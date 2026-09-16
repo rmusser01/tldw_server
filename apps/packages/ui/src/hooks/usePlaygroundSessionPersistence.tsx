@@ -74,6 +74,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -93,6 +94,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,
@@ -114,6 +116,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch: state.webSearch,
       compareMode: state.compareMode,
       compareSelectedModels: state.compareSelectedModels,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
       ragMediaIds: state.ragMediaIds,
       ragSearchMode: state.ragSearchMode,
       ragTopK: state.ragTopK,
@@ -133,6 +136,7 @@ export function usePlaygroundSessionPersistence() {
       setWebSearch: state.setWebSearch,
       setCompareMode: state.setCompareMode,
       setCompareSelectedModels: state.setCompareSelectedModels,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
       setRagMediaIds: state.setRagMediaIds,
       setRagSearchMode: state.setRagSearchMode,
       setRagTopK: state.setRagTopK,
@@ -263,6 +267,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch,
       compareMode,
       compareSelectedModels,
+      fileRetrievalEnabled,
       ragMediaIds,
       ragSearchMode,
       ragTopK,
@@ -281,6 +286,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -678,6 +684,7 @@ export function usePlaygroundSessionPersistence() {
         selectionBeforeRestore
       if (!sourceSelectionChanged) {
         setChatMode(sessionStore.chatMode)
+        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
         if (sessionStore.ragMediaIds) {
           setRagMediaIds(sessionStore.ragMediaIds)
         }
@@ -728,6 +735,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,

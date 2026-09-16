@@ -1,0 +1,106 @@
+{
+  "at": "2026-09-16T21:56:36.698Z",
+  "note": "Text trailing whitespace normalized; audit hashes refer to original private files. Source identities unchanged.",
+  "files": [
+    {
+      "file": "IMPLEMENTATION.md",
+      "original_sha256": "84131f9b07a6a738816469b4d69400a11d2eebfa366a1c4a198b231c031f7abe",
+      "retained_sha256": "84131f9b07a6a738816469b4d69400a11d2eebfa366a1c4a198b231c031f7abe"
+    },
+    {
+      "file": "DESIGN.md",
+      "original_sha256": "90a01d26decf861d41911efd51102f941cdcacc508e5b24199aa21c17b75fb41",
+      "retained_sha256": "90a01d26decf861d41911efd51102f941cdcacc508e5b24199aa21c17b75fb41"
+    },
+    {
+      "file": "owned-manifest.json",
+      "original_sha256": "6dd6a048814ed7feb0037b6a3ae50d7a518ffc08b8d7dbddbc50b779fc8d9c2a",
+      "retained_sha256": "6dd6a048814ed7feb0037b6a3ae50d7a518ffc08b8d7dbddbc50b779fc8d9c2a"
+    },
+    {
+      "file": "owned-paths.json",
+      "original_sha256": "a4a3a0bcfe72b806833bae13bb2d90f800c424716fbbc4c871aa19f60cbacec2",
+      "retained_sha256": "a4a3a0bcfe72b806833bae13bb2d90f800c424716fbbc4c871aa19f60cbacec2"
+    },
+    {
+      "file": "owned.patch",
+      "original_sha256": "9822b116566548d2b15d5a9299715f8b1a1178c2c11b4dc6c2558e87139d0d2c",
+      "retained_sha256": "10137881678a4f28f933989ced087296ff3a12f62e512e3aebd59a7875160a39"
+    },
+    {
+      "file": "red-cold.log",
+      "original_sha256": "273b4a2d593882ef3cb783ff10644957166df42117b61a464b043a32512e394b",
+      "retained_sha256": "b38f8615e679e8332bf363702bbfa5f0ce945ef1a7bd4da4098f8ec801468557"
+    },
+    {
+      "file": "green-cold.log",
+      "original_sha256": "05a2b10a34f3c97fa52e633af001ed7fdd72b0f4cc6b1fc8bdd35e28e56fda4f",
+      "retained_sha256": "fcac426a5c1f08f39bee229887e49f12cbd345e78170ed71b802ee31163b5321"
+    },
+    {
+      "file": "red-toggle.log",
+      "original_sha256": "7436e9ac4e0218c62c877853c1ae78df431f03efed141b81c2346daf382b7b51",
+      "retained_sha256": "752b3fd9b20f7198c97db69a427c777cc550b8a732fb60f025485c54b4cb1174"
+    },
+    {
+      "file": "green.log",
+      "original_sha256": "897701af1e2f9e436d448f8f51696327e08d2ed2f5463c029889ed0ec3f21c3f",
+      "retained_sha256": "e6923d180e9ca32920629aa4c3b23a72a95f32b359d012aa0f5851137623488f"
+    },
+    {
+      "file": "root-green.log",
+      "original_sha256": "979b0f05eab656095b7a16123eb3e5a1477275c878c4bf1a9ca76cb8fde3e2a8",
+      "retained_sha256": "1203586d5ce0255c2d5aded05d20600546de6b36841d5d04eaa40070c6d8a3db"
+    },
+    {
+      "file": "eslint-comparison.json",
+      "original_sha256": "4a933f83d4252f2326749b9eebbcf3dd6cf1fe36c0c3a8e3d4f395b0966a33c0",
+      "retained_sha256": "4a933f83d4252f2326749b9eebbcf3dd6cf1fe36c0c3a8e3d4f395b0966a33c0"
+    },
+    {
+      "file": "typecheck-comparison.json",
+      "original_sha256": "6353436063274252e273c2272f94517251aeec778afaf35ad7abc06d6013828b",
+      "retained_sha256": "6353436063274252e273c2272f94517251aeec778afaf35ad7abc06d6013828b"
+    },
+    {
+      "file": "reviewer-review.md",
+      "original_sha256": "293ff6983af7ae087d3d09a2d8a4623fab92d46bf58e782102254dab0a39b234",
+      "retained_sha256": "293ff6983af7ae087d3d09a2d8a4623fab92d46bf58e782102254dab0a39b234"
+    },
+    {
+      "file": "reviewer-manifest.json",
+      "original_sha256": "971dab1b47300bad57596a64810e6284c1789ae24545ccbb3bf648e29ae9401e",
+      "retained_sha256": "971dab1b47300bad57596a64810e6284c1789ae24545ccbb3bf648e29ae9401e"
+    },
+    {
+      "file": "reviewer-green.log",
+      "original_sha256": "7e39512058e6be21c394c095632034287184f2b71bd10bcfe4359e70df8885c2",
+      "retained_sha256": "41ba93b5b48cc4e9342eeb35311d5ebe0cc281c2e8fa637b3d106e01c1f8eda5"
+    },
+    {
+      "file": "reviewer-red-cold.log",
+      "original_sha256": "db8f9557958c3190109b15f6c6a4bf9c7fbc1cbc482c0ce57c74687425f9e037",
+      "retained_sha256": "d8bcda799a92bda14e2fc91b5b5fe9b8530339b37541060a4e871c080df53761"
+    },
+    {
+      "file": "reviewer-red-toggle.log",
+      "original_sha256": "51c2614717a89a65392c2ee4cccf1598b523bbf9f67a4c9980a5625e6092428e",
+      "retained_sha256": "d8acf74e3d34a1dc12be63e91a080c383ab0701a56716d358895a04d25c1fc2b"
+    },
+    {
+      "file": "reviewer-eslint-comparison.json",
+      "original_sha256": "b0eba317a4cd700b3ba2fbf06fced9bb9e023730a8679daa20ffe9b72cd8f47e",
+      "retained_sha256": "b0eba317a4cd700b3ba2fbf06fced9bb9e023730a8679daa20ffe9b72cd8f47e"
+    },
+    {
+      "file": "reviewer-source-verification.json",
+      "original_sha256": "117870d230211599f593516888e4aca4a5a71cebf64592020bb9d86357fdb590",
+      "retained_sha256": "117870d230211599f593516888e4aca4a5a71cebf64592020bb9d86357fdb590"
+    },
+    {
+      "file": "reviewer-baseline-verification.json",
+      "original_sha256": "842977ba7e8ee3bc47b84e4465692ef500014b7a2a09e11b236ed991bf465abc",
+      "retained_sha256": "842977ba7e8ee3bc47b84e4465692ef500014b7a2a09e11b236ed991bf465abc"
+    }
+  ]
+}

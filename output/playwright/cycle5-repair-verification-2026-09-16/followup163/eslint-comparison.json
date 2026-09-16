@@ -1,0 +1,994 @@
+{
+  "summary": {
+    "baselineErrors": 0,
+    "currentErrors": 0,
+    "baselineWarnings": 91,
+    "currentWarnings": 91,
+    "sameRules": true
+  },
+  "files": [
+    {
+      "path": "apps/packages/ui/src/store/playground-session.tsx",
+      "baseline": {
+        "errors": 0,
+        "warnings": 1,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      },
+      "current": {
+        "errors": 0,
+        "warnings": 1,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      }
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "baseline": {
+        "errors": 0,
+        "warnings": 1,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      },
+      "current": {
+        "errors": 0,
+        "warnings": 1,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      }
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "baseline": {
+        "errors": 0,
+        "warnings": 72,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'BetaTag' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'CharacterSelect' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'CollapsedRange' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ChatModelSettings' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationEventSyncPolicy' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationRefineMetadata' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationRequestSnapshot' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenerationEventSyncPolicy' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'resolveImageGenerationEventSyncMode' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'MentionsDropdown' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'estimateTokensFromText' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'StartupTemplateBundle' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'PlaygroundQueuedSourceContext' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setCompareFeatureEnabled' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setCompareMaxModels' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'canUseServerAudio' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'selectedModelMeta' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'providerLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'favoriteModelSet' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'toggleFavoriteModel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'filteredModels' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'compareModelMetaById' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'compareModelLabelById' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'selectedSystemPromptRecord' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'parseCollapsedRange' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'buildCollapsedMessageLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'restoreMessageValue' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'collapsedDisplayMeta' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'markComposerPerf' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'tokenUsageTooltip' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'tokenUsageDisplay' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'systemPromptTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'historyTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'modelRecommendations' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'nonMessageContextTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setImageBackendDefault' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has missing dependencies: 'pendingCaretRef' and 'pendingCollapsedStateRef'. Either include them or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has missing dependencies: 'lastDisplaySelectionRef', 'pendingCaretRef', and 'pointerDownRef'. Either include them or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'form'. Either include it or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'fileInputRef'. Either include it or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'error' is defined but never used. Allowed unused args must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'availableChatModelIds' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'isQueuedDispatchBlockedByComposerState' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'getPersistenceModeLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'handleSaveChatToServer' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'persistChatMetadata' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageGenerateRefineMetadata' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageGenerationCharacterMood' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageEventSyncBaselineMode' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenSyncMode' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenSyncPolicy' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'pendingCaretRef'. Either include it or remove the dependency array.",
+            "severity": 1
+          }
+        ]
+      },
+      "current": {
+        "errors": 0,
+        "warnings": 72,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'BetaTag' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'CharacterSelect' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'CollapsedRange' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ChatModelSettings' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationEventSyncPolicy' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationRefineMetadata' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'ImageGenerationRequestSnapshot' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenerationEventSyncPolicy' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'resolveImageGenerationEventSyncMode' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'MentionsDropdown' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'estimateTokensFromText' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'StartupTemplateBundle' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'PlaygroundQueuedSourceContext' is defined but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setCompareFeatureEnabled' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setCompareMaxModels' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'canUseServerAudio' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'selectedModelMeta' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'providerLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'favoriteModelSet' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'toggleFavoriteModel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'filteredModels' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'compareModelMetaById' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'compareModelLabelById' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'selectedSystemPromptRecord' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'parseCollapsedRange' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'buildCollapsedMessageLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'restoreMessageValue' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'collapsedDisplayMeta' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'markComposerPerf' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'tokenUsageTooltip' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'tokenUsageDisplay' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'systemPromptTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'historyTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'modelRecommendations' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'nonMessageContextTokenEstimate' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'setImageBackendDefault' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has missing dependencies: 'pendingCaretRef' and 'pendingCollapsedStateRef'. Either include them or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has missing dependencies: 'lastDisplaySelectionRef', 'pendingCaretRef', and 'pointerDownRef'. Either include them or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'form'. Either include it or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'fileInputRef'. Either include it or remove the dependency array.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'error' is defined but never used. Allowed unused args must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'availableChatModelIds' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'isQueuedDispatchBlockedByComposerState' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'getPersistenceModeLabel' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'handleSaveChatToServer' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'persistChatMetadata' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageGenerateRefineMetadata' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageGenerationCharacterMood' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'imageEventSyncBaselineMode' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenSyncMode' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-unused-vars",
+            "message": "'normalizeImageGenSyncPolicy' is assigned a value but never used. Allowed unused vars must match /^_/u.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "react-hooks/exhaustive-deps",
+            "message": "React Hook React.useCallback has a missing dependency: 'pendingCaretRef'. Either include it or remove the dependency array.",
+            "severity": 1
+          }
+        ]
+      }
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
+      "baseline": {
+        "errors": 0,
+        "warnings": 17,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      },
+      "current": {
+        "errors": 0,
+        "warnings": 17,
+        "messages": [
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          },
+          {
+            "rule": "@typescript-eslint/no-explicit-any",
+            "message": "Unexpected any. Specify a different type.",
+            "severity": 1
+          }
+        ]
+      }
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx",
+      "baseline": {
+        "errors": 0,
+        "warnings": 0,
+        "messages": []
+      },
+      "current": {
+        "errors": 0,
+        "warnings": 0,
+        "messages": []
+      }
+    }
+  ]
+}

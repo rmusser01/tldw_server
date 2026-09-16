@@ -1,0 +1,53 @@
+{
+  "task": "TASK-13260.100",
+  "files": [
+    {
+      "file": "reviewer-baseline-verification.json",
+      "sha256": "842977ba7e8ee3bc47b84e4465692ef500014b7a2a09e11b236ed991bf465abc"
+    },
+    {
+      "file": "reviewer-baseline.config.ts",
+      "sha256": "42c7f9017f4b17c7a05665e5dcf5b684ac8177667832ea9d237ecfd9d762988d"
+    },
+    {
+      "file": "reviewer-eslint-comparison.json",
+      "sha256": "b0eba317a4cd700b3ba2fbf06fced9bb9e023730a8679daa20ffe9b72cd8f47e"
+    },
+    {
+      "file": "reviewer-eslint-final-stderr.log",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "reviewer-eslint-final.json",
+      "sha256": "9c5da18a9ca1a10792dc88fcfb9bcfa8adb699db895c9d103dce0085c5fddfce"
+    },
+    {
+      "file": "reviewer-eslint-stderr.log",
+      "sha256": "a6ac7553b6d5c15d9830c651cb44301a99a4406a2b682d0953af19c63286337c"
+    },
+    {
+      "file": "reviewer-eslint.json",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "reviewer-green.log",
+      "sha256": "7e39512058e6be21c394c095632034287184f2b71bd10bcfe4359e70df8885c2"
+    },
+    {
+      "file": "reviewer-red-cold.log",
+      "sha256": "db8f9557958c3190109b15f6c6a4bf9c7fbc1cbc482c0ce57c74687425f9e037"
+    },
+    {
+      "file": "reviewer-red-toggle.log",
+      "sha256": "51c2614717a89a65392c2ee4cccf1598b523bbf9f67a4c9980a5625e6092428e"
+    },
+    {
+      "file": "reviewer-review.md",
+      "sha256": "293ff6983af7ae087d3d09a2d8a4623fab92d46bf58e782102254dab0a39b234"
+    },
+    {
+      "file": "reviewer-source-verification.json",
+      "sha256": "117870d230211599f593516888e4aca4a5a71cebf64592020bb9d86357fdb590"
+    }
+  ]
+}

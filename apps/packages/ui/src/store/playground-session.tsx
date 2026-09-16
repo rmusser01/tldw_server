@@ -32,6 +32,7 @@ export interface PlaygroundSessionData {
   compareSelectedModels: string[]
 
   // RAG settings (when chatMode === "rag")
+  fileRetrievalEnabled: boolean
   ragMediaIds: number[] | null
   ragSearchMode: "hybrid" | "vector" | "fts"
   ragTopK: number | null
@@ -70,6 +71,7 @@ const initialState: PlaygroundSessionData = {
   webSearch: false,
   compareMode: false,
   compareSelectedModels: [],
+  fileRetrievalEnabled: false,
   ragMediaIds: null,
   ragSearchMode: "hybrid",
   ragTopK: null,
@@ -157,6 +159,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         webSearch: state.webSearch,
         compareMode: state.compareMode,
         compareSelectedModels: state.compareSelectedModels,
+        fileRetrievalEnabled: state.fileRetrievalEnabled,
         ragMediaIds: state.ragMediaIds,
         ragSearchMode: state.ragSearchMode,
         ragTopK: state.ragTopK,

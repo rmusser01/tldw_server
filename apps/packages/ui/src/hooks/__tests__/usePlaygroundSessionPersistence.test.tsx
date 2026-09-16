@@ -73,6 +73,7 @@ describe("usePlaygroundSessionPersistence", () => {
       webSearch: false,
       compareMode: false,
       compareSelectedModels: [],
+      fileRetrievalEnabled: false,
       ragMediaIds: null,
       ragSearchMode: "hybrid",
       ragTopK: null,
@@ -306,6 +307,9 @@ describe("usePlaygroundSessionPersistence", () => {
       historyId: "persisted-history",
       serverChatId: "persisted-chat",
       scopeKey: "global",
+      chatMode: "rag",
+      ragMediaIds: [42],
+      fileRetrievalEnabled: true,
       queuedMessages: []
     })
 
@@ -356,6 +360,8 @@ describe("usePlaygroundSessionPersistence", () => {
     expect(useStoreMessageOption.getState().serverChatId).toBe("selected-chat")
     expect(useStoreMessageOption.getState().historyId).toBeNull()
     expect(useStoreMessageOption.getState().serverChatTitle).toBe("Selected from Chats")
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
   })
 
   it("reports cancellation when a server chat is selected during assistant persistence", async () => {

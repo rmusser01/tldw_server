@@ -1,0 +1,82 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:65472) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > restores source activation through cold persistence and Send (prior retrieval failure=false)
+Using normalChatMode
+
+stdout | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > restores source activation through cold persistence and Send (prior retrieval failure=true)
+Using ragMode
+
+stdout | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > restores source activation through cold persistence and Send (prior retrieval failure=true)
+Using normalChatMode
+
+stdout | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps explicit-false retrieval disabled after cold rehydrate
+Using normalChatMode
+
+stdout | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > keeps legacy-missing retrieval disabled after cold rehydrate
+Using normalChatMode
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx (37 tests | 2 failed | 31 skipped) 1496ms
+     × restores source activation through cold persistence and Send (prior retrieval failure=false) 386ms
+     × restores source activation through cold persistence and Send (prior retrieval failure=true) 300ms
+     ✓ keeps explicit-false retrieval disabled after cold rehydrate 275ms
+     ✓ keeps legacy-missing retrieval disabled after cold rehydrate 279ms
+     ✓ rejects source activation from a cold session owned by another account 124ms
+     ✓ rejects source activation from a cold session owned by another server 132ms
+     ↓ preserves a newer explicit retrieval toggle off before-restore
+     ↓ preserves a newer explicit retrieval toggle off during-restore
+     ↓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=false)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=false)
+     ↓ retrieves Rowan before generation with old Cedar history ('restore-first', prior source=true)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-first', prior source=true)
+     ↓ retrieves Rowan before generation with old Cedar history ('handoff-before-restore', prior source=true)
+     ↓ does not generate from the old conversation after empty selected-source retrieval
+     ↓ does not generate from the old conversation after error selected-source retrieval
+     ↓ keeps a full-content ordinary handoff on the ordinary path
+     ↓ does not arm retrieval or seed the composer for a different owner's handoff
+     ↓ discards an earlier owner's storage read through A to B to A
+     ↓ does not publish a late source answer after the captured request authority is invalidated
+     ↓ preserves an accepted same-value Rowan handoff before-restore
+     ↓ preserves an accepted same-value Rowan handoff during-restore
+     ↓ preserves an accepted same-value ordinary handoff before-restore
+     ↓ preserves an accepted same-value ordinary handoff during-restore
+     ↓ preserves accepted source intent through Rowan to Cedar to Rowan while restore is pending
+     ↓ allows a later requested restore on the same hook to replay saved source selection
+     ↓ does not apply the initial selection baseline to a different persisted conversation
+     ↓ does not apply the initial selection baseline to a different persisted account
+     ↓ hydrates the real localStorage session synchronously before the handoff owner mounts
+     ↓ consumes legacy unowned handoffs when token-derived identity is unavailable
+     ↓ waits for a resolved identity before applying or clearing an owned handoff
+     ↓ only applies a saved source owned by server-a:alice when identity matches
+     ↓ only applies a saved source owned by server-a:bob when identity matches
+     ↓ does not apply a saved source after identity changes while storage resolves
+     ↓ records normal Chat milestone only for submitted and its original owner
+     ↓ records normal Chat milestone only for failed and its original owner
+     ↓ records normal Chat milestone only for skipped and its original owner
+     ↓ sends the next prompt with OpenUI request overrides
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > restores source activation through cold persistence and Send (prior retrieval failure=false)
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx > Home source handoff through the real Chat and RAG send boundary > restores source activation through cold persistence and Send (prior retrieval failure=true)
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx:1250:32
+    1248|     await send()
+    1249|
+    1250|     expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectConta…
+       |                                ^
+    1251|       path: "/api/v1/rag/search",
+    1252|       body: expect.objectContaining({ include_media_ids: [42], sources…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 passed | 31 skipped (37)
+   Start at  14:52:58
+   Duration  3.01s (transform 921ms, setup 84ms, import 1.14s, tests 1.50s, environment 201ms)

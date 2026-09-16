@@ -5681,7 +5681,10 @@ export const PlaygroundForm = ({
                         onAddFile={handleKnowledgeAddFile}
                         onRemoveFile={removeUploadedFile}
                         onClearFiles={clearUploadedFiles}
-                        onFileRetrievalChange={setFileRetrievalEnabled}
+                        onFileRetrievalChange={(enabled) => {
+                          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
+                          setFileRetrievalEnabled(enabled);
+                        }}
                         wrapComposerProfile={wrapComposerProfile}
                         t={t}
                       />

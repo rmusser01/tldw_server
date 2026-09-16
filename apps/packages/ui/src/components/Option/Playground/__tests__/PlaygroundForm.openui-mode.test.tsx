@@ -699,7 +699,15 @@ vi.mock("../PlaygroundComposerNotices", () => ({
 }))
 
 vi.mock("../PlaygroundKnowledgeSection", () => ({
-  PlaygroundKnowledgeSection: () => null
+  PlaygroundKnowledgeSection: ({ fileRetrievalEnabled, onFileRetrievalChange }: {
+    fileRetrievalEnabled: boolean
+    onFileRetrievalChange: (enabled: boolean) => void
+  }) => sourceFlow.enabled ? (
+    <label>
+      Source retrieval
+      <input type="checkbox" checked={fileRetrievalEnabled} onChange={event => onFileRetrievalChange(event.target.checked)} />
+    </label>
+  ) : null
 }))
 
 vi.mock("../CompareToggle", () => ({
@@ -1158,6 +1166,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     sourceFlow.enabled = true
     sourceFlow.sessionReady = false
     sourceFlow.restore = null
+    sourceFlow.config.serverUrl = "https://handoff.test"
     sourceFlow.config.apiKey = "synthetic-handoff"
     localStorage.clear()
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
@@ -1200,6 +1209,105 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
+
+  const persistSourceSession = async (enabled = true, failedRetrieval = false) => {
+    const view = render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    if (failedRetrieval) {
+      sourceFlow.request.mockRejectedValueOnce(new Error("Source unavailable"))
+      await send()
+      expect(sourceFlow.stream).not.toHaveBeenCalled()
+    }
+    await act(async () => useStoreMessageOption.getState().setFileRetrievalEnabled(enabled))
+    // Exercise the real unmount flush, including its asynchronous scope lookup.
+    await act(async () => view.unmount())
+    await waitFor(() => expect(usePlaygroundSessionStore.getState().ragMediaIds).toEqual([42]))
+    return localStorage.getItem("tldw-playground-session")!
+  }
+
+  const rehydrateColdSession = async (serialized: string) => {
+    await act(async () => {
+      useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+      useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false })
+      usePlaygroundSessionStore.setState(usePlaygroundSessionStore.getInitialState(), true)
+      localStorage.setItem("tldw-playground-session", serialized)
+      await usePlaygroundSessionStore.persist.rehydrate()
+    })
+    sourceFlow.restore = null
+    sourceFlow.sessionReady = false
+    sourceFlow.request.mockClear()
+    sourceFlow.stream.mockClear()
+  }
+
+  it.each([false, true])("restores source activation through cold persistence and Send (prior retrieval failure=%s)", async failedRetrieval => {
+    await rehydrateColdSession(await persistSourceSession(true, failedRetrieval))
+    render(<SourceFlowHarness />)
+    await restore()
+    await userEvent.setup().type(screen.getByTestId("composer-textarea"), "Where does Rowan keep the maps?")
+    await send()
+
+    expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/rag/search",
+      body: expect.objectContaining({ include_media_ids: [42], sources: ["media_db"] })
+    }))
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+    expect(useStoreMessageOption.getState().messages.at(-1)?.sources[0]?.pageContent).toBe(rowanText)
+    expect(useStoreMessageOption.getState().serverChatId).toBe("cedar-server")
+  })
+
+  it.each(["explicit-false", "legacy-missing"])("keeps %s retrieval disabled after cold rehydrate", async savedFlag => {
+    const persisted = JSON.parse(await persistSourceSession(false))
+    if (savedFlag === "legacy-missing") delete persisted.state.fileRetrievalEnabled
+    await rehydrateColdSession(JSON.stringify(persisted))
+    render(<SourceFlowHarness />)
+    await restore()
+    await userEvent.setup().type(screen.getByTestId("composer-textarea"), "Continue the ordinary conversation.")
+    await send()
+
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(sourceFlow.stream).toHaveBeenCalledTimes(1)
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+  })
+
+  it.each(["account", "server"])("rejects source activation from a cold session owned by another %s", async changed => {
+    await rehydrateColdSession(await persistSourceSession())
+    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    else sourceFlow.config.serverUrl = "https://other-handoff.test"
+    render(<SourceFlowHarness />)
+    await restore()
+
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+  })
+
+  it.each(["before-restore", "during-restore"])("preserves a newer explicit retrieval toggle off %s", async order => {
+    await rehydrateColdSession(await persistSourceSession())
+    const historyRead = defer<typeof cedarData>()
+    sourceFlow.getFullChatData.mockClear()
+    if (order === "during-restore") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring: Promise<unknown> | undefined
+    if (order === "during-restore") {
+      await act(async () => { restoring = sourceFlow.restore!() })
+      await waitFor(() => expect(sourceFlow.getFullChatData).toHaveBeenCalledTimes(1))
+    }
+    // Reach the real Form's user callback, including a return to the initial
+    // false value. A value comparison alone cannot protect this newer intent.
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("checkbox", { name: "Source retrieval" }))
+    await user.click(screen.getByRole("checkbox", { name: "Source retrieval" }))
+    if (order === "during-restore") await act(async () => { historyRead.resolve(cedarData); await restoring })
+    else await restore()
+    await user.type(screen.getByTestId("composer-textarea"), "Continue the ordinary conversation.")
+    await send()
+
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+    expect(useStoreMessageOption.getState().serverChatId).toBe("cedar-server")
+  })
 
   it.each([
     { order: "restore-first", priorSource: false },

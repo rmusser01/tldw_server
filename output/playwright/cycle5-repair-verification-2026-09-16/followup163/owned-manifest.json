@@ -1,0 +1,68 @@
+{
+  "task": "TASK-13260.100",
+  "baseHead": "223591ac4fb2520290634c74310351ce7d8b18ae",
+  "sourceFrozen": true,
+  "productionScope": [
+    "apps/packages/ui/src/store/playground-session.tsx",
+    "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+    "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx"
+  ],
+  "files": [
+    {
+      "path": "apps/packages/ui/src/store/playground-session.tsx",
+      "sha256": "64db2ac276ecb6358eaa8197858869f7bd99573eee1079e4c9e49f0843c5cfa4"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
+      "sha256": "f098d478bf69271fa92230a7a89f632aa5d36d89e3552808e1f42e5cc4db0bd7"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "sha256": "a656a860faa08d8591f89b05c0fb144d748d35a86ae3c8ca08d57d26a950410a"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
+      "sha256": "d259d75252b94caf1f0e7b918fb7137c8052a130b4117d0ff34f40fa6a7c74d3"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx",
+      "sha256": "441431f82a13f752d7bd35941f752138bc5e75e3f43e53bdff0c995af99d658d"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/DESIGN.md",
+      "sha256": "90a01d26decf861d41911efd51102f941cdcacc508e5b24199aa21c17b75fb41"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/IMPLEMENTATION.md",
+      "sha256": "84131f9b07a6a738816469b4d69400a11d2eebfa366a1c4a198b231c031f7abe"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/owned.patch",
+      "sha256": "9822b116566548d2b15d5a9299715f8b1a1178c2c11b4dc6c2558e87139d0d2c"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/vitest.config.ts",
+      "sha256": "05acff8c4e9d575beb960080d2c8f2d52b7c27cb98d23effc17dff8507fd7923"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/red-cold.log",
+      "sha256": "273b4a2d593882ef3cb783ff10644957166df42117b61a464b043a32512e394b"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/red-toggle.log",
+      "sha256": "7436e9ac4e0218c62c877853c1ae78df431f03efed141b81c2346daf382b7b51"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/green.log",
+      "sha256": "897701af1e2f9e436d448f8f51696327e08d2ed2f5463c029889ed0ec3f21c3f"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/eslint-comparison.json",
+      "sha256": "4a933f83d4252f2326749b9eebbcf3dd6cf1fe36c0c3a8e3d4f395b0966a33c0"
+    },
+    {
+      "path": ".tmp/uat163-repair-20260916/typecheck-comparison.json",
+      "sha256": "6353436063274252e273c2272f94517251aeec778afaf35ad7abc06d6013828b"
+    }
+  ]
+}
