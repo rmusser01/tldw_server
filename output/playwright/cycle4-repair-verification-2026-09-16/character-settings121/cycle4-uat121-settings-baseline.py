@@ -2782,7 +2782,6 @@ async def test_complete_v2_request_generation_fields_override_character_defaults
                     "model": "gpt-x",
                     "append_user_message": "test",
                     "save_to_db": False,
-                    "max_tokens": 16,
                     "temperature": 0.91,
                     "top_p": 0.44,
                     "repetition_penalty": 1.4,
@@ -2792,7 +2791,6 @@ async def test_complete_v2_request_generation_fields_override_character_defaults
             assert r.status_code == 200
 
             kwargs = captured.get("kwargs") or {}
-            assert kwargs.get("max_tokens") == 16
             assert kwargs.get("temp") == pytest.approx(0.91)
             assert kwargs.get("top_p") == pytest.approx(0.44)
             assert kwargs.get("repetition_penalty") == pytest.approx(1.4)

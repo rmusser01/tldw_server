@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 import type { Message } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 
 const {
+  bgStreamMock,
   saveLocalSuccessMock,
   saveLocalErrorMock,
   addChatMessageMock,
@@ -17,6 +20,7 @@ const {
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
+  bgStreamMock: vi.fn(),
   saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
   saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
   addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
@@ -55,6 +59,8 @@ const messageStoreState = vi.hoisted(() => ({
     serverChatSource: null as string | null
   }
 }))
+
+vi.mock("@/services/background-proxy", () => ({ bgStream: bgStreamMock, bgRequest: vi.fn(), bgUpload: vi.fn() }))
 
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
@@ -273,6 +279,7 @@ describe("useChatActions character integration", () => {
   beforeEach(() => {
     recoveryAuthority.controller = new AbortController()
     vi.clearAllMocks()
+    useStoreChatModelSettings.getState().reset()
     normalChatModeMock.mockResolvedValue(undefined)
     createChatMock.mockResolvedValue({
       id: "unexpected-new-chat",
@@ -305,22 +312,79 @@ describe("useChatActions character integration", () => {
     resolveVisualIdentityBindingMock.mockClear()
   })
 
+
+  const useRealCharacterTransport = () => {
+    streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+    bgStreamMock.mockImplementation(async function* () {
+      yield JSON.stringify({ choices: [{ delta: { content: "Configured reply" } }] })
+    })
+  }
+
+  const scopedOptions = (scope: string, values: Record<string, number>) => {
+    const store = useStoreChatModelSettings.getState()
+    store.setActiveSettingsScope(scope)
+    for (const [key, value] of Object.entries(values)) {
+      store.updateScopedSetting(scope, key as "numPredict", value)
+    }
+    return { ...createHookOptions(), currentChatModelSettings: useStoreChatModelSettings.getState() }
+  }
+
+  it.each([0, 0.5])("forwards scoped current-chat controls through the real Character transport (sampling=%s)", async sampling => {
+    useRealCharacterTransport()
+    const options = scopedOptions("openai:deepseek-chat", { numPredict: 16, temperature: sampling, topP: sampling, repeatPenalty: sampling })
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Configured question", image: "" }) })
+    expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({
+      path: expect.stringContaining("/chats/tracked-chat-1/complete-v2"),
+      body: expect.objectContaining({ max_tokens: 16, temperature: sampling, top_p: sampling, repetition_penalty: sampling, stream: true })
+    }))
+  })
+
+  it("omits unset controls from the real Character request after switching to an unconfigured model scope", async () => {
+    useRealCharacterTransport()
+    scopedOptions("openai:previous-model", { numPredict: 16, temperature: 0.5 })
+    const options = scopedOptions("openai:deepseek-chat", {})
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Default question", image: "" }) })
+    const body = bgStreamMock.mock.calls[0][0].body
+    for (const key of ["max_tokens", "temperature", "top_p", "repetition_penalty"]) expect(body).not.toHaveProperty(key)
+  })
+
+  it("retains captured model controls while a pending Character user save outlives a settings-scope change", async () => {
+    useRealCharacterTransport()
+    let release!: (value: { id: string; version: number }) => void
+    addChatMessageMock.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const original = scopedOptions("openai:deepseek-chat", { numPredict: 16, temperature: 0.25 })
+    const { result, rerender } = renderHook(({ options }) => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]), { initialProps: { options: original } })
+    let pending!: ReturnType<typeof result.current.onSubmit>
+    await act(async () => { pending = result.current.onSubmit({ message: "Captured question", image: "" }); await Promise.resolve() })
+    await waitFor(() => expect(addChatMessageMock).toHaveBeenCalled())
+    const next = { ...scopedOptions("openai:new-model", { numPredict: 128, temperature: 0.75 }), selectedModel: "new-model" }
+    messageStoreState.value.selectedModel = "new-model"
+    rerender({ options: next })
+    await act(async () => { release({ id: "captured-user", version: 1 }); await pending })
+    expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ model: "deepseek-chat", max_tokens: 16, temperature: 0.25 }) }))
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(128)
+  })
+
   it("does not publish recovered IDs or save an old owner's partial after the lease invalidates", async () => {
     streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield "<think>Only reasoning</think>" })
     addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
     let release!: (value: { id: string; version: number }) => void
     const held = new Promise<{ id: string; version: number }>(resolve => { release = resolve })
     addChatMessageMock.mockImplementationOnce(() => held)
-    const options = createHookOptions()
+    const options = scopedOptions("owner-a:deepseek-chat", { numPredict: 16 })
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
     let pending!: ReturnType<typeof result.current.onSubmit>
     await act(async () => { pending = result.current.onSubmit({ message: "Question", image: "" }); await new Promise(resolve => setTimeout(resolve, 0)) })
     await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTimes(2))
     recoveryAuthority.controller.abort()
+    scopedOptions("owner-b:deepseek-chat", { numPredict: 128 })
     options.setMessages.mockClear()
     await act(async () => { release({ id: "old-assistant", version: 1 }); await pending })
     expect(saveLocalErrorMock).not.toHaveBeenCalled()
     expect(options.setMessages).not.toHaveBeenCalled()
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(128)
   })
 
   it.each([

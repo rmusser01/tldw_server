@@ -1,0 +1,22 @@
+{
+  "frozenAt": "2026-09-16T06:01:49.196Z",
+  "baseline": "28dc9ddffabd848842ae0f9dc2ecdc8d14bce2b1",
+  "entries": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "fb4ceb84b204e46ba15cbca24394302c307b9db9b7d4a3b3dfa374085ce55a80"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "91440b5aeaa5192dfe5693bb63a99ff0cb37ff3f021cb41eb6bd530d11e40638"
+    },
+    {
+      "path": "tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py",
+      "sha256": "57239e3c3782ac73b4e4feaeee096e1269dfd1e2cac878bfb70fe6f1effad40d"
+    },
+    {
+      "path": "backlog/tasks/task-13260.61 - Honor-saved-Max-Tokens-in-tracked-Character-Chat.md",
+      "sha256": "4c663610beeb4bf5a4ad4412cf70f81321d517b05aa2d74f2902afd000dcbe34"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 82,
+      "row": 15
+    },
+    "filename": "/private/tmp/cycle4-uat121-settings-baseline.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "import base64\nimport io\nimport shutil\nimport tempfile\nfrom datetime import datetime, timezone\n\nimport httpx\nimport pytest\nfrom PIL import Image\n\nfrom tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings\n\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 18
+          },
+          "location": {
+            "column": 1,
+            "row": 5
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 5
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 5,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

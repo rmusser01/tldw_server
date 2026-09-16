@@ -1726,6 +1726,14 @@ export const useChatActions = ({
       forceNarrate: boolean
     }
   }): Promise<ChatSubmitResult> => {
+    // Capture the current turn's supported controls before asynchronous work.
+    const { numPredict, temperature, topP, repeatPenalty } = currentChatModelSettings
+    const completionSettings = {
+      ...(numPredict != null ? { max_tokens: numPredict } : {}),
+      ...(temperature != null ? { temperature } : {}),
+      ...(topP != null ? { top_p: topP } : {}),
+      ...(repeatPenalty != null ? { repetition_penalty: repeatPenalty } : {})
+    }
     const activeCharacter = character ?? selectedCharacter
     if (!activeCharacter?.id) {
       throw new Error("No character selected")
@@ -2292,6 +2300,7 @@ export const useChatActions = ({
         chatId,
         {
           include_character_context: true,
+          ...completionSettings,
           model: streamModel,
           provider: resolvedApiProvider,
           save_to_db: shouldPersistToServer,
