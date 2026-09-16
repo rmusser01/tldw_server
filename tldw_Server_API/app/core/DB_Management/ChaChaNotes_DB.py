@@ -700,8 +700,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
-    _POSTGRES_SCHEMA_VERSION = 67
+    _CURRENT_SCHEMA_VERSION = 68  # Immutable history projections and protected admission provenance
+    _POSTGRES_SCHEMA_VERSION = 68
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -8509,6 +8509,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (64, "_migrate_from_v64_to_v65"),
             (65, "_migrate_from_v65_to_v66"),
             (66, "_migrate_from_v66_to_v67"),
+            (67, "_migrate_from_v67_to_v68"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17589,6 +17590,59 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             connection=conn,
         )
 
+    _HISTORY_PROJECTIONS_SCHEMA_SQL = """
+        CREATE TABLE IF NOT EXISTS conversation_history_projections (
+            projection_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            client_id TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            interpretation_version INTEGER NOT NULL CHECK (interpretation_version = 1),
+            source_digest TEXT NOT NULL,
+            history_fence TEXT NOT NULL,
+            source_members_json TEXT NOT NULL,
+            ordered_path_ids_json TEXT NOT NULL,
+            confirmation_json TEXT NOT NULL,
+            projection_digest TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (client_id, owner_key, conversation_id, projection_id)
+        )
+    """
+
+    def _migrate_from_v67_to_v68(self, conn: sqlite3.Connection) -> None:
+        """Preserve legacy rows; only specialized admission may set protected provenance."""
+        conn.execute(self._HISTORY_PROJECTIONS_SCHEMA_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "history_admission_json" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN history_admission_json TEXT")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS history_projection_immutable
+            BEFORE UPDATE ON conversation_history_projections
+            BEGIN SELECT RAISE(ABORT, 'History projections are immutable'); END
+        """)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 68 WHERE schema_name = ? AND version = 67",
+            (self._SCHEMA_NAME,),
+        )
+
+    def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
+        """Create the PostgreSQL projection store and protected nullable provenance."""
+        statements = (
+            self._HISTORY_PROJECTIONS_SCHEMA_SQL,
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS history_admission_json TEXT",
+            """CREATE OR REPLACE FUNCTION history_projection_immutable() RETURNS TRIGGER AS $$
+               BEGIN RAISE EXCEPTION 'History projections are immutable'; END;
+               $$ LANGUAGE plpgsql""",
+            "DROP TRIGGER IF EXISTS history_projection_immutable ON conversation_history_projections",
+            "CREATE TRIGGER history_projection_immutable BEFORE UPDATE ON conversation_history_projections "
+            "FOR EACH ROW EXECUTE FUNCTION history_projection_immutable()",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 67",
+            (68, self._SCHEMA_NAME), connection=conn,
+        )
+
     def _migrate_from_v66_to_v67(self, conn: sqlite3.Connection) -> None:
         """Add OSCE quiz activity metadata, stations, and practice attempts."""
         for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
@@ -20435,6 +20489,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 67 and current_db_version == 66:
                         self._migrate_from_v66_to_v67(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 68 and current_db_version == 67:
+                        self._migrate_from_v67_to_v68(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -20884,6 +20941,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 67 and current_db_version == 66:
                     self._migrate_from_v66_to_v67(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 68 and current_db_version == 67:
+                    self._migrate_from_v67_to_v68(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -24896,6 +24956,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 67 and current_version < 67:
                 self._migrate_from_v66_to_v67_postgres(conn)
                 current_version = 67
+            if target_version >= 68 and current_version < 68:
+                self._migrate_from_v67_to_v68_postgres(conn)
+                current_version = 68
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -44326,6 +44389,9 @@ for _message_store_method in (
     "add_message",
     "lock_message_for_edit",
     "lock_message_metadata_for_edit",
+    "get_conversation_history_snapshot",
+    "get_conversation_history_selected_content",
+    "confirm_legacy_history_projection",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

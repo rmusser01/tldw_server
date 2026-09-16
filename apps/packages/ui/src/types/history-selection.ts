@@ -18,6 +18,7 @@ export type HistoryFencesV1 = { readonly conversation: string; readonly history:
 export type HistoryRequiredReferenceV1 = { readonly id: string; readonly revision: string; readonly kind: string }
 
 export type HistoryNodeV1 = HistoryMessageRevisionV1 & {
+  readonly legacy_projection_id?: string
   readonly parent_id: string | null
   readonly role: string
   readonly settled: boolean

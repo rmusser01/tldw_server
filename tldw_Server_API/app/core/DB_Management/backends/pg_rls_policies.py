@@ -818,6 +818,27 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    add("""
+        DO $history_projection_rls$
+        BEGIN
+          IF to_regclass('conversation_history_projections') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE conversation_history_projections ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE conversation_history_projections FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS history_projection_owner ON conversation_history_projections';
+          EXECUTE $policy$
+            CREATE POLICY history_projection_owner ON conversation_history_projections
+            USING (client_id = current_setting('app.current_user_id', true)
+              AND EXISTS (SELECT 1 FROM conversations c
+                WHERE c.id = conversation_history_projections.conversation_id
+                AND c.client_id = current_setting('app.current_user_id', true) AND c.deleted = FALSE))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true)
+              AND EXISTS (SELECT 1 FROM conversations c
+                WHERE c.id = conversation_history_projections.conversation_id
+                AND c.client_id = current_setting('app.current_user_id', true) AND c.deleted = FALSE))
+          $policy$;
+        END
+        $history_projection_rls$;
+    """)
     return stmts
 
 

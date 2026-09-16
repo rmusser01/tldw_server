@@ -94,6 +94,7 @@ class HistoryComparisonMetadataV1(HistoryWireModel):
 
 
 class HistoryNodeV1(HistoryMessageRevisionV1):
+    legacy_projection_id: str | None = None
     parent_id: str | None
     role: str
     settled: StrictBool

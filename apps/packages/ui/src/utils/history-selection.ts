@@ -74,7 +74,7 @@ export const resolveParentPath = (
 
 /** A reviewed legacy order is immutable; original rows and parent edges remain intact. */
 export const resolveLegacyProjection = (
-  nodes: readonly HistoryNodeV1[], orderedPathIds: readonly string[], cursor: HistoryCursorV1
+  nodes: readonly HistoryNodeV1[], orderedPathIds: readonly string[], cursor: HistoryCursorV1, projectionId?: string
 ): readonly HistoryNodeV1[] => {
   const byId = indexNodes(nodes)
   const seen = new Set<string>()
@@ -87,8 +87,23 @@ export const resolveLegacyProjection = (
   })
   if (cursor.kind === "empty") return []
   const at = orderedPathIds.indexOf(cursor.message_id)
-  if (at < 0) throw new HistorySelectionError("missing_cursor")
-  return path.slice(0, at + (cursor.kind === "after_message" ? 1 : 0))
+  if (at >= 0) return path.slice(0, at + (cursor.kind === "after_message" ? 1 : 0))
+  if (!byId.has(cursor.message_id) || !projectionId) throw new HistorySelectionError("missing_cursor")
+  const descendants: HistoryNodeV1[] = []
+  const visited = new Set<string>()
+  let currentId: string | null = cursor.message_id
+  while (currentId !== null && !seen.has(currentId)) {
+    if (visited.has(currentId)) throw new HistorySelectionError("cyclic_ancestry")
+    visited.add(currentId)
+    const row = byId.get(currentId)
+    if (!row) throw new HistorySelectionError("missing_parent")
+    if (row.legacy_projection_id !== projectionId) throw new HistorySelectionError("interpretation_mismatch")
+    descendants.push(row)
+    currentId = row.parent_id
+  }
+  const base = currentId === null ? [] : path.slice(0, orderedPathIds.indexOf(currentId) + 1)
+  const resolved = [...base, ...descendants.reverse()]
+  return cursor.kind === "after_message" ? resolved : resolved.slice(0, -1)
 }
 
 /** Bind a separately loaded content payload to the exact captured path. */
@@ -164,7 +179,7 @@ export const resolveHistorySelection = (
     }
     const rows = status.kind === "parent_graph_v1"
       ? resolveParentPath(snapshot.nodes, view.cursor)
-      : resolveLegacyProjection(snapshot.nodes, status.ordered_path_ids, view.cursor)
+      : resolveLegacyProjection(snapshot.nodes, status.ordered_path_ids, view.cursor, status.projection_id)
     if (rows.some(row => !row.settled)) throw new HistorySelectionError("unsettled_message")
     const selection: HistorySelectionV1 = {
       version: 1, owner_key: snapshot.owner_key, conversation_id: snapshot.conversation_id,

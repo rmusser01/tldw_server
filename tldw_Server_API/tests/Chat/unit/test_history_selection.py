@@ -260,3 +260,22 @@ def test_wire_snapshot_and_comparison_rows_are_strict_and_deeply_immutable() -> 
         snapshot.nodes[0].comparison.cluster_id = "changed"
     with pytest.raises((TypeError, AttributeError, FrozenInstanceError, ValidationError)):
         snapshot.nodes[0] = snapshot.nodes[1]
+
+
+def test_legacy_descendants_keep_their_protected_base_and_null_branch():
+    nodes = [
+        {"id": "a", "parent_id": None}, {"id": "b", "parent_id": None},
+        {"id": "shared", "parent_id": None},
+        {"id": "x", "parent_id": "shared", "legacy_projection_id": "first"},
+        {"id": "y", "parent_id": "shared", "legacy_projection_id": "second"},
+        {"id": "fresh", "parent_id": None, "legacy_projection_id": "first"},
+    ]
+    def path(base, target, projection):
+        return [row["id"] for row in resolve_legacy_projection(nodes, base,
+            {"kind": "after_message", "message_id": target}, projection_id=projection)]
+    assert path(["a", "shared"], "x", "first") == ["a", "shared", "x"]
+    assert path(["b", "shared"], "y", "second") == ["b", "shared", "y"]
+    assert path(["a", "shared"], "fresh", "first") == ["fresh"]
+    assert path(["a", "shared"], "shared", "first") == ["a", "shared"]
+    with pytest.raises(HistorySelectionError, match="interpretation_mismatch"):
+        path(["a", "shared"], "y", "first")

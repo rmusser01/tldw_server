@@ -239,7 +239,8 @@ def resolve_parent_path(
 
 
 def resolve_legacy_projection(
-    nodes: Sequence[Mapping[str, Any]], ordered_path_ids: Sequence[str], cursor: Mapping[str, str]
+    nodes: Sequence[Mapping[str, Any]], ordered_path_ids: Sequence[str], cursor: Mapping[str, str],
+    *, projection_id: str | None = None,
 ) -> list[Mapping[str, Any]]:
     """Read reviewed membership without rewriting source rows or parent edges."""
 
@@ -249,7 +250,8 @@ def resolve_legacy_projection(
     conversations = {row.get("conversation_id") for row in nodes if row.get("conversation_id")}
     if len(conversations) > 1:
         raise HistorySelectionError("cross_conversation_parent")
-    if len(set(ordered_path_ids)) != len(ordered_path_ids):
+    positions = {row_id: index for index, row_id in enumerate(ordered_path_ids)}
+    if len(positions) != len(ordered_path_ids):
         raise HistorySelectionError("duplicate_projection_member")
     try:
         path = [by_id[row_id] for row_id in ordered_path_ids]
@@ -259,11 +261,30 @@ def resolve_legacy_projection(
         raise HistorySelectionError("invalid_cursor")
     if cursor["kind"] == "empty":
         return []
-    try:
-        at = ordered_path_ids.index(cursor["message_id"])
-    except ValueError as exc:
-        raise HistorySelectionError("missing_cursor") from exc
-    return path[: at + (cursor["kind"] == "after_message")]
+    target = cursor["message_id"]
+    if target in positions:
+        at = positions[target]
+        return path[: at + (cursor["kind"] == "after_message")]
+    if target not in by_id or projection_id is None:
+        raise HistorySelectionError("missing_cursor")
+    descendants: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    current_id: str | None = target
+    while current_id is not None and current_id not in positions:
+        if current_id in seen:
+            raise HistorySelectionError("cyclic_ancestry")
+        seen.add(current_id)
+        row = by_id.get(current_id)
+        if row is None:
+            raise HistorySelectionError("missing_parent")
+        if row.get("legacy_projection_id") != projection_id:
+            raise HistorySelectionError("interpretation_mismatch")
+        descendants.append(row)
+        current_id = row.get("parent_id")
+    base = path[: positions[current_id] + 1] if current_id is not None else []
+    resolved = base + list(reversed(descendants))
+    return resolved if cursor["kind"] == "after_message" else resolved[:-1]
+
 
 
 def canonical_selection_tuple(selection: Mapping[str, Any]) -> list[Any]:
@@ -376,7 +397,8 @@ def resolve_history_selection(
         rows = (
             resolve_parent_path(nodes, view["cursor"])
             if status["kind"] == "parent_graph_v1"
-            else resolve_legacy_projection(nodes, status["ordered_path_ids"], view["cursor"])
+            else resolve_legacy_projection(nodes, status["ordered_path_ids"], view["cursor"],
+                                           projection_id=status["projection_id"])
         )
         if any(not row["settled"] for row in rows):
             raise HistorySelectionError("unsettled_message")

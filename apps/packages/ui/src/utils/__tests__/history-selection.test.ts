@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { bindSelectedHistoryContent, resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest } from "../history-selection"
+import { resolveLegacyProjection, bindSelectedHistoryContent, resolveParentPath, resolveHistorySelection, selectionDigest, canonicalSelectionJson, resolveComparisonProjection, canonicalComparisonJson, comparisonDigest } from "../history-selection"
 import type { HistoryNodeV1, HistorySelectedContentV1, HistorySelectionSnapshotV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import vectors from "../../../../../../tldw_Server_API/tests/Chat/fixtures/history_selection_v1.json"
 
@@ -105,4 +105,19 @@ it("retains A's semantic comparison order despite stored cross-model edges", () 
   expect(resolveComparisonProjection(vector.source_rows as HistoryNodeV1[], vector.model_id, vector.boundary_id).map(row => row.id)).toEqual(vector.expected_path_ids)
   expect(canonicalComparisonJson(vector.selection as Parameters<typeof comparisonDigest>[0])).toBe(vector.canonical_json)
   expect(comparisonDigest(vector.selection as Parameters<typeof comparisonDigest>[0])).toBe(vector.selection_digest)
+})
+
+
+it("binds new legacy descendants to only their protected base, including null branches", () => {
+  const node = (id: string, parent_id: string | null, legacy_projection_id?: string): HistoryNodeV1 =>
+    ({ id, parent_id, legacy_projection_id, revision: "1", role: "user", settled: true })
+  const source = [node("a", null), node("b", null), node("shared", null),
+    node("x", "shared", "first"), node("y", "shared", "second"), node("fresh", null, "first")]
+  const path = (base: string[], target: string, projection: string) =>
+    resolveLegacyProjection(source, base, { kind: "after_message", message_id: target }, projection).map(row => row.id)
+  expect(path(["a", "shared"], "x", "first")).toEqual(["a", "shared", "x"])
+  expect(path(["b", "shared"], "y", "second")).toEqual(["b", "shared", "y"])
+  expect(path(["a", "shared"], "fresh", "first")).toEqual(["fresh"])
+  expect(path(["a", "shared"], "shared", "first")).toEqual(["a", "shared"])
+  expect(() => path(["a", "shared"], "y", "first")).toThrow(expect.objectContaining({code: "interpretation_mismatch"}))
 })
