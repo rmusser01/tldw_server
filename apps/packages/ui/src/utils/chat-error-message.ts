@@ -4,6 +4,15 @@ import { parseBillingLimitError } from "@/utils/billing-error"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
+// Only this local pretransport error can establish that server Retry is not
+// required. A provider's matching message or arbitrary object cannot do so.
+export class ImageSupportUnconfirmedError extends Error {
+  constructor(readonly serverRetryRequired: boolean) {
+    super("Image support is not confirmed for this model.")
+    this.name = "ImageSupportUnconfirmedError"
+  }
+}
+
 export type ChatErrorPayload = {
   summary: string
   hint: string
@@ -12,6 +21,7 @@ export type ChatErrorPayload = {
   category?: string
   recoveryAction?: "open-model-selector" | "open-model-settings"
   recoveryLabel?: string
+  serverRetryRequired?: boolean
 }
 
 export const encodeChatErrorPayload = (payload: ChatErrorPayload): string =>
@@ -42,6 +52,8 @@ export const decodeChatErrorPayload = (
           : undefined,
       recoveryLabel:
         typeof parsed.recoveryLabel === "string" ? parsed.recoveryLabel : undefined,
+      serverRetryRequired:
+        typeof parsed.serverRetryRequired === "boolean" ? parsed.serverRetryRequired : undefined,
     }
   } catch {
     return null
@@ -58,6 +70,26 @@ const translateErrorText = (key: string, fallback: string): string => {
 export const buildFriendlyErrorMessage = (rawError: unknown): string => {
   const detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
+
+  if (rawError instanceof ImageSupportUnconfirmedError) {
+    return encodeChatErrorPayload({
+      summary: translateErrorText(
+        "common:error.imageSupportUnconfirmedSummary",
+        "Image support is not confirmed for this model."
+      ),
+      hint: translateErrorText(
+        "common:error.imageSupportUnconfirmedHint",
+        "Choose a model that supports images, or start a new text-only conversation."
+      ),
+      detail,
+      recoveryAction: "open-model-selector",
+      recoveryLabel: translateErrorText(
+        "common:error.chooseAnotherModel",
+        "Choose another model"
+      ),
+      serverRetryRequired: rawError.serverRetryRequired
+    })
+  }
 
   let summary: string
   let hint: string

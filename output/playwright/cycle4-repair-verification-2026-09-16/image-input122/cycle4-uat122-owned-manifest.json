@@ -1,0 +1,40 @@
+{
+  "frozenAt": "2026-09-16T07:16:41.108094+00:00",
+  "baseRef": "6595bcfff4979d2495f34be39ebe18792d07a732",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "sha256": "0ffdcba7c7abc69e5dc4eda3076360ccbee65a6276341d61e5fccde8ff3e4b94"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/chat-error-message.ts",
+      "sha256": "e3d720de98918e25a762073b38fc06ddc3c2bc3bcebb0b5764613e018ea55961"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "c90044e560e207f926d74f45c412bd87b4310287e0d89a370febb2b8ba5871f6"
+    },
+    {
+      "path": "apps/packages/ui/src/models/__tests__/ChatTldw.image-input.test.ts",
+      "sha256": "6054e31c34e283dba3f582d03fc419f9b891ee6bdff986efd8129a2954fb2640"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "sha256": "5aa679fb048787379f6dac16064341b8dd2b99b97a1fb0a1d2981860410cbd1d"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "8ddc02d1a885598ff7dfed224cea5147f869226260db34e54d26382ab626e232"
+    },
+    {
+      "path": "apps/packages/ui/vitest.config.ts",
+      "sha256": "678eb0b079091b7163170e578e0fc79abf6edf6c2b4d8254f39d428f67de57d2"
+    },
+    {
+      "path": "backlog/tasks/task-13260.62 - Prevent-image-bearing-Chat-sends-from-silently-dropping-unsupported-attachments.md",
+      "sha256": "8ca5f0f50e8e94038b28c9793513ff28e9bee279d4c8f08e35ca898952a84d8e",
+      "kind": "task record"
+    }
+  ],
+  "taskRecordUpdatedAt": "2026-09-16T07:20:58.815954+00:00"
+}

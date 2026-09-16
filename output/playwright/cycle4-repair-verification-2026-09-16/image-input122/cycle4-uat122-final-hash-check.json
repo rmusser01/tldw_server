@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-09-16T07:18:30.679091+00:00",
+  "allMatch": true,
+  "checks": [
+    {
+      "path": "apps/packages/ui/src/models/ChatTldw.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/utils/chat-error-message.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/models/__tests__/ChatTldw.image-input.test.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/vitest.config.ts",
+      "matches": true
+    }
+  ]
+}

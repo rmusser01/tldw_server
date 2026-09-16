@@ -1,0 +1,27 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:96228) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.abort-lifecycle.test.ts (12 tests) 117ms
+(node:96246) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.conversation-id.test.ts (8 tests) 8ms
+(node:96258) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.dynamic-ui.test.ts (3 tests) 5ms
+(node:96294) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.provider-recovery.test.ts (2 tests) 4ms
+(node:96297) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/generate-history.image-generation.test.ts (3 tests) 3ms
+(node:96300) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat-modes/__tests__/chatModePipeline.error-recovery.guard.test.ts (2 tests) 2ms
+
+ Test Files  6 passed (6)
+      Tests  30 passed (30)
+   Start at  00:17:41
+   Duration  4.26s (transform 737ms, setup 433ms, import 1.26s, tests 138ms, environment 1.68s)
+

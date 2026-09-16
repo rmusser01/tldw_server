@@ -17,6 +17,7 @@ import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
 
 export interface ChatTldwOptions {
   model: string
@@ -462,6 +463,13 @@ export class ChatTldw {
         }
       }
       if (msg instanceof HumanMessage) {
+        if (
+          !this.supportsMultimodal &&
+          Array.isArray(msg.content) &&
+          msg.content.some((part) => part?.type === "image_url")
+        ) {
+          throw new ImageSupportUnconfirmedError(this.retryFailedTurn === true)
+        }
         return {
           role: "user",
           content: this.supportsMultimodal

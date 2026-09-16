@@ -1,0 +1,416 @@
+.F.                                                                      [100%]
+=================================== FAILURES ===================================
+__________ test_never_dispatched_image_retry_is_a_new_turn[identical] __________
+
+prior = 'identical'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('prior', ['empty', 'different', 'identical'])
+    async def test_never_dispatched_image_retry_is_a_new_turn(prior):
+        buffer = io.BytesIO()
+        Image.new('RGB', (2, 2), 'red').save(buffer, format='PNG')
+        data = buffer.getvalue()
+        content = [{'type':'text','text':'Question'}, {'type':'image_url','image_url':{'url':'data:image/png;base64,'+base64.b64encode(data).decode()}}]
+        rows = [] if prior == 'empty' else [
+            {'id':'old-user','sender':'user','content':'Question' if prior == 'identical' else 'Prior question','timestamp':1,
+             'images':[{'image_data':data,'image_mime_type':'image/png'}]},
+            {'id':'old-assistant','sender':'assistant','content':'Answered','timestamp':2}
+        ]
+        class SavedDB(DummyChatDB):
+            def get_conversation_by_id(self, _):
+                return {'id':'conv','character_id':1,'client_id':'client'}
+            def get_message_metadata(self, message_id):
+                return {'extra': {'client_message_id':'old-local-user'}} if message_id == 'old-user' else {}
+        request = ChatCompletionRequest(model='test',save_to_db=True,conversation_id='conv', messages=[{'role':'user','content':content}], metadata={'tldw_retry_failed_turn':True,'tldw_client_message_id':'new-never-sent-local-user'})
+        save = AsyncMock(return_value='new-user')
+        state = {}
+>       await chat_service.build_context_and_messages(chat_db=SavedDB(rows),request_data=request,loop=asyncio.get_running_loop(),metrics=MagicMock(),default_save_to_db=False,final_conversation_id='conv',save_message_fn=save,runtime_state=state)
+
+/private/tmp/cycle4-uat122-unacked-retry-independent.py:34: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+chat_db = <cycle4-uat122-unacked-retry-independent.test_never_dispatched_image_retry_is_a_new_turn.<locals>.SavedDB object at 0x113c572d0>
+request_data = ChatCompletionRequest(api_provider=None, routing=None, model='test', messages=[ChatCompletionUserMessageParam(role='us...lse, save_to_db=True, metadata={'tldw_retry_failed_turn': True, 'tldw_client_message_id': 'new-never-sent-local-user'})
+loop = <_UnixSelectorEventLoop running=False closed=False debug=False>
+metrics = <MagicMock id='4626673936'>, default_save_to_db = False
+final_conversation_id = 'conv', save_message_fn = <AsyncMock id='4626987152'>
+runtime_state = {}
+
+    async def build_context_and_messages(
+        chat_db: Any,
+        request_data: Any,
+        loop: Any,
+        metrics: Any,
+        default_save_to_db: bool,
+        final_conversation_id: str | None,
+        save_message_fn: Any,
+        runtime_state: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], int | None, str, bool, list[dict[str, Any]], bool]:
+        """Resolve character/conversation context, load history, save current messages, and return LLM-ready payload.
+    
+        Returns (character_card, character_db_id, final_conversation_id, conversation_created, llm_payload_messages, should_persist)
+        """
+        # Assistant context
+        (
+            character_card,
+            character_db_id,
+            existing_conversation,
+            assistant_context,
+        ) = await _resolve_assistant_context_for_chat(
+            chat_db=chat_db,
+            request_data=request_data,
+            loop=loop,
+            conversation_id=final_conversation_id,
+        )
+        if character_card:
+            logger.debug(
+                "Loaded assistant context name={} system_prompt_summary={}",
+                character_card.get("name"),
+                text_summary(character_card.get("system_prompt")),
+            )
+    
+        if character_card and character_db_id is not None:
+            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                metrics.track_character_access(character_id=str(request_data.character_id or "default"), cache_hit=False)
+    
+        if not character_card:
+            logger.warning("No character context found; proceeding with ephemeral default context.")
+            character_card = {"name": DEFAULT_CHARACTER_NAME, "system_prompt": _DEFAULT_ASSISTANT_SYSTEM_PROMPT}
+            character_db_id = None
+            assistant_context = {
+                "assistant_kind": None,
+                "assistant_id": None,
+                "persona_memory_mode": assistant_context.get("persona_memory_mode"),
+            }
+    
+        # Persistence decision
+        requested = getattr(request_data, "save_to_db", None)
+        should_persist: bool = bool(requested) if (requested is not None) else bool(default_save_to_db)
+    
+        # Conversation resolution
+        client_id_from_db = getattr(chat_db, "client_id", None)
+        conversation_created = False
+        conv_id = final_conversation_id
+        is_existing_persona_conversation = bool(
+            existing_conversation
+            and assistant_context.get("assistant_kind") == "persona"
+            and assistant_context.get("assistant_id")
+        )
+        # Workspace chats can intentionally have no saved assistant identity. An
+        # implicit default character supplies prompt context, not a request to fork.
+        is_owned_neutral_conversation = bool(
+            existing_conversation
+            and client_id_from_db is not None
+            and existing_conversation.get("client_id") == client_id_from_db
+            and getattr(request_data, "character_id", None) is None
+            and existing_conversation.get("character_id") is None
+            and existing_conversation.get("assistant_kind") is None
+            and existing_conversation.get("assistant_id") is None
+        )
+        from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+    
+        publication = current_buddy_publication.get()
+        # A Buddy acceptance already captured one exact existing conversation. Its
+        # transaction fence rechecks owner/revision; default-character resolution
+        # must not fork a neutral conversation into a new target.
+        is_accepted_buddy_conversation = bool(
+            publication is not None
+            and existing_conversation
+            and conv_id == publication.turn["conversation_id"]
+            and str(client_id_from_db) == publication.repository.user_id
+        )
+        # Ensure a valid assistant identity is present before attempting persistence
+        if should_persist and character_db_id is None and not (
+            is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+        ):
+            logger.warning(
+                'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
+                final_conversation_id or "<new>",
+            )
+            should_persist = False
+    
+        if should_persist:
+            if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation) and conv_id:
+                conversation_created = False
+            else:
+                conv_id, conversation_created = await get_or_create_conversation(
+                    chat_db,
+                    conv_id,
+                    character_db_id,
+                    character_card.get("name", "Chat"),
+                    client_id_from_db,
+                    loop,
+                )
+        else:
+            if not conv_id:
+                conv_id = str(_uuid.uuid4())
+            conversation_created = False
+    
+        if conv_id:
+            with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
+                metrics.track_conversation(conv_id, conversation_created)
+        if not conv_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to establish conversation context.")
+    
+        continuation_spec = _extract_tldw_continuation_spec(request_data)
+        continuation_metadata: dict[str, Any] | None = None
+        assistant_parent_message_id: str | None = None
+        assistant_prefill: str | None = None
+        if continuation_spec:
+            assistant_parent_message_id, _mode, assistant_prefill = continuation_spec
+            if conversation_created:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="conversation_id is required for continuation and must reference an existing conversation.",
+                )
+    
+        request_metadata = getattr(request_data, "metadata", None)
+        explicit_failed_retry = isinstance(request_metadata, dict) and request_metadata.get("tldw_retry_failed_turn") is True
+    
+        # History loading (configurable limit/order; filter missing roles, normalize assistant names)
+        requested_history_limit = getattr(request_data, "history_message_limit", None)
+        if requested_history_limit is None:
+            history_limit = DEFAULT_HISTORY_MESSAGE_LIMIT
+        else:
+            try:
+                history_limit = int(requested_history_limit)
+            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                history_limit = DEFAULT_HISTORY_MESSAGE_LIMIT
+            history_limit = max(0, min(_MAX_HISTORY_MESSAGES, history_limit))
+    
+        requested_history_order = getattr(request_data, "history_message_order", None)
+        if requested_history_order:
+            history_order = str(requested_history_order).strip().lower()
+            if history_order not in {"asc", "desc"}:
+                history_order = DEFAULT_HISTORY_MESSAGE_ORDER
+        else:
+            history_order = DEFAULT_HISTORY_MESSAGE_ORDER
+        db_order = "ASC" if history_order == "asc" else "DESC"
+    
+        historical_msgs: list[dict[str, Any]] = []
+        historical_ids: list[str | None] = []
+        retry_history_content: dict[int, Any] = {}
+        if conv_id and (not conversation_created):
+            raw_hist: list[dict[str, Any]] = []
+            if continuation_spec:
+                from_message_id, mode, assistant_prefill = continuation_spec
+                resolved_hist, continuation_metadata = await _resolve_tldw_continuation_history(
+                    chat_db=chat_db,
+                    loop=loop,
+                    conversation_id=conv_id,
+                    from_message_id=from_message_id,
+                    mode=mode,
+                    history_limit=(history_limit if history_limit > 0 else _MAX_HISTORY_MESSAGES),
+                    history_order=history_order,
+                )
+                if history_limit > 0:
+                    raw_hist = resolved_hist
+                continuation_metadata["anchor_message_id"] = from_message_id
+            elif history_limit > 0:
+                raw_hist = await loop.run_in_executor(
+                    None,
+                    partial(chat_db.get_messages_for_conversation,
+                        conv_id, history_limit, 0, db_order,
+                        **({"strict_images": True} if explicit_failed_retry else {})),
+                )
+            for db_msg in raw_hist:
+                sender_val = str(db_msg.get("sender", "") or "")
+                metadata = None
+                try:
+                    metadata = await loop.run_in_executor(None, chat_db.get_message_metadata, db_msg.get("id"))
+                except _CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
+                    logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
+    
+                tool_calls_meta = None
+                function_call_meta = None
+                content_placeholder_reason = None
+                tool_call_id_meta = None
+                stored_role = None
+                stored_name = None
+                if metadata:
+                    tool_calls_meta = metadata.get("tool_calls")
+                    extra_meta = metadata.get("extra") or {}
+                    if isinstance(extra_meta, dict):
+                        function_call_meta = extra_meta.get("function_call")
+                        content_placeholder_reason = extra_meta.get("content_placeholder_reason")
+                        tool_call_id_meta = extra_meta.get("tool_call_id")
+                        stored_role = extra_meta.get("sender_role")
+                        stored_name = extra_meta.get("sender_name")
+    
+                role_initial = map_sender_to_role(sender_val, character_card.get("name") if character_card else None)
+                role = stored_role if stored_role in {"user", "assistant", "system", "tool"} else role_initial
+                if not should_persist_message_role(role):
+                    continue
+                char_name_hist = character_card.get("name", "Char") if character_card else "Char"
+                text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
+                raw_user_text = text_content
+                # Normal/persona Retry compares and sends the literal saved user input.
+                preserve_literal_retry = explicit_failed_retry and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
+                if text_content and role != "tool" and not preserve_literal_retry:
+                    text_content = replace_placeholders(text_content, char_name_hist, "User")
+                msg_parts = []
+                if text_content:
+                    msg_parts.append({"type": "text", "text": text_content})
+                raw_images = db_msg.get("images") or []
+                if (not raw_images) and db_msg.get("image_data") and db_msg.get("image_mime_type"):
+                    raw_images = [{
+                        "position": 0,
+                        "image_data": db_msg.get("image_data"),
+                        "image_mime_type": db_msg.get("image_mime_type"),
+                    }]
+    
+                for image_entry in raw_images:
+                    try:
+                        img_bytes = image_entry.get("image_data")
+                        if isinstance(img_bytes, memoryview):
+                            img_bytes = img_bytes.tobytes()
+                        if not img_bytes:
+                            if explicit_failed_retry:
+                                raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete. Reload after repairing the source message.")
+                            continue
+                        img_mime = image_entry.get("image_mime_type") or db_msg.get("image_mime_type") or "image/png"
+                        b64_img = await loop.run_in_executor(None, base64.b64encode, img_bytes)
+                        image_part = {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
+                        }
+                        if explicit_failed_retry:
+                            _retry_content_components([image_part])
+                        msg_parts.append(image_part)
+                    except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+                        if explicit_failed_retry:
+                            raise HTTPException(status_code=409, detail="A saved chat attachment could not be read completely.") from e
+                        logger.warning(
+                            "Error encoding DB image for history msg_id={} error={}",
+                            db_msg.get("id"),
+                            exception_summary(e),
+                        )
+                if msg_parts:
+                    hist_entry = {"role": role}
+                    if role == "tool" and len(msg_parts) == 1 and msg_parts[0].get("type") == "text":
+                        hist_entry["content"] = msg_parts[0].get("text", "")
+                    else:
+                        hist_entry["content"] = msg_parts
+                    if role == "assistant":
+                        name_source = stored_name or (character_card.get("name") if character_card else None)
+                        if name_source:
+                            name = sanitize_sender_name(name_source)
+                            if name:
+                                hist_entry["name"] = name
+    
+                    if tool_calls_meta is not None:
+                        hist_entry["tool_calls"] = tool_calls_meta
+                    if function_call_meta and not hist_entry.get("tool_calls"):
+                        hist_entry["function_call"] = function_call_meta
+                    if content_placeholder_reason in {"tool_calls", "function_call"}:
+                        hist_entry["content"] = ""
+                    if role == "tool" and tool_call_id_meta:
+                        hist_entry["tool_call_id"] = tool_call_id_meta
+                    if role == "tool" and not tool_call_id_meta:
+                        logger.debug(
+                            "Skipping tool message {} without tool_call_id metadata.",
+                            db_msg.get("id"),
+                        )
+                        continue
+                    if explicit_failed_retry and role == "user":
+                        retry_history_content[id(hist_entry)] = ([{"type": "text", "text": raw_user_text}] if raw_user_text else []) + [part for part in msg_parts if part.get("type") == "image_url"]
+                    historical_msgs.append(hist_entry)
+                    historical_ids.append(db_msg.get("id"))
+            logger.info(f"Loaded {len(historical_msgs)} historical messages for conv_id '{conv_id}'.")
+    
+        # Keep failure diagnostics in saved history, but never send them as model
+        # replies. Only a matching retry of the trailing failure can reuse its user
+        # turn; ordinary repeated user messages retain their existing semantics.
+        history_ended_with_error = bool(
+            historical_msgs
+            and _is_saved_chat_error_envelope(historical_msgs[0 if history_order == "desc" else -1])
+        )
+        visible_history = [(message, message_id) for message, message_id in zip(historical_msgs, historical_ids)
+                           if not _is_saved_chat_error_envelope(message)]
+        historical_msgs = [message for message, _ in visible_history]
+        historical_ids = [message_id for _, message_id in visible_history]
+    
+        # Process current turn messages (persist if needed)
+        request_messages: list[dict[str, Any]] = []
+        for msg_model in request_data.messages:
+            if not should_persist_message_role(msg_model.role):
+                continue
+            msg_dict = msg_model.model_dump(exclude_none=True)
+            raw_name = msg_dict.get("name")
+            if isinstance(raw_name, str) and raw_name.strip():
+                sanitized = sanitize_sender_name(raw_name)
+                if sanitized:
+                    msg_dict["name"] = sanitized
+                else:
+                    msg_dict.pop("name", None)
+            request_messages.append(msg_dict)
+    
+        metadata = getattr(request_data, "metadata", None)
+        client_message_id = metadata.get("tldw_client_message_id") if isinstance(metadata, dict) else None
+        if not isinstance(client_message_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+            client_message_id = None
+        explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
+        retry_user_message_id: str | None = None
+        if explicit_failed_retry and should_persist and not conversation_created and request_messages:
+            # Read the actual tail independently of the requested context window.
+            # Retry is an explicit operation; equal text on an ordinary send is new.
+            tail_rows = await loop.run_in_executor(None, partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+            tail_metadata = {row["id"]: await loop.run_in_executor(None, chat_db.get_message_metadata, row["id"]) for row in tail_rows}
+            requested_user = request_messages[-1]
+            if requested_user.get("role") != "user":
+                raise HTTPException(status_code=409, detail="The failed turn changed. Reload the conversation before retrying.")
+    
+            def matches_saved_user(row: dict[str, Any]) -> bool:
+                if str(row.get("sender", "")).lower() != "user":
+                    return False
+                stored_metadata = tail_metadata.get(row["id"]) or {}
+                text = _saved_image_text(row, stored_metadata.get("extra"))
+                parts = [{"type": "text", "text": text}] if text else []
+                images = row.get("images") or []
+                if not images and row.get("image_data"):
+                    images = [row]
+                for image in images:
+                    data = image.get("image_data")
+                    if not data:
+                        raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
+                    mime = image.get("image_mime_type") or "image/png"
+                    parts.append({"type": "image_url", "image_url": {
+                        "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
+                    }})
+                return _retry_content_components(requested_user.get("content")) == _retry_content_components(parts)
+    
+            if tail_rows:
+                tail = tail_rows[0]
+                if str(tail.get("sender", "")).lower() == "user":
+                    if not matches_saved_user(tail):
+                        raise HTTPException(status_code=409, detail="The unanswered turn changed. Reload the conversation before retrying.")
+                    retry_user_message_id = str(tail["id"])
+                elif len(tail_rows) > 1 and matches_saved_user(tail_rows[1]):
+                    if _is_saved_chat_error_envelope({"role": "assistant", "content": tail.get("content", "")}):
+                        retry_user_message_id = str(tail_rows[1]["id"])
+                    else:
+>                       raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
+E                       fastapi.exceptions.HTTPException: 409: This turn already has an answer. Reload the conversation before retrying.
+
+tldw_Server_API/app/core/Chat/chat_service.py:4368: HTTPException
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 00:06:07.167 | INFO     | tldw_Server_API.app.core.Chat.chat_helpers:get_or_create_character_context:189 - Loaded character 'Assistant' (ID: 1)
+2026-09-16 00:06:07.167 | DEBUG    | tldw_Server_API.app.core.Chat.chat_service:build_context_and_messages:4042 - Loaded assistant context name=Assistant system_prompt_summary={'present': True, 'type': 'str', 'chars': 6}
+2026-09-16 00:06:07.169 | INFO     | tldw_Server_API.app.core.Chat.chat_service:build_context_and_messages:4295 - Loaded 2 historical messages for conv_id 'conv'.
+=============================== warnings summary ===============================
+.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "ResponseFormatJsonSchemaSpec" shadows an attribute in parent "BaseModel"
+    warnings.warn(
+
+.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:13
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Chat/unit/test_chat_history_and_streaming.py:13: PytestUnknownMarkWarning: Unknown pytest.mark.unit - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = pytest.mark.unit
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../../../../private/tmp/cycle4-uat122-unacked-retry-independent.py::test_never_dispatched_image_retry_is_a_new_turn[identical]
+1 failed, 2 passed, 3 warnings in 3.43s

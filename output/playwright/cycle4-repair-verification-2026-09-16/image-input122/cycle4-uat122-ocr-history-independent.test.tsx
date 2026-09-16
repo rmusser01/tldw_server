@@ -11,13 +11,12 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatTldw } from "@/models/ChatTldw"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
-import { useChatActions } from "../useChatActions"
-import { useServerChatLoader } from "../useServerChatLoader"
+import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
 import { useStoreMessageOption } from "@/store/option"
 import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
-import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -29,9 +28,6 @@ const mocks = vi.hoisted(() => ({
   listChatMessages: vi.fn(),
   initialize: vi.fn(),
   pageAssistModel: vi.fn(),
-  getModel: vi.fn(),
-  ocr: vi.fn(),
-  realFormatter: false,
   streamMessage: vi.fn(),
   saveHistory: vi.fn(),
   saveMessage: vi.fn(),
@@ -87,37 +83,16 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 vi.mock("@/services/tldw", async () => {
   const actual = await vi.importActual<typeof import("@/services/tldw")>("@/services/tldw")
-  return { ...actual, tldwModels: { ...actual.tldwModels, getModel: mocks.getModel }, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
+  return { ...actual, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
 })
 vi.mock("@/models", () => ({ pageAssistModel: mocks.pageAssistModel }))
 vi.mock("@/services/title", () => ({
   generateTitle: async () => "First question"
 }))
 vi.mock("@/services/tldw-server", () => ({
-  systemPromptForNonRagOption: async () => "",
-  getDefaultApiProvider: async () => "openai"
+  systemPromptForNonRagOption: async () => ""
 }))
-vi.mock("@/services/model-settings", async () => ({
-  ...await vi.importActual<typeof import("@/services/model-settings")>("@/services/model-settings"),
-  getAllDefaultModelSettings: async () => ({}),
-  getModelSettings: async () => ({})
-}))
-vi.mock("@/utils/resolve-api-provider", async () => ({
-  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
-  resolveApiProviderForModel: async () => "openai"
-}))
-vi.mock("@/utils/ocr", () => ({ processImageForOCR: mocks.ocr }))
-// Existing transport-independent cases retain their simple fixture; image-input
-// controls use the real formatter and model factory, with only OCR disabled.
-vi.mock("@/utils/human-message", async () => {
-  const { HumanMessage } = await vi.importActual<typeof import("@/types/messages")>("@/types/messages")
-  const actual = await vi.importActual<typeof import("@/utils/human-message")>("@/utils/human-message")
-  return { humanMessageFormatter: async (options: Parameters<typeof actual.humanMessageFormatter>[0]) =>
-    mocks.realFormatter ? actual.humanMessageFormatter(options) : Array.isArray(options.content) && options.content.some(part => part.type === "image_url")
-      ? new HumanMessage({ content: options.content })
-      : { role: "user", content: Array.isArray(options.content) ? options.content[0]?.type === "text" ? options.content[0].text : "" : options.content }
-  }
-})
+vi.mock("@/utils/ocr", () => ({ processImageForOCR: vi.fn(async () => "Receipt total 42") }))
 vi.mock("@/utils/actor", () => ({
   maybeInjectActorMessage: async (history: unknown[]) => history
 }))
@@ -330,7 +305,7 @@ const ServerLoaderHost = ({ children }: React.PropsWithChildren) => {
   return <>{children}</>
 }
 
-const renderWorkspace = (realNotifications = false, withLoader = false, options: Partial<ReturnType<typeof createHookOptions>> = {}) =>
+const renderWorkspace = (realNotifications = false, withLoader = false) =>
   renderHook(
     ({ ready }) => {
       const notificationApi = React.useContext(NotificationContext)
@@ -338,7 +313,6 @@ const renderWorkspace = (realNotifications = false, withLoader = false, options:
       const actions = useChatActions({
         ...createHookOptions(),
         ...state,
-        ...options,
         ensureServerChatHistoryId: mocks.ensureHistory,
         selectedCharacter: null,
         selectedAssistant: null
@@ -623,9 +597,6 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.rows.length = 0
     mocks.mirrorHistories.clear()
     mocks.withLoader = false
-    mocks.realFormatter = false
-    mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
-    mocks.ocr.mockResolvedValue("Explicit OCR text")
     mocks.selectionRevision = 0
     mocks.serverRows.clear()
     mocks.watches.clear()
@@ -699,164 +670,6 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
-  })
-
-  it.each([false, true].flatMap(prior => ["", "  Keep this image  "].map(text => ({ prior, text }))))("keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: $text / prior $prior", async ({ text, prior }) => {
-    mocks.withLoader = true
-    mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
-    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
-    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
-    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
-    mocks.getModel.mockImplementation(async model => ({ id: model, name: model, capabilities: model === "vision-test" ? ["vision"] : [] }))
-    let accepted = 0
-    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
-      if (options.model !== "vision-test") throw new Error("Unsupported model reached transport")
-      const users = messages.filter((row: { role: string }) => row.role === "user")
-      expect(users).toHaveLength(prior && accepted ? 2 : 1)
-      expect(users.at(-1)).toEqual({ role: "user", content: [{ type: "text", text }, { type: "image_url", image_url: { url: image } }] })
-      // This is a new, never-dispatched user even if an earlier answered user
-      // happens to have identical text and image. Backend Retry=true rejects it.
-      expect(options.retryFailedTurn).toBe(false)
-      const userId = prior && accepted === 0 ? "prior-image-user" : "accepted-image-user"
-      const answerId = prior && accepted === 0 ? "prior-image-answer" : "accepted-image-answer"
-      accepted++
-      mocks.serverRows.get(options.conversationId)!.push(
-        { id: userId, role: "user", content: text || "<Image attachment x1>", images: [image], version: 1, metadata_extra: { client_message_id: options.clientMessageId, ...(!text ? { content_placeholder_reason: "image_attachment" } : {}) } },
-        { id: answerId, role: "assistant", content: "Image accepted", images: [], version: 1 })
-      onChunk({ tldw_user_message_id: userId, tldw_message_id: answerId })
-      yield "Image accepted"
-    })
-    let view = renderWorkspace(false, true)
-    if (prior) {
-      act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
-      await act(async () => { await view.result.current.actions.onSubmit({ message: text, image }) })
-      await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
-      act(() => useStoreMessageOption.setState({ selectedModel: "unconfirmed-test" }))
-    }
-    await act(async () => { await view.result.current.actions.onSubmit({ message: text, image }) })
-    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
-    expect(mocks.streamMessage).toHaveBeenCalledTimes(prior ? 1 : 0)
-    const user = view.result.current.state.messages.findLast(row => !row.isBot)!
-    expect(user).toMatchObject({ message: text, images: [image] })
-    expect(user.serverMessageId).toBeUndefined()
-    expect(mocks.serverRows.get(view.result.current.state.serverChatId!)?.filter(row => row.role === "user")).toHaveLength(prior ? 1 : 0)
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)).toMatchObject({ recoveryAction: "open-model-selector", summary: "Image support is not confirmed for this model.", serverRetryRequired: false })
-    view.unmount()
-    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
-    view = renderWorkspace(false, true)
-    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
-    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
-    expect(mocks.streamMessage).toHaveBeenCalledTimes(prior ? 1 : 0)
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)).toMatchObject({ serverRetryRequired: false })
-    expect(view.result.current.state.messages.find(row => row.id === user.id)).toMatchObject({ id: user.id, message: text, images: [image] })
-    expect(mocks.rows.filter(row => row.role === "user")).toHaveLength(prior ? 2 : 1)
-    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
-    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
-    expect(mocks.streamMessage).toHaveBeenCalledTimes(prior ? 2 : 1)
-    expect(mocks.streamMessage.mock.calls.at(-1)![1]).toMatchObject({ retryFailedTurn: false, clientMessageId: user.id })
-    expect(view.result.current.state.messages.find(row => row.id === user.id)).toMatchObject({ id: user.id, serverMessageId: "accepted-image-user", images: [image] })
-    view.unmount()
-    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
-    view = renderWorkspace(false, true)
-    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
-    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "accepted-image-user")).toMatchObject([{ id: user.id, message: text, images: [image], serverMessageId: "accepted-image-user" }])
-    expect(view.result.current.state.messages.filter(row => row.serverMessageId === "accepted-image-answer")).toMatchObject([{ message: "Image accepted" }])
-    view.unmount()
-  })
-
-  it.each([false, true])("retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal %s", async initialRefusal => {
-    mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
-    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
-    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
-    mocks.getModel.mockImplementation(async model => ({ id: model, capabilities: model === "vision-test" ? ["vision"] : [] }))
-    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
-    const attempts: boolean[] = []
-    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
-      attempts.push(options.retryFailedTurn)
-      if (attempts.length === 1) {
-        mocks.serverRows.get(options.conversationId)!.push({ id: "ambiguous-image-user", role: "user", content: "Image question", images: [image], metadata_extra: { client_message_id: options.clientMessageId } })
-        throw new Error("Provider failed before acknowledgement")
-      }
-      mocks.serverRows.get(options.conversationId)!.push({ id: "recovered-image-answer", role: "assistant", content: "Recovered" })
-      onChunk({ tldw_user_message_id: "ambiguous-image-user", tldw_message_id: "recovered-image-answer" })
-      yield "Recovered"
-    })
-    act(() => useStoreMessageOption.setState({ selectedModel: initialRefusal ? "unconfirmed" : "vision-test" }))
-    const view = renderWorkspace()
-    await act(async () => { await view.result.current.actions.onSubmit({ message: "Image question", image }) })
-    if (initialRefusal) {
-      expect(attempts).toEqual([])
-      expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)?.serverRetryRequired).toBe(false)
-      act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
-      await act(async () => { await view.result.current.actions.regenerateLastMessage() })
-    }
-    expect(attempts).toEqual([false])
-    const user = view.result.current.state.messages.find(row => !row.isBot)!
-    expect(user.serverMessageId).toBeUndefined()
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)?.serverRetryRequired).toBeUndefined()
-    act(() => useStoreMessageOption.setState({ selectedModel: "unconfirmed" }))
-    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
-    expect(attempts).toEqual([false])
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)?.serverRetryRequired).toBe(true)
-    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
-    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
-    expect(attempts).toEqual([false, true])
-    expect(mocks.serverRows.get(view.result.current.state.serverChatId!)?.filter(row => row.role === "user")).toHaveLength(1)
-    expect(view.result.current.state.messages.filter(row => !row.isBot)).toMatchObject([{ id: user.id, images: [image], serverMessageId: "ambiguous-image-user" }])
-    expect(mocks.rows.filter(row => row.role === "user")).toHaveLength(1)
-    view.unmount()
-  })
-
-  it("allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn", async () => {
-    mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
-    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
-    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
-    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
-    mocks.streamMessage.mockImplementation(async function* (_messages, _options, onChunk) {
-      onChunk({ tldw_user_message_id: "ocr-user", tldw_message_id: "ocr-answer" })
-      yield "OCR answer"
-    })
-    const view = renderWorkspace(false, false, { useOCR: true })
-    await act(async () => { await view.result.current.actions.onSubmit({ message: "Read receipt", image }) })
-    expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
-    expect(mocks.streamMessage.mock.calls[0][0].at(-1)?.content).toBe("Read receipt\n\n[IMAGE OCR TEXT]\nExplicit OCR text")
-    expect(view.result.current.state.history[0]).toMatchObject({ content: "Read receipt", image })
-    await act(async () => { await view.result.current.actions.onSubmit({ message: "Follow-up", image: "" }) })
-    expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
-    expect(mocks.ocr).toHaveBeenCalledTimes(1)
-    expect(view.result.current.state.messages.find(row => row.serverMessageId === "ocr-user")?.images).toEqual([image])
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)).toMatchObject({
-      summary: "Image support is not confirmed for this model.",
-      hint: "Choose a model that supports images, or start a new text-only conversation."
-    })
-    view.unmount()
-  })
-
-  it.each(["B", "A"])("does not publish delayed image capability errors after A to B to %s", async destination => {
-    mocks.realFormatter = true
-    const modelInfo = deferred<{ capabilities: string[] }>()
-    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
-    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
-    mocks.getModel.mockReturnValue(modelInfo.promise)
-    const view = renderWorkspace()
-    let pending!: Promise<unknown>
-    act(() => { pending = view.result.current.actions.onSubmit({ message: "Alice image", image: "data:image/png;base64,aW1hZ2U=" }) })
-    await waitFor(() => expect(mocks.getModel).toHaveBeenCalled())
-    const draft = { id: "new-owner-draft", isBot: false, name: "You", message: "New owner work", sources: [] }
-    await act(async () => {
-      replaceAuthority("synthetic-b")
-      if (destination === "A") replaceAuthority("synthetic-a")
-      useStoreMessageOption.setState({ messages: [draft], history: [], historyId: null, serverChatId: null })
-      modelInfo.resolve({ capabilities: [] })
-      await pending
-    })
-    expect(mocks.streamMessage).not.toHaveBeenCalled()
-    expect(view.result.current.state.messages).toEqual([draft])
-    expect(mocks.rows).toEqual([])
-    view.unmount()
   })
 
   it("hydrates a failed saved turn before Retry without duplicating the canonical user", async () => {
@@ -1912,4 +1725,29 @@ describe("saved normal Chat pipeline with autosave", () => {
       expect(result.current.state.serverChatId).toBeNull()
     }
   )
+  it("independent UAT122 two-turn explicit OCR continuity", async () => {
+    useStoreMessageOption.setState({ useOCR: true });
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=";
+    const projected: Array<Array<{role:string;content:unknown}>> = [];
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId, clientMessageId, retryFailedTurn }) =>
+      new ChatTldw({ model: "test", supportsMultimodal: false, saveToDb: true, conversationId, clientMessageId, retryFailedTurn }));
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      projected.push(messages);
+      onChunk({ tldw_user_message_id: "ocr-user-" + projected.length, tldw_message_id: "ocr-assistant-" + projected.length });
+      yield "Receipt analyzed";
+    });
+    const view = renderWorkspace();
+    let first: unknown;
+    await act(async () => { first = await view.result.current.actions.onSubmit({ message: "Read this receipt", image }); });
+    expect(first).toMatchObject({status:"submitted"});
+    expect(projected[0].at(-1)?.content).toContain("[IMAGE OCR TEXT]\nReceipt total 42");
+    expect(view.result.current.state.history[0].image).toBe(image);
+    expect(view.result.current.state.history[0].content).toBe("Read this receipt");
+    let second: unknown;
+    await act(async () => { second = await view.result.current.actions.onSubmit({ message: "What was the total?", image: "" }); });
+    console.log("UAT122_OCR_OBSERVATION", JSON.stringify({ first, second, dispatchCount:projected.length, firstDispatch:projected[0], secondDispatch:projected[1], retainedOriginalImage:view.result.current.state.history[0].image===image }));
+    expect(second).toMatchObject({status:"submitted"});
+    expect(projected).toHaveLength(2);
+  });
+
 })

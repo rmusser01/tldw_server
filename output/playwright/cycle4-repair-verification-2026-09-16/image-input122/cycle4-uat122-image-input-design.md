@@ -18,7 +18,7 @@ Command from `apps/packages/ui`: `./node_modules/.bin/vitest run --config /priva
 
 It uses real formatter, actual isCustomModel function and real ChatTldw; only transport/OCR dependencies are controlled. Vite initially could not resolve the optional OCR package despite the no-OCR test; a private alias provides an unused throwing createWorker stub. No OCR worker, inference or browser ran. This harness adjustment is not a product failure or fix.
 
-## Approved contract
+## Recommended contract
 
 Fail fast before `tldwChat.streamMessage` / `sendMessage` if any user message has an image content part and `supportsMultimodal` is false. Do not dispatch a shortened request. Pure text remains unchanged. Scan the whole outgoing user history, not only the new turn, so switching to an unconfirmed model cannot silently drop earlier images either.
 
@@ -38,14 +38,14 @@ The saved conversation may already have been bootstrapped before the model rejec
 
 Old native rows already persisted text-only cannot safely be retroactively associated with a local image; retain the existing mismatch guard and local work. No migration or attachment guessing.
 
-## Approved bounded source/test scope
+## Proposed bounded source/test scope
 
 Production:
 
 1. `apps/packages/ui/src/models/ChatTldw.ts`: reject instead of lossy HumanMessage coercion when an image is present without confirmed vision.
 2. `apps/packages/ui/src/utils/chat-error-message.ts`: narrow actionable friendly-error mapping and model-selector action.
 
-No formatter production edit is justified. No backend, schema, capability registry, loader or shared ownership abstraction change is approved. Independent endpoint proof exposed a never-dispatched Retry distinction, so the bounded pipeline addition below is approved. The shared UI Vitest config may alias the already installed pa-tesseract package exactly as Next does, without installing or changing dependencies.
+No formatter production edit is currently justified. No backend, schema, capability registry, loader, shared ownership abstraction, or pipeline production change is proposed. If real action regressions expose an additional necessary boundary, report it before extending scope.
 
 Permanent tests before production edits:
 
@@ -63,16 +63,4 @@ TDD on actual boundaries, focused existing Chat suites, root-config ESLint basel
 
 Native validation with the current `vision=false` provider should verify visible actionable refusal, no Chat POST, retained local image/text and stable Retry. A successful real vision response remains unverified until an actually supported model is available; do not change model/runtime as a workaround. UAT118 cannot be marked fully passed from these negative controls alone.
 
-Root approved this design and released the two production files plus actual-boundary tests under TASK13260.62 after pausing both isolated Next runtimes. Backend/data remain preserved.
-
-## Independent review refinements approved during implementation
-
-### Never-dispatched refusal versus server Retry
-
-The actual backend context-builder probe reproduces409 when a new, never-dispatched local turn matches an older answered text+image but is incorrectly marked as a failed-server-turn Retry. Keep the existing local retryFailedTurn decision for local user ID and acknowledgement semantics. Add an optional boolean serverRetryRequired to the recognized local capability-refusal error payload. ChatTldw captures whether its request was already a canonical failed-turn Retry; only this trusted pretransport error may supply false. Encode/decode preserves the boolean. The pipeline passes retryFailedTurn AND serverRetryRequired is not false to the model factory, while leaving local persistence/identity handling unchanged.
-
-Initial local refusal and repeated refusals preserve false; earlier ambiguous/server failure followed by a local refusal preserves true. If a later supported-model attempt actually reaches transport and fails, its ordinary error has no local exemption, so the next retry requires server correlation. Missing/malformed/unrecognized values remain conservative true. A message string resembling this local error is insufficient evidence. No backend exact-match guard is relaxed. Tests include same-content prior answered turns, remount, captured owner and these transitions. Third approved production path: hooks/chat-modes/chatModePipeline.ts.
-
-### Explicit OCR history limit
-
-Independent mounted baseline proof shows that current-turn OCR extracts text, but a later turn rebuilds the original local image and previously silently loses that OCR text when capability is false. The new guard makes this incomplete historical input fail visibly. Do not re-OCR or exempt unknown history: reprocessing may change canonical content and violate exact overlap matching. Current explicit OCR conversion remains allowed; unproven historical image input requires a confirmed image model or a new text-only conversation. The hint must cover images anywhere in the conversation. Multi-turn legacy OCR is not certified as a working text-only workflow; the before/after evidence and coverage limit remain explicit.
+No repository source/test edits have been made for this design. Source release is still parent-owned.

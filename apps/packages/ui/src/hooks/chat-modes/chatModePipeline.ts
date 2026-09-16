@@ -225,9 +225,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ? String(rawModelIdOverride).trim()
     : undefined
 
-  const retryFailedTurn = Boolean(
-    isRegenerate && decodeChatErrorPayload(regenerateFromMessage?.message || "")
-  )
+  const failedTurnError = decodeChatErrorPayload(regenerateFromMessage?.message || "")
+  const retryFailedTurn = Boolean(isRegenerate && failedTurnError)
+  // A local capability refusal can prove no request was dispatched. Keep the
+  // local failed-user identity while avoiding server reuse of an older turn.
+  const serverRetryRequired = retryFailedTurn && failedTurnError?.serverRetryRequired !== false
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
     !isRegenerate
@@ -679,7 +681,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       conversationId,
       researchContext: context.researchContext,
       clientMessageId: resolvedUserMessageId,
-      retryFailedTurn,
+      retryFailedTurn: serverRetryRequired,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
 

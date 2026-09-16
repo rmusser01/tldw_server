@@ -187,6 +187,8 @@ Actual History/Note navigation loads an ordinary canonical chat while persisted 
 ### Current repair verification stages
 
 1. Reproduce/design — Complete: native122 image omission and123 stale canonical mode; approved122 design in Docs/Design/2026-09-16-uat-image-input-validation.md,123 bounded derivation recorded above. Task62/63 own disjoint code.
-2. Implement/regress — In Progress: actual formatter/factory/model/action tests for122; existing real selection/coordinator controls for123. Preserve owner/unsaved-work and freshCharacter behavior.
-3. Review/targeted — Not Started: independent source and integrated boundary review, scoped lint/compiler comparison, native no-loss refusal and History/Note mode checks on committed code.
+2. Implement/regress — Complete: frozen122 three production files plus tests/test alias; frozen123 one production file plus existing coordinator/Notes tests. Author and independent12293tests pass; root12374tests pass. Owner, Retry provenance, unsaved-work and fresh Character controls retained.
+3. Review/targeted — In Progress: independent source reviews clear; scoped lint no new findings; full compiler exactly90 baseline diagnostics. Broader affected frontend run passed2593tests/95files. Commit and native no-loss refusal/History/Note mode checks follow.
 4. Full fresh cycle5 — Not Started: only after these repairs and preserved evidence, use prepared fresh protocol. Existing vision/Postgres/hidden-tab limitations remain explicit.
+
+122 independent review refinement: actual backend proof requires distinct local failed-user identity and server failed-turn reuse. Approved narrow chatModePipeline provenance flag (thirdproductionpath), no backend relaxation. Current OCR remains intentional text; old historical OCR context was already lost, and its unproven image history will now fail visibly rather than be stripped. No re-OCR or global history exemption. Approved test-only Vitest alias to existing installed pa-tesseract, no dependency change.
