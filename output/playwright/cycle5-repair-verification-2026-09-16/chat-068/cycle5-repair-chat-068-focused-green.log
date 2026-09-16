@@ -1,0 +1,673 @@
+$ vitest run src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Layouts/__tests__/Header.character-mode.test.tsx src/hooks/chat/__tests__/useClearChat.settings-navigation.test.tsx src/components/Common/__tests__/AssistantSelect.tabs.test.tsx src/components/Common/__tests__/AssistantSelect.behavior.test.tsx src/components/Common/__tests__/CharacterSelect.identity-smoke.test.tsx src/hooks/__tests__/useSelectedAssistant.test.tsx src/hooks/__tests__/useServerChatLoader.test.ts src/hooks/__tests__/useServerChatLoader.scope.test.tsx src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx src/hooks/__tests__/playground-session-restore.test.ts src/store/__tests__/playground-session-store.test.ts "src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2905ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  635ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  616ms
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (25 tests) 8116ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  713ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1635ms
+     ✓ opens linked conversations in the same tab by default  306ms
+     ✓ restores Cedar identity and canonical saved-message IDs before navigation, replacing the Robot restore target  308ms
+     ✓ keeps the linked Cedar reply through the real Playground mismatch and persisted-session initialization effects  315ms
+     ✓ opens an ordinary Note source in ordinary workflow after a persisted Character session  326ms
+     ✓ does not replace current work when stream changes during a linked read  301ms
+     ✓ does not replace current work when new-draft changes during a linked read  309ms
+     ✓ does not replace current work when image-draft changes during a linked read  324ms
+     ✓ does not cancel an owned linked read when only an assistant display error is restored  310ms
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies persona selection when persona detail lookup fails
+[assistant-overlay] Failed to load persona detail; using summary snapshot Error: persona detail unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:746:7
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies local selection when overlay settings persistence fails
+[AssistantSelect] Failed to persist assistant overlay; keeping local selection Error: settings write failed
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:785:48
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx (31 tests | 11 failed) 4537ms
+     ✓ stages a controlled selection without changing the active chat or stored assistant 137ms
+     ✓ does not load dropdown catalogs until the selector opens 18ms
+     ✓ loads catalogs immediately for an inline selector 4ms
+     ✓ opens a searchable menu and filters visible characters 60ms
+     ✓ announces character and persona catalog loading in the selector 22ms
+     ✓ shows a retryable character catalog failure instead of an empty list 35ms
+     ✓ keeps loaded characters usable when persona catalog loading fails 47ms
+     ✓ does not select a character when its favorite star is clicked 41ms
+     ✓ opens the character tab when character chat requests character selection 38ms
+     ✓ returns focus to the requested rail trigger after selection 88ms
+     × closes the menu and restores focus without waiting for selection persistence 92ms
+     ✓ returns focus to the requested rail trigger after Escape closes the menu 89ms
+     ✓ labels identity and optional scene choices without mixing character and persona concepts 35ms
+     ✓ keeps personas accessible and dispatches the actor footer action 56ms
+     × lists and selects personas with canonical buddy summary payloads 58ms
+     × supports 'character to another character' from the assistant selector 50ms
+     × supports 'character to persona' from the assistant selector 51ms
+     × supports 'persona to character' from the assistant selector 53ms
+     × supports 'none to persona' from the assistant selector 49ms
+     × supports 'none to character' from the assistant selector 45ms
+     ✓ moves a favorited character ahead of other characters and closes on escape 50ms
+     × resolves persona overlay snapshots from full persona detail on apply 1037ms
+     ✓ refreshes character detail for overlay snapshots when summary prompt material is missing 39ms
+     ✓ still applies persona selection when persona detail lookup fails 36ms
+     ✓ still applies local selection when overlay settings persistence fails 37ms
+     × keeps event-supplied tracked mode when dropdown open change fires 1037ms
+     × uses the latest prop-driven selection mode when choosing after rerender 1064ms
+     ✓ switches the mounted picker to the latest requested initial tab 31ms
+     ✓ uses the prop-driven overlay selection path and custom label without requiring an open event 49ms
+     ✓ refuses overlay writes when the current chat is already tracked 52ms
+     × clears the active server chat when selecting a different tracked character 35ms
+ ✓ src/components/Layouts/__tests__/Header.character-mode.test.tsx (6 tests) 118ms
+ ✓ src/hooks/__tests__/useSelectedAssistant.test.tsx (15 tests) 89ms
+ ✓ src/components/Common/__tests__/AssistantSelect.tabs.test.tsx (1 test) 61ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (12 tests) 17ms
+ ✓ src/hooks/chat/__tests__/useClearChat.settings-navigation.test.tsx (2 tests) 8ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 6ms
+ ✓ src/hooks/__tests__/playground-session-restore.test.ts (6 tests) 1ms
+ ✓ src/store/__tests__/playground-session-store.test.ts (2 tests) 1ms
+ ✓ src/components/Common/__tests__/CharacterSelect.identity-smoke.test.tsx (1 test) 1ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (59 tests) 15942ms
+     ✓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1  343ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  399ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  524ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  521ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  390ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  660ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  624ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1124ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  1132ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  1880ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  654ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  661ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  492ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  602ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 11 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > closes the menu and restores focus without waiting for selection persistence
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:444:40
+    442|       expect(document.activeElement).toBe(railTrigger)
+    443|     })
+    444|     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+       |                                        ^
+    445|       expect.objectContaining({ kind: "character", id: "char-1", name:…
+    446|     )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > lists and selects personas with canonical buddy summary payloads
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:556:40
+    554|     await user.click(personaButton)
+    555| 
+    556|     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+       |                                        ^
+    557|       expect.objectContaining({
+    558|         kind: "persona",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > supports 'character to another character' from the assistant selector
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > supports 'character to persona' from the assistant selector
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > supports 'persona to character' from the assistant selector
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > supports 'none to persona' from the assistant selector
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > supports 'none to character' from the assistant selector
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:628:40
+    626|     await user.click(await screen.findByRole("button", { name: targetN…
+    627| 
+    628|     expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
+       |                                        ^
+    629|     expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
+    630|       expect.objectContaining(expected)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > resolves persona overlay snapshots from full persona detail on apply
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'persona-1' ]
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<button[39m
+        [33mid[39m=[32m"assistant-rail-trigger"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [0mRuntime rail trigger[0m
+      [36m</button>[39m
+      [36m<div>[39m
+        [36m<div>[39m
+          [36m<button[39m
+            [33maria-expanded[39m=[32m"false"[39m
+            [33maria-label[39m=[32m"Select character or persona"[39m
+            [33mclass[39m=[32m"inline-flex items-center gap-2 text-text-muted"[39m
+            [33mdata-testid[39m=[32m"character-select"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-circle-user-round size-5"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M18 20a6 6 0 0 0-12 0"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"10"[39m
+                [33mr[39m=[32m"4"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"max-w-[180px] truncate text-sm"[39m
+            [36m>[39m
+              [0mSelect character or persona[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:687:39
+    685|     })
+    686|     await waitFor(() => {
+    687|       expect(mocks.getPersonaProfile).toHaveBeenCalledWith("persona-1")
+       |                                       ^
+    688|     })
+    689|     expect(mocks.updateSettings).toHaveBeenCalledWith({
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > keeps event-supplied tracked mode when dropdown open change fires
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<button[39m
+        [33mid[39m=[32m"assistant-rail-trigger"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [0mRuntime rail trigger[0m
+      [36m</button>[39m
+      [36m<div>[39m
+        [36m<div>[39m
+          [36m<button[39m
+            [33maria-expanded[39m=[32m"false"[39m
+            [33maria-label[39m=[32m"Apply assistant"[39m
+            [33mclass[39m=[32m"inline-flex items-center gap-2 text-text-muted"[39m
+            [33mdata-testid[39m=[32m"character-select"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-circle-user-round size-5"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M18 20a6 6 0 0 0-12 0"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"10"[39m
+                [33mr[39m=[32m"4"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"max-w-[180px] truncate text-sm"[39m
+            [36m>[39m
+              [0mApply assistant[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:833:42
+    831| 
+    832|     await waitFor(() => {
+    833|       expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+       |                                          ^
+    834|         expect.objectContaining({
+    835|           kind: "character",
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > uses the latest prop-driven selection mode when choosing after rerender
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Number of calls: 0
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<button[39m
+        [33mid[39m=[32m"assistant-rail-trigger"[39m
+        [33mtype[39m=[32m"button"[39m
+      [36m>[39m
+        [0mRuntime rail trigger[0m
+      [36m</button>[39m
+      [36m<div>[39m
+        [36m<div>[39m
+          [36m<button[39m
+            [33maria-expanded[39m=[32m"false"[39m
+            [33maria-label[39m=[32m"Apply assistant"[39m
+            [33mclass[39m=[32m"inline-flex items-center gap-2 text-text-muted"[39m
+            [33mdata-testid[39m=[32m"character-select"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-circle-user-round size-5"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M18 20a6 6 0 0 0-12 0"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"10"[39m
+                [33mr[39m=[32m"4"[39m
+              [36m/>[39m
+              [36m<circle[39m
+                [33mcx[39m=[32m"12"[39m
+                [33mcy[39m=[32m"12"[39m
+                [33mr[39m=[32m"10"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"max-w-[180px] truncate text-sm"[39m
+            [36m>[39m
+              [0mApply assistant[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:869:42
+    867| 
+    868|     await waitFor(() => {
+    869|       expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+       |                                          ^
+    870|         expect.objectContaining({
+    871|           kind: "persona",
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/11]⎯
+
+ FAIL  src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > clears the active server chat when selecting a different tracked character
+AssertionError: expected "vi.fn()" to be called with arguments: [ null, …(1) ]
+
+Number of calls: 0
+
+ ❯ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:1017:39
+    1015|     await user.click(await screen.findByRole("button", { name: "Beta" …
+    1016| 
+    1017|     expect(state.option.setHistoryId).toHaveBeenCalledWith(null, {
+       |                                       ^
+    1018|       preserveServerChatId: false
+    1019|     })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/11]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 11 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "returns focus to the requested rail trigger after selection". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "closes the menu and restores focus without waiting for selection persistence". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "lists and selects personas with canonical buddy summary payloads". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "supports 'character to another character' from the assistant selector". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "supports 'character to persona' from the assistant selector". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "supports 'persona to character' from the assistant selector". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "supports 'none to persona' from the assistant selector". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "supports 'none to character' from the assistant selector". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "keeps event-supplied tracked mode when dropdown open change fires". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "uses the latest prop-driven selection mode when choosing after rerender". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: __vite_ssr_import_10__.useStoreMessageOption.getState is not a function
+ ❯ src/components/Common/AssistantSelect.tsx:562:47
+    560|         !trackedSelectionMatchesActiveChat(nextEntry)
+    561|       ) {
+    562|         const current = useStoreMessageOption.getState()
+       |                                               ^
+    563|         dispatchChatRouteReplacement({
+    564|           serverChatId: current.serverChatId,
+ ❯ onClick src/components/Common/AssistantSelect.tsx:777:26
+ ❯ HTMLUnknownElement.callCallback ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "src/components/Common/__tests__/AssistantSelect.behavior.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "clears the active server chat when selecting a different tracked character". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed | 12 passed (13)
+      Tests  11 failed | 189 passed (200)
+     Errors  11 errors
+   Start at  02:50:06
+   Duration  25.03s (transform 3.04s, setup 1.37s, import 10.02s, tests 31.80s, environment 4.67s)
+
+error: script "test" exited with code 1

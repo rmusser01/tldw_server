@@ -1,0 +1,24 @@
+$ vitest run src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Layouts/__tests__/Header.character-mode.test.tsx
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Layouts/__tests__/Header.character-mode.test.tsx (6 tests) 167ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (53 tests) 11821ms
+     ✓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1  310ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  360ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  516ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  516ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  406ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  746ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  659ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  879ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  907ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  613ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  586ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  648ms
+
+ Test Files  2 passed (2)
+      Tests  59 passed (59)
+   Start at  02:44:12
+   Duration  14.54s (transform 1.42s, setup 262ms, import 2.81s, tests 11.99s, environment 802ms)
+

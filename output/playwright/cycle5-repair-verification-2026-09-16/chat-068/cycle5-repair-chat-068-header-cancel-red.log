@@ -1,0 +1,51 @@
+$ vitest run src/components/Layouts/__tests__/Header.character-mode.test.tsx -t declined
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Layouts/__tests__/Header.character-mode.test.tsx (6 tests | 1 failed | 5 skipped) 68ms
+     ↓ enters character mode and opens selection before scene controls when no character is active
+     ↓ keeps an active character selected and preserves the current chat
+     ↓ omits chat session actions on non-chat surfaces
+     × preserves identity and temporary mode when the clear action is declined 68ms
+     ↓ clears character state when switching back to saved or temporary chat
+     ↓ dispatches the global command palette event from the header search trigger
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Layouts/__tests__/Header.character-mode.test.tsx > Header character mode sequencing > preserves identity and temporary mode when the clear action is declined
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 2 times
+
+Received: 
+
+  1st vi.fn() call:
+
+    Array [
+      null,
+    ]
+
+  2nd vi.fn() call:
+
+    Array [
+      null,
+    ]
+
+
+Number of calls: 2
+
+ ❯ src/components/Layouts/__tests__/Header.character-mode.test.tsx:232:42
+    230|     fireEvent.click(screen.getByRole("button", { name: "New saved chat…
+    231|     fireEvent.click(screen.getByRole("button", { name: "Temporary chat…
+    232|     expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+       |                                          ^
+    233|     expect(setTemporaryChatMock).not.toHaveBeenCalled()
+    234|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  02:41:38
+   Duration  1.17s (transform 457ms, setup 122ms, import 551ms, tests 68ms, environment 365ms)
+
+error: script "test" exited with code 1

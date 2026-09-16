@@ -1,0 +1,68 @@
+$ vitest run src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Layouts/__tests__/Header.character-mode.test.tsx src/hooks/chat/__tests__/useClearChat.settings-navigation.test.tsx src/components/Common/__tests__/AssistantSelect.tabs.test.tsx src/components/Common/__tests__/AssistantSelect.behavior.test.tsx src/components/Common/__tests__/CharacterSelect.identity-smoke.test.tsx src/hooks/__tests__/useSelectedAssistant.test.tsx src/hooks/__tests__/useServerChatLoader.test.ts src/hooks/__tests__/useServerChatLoader.scope.test.tsx src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx src/hooks/__tests__/playground-session-restore.test.ts src/store/__tests__/playground-session-store.test.ts "src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx (25 tests) 6723ms
+     ✓ shows conversation title labels with UUID debug tooltip in list and header  546ms
+     ✓ retries transient conversation label lookups and hydrates once they recover  1597ms
+     ✓ opens an ordinary Note source in ordinary workflow after a persisted Character session  333ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (10 tests) 2899ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  628ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  616ms
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies persona selection when persona detail lookup fails
+[assistant-overlay] Failed to load persona detail; using summary snapshot Error: persona detail unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:748:7
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+stderr | src/components/Common/__tests__/AssistantSelect.behavior.test.tsx > AssistantSelect behavior > still applies local selection when overlay settings persistence fails
+[AssistantSelect] Failed to persist assistant overlay; keeping local selection Error: settings write failed
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/__tests__/AssistantSelect.behavior.test.tsx:787:48
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12)
+
+ ✓ src/components/Common/__tests__/AssistantSelect.behavior.test.tsx (31 tests) 1870ms
+ ✓ src/components/Layouts/__tests__/Header.character-mode.test.tsx (6 tests) 165ms
+ ✓ src/hooks/__tests__/useSelectedAssistant.test.tsx (15 tests) 92ms
+ ✓ src/components/Common/__tests__/AssistantSelect.tabs.test.tsx (1 test) 73ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx (12 tests) 23ms
+ ✓ src/hooks/chat/__tests__/useClearChat.settings-navigation.test.tsx (2 tests) 10ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts (30 tests) 9ms
+ ✓ src/store/__tests__/playground-session-store.test.ts (2 tests) 2ms
+ ✓ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (59 tests) 17169ms
+     ✓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1  301ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  337ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  525ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  520ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  408ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  856ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  799ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1295ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  1362ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  2173ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  756ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  685ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  552ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  735ms
+ ✓ src/hooks/__tests__/playground-session-restore.test.ts (6 tests) 2ms
+ ✓ src/components/Common/__tests__/CharacterSelect.identity-smoke.test.tsx (1 test) 1ms
+
+ Test Files  13 passed (13)
+      Tests  200 passed (200)
+   Start at  02:52:26
+   Duration  21.49s (transform 2.57s, setup 1.13s, import 7.02s, tests 29.04s, environment 3.79s)
+

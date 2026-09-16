@@ -147,6 +147,8 @@ import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
+  CHAT_ROUTE_REPLACEMENT_EVENT,
+  type ChatRouteReplacementDetail,
   getCharacterChatRouteIntent,
 } from "@/utils/character-chat-mode-intent";
 import {
@@ -719,7 +721,10 @@ export const Playground = () => {
     !stableHistoryId &&
     !serverChatId &&
     !composerHasDraft;
-  const routeCharacterIntent = React.useMemo(
+  const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
+  const retiredRouteLocationRef = React.useRef<string | null>(null);
+  const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join("|");
+  const rawRouteCharacterIntent = React.useMemo(
     () =>
       getCharacterChatRouteIntentFromLocation(
         location.search ?? "",
@@ -727,6 +732,14 @@ export const Playground = () => {
       ),
     [location.hash, location.key, location.search],
   );
+  const routeCharacterIntent = retiredRouteLocation === routeLocationKey
+    ? null : rawRouteCharacterIntent;
+  React.useEffect(() => {
+    if (retiredRouteLocationRef.current !== routeLocationKey) {
+      retiredRouteLocationRef.current = null;
+      setRetiredRouteLocation(null);
+    }
+  }, [routeLocationKey]);
   const routeCharacterIntentSignature = React.useMemo(() => {
     if (!routeCharacterIntent) return null;
     return [
@@ -944,6 +957,46 @@ export const Playground = () => {
   }, [setChatWorkflowMode]);
 
   React.useEffect(() => {
+    const handleReplacement = (event: Event) => {
+      const detail = (event as CustomEvent<ChatRouteReplacementDetail>).detail;
+      const current = useStoreMessageOption.getState();
+      const session = usePlaygroundSessionStore.getState();
+      if (!detail || detail.href !== window.location.href ||
+        detail.serverChatId !== current.serverChatId ||
+        detail.historyId !== current.historyId ||
+        detail.restoreRevision !== session.restoreRevision ||
+        !rawRouteCharacterIntent ||
+        (rawRouteCharacterIntent.chatId && rawRouteCharacterIntent.chatId !== detail.serverChatId &&
+          retiredRouteLocationRef.current !== routeLocationKey)) return;
+      retiredRouteLocationRef.current = routeLocationKey;
+      setRetiredRouteLocation(routeLocationKey);
+      routeCharacterIntentRequestRef.current += 1;
+      routeCharacterIntentInFlightRef.current = null;
+      routeCharacterIntentAppliedRef.current = null;
+      setRouteCharacterRecovery(null);
+      session.cancelPendingRestore();
+      if (detail.characterId === undefined) return;
+      const replaceSearch = (search: string) => {
+        const next = updateCharacterChatRouteSearch(search, detail.characterId ?? null);
+        if (detail.characterId != null) return next;
+        const params = new URLSearchParams(next);
+        params.delete("mode");
+        return params.size ? "?" + params.toString() : "";
+      };
+      const searchIntent = getCharacterChatRouteIntent(location.search ?? "");
+      const hash = location.hash ?? "";
+      const queryIndex = hash.indexOf("?");
+      navigate({
+        pathname: location.pathname,
+        search: searchIntent ? replaceSearch(location.search ?? "") : location.search,
+        hash: searchIntent ? hash : hash.slice(0, queryIndex < 0 ? hash.length : queryIndex) + replaceSearch(extractHashSearch(hash)),
+      }, { replace: true });
+    };
+    window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
+    return () => window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
+  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey]);
+
+  React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;
     setCharacterModeIntentActive(true);
     void setChatWorkflowMode("character");
@@ -961,6 +1014,7 @@ export const Playground = () => {
   }, [routeCharacterIntentSignature]);
 
   React.useEffect(() => {
+    if (retiredRouteLocationRef.current === routeLocationKey) return;
     if (!routeCharacterIntentChatId) return;
     if (serverChatId === routeCharacterIntentChatId) return;
     usePlaygroundSessionStore.getState().cancelPendingRestore();
@@ -968,9 +1022,10 @@ export const Playground = () => {
     routeCharacterIntentAppliedRef.current = null;
     routeCharacterIntentInFlightRef.current = null;
     setRouteCharacterRecovery(null);
-  }, [routeCharacterIntentChatId, serverChatId, setServerChatId]);
+  }, [routeLocationKey, routeCharacterIntentChatId, serverChatId, setServerChatId]);
 
   React.useEffect(() => {
+    if (retiredRouteLocationRef.current === routeLocationKey) return;
     if (!routeCharacterIntentId) return;
     if (routeCharacterIntentChatId) return;
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
@@ -1043,6 +1098,7 @@ export const Playground = () => {
       });
   }, [
     clearPersistedSession,
+    routeLocationKey,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
     routeCharacterIntentSignature,
@@ -1078,6 +1134,7 @@ export const Playground = () => {
   }, [activeCharacterSelection?.id, routeCharacterRecovery]);
 
   React.useEffect(() => {
+    if (retiredRouteLocationRef.current === routeLocationKey) return;
     if (!routeRequestsCharacterMode) return;
     if (routeCharacterIntentInFlightRef.current) return;
 
@@ -1154,6 +1211,7 @@ export const Playground = () => {
     location.pathname,
     location.search,
     navigate,
+    routeLocationKey,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
     routeRequestsCharacterMode,

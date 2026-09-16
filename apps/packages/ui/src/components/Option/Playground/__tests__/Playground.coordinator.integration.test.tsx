@@ -12,6 +12,10 @@ import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 import { resolveEffectiveAssistantState, effectiveAssistantStateToSelection } from "@/hooks/chat/effective-assistant-state"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { Header } from "@/components/Layouts/Header"
+import { CHAT_ROUTE_REPLACEMENT_EVENT } from "@/utils/character-chat-mode-intent"
+import { SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return"
+import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
@@ -40,6 +44,7 @@ const setStorageAssistant = async (selection: AssistantSelection | null) => {
 }
 const setTestAssistant = async (selection: AssistantSelection | null) => { await realLoader.setSelection?.(selection) }
 const useRealServerConversation = () => {
+  const clearChat = useClearChat()
   const store = useStoreMessageOption() as SelectionTestState
   const [assistant, setAssistant] = useSelectedAssistant()
   realLoader.setSelection = setAssistant
@@ -48,7 +53,7 @@ const useRealServerConversation = () => {
     tracked: { assistantKind: store.serverChatAssistantKind, assistantId: store.serverChatAssistantId, characterId: store.serverChatCharacterId },
     draftSelection: assistant
   })
-  return { ...messageOptionState.value, ...store, selectedAssistant: effectiveAssistantStateToSelection(resolved) ?? assistant, setSelectedAssistant: setAssistant, ...(realLoader.session ? { setSelectedCharacter: async (character: { id: string | number; name: string }) => setAssistant({ kind: "character", id: String(character.id), name: character.name, metadata: { selectionMode: "tracked" } }) } : {}) }
+  return { ...messageOptionState.value, ...store, clearChat, selectedAssistant: effectiveAssistantStateToSelection(resolved) ?? assistant, setSelectedAssistant: setAssistant, ...(realLoader.session || realLoader.route ? { setSelectedCharacter: async (character: { id: string | number; name: string }) => setAssistant({ kind: "character", id: String(character.id), name: character.name, metadata: { selectionMode: "tracked" } }) } : {}) }
 }
 
 const AdditionalServerLoader = () => { useRealServerConversation(); return null }
@@ -107,6 +112,7 @@ const tldwClientState = vi.hoisted(() => ({
   initialize: vi.fn(async () => undefined),
   getProvidersStatus: vi.fn(async () => null),
   getChatSettings: vi.fn(async () => ({ settings: {} })),
+  listConversationShareLinks: vi.fn(async () => ({ links: [] })),
   ensureConfigForRequest: vi.fn(async () => ({ serverUrl: "http://chat.test", authMode: "multi-user", accessToken: "test." + btoa(JSON.stringify({ sub: "A" })) + ".signature" })),
   getChat: vi.fn(),
   listAllCharacters: vi.fn(async () => [{ id: 5, name: "Robot" }, { id: 7, name: "New choice" }]),
@@ -119,11 +125,8 @@ const tldwClientState = vi.hoisted(() => ({
 }))
 
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key
-  })
-}))
+const stableTranslation = vi.hoisted(() => (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key)
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: stableTranslation }) }))
 
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
   PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="playground-form" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))}>{realLoader.additionalLoader ? Array.from({ length: realLoader.webStorage ? 5 : 1 }, (_, index) => <AdditionalServerLoader key={index} />) : null}</div>
@@ -196,9 +199,11 @@ vi.mock("@/db/dexie/helpers", () => ({
 }))
 
 vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn() })
+  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn(), reset: vi.fn() })
 }))
 
+vi.mock("@/components/Layouts/HeaderShortcuts", () => ({ HeaderShortcuts: () => null }))
+vi.mock("@/hooks/useActiveChatTitle", () => ({ useActiveChatTitle: () => ({ title: "Saved Chat", ready: true, owner: { saving: false }, renameTitle: vi.fn() }) }))
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({
     containerRef: { current: null },
@@ -220,6 +225,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
     key: "theme",
     defaultValue: "dark"
   },
+  HEADER_SHORTCUTS_EXPANDED_SETTING: { key: "headerShortcutsExpanded", defaultValue: false },
   HEADER_SHORTCUT_IDS: [],
   SIDEBAR_SHORTCUT_IDS: []
 }))
@@ -323,9 +329,14 @@ const subscribeRoute = (notify: () => void) => {
   return () => window.removeEventListener("popstate", notify)
 }
 const readRoute = () => window.location.href
-const navigateRoute = (to: { pathname?: string; search?: string; hash?: string }) => {
-  window.history.replaceState({}, "", `${to.pathname || "/chat"}${to.search || ""}${to.hash || ""}`)
-  window.dispatchEvent(new PopStateEvent("popstate"))
+let routeCommitDelay = 0
+const navigateRoute = (to: string | { pathname?: string; search?: string; hash?: string }) => {
+  const commit = () => {
+    window.history.replaceState({}, "", typeof to === "string" ? to : `${to.pathname || "/chat"}${to.search || ""}${to.hash || ""}`)
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  }
+  if (routeCommitDelay) setTimeout(commit, routeCommitDelay)
+  else commit()
 }
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
@@ -347,6 +358,7 @@ class RouteTestBoundary extends React.Component<{ children: React.ReactNode }, {
 describe("Playground coordinator integration", () => {
   beforeEach(() => {
     realLoader.session = false
+    routeCommitDelay = 0
     realLoader.route = false
     realLoader.enabled = false
     realLoader.webStorage = false
@@ -1027,6 +1039,121 @@ describe("Playground coordinator integration", () => {
       await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: choice === "Robot" ? "5" : "7", name: choice }))
       expect(useStoreMessageOption.getState().serverChatId).toBe(choice === "Robot" ? "robot" : null)
     } finally { release(); view.unmount(); queryClient.clear() }
+  })
+
+  it.each(["search", "hash", "roundtrip"])("UAT068 replaces a fully loaded saved Character from its %s route without restoring it", async routeKind => {
+    const choice = "New choice"
+    realLoader.route = true
+    routeCommitDelay = routeKind === "roundtrip" ? 250 : 70
+    realLoader.enabled = true
+    realLoader.webStorage = true
+    realLoader.additionalLoader = true
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    window.localStorage.clear()
+    await selectedAssistantStorage.set("selectedAssistant", { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
+    tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
+    tldwClientState.getCharacter.mockImplementation(async id => ({ id, name: String(id) === "5" ? "Robot" : "New choice" }))
+    window.history.pushState({}, "", routeKind !== "hash" ? "/chat?mode=character&characterId=5&chatId=robot&keep=1#anchor" : "/options.html?keep=1#/chat?mode=character&characterId=5&chatId=robot&tab=2")
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={queryClient}><Playground /><AssistantSelect /></QueryClientProvider>)
+    try {
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+      await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: "5", name: "Robot" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Robot" }))
+      const buttons = await screen.findAllByRole("button", { name: choice })
+      fireEvent.click(buttons.at(-1)!)
+      // The handler detaches synchronously, before selection persistence or the held profile.
+      expect(useStoreMessageOption.getState().serverChatId).toBe(null)
+      await act(async () => { release(); await pending })
+      await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: "7", name: choice }))
+      if (routeKind === "roundtrip") {
+        fireEvent.click(await screen.findByRole("button", { name: "New choice" }))
+        fireEvent.click((await screen.findAllByRole("button", { name: "Robot" })).at(-1)!)
+      }
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, routeKind === "roundtrip" ? 500 : 180)) })
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      expect(window.location.search + window.location.hash).not.toContain("chatId=robot")
+      expect(window.location.search + window.location.hash).toContain(routeKind === "roundtrip" ? "characterId=5" : "characterId=7")
+      expect(window.location.search).toContain("keep=1")
+      expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: routeKind === "roundtrip" ? "5" : "7", name: routeKind === "roundtrip" ? "Robot" : choice })
+      // A later deliberate revisit must still restore the untouched old saved chat.
+      act(() => navigateRoute(routeKind !== "hash" ? "/chat?mode=character&characterId=5&chatId=robot&keep=1#anchor" : "/options.html?keep=1#/chat?mode=character&characterId=5&chatId=robot&tab=2"))
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatId).toBe("robot"))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["BEEP BOOP"]))
+    } finally { release(); view.unmount(); queryClient.clear() }
+  })
+
+  it.each([0, 70])("UAT068 clear survives a %sms route commit without restoring the saved Character", async delay => {
+    const routeKind = "search"
+    realLoader.route = true
+    routeCommitDelay = delay
+    realLoader.enabled = true
+    realLoader.webStorage = true
+    realLoader.additionalLoader = true
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    window.localStorage.clear()
+    await selectedAssistantStorage.set("selectedAssistant", { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    let release!: () => void
+    new Promise<void>(resolve => { release = resolve })
+    tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
+    tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
+    tldwClientState.getCharacter.mockImplementation(async () => { return { id: 5, name: "Robot" } })
+    window.history.pushState({}, "", routeKind === "search" ? "/chat?mode=character&characterId=5&chatId=robot&keep=1#anchor" : "/options.html?keep=1#/chat?mode=character&characterId=5&chatId=robot&tab=2")
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={queryClient}><Playground /><Header /></QueryClientProvider>)
+    try {
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+      await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: "5", name: "Robot" }))
+      fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
+      expect(window.location.pathname + window.location.search).toBe("/chat")
+      expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+    } finally { release(); view.unmount(); queryClient.clear() }
+  })
+
+  it.each(["cancel", "other-surface", "other-target", "other-history", "authority-roundtrip"])("UAT068 rejects %s before retiring the owned saved route", async boundary => {
+    realLoader.enabled = realLoader.webStorage = realLoader.route = true
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    localStorage.clear()
+    await selectedAssistantStorage.set("selectedAssistant", { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
+    tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
+    tldwClientState.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }])
+    tldwClientState.getCharacter.mockResolvedValue({ id: 5, name: "Robot" })
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=5&chatId=robot")
+    const view = render(<><Playground /><Header /></>)
+    const decline = (event: Event) => event.preventDefault()
+    try {
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+      const before = useStoreMessageOption.getState()
+      const href = window.location.href
+      const detail = { href, serverChatId: before.serverChatId, historyId: before.historyId, restoreRevision: usePlaygroundSessionStore.getState().restoreRevision, characterId: "7" }
+      if (boundary === "cancel") {
+        window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline)
+        fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
+      } else {
+        if (boundary === "other-surface") detail.href = "http://localhost/sidepanel.html"
+        if (boundary === "other-target") detail.serverChatId = "another-chat"
+        if (boundary === "other-history") detail.historyId = "another-history"
+        if (boundary === "authority-roundtrip") {
+          act(() => { usePlaygroundSessionStore.getState().cancelPendingRestore(); usePlaygroundSessionStore.getState().cancelPendingRestore() })
+        }
+        act(() => window.dispatchEvent(new CustomEvent(CHAT_ROUTE_REPLACEMENT_EVENT, { detail })))
+      }
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+      expect(window.location.href).toBe(href)
+      expect(useStoreMessageOption.getState().serverChatId).toBe("robot")
+      expect(useStoreMessageOption.getState().temporaryChat).toBe(false)
+      expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["BEEP BOOP"])
+      expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: "5", name: "Robot" })
+    } finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, decline); view.unmount() }
   })
 
   it("keeps the saved conversation and preference after cancelling the real legacy picker confirmation", async () => {

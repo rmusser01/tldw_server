@@ -137,15 +137,15 @@ export const Header: React.FC<Props> = ({
   )
 
   const startSavedChat = React.useCallback(() => {
+    if (clearChat() === false) return
     setTemporaryChat(false)
     void setSelectedCharacter(null)
-    clearChat()
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startTemporaryChat = React.useCallback(() => {
+    if (clearChat() === false) return
     setTemporaryChat(true)
     void setSelectedCharacter(null)
-    clearChat()
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startCharacterChat = React.useCallback(() => {

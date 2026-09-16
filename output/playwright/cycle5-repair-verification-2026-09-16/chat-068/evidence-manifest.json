@@ -1,0 +1,133 @@
+{
+  "unit": "chat-068",
+  "retainedAt": "2026-09-16T13:43:11.024Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-chat-068-actual-header-baseline-red.log",
+      "bytes": 8066,
+      "sha256": "6c2659666650cb59937b4aebfa4520f184f053ecedaa5eb5c77120197a22748f"
+    },
+    {
+      "name": "cycle5-repair-chat-068-diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "cycle5-repair-chat-068-eslint-baseline.json",
+      "bytes": 258150,
+      "sha256": "12a6eddc5e35f05a7984f88e6d99e363df9e8c10aef463e731b7b8d8b260048f"
+    },
+    {
+      "name": "cycle5-repair-chat-068-eslint-comparison.json",
+      "bytes": 211,
+      "sha256": "d6e293a034307e7b40e95d3de9c1c7349acaeefcdd3753ff82da370ca424999e"
+    },
+    {
+      "name": "cycle5-repair-chat-068-eslint-final.json",
+      "bytes": 254976,
+      "sha256": "ec1065f4406f58c8b8d412dd09fd03ab204af41b8bb3d600b32a4afc2f36b007"
+    },
+    {
+      "name": "cycle5-repair-chat-068-eslint.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "name": "cycle5-repair-chat-068-first-green.log",
+      "bytes": 1882,
+      "sha256": "118617482a090e2637d67f8465a823cc85b28bca8512ef89ab2e7ff8cd285585"
+    },
+    {
+      "name": "cycle5-repair-chat-068-focused-final.log",
+      "bytes": 7726,
+      "sha256": "391964d244252253d6a8690b5a88a322d2aa2c8b16ea0421e6b11135c3b09785"
+    },
+    {
+      "name": "cycle5-repair-chat-068-focused-green.log",
+      "bytes": 50800,
+      "sha256": "11602ba997281fc2a5abd6254d878a532a65105e9a87a22a1d3b0de64d6cad2a"
+    },
+    {
+      "name": "cycle5-repair-chat-068-header-cancel-red.log",
+      "bytes": 1979,
+      "sha256": "6ea66fc1354b68fc31c17586319557b8bfdd047f55ac39158a548fad154a1db9"
+    },
+    {
+      "name": "cycle5-repair-chat-068-header-owner-green.log",
+      "bytes": 242,
+      "sha256": "21141e1c73018720b1d7d73ad7cd4023056e57a04ba07bc59265caec8afbf216"
+    },
+    {
+      "name": "cycle5-repair-chat-068-independent-review.md",
+      "bytes": 901,
+      "sha256": "cea3a3844fd2207d997efb10950c3c4768dd07acc3e0e71b7bc4cc339757bc4e"
+    },
+    {
+      "name": "cycle5-repair-chat-068-independent-tests.log",
+      "bytes": 6826,
+      "sha256": "a3f9973e8d1491faa410952579a21f3f22408d73ec38ee8bf07fd6e73e0d9562"
+    },
+    {
+      "name": "cycle5-repair-chat-068-lint-compare.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "name": "cycle5-repair-chat-068-lint-compare.mjs",
+      "bytes": 1862,
+      "sha256": "2d61cc5fd81f696215bccf0c4c8dac095d51df80108a0547144d45f650939244"
+    },
+    {
+      "name": "cycle5-repair-chat-068-manifest.json",
+      "bytes": 2216,
+      "sha256": "bc389927ae464ba41c25082f10a505c671c05cd5fcec4cb9e021420bbebdd4aa"
+    },
+    {
+      "name": "cycle5-repair-chat-068-owned-green.log",
+      "bytes": 1976,
+      "sha256": "7fa3c73399084c5db485c36c6dc7b38cce6228cae9cfb4ed8dae6edfae10f537"
+    },
+    {
+      "name": "cycle5-repair-chat-068-picker-fixture-green.log",
+      "bytes": 4022,
+      "sha256": "b08a782a02c1ed749019389ad85ce9f9190961b931effff4ea399de6f2b1aeff"
+    },
+    {
+      "name": "cycle5-repair-chat-068-red.log",
+      "bytes": 7387,
+      "sha256": "2095e4e4c3a9aefe1bd942c325d7a2caf59e76ed4e9428b34165dd716abb5c5a"
+    },
+    {
+      "name": "cycle5-repair-chat-068-report.md",
+      "bytes": 3351,
+      "sha256": "c881200a296af3d133a21fed08e0a4b0a759fd3549aa8702dd8fea4976c8efe9"
+    },
+    {
+      "name": "cycle5-repair-chat-068-return-red.log",
+      "bytes": 13959,
+      "sha256": "a6fa8e90820312fffd362b31576c53671b7ebb7a0e577fa78abc210bc49484a5"
+    },
+    {
+      "name": "cycle5-repair-chat-068-roundtrip-green.log",
+      "bytes": 623,
+      "sha256": "3b0a6ce6e36f3becad3293e235bcd597514ecdc7c0b452de41074a67284ea36b"
+    },
+    {
+      "name": "cycle5-repair-chat-068-roundtrip-red.log",
+      "bytes": 6798,
+      "sha256": "c5970586200ba105254581918bc42984ef4a92662030751dc2e890283d714e13"
+    },
+    {
+      "name": "cycle5-repair-chat-068-route-header-green.log",
+      "bytes": 905,
+      "sha256": "03629c0431895aab71696e9d845d17b51fcf6ad94223dcdfa67865f3db4758bc"
+    },
+    {
+      "name": "cycle5-repair-chat-068-task-review.log",
+      "bytes": 27,
+      "sha256": "d72b6a31c3cac613ad8d413b24ab1a7d76911913f9b6c388d9227686df5e11cb"
+    }
+  ]
+}

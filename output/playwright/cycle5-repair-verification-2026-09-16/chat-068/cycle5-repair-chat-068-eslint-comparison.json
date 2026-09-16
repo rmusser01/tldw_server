@@ -1,0 +1,15 @@
+{
+  "baselineRef": "ba5233a5a9",
+  "baseline": {
+    "errors": 0,
+    "warnings": 22,
+    "files": 9
+  },
+  "current": {
+    "errors": 0,
+    "warnings": 22,
+    "files": 9
+  },
+  "added": [],
+  "removed": []
+}

@@ -10,6 +10,8 @@ import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import {
   OPEN_ASSISTANT_SELECT_EVENT,
   type AssistantSelectOpenDetail,
@@ -555,10 +557,16 @@ export const AssistantSelect: React.FC<Props> = ({
       }
       if (
         nextMode === "tracked" &&
-        serverChatId &&
         !trackedSelectionMatchesActiveChat(nextEntry)
       ) {
-        clearActiveServerChat()
+        const current = useStoreMessageOption.getState()
+        dispatchChatRouteReplacement({
+          serverChatId: current.serverChatId,
+          historyId: current.historyId,
+          restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
+          characterId: nextEntry.kind === "character" ? nextEntry.id : null
+        })
+        if (serverChatId) clearActiveServerChat()
       }
       await setSelectedAssistant(nextEntry)
       if (nextMode === "overlay") {
