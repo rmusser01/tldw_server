@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-16T22:43:07.244Z","url":"http://127.0.0.1:18583/settings/model","geometry":{"card":{"x":416,"y":331,"width":688,"height":163.28125,"top":331,"right":1104,"bottom":494.28125,"left":416},"viewport":1200,"documentWidth":1200,"selects":[{"selected":"LLaMa.cpp","box":{"x":433,"y":416,"width":321,"height":40,"top":416,"right":754,"bottom":456,"left":433},"contained":true,"arrowVisible":false},{"selected":"LLaMa.cpp - ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","box":{"x":766,"y":416,"width":321,"height":40,"top":416,"right":1087,"bottom":456,"left":766},"contained":true,"arrowVisible":false}]}}
+### Ran Playwright code
+```js
+await (async page => {const heading=page.getByText('Set your defaults',{exact:true});await heading.scrollIntoViewIfNeeded();return {at:new Date().toISOString(),url:page.url(),geometry:await heading.evaluate(el=>{const card=el.parentElement.parentElement;const r=card.getBoundingClientRect();return {card:r.toJSON(),viewport:window.innerWidth,documentWidth:document.documentElement.scrollWidth,selects:[...card.querySelectorAll('.ant-select')].map(s=>{const b=s.getBoundingClientRect(),a=s.querySelector('.ant-select-arrow'),ar=a?.getBoundingClientRect();return {selected:s.textContent,box:b.toJSON(),contained:b.left>=r.left&&b.right<=r.right,arrow:ar?.toJSON(),arrowVisible:ar?ar.left>=0&&ar.right<=window.innerWidth:false}})}})};}
+)(page);
+```

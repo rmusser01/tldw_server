@@ -1,0 +1,42 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:80866) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80867) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80868) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80869) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/i18n/__tests__/icu-format.test.ts (5 tests) 15ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests) 83ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx (5 tests) 2220ms
+     ✓ creates a new structured-import deck with scheduler settings from the selector flow  1289ms
+     ✓ creates a new generated-cards deck with scheduler settings from the selector flow  610ms
+Not implemented: navigation to another Document
+Not implemented: navigation to another Document
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx (48 tests) 16878ms
+     ✓ shows expandable import help references for columns/delimiter/json mapping  633ms
+     ✓ documents current invalid import failure preserving input and exiting loading  2088ms
+     ✓ requires confirmation before importing very large batches  305ms
+     ✓ routes JSON/JSONL imports through the JSON upload mutation  539ms
+     ✓ routes APKG imports through the APKG upload mutation  520ms
+     ✓ previews structured q and a drafts and saves only selected cards  576ms
+     ✓ renders structured preview warnings with design-system alerts  546ms
+     ✓ keeps selected invalid structured drafts in the editor when saving  582ms
+     ✓ keeps structured drafts editable when bulk save returns zero created cards without details  582ms
+     ✓ keeps structured drafts editable when zero created cards still have local errors  572ms
+     ✓ allows clearing the structured target deck without auto-restoring the first deck  514ms
+     ✓ requires confirmation before importing large APKG files  568ms
+     ✓ imports small APKG files without confirmation  521ms
+     ✓ maps export options and normalized tag filters to preview and export params  769ms
+     ✓ serializes object payloads before creating JSON export blobs  513ms
+     ✓ classifies status-less JSON endpoint request failures as operational  553ms
+     ✓ updates advanced generation totals and disables invalid totals  766ms
+     ✓ clears retryable generated-card save status when the remaining draft is removed  999ms
+
+ Test Files  4 passed (4)
+      Tests  61 passed (61)
+   Start at  15:34:44
+   Duration  18.66s (transform 1.52s, setup 407ms, import 3.20s, tests 19.20s, environment 997ms)

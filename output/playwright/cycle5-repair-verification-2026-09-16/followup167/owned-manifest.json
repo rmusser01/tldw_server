@@ -1,0 +1,54 @@
+{
+  "task": "TASK-13260.104",
+  "uat": "UAT167",
+  "baselineHead": "588d6c3cef7bb29ec9a4fef9f726b65f9330fb5f",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/flashcards.py",
+      "sha256": "2c9416308c5f66eb60784d49bea7020f115e697f6d59d8fafab755a3c9d01ac1"
+    },
+    {
+      "path": "tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py",
+      "sha256": "76d3a2edb1bb3b127fa0191354fef13dbb76b00acd28d62d3d84cb4b1560a3c8"
+    }
+  ],
+  "status": "Final combined38PASS/0skip; existingSQLite184PASS/0skip; 167 source and tests unchanged; 168 independently clear",
+  "artifacts": [
+    {
+      "path": "IMPLEMENTATION.md",
+      "sha256": "eff1509751f574f3a28de5c111681616b341ff1f675aac8f135f6d365bb8c1ad"
+    },
+    {
+      "path": "owned.patch",
+      "sha256": "373801671f1aacdc983738b9d8ac89a02c7e94b1544cc97909220bb1a85e7339"
+    },
+    {
+      "path": "pg-red.log",
+      "sha256": "b4acbc3f98c8fe59ec76fca5af8e9ee88d70c7b7c77deb193f2643368eec150b"
+    },
+    {
+      "path": "pg-schema-green.log",
+      "sha256": "bc8409efd1a7372de2d333205f0bba5aaff6512ea29fc2010abb67b8763b0e86"
+    },
+    {
+      "path": "combined-green.log",
+      "sha256": "0f0faef88217555f3c9aa324308379b34b9433bdae2896e26686bf744faac117"
+    },
+    {
+      "path": "combined-final-green.log",
+      "sha256": "657f6f8b735be01fb0e14ffbab4e66407601aca273fcfc2e9f78f55ce6460146"
+    },
+    {
+      "path": "sqlite-regressions.log",
+      "sha256": "1fe648989b40bb780700dd470493d448bc45e4cbd4ac011471a155dda32a0bb6"
+    },
+    {
+      "path": "ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "2c559ceb1e30963a0723a928262587419914b123c13c186b6159cb32947580a9"
+    }
+  ]
+}

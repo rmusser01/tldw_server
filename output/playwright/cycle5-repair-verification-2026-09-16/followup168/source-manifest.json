@@ -1,0 +1,10 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "7a9dea2397adbfcf0a206d6f27dc84a761ee0acb27c4eda3770749c453a1123e"
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py",
+    "sha256": "68868cfec799d4cff7073ae22dc169e48311078633589639584dae0f411570ad"
+  }
+]

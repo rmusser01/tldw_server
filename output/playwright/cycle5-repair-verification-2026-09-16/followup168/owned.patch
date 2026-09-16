@@ -1,0 +1,70 @@
+diff --git a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+index f484294628..d5bc69732d 100644
+--- a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
++++ b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+@@ -35077,7 +35077,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                 ).fetchone()
+                 if not row:
+                     raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
+-                current_version = int(row[0])
++                current_version = int(row["version"])
+                 if expected_version is not None and current_version != expected_version:
+                     raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                 if parent_deck_id is not ...:
+@@ -36008,7 +36008,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+         try:
+             cursor = self.execute_query(query, tuple(params))
+             row = cursor.fetchone()
+-            return int(row[0]) if row else 0
++            return int(row["cnt"]) if row else 0
+         except CharactersRAGDBError:  # noqa: TRY203
+             raise
+
+@@ -37247,17 +37247,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                 ).fetchone()
+                 if not card_row:
+                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
+-                card_id = int(card_row[0])
++                card_id = int(card_row["id"])
+
+                 existing_asset_rows = conn.execute(
+                     "SELECT id, uuid, card_id FROM flashcard_assets WHERE deleted = 0"
+                 ).fetchall()
+-                assets_by_uuid = {str(row[1]): row for row in existing_asset_rows}
++                assets_by_uuid = {str(row["uuid"]): row for row in existing_asset_rows}
+                 for asset_uuid in referenced_asset_uuids:
+                     asset_row = assets_by_uuid.get(asset_uuid)
+                     if not asset_row:
+                         raise InputError(f"Flashcard asset not found: {asset_uuid}")  # noqa: TRY003
+-                    attached_card_id = asset_row[2]
++                    attached_card_id = asset_row["card_id"]
+                     if attached_card_id is not None and int(attached_card_id) != card_id:
+                         raise ConflictError(
+                             "Flashcard asset is attached to a different card",
+@@ -37282,7 +37282,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                 ).fetchall()
+                 referenced_set = set(referenced_asset_uuids)
+                 for row in existing_attached_rows:
+-                    existing_uuid = str(row[0])
++                    existing_uuid = str(row["uuid"])
+                     if existing_uuid in referenced_set:
+                         continue
+                     conn.execute(
+@@ -37364,7 +37364,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                     ).fetchone()
+                     if not row:
+                         raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
+-                    current_version = int(row[0])
++                    current_version = int(row["version"])
+                     if current_version != expected_version:
+                         raise ConflictError(  # noqa: TRY003
+                             "Version mismatch updating flashcard",
+@@ -37384,7 +37384,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                 row = conn.execute("SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                 if not row:
+                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
+-                card_id, current_version = int(row[0]), int(row[1])
++                card_id, current_version = int(row["id"]), int(row["version"])
+                 if expected_version is not None and current_version != expected_version:
+                     raise ConflictError("Version mismatch updating flashcard", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
+                 if norm_tags is not None:

@@ -1,0 +1,277 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=3768607861
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 8 items / 6 deselected / 2 selected
+
+tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py FF  [100%]
+
+=================================== FAILURES ===================================
+______ test_flashcard_asset_reconciliation_round_trips_real_rows[sqlite] _______
+tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py:58: in test_flashcard_asset_reconciliation_round_trips_real_rows
+    assert count_db.get_flashcard_asset(asset_uuid)["card_id"] == count_db.get_flashcard(card_uuid)["id"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'card_id'
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 15:33:07.608 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.609 | DEBUG    | tldw_Server_API.app.core.DB_Management.db_path_utils:get_user_base_directory:534 - Created user directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a/1
+2026-09-16 15:33:07.609 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.610 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.610 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.628 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 15:33:07.628 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 15:33:07.631 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.681 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:07.681 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db [Client ID: 1] (backend=sqlite)
+2026-09-16 15:33:07.681 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7949 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db for thread 8346099072
+2026-09-16 15:33:07.682 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:44651 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 15:33:07.682 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20154 - Checking DB schema 'rag_char_chat_schema'. Current version: 0. Code supports: 67
+2026-09-16 15:33:07.682 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8623 - Applying schema Version 4 for 'rag_char_chat_schema' to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.688 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8627 - [rag_char_chat_schema V4] Full schema script executed.
+2026-09-16 15:33:07.688 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8633 - [rag_char_chat_schema V4] Schema 4 applied and version confirmed for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db.
+2026-09-16 15:33:07.688 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v4_to_v5:8680 - Migrating 'rag_char_chat_schema' schema from V4 to V5 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.690 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v4_to_v5:8687 - [rag_char_chat_schema] Migration to V5 completed.
+2026-09-16 15:33:07.690 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v5_to_v6:8701 - Migrating 'rag_char_chat_schema' schema from V5 to V6 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.692 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v5_to_v6:8708 - [rag_char_chat_schema] Migration to V6 completed.
+2026-09-16 15:33:07.692 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v6_to_v7:8720 - Migrating 'rag_char_chat_schema' schema from V6 to V7 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v6_to_v7:8727 - [rag_char_chat_schema] Migration to V7 completed.
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v7_to_v8:8739 - Migrating 'rag_char_chat_schema' schema from V7 to V8 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v7_to_v8:8746 - [rag_char_chat_schema] Migration to V8 completed.
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v8_to_v9:8758 - Migrating 'rag_char_chat_schema' schema from V8 to V9 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v8_to_v9:8765 - [rag_char_chat_schema] Migration to V9 completed.
+2026-09-16 15:33:07.694 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v9_to_v10:8777 - Migrating 'rag_char_chat_schema' schema from V9 to V10 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.703 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v9_to_v10:8785 - [rag_char_chat_schema] Migration to V10 completed.
+2026-09-16 15:33:07.703 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v10_to_v11:8797 - Migrating 'rag_char_chat_schema' schema from V10 to V11 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.708 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v10_to_v11:8816 - [rag_char_chat_schema] Migration to V11 completed.
+2026-09-16 15:33:07.708 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v11_to_v12:8828 - Migrating 'rag_char_chat_schema' schema from V11 to V12 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.710 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v11_to_v12:8836 - [rag_char_chat_schema] Migration to V12 completed.
+2026-09-16 15:33:07.710 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v12_to_v13:8848 - Migrating 'rag_char_chat_schema' schema from V12 to V13 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.710 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v12_to_v13:8856 - [rag_char_chat_schema] Migration to V13 completed.
+2026-09-16 15:33:07.710 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v13_to_v14:8868 - Migrating 'rag_char_chat_schema' schema from V13 to V14 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.717 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v13_to_v14:8934 - [rag_char_chat_schema] Migration to V14 completed.
+2026-09-16 15:33:07.717 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v14_to_v15:8946 - Migrating 'rag_char_chat_schema' schema from V14 to V15 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.720 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v14_to_v15:8954 - [rag_char_chat_schema] Migration to V15 completed.
+2026-09-16 15:33:07.720 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v15_to_v16:8966 - Migrating 'rag_char_chat_schema' schema from V15 to V16 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.721 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v15_to_v16:8974 - [rag_char_chat_schema] Migration to V16 completed.
+2026-09-16 15:33:07.721 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v16_to_v17:8986 - Migrating 'rag_char_chat_schema' schema from V16 to V17 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.721 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v16_to_v17:9013 - [rag_char_chat_schema] Migration to V17 completed.
+2026-09-16 15:33:07.721 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v17_to_v18:9025 - Migrating 'rag_char_chat_schema' schema from V17 to V18 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.721 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v17_to_v18:9033 - [rag_char_chat_schema] Migration to V18 completed.
+2026-09-16 15:33:07.722 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v18_to_v19:9045 - Migrating 'rag_char_chat_schema' schema from V18 to V19 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.722 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v18_to_v19:9053 - [rag_char_chat_schema] Migration to V19 completed.
+2026-09-16 15:33:07.722 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v19_to_v20:9065 - Migrating 'rag_char_chat_schema' schema from V19 to V20 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.731 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v19_to_v20:9073 - [rag_char_chat_schema] Migration to V20 completed.
+2026-09-16 15:33:07.731 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v20_to_v21:9085 - Migrating 'rag_char_chat_schema' schema from V20 to V21 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.731 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v20_to_v21:9093 - [rag_char_chat_schema] Migration to V21 completed.
+2026-09-16 15:33:07.731 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v21_to_v22:9105 - Migrating 'rag_char_chat_schema' schema from V21 to V22 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.732 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v21_to_v22:9113 - [rag_char_chat_schema] Migration to V22 completed.
+2026-09-16 15:33:07.732 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v22_to_v23:9125 - Migrating 'rag_char_chat_schema' schema from V22 to V23 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.740 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v22_to_v23:9133 - [rag_char_chat_schema] Migration to V23 completed.
+2026-09-16 15:33:07.740 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v23_to_v24:9145 - Migrating 'rag_char_chat_schema' schema from V23 to V24 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.748 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v23_to_v24:9153 - [rag_char_chat_schema] Migration to V24 completed.
+2026-09-16 15:33:07.748 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v24_to_v25:9165 - Migrating 'rag_char_chat_schema' schema from V24 to V25 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.754 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v24_to_v25:9191 - [rag_char_chat_schema] Migration to V25 completed.
+2026-09-16 15:33:07.754 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v25_to_v26:9203 - Migrating 'rag_char_chat_schema' schema from V25 to V26 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.757 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v25_to_v26:9211 - [rag_char_chat_schema] Migration to V26 completed.
+2026-09-16 15:33:07.757 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v26_to_v27:9223 - Migrating 'rag_char_chat_schema' schema from V26 to V27 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.761 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v26_to_v27:9251 - [rag_char_chat_schema] Migration to V27 completed.
+2026-09-16 15:33:07.761 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v27_to_v28:9263 - Migrating 'rag_char_chat_schema' schema from V27 to V28 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.763 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v27_to_v28:9284 - [rag_char_chat_schema] Migration to V28 completed.
+2026-09-16 15:33:07.763 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v28_to_v29:9296 - Migrating 'rag_char_chat_schema' schema from V28 to V29 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.764 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v28_to_v29:9304 - [rag_char_chat_schema] Migration to V29 completed.
+2026-09-16 15:33:07.764 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v29_to_v30:9316 - Migrating 'rag_char_chat_schema' schema from V29 to V30 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.766 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v29_to_v30:9334 - [rag_char_chat_schema] Migration to V30 completed.
+2026-09-16 15:33:07.766 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v30_to_v31:9346 - Migrating 'rag_char_chat_schema' schema from V30 to V31 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.772 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v30_to_v31:9368 - [rag_char_chat_schema] Migration to V31 completed.
+2026-09-16 15:33:07.772 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v31_to_v32:9380 - Migrating 'rag_char_chat_schema' schema from V31 to V32 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v31_to_v32:9424 - [rag_char_chat_schema] Migration to V32 completed.
+2026-09-16 15:33:07.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v32_to_v33:9436 - Migrating 'rag_char_chat_schema' schema from V32 to V33 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v32_to_v33:9444 - [rag_char_chat_schema] Migration to V33 completed.
+2026-09-16 15:33:07.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v33_to_v34:9456 - Migrating 'rag_char_chat_schema' schema from V33 to V34 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.781 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v33_to_v34:9476 - [rag_char_chat_schema] Migration to V34 completed.
+2026-09-16 15:33:07.781 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v34_to_v35:9488 - Migrating 'rag_char_chat_schema' schema from V34 to V35 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.783 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v34_to_v35:9508 - [rag_char_chat_schema] Migration to V35 completed.
+2026-09-16 15:33:07.783 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v35_to_v36:9520 - Migrating 'rag_char_chat_schema' schema from V35 to V36 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.787 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v35_to_v36:9571 - [rag_char_chat_schema] Migration to V36 completed.
+2026-09-16 15:33:07.787 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v36_to_v37:9583 - Migrating 'rag_char_chat_schema' schema from V36 to V37 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v36_to_v37:9594 - [rag_char_chat_schema] Migration to V37 completed.
+2026-09-16 15:33:07.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v37_to_v38:9606 - Migrating 'rag_char_chat_schema' schema from V37 to V38 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v37_to_v38:9615 - [rag_char_chat_schema] Migration to V38 completed.
+2026-09-16 15:33:07.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v38_to_v39:9627 - Migrating 'rag_char_chat_schema' schema from V38 to V39 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.849 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v38_to_v39:9636 - [rag_char_chat_schema] Migration to V39 completed.
+2026-09-16 15:33:07.849 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v39_to_v40:9648 - Migrating 'rag_char_chat_schema' schema from V39 to V40 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.850 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v39_to_v40:9656 - [rag_char_chat_schema] Migration to V40 completed.
+2026-09-16 15:33:07.850 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v40_to_v41:9668 - Migrating 'rag_char_chat_schema' schema from V40 to V41 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.854 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v40_to_v41:9676 - [rag_char_chat_schema] Migration to V41 completed.
+2026-09-16 15:33:07.854 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v41_to_v42:9688 - Migrating 'rag_char_chat_schema' schema from V41 to V42 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.859 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v41_to_v42:9696 - [rag_char_chat_schema] Migration to V42 completed.
+2026-09-16 15:33:07.859 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v42_to_v43:9708 - Migrating 'rag_char_chat_schema' schema from V42 to V43 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.860 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v42_to_v43:9716 - [rag_char_chat_schema] Migration to V43 completed.
+2026-09-16 15:33:07.860 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v43_to_v44:9728 - Migrating 'rag_char_chat_schema' schema from V43 to V44 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.861 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v43_to_v44:9749 - [rag_char_chat_schema] Migration to V44 completed.
+2026-09-16 15:33:07.861 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v44_to_v45:9761 - Migrating 'rag_char_chat_schema' schema from V44 to V45 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.871 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v44_to_v45:9770 - [rag_char_chat_schema] Migration to V45 completed.
+2026-09-16 15:33:07.871 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v45_to_v46:9782 - Migrating 'rag_char_chat_schema' schema from V45 to V46 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.871 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v45_to_v46:9790 - [rag_char_chat_schema] Migration to V46 completed.
+2026-09-16 15:33:07.871 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v46_to_v47:9802 - Migrating 'rag_char_chat_schema' schema from V46 to V47 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.876 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v46_to_v47:9817 - [rag_char_chat_schema] Migration to V47 completed.
+2026-09-16 15:33:07.876 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v47_to_v48:9829 - Migrating 'rag_char_chat_schema' schema from V47 to V48 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v47_to_v48:9837 - [rag_char_chat_schema] Migration to V48 completed.
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v48_to_v49:9849 - Migrating 'rag_char_chat_schema' schema from V48 to V49 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v48_to_v49:9858 - [rag_char_chat_schema] Migration to V49 completed.
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v49_to_v50:9870 - Migrating 'rag_char_chat_schema' schema from V49 to V50 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v49_to_v50:9879 - [rag_char_chat_schema] Migration to V50 completed.
+2026-09-16 15:33:07.878 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v50_to_v51:9891 - Migrating 'rag_char_chat_schema' schema from V50 to V51 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.880 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v50_to_v51:9907 - [rag_char_chat_schema] Migration to V51 completed.
+2026-09-16 15:33:07.880 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v51_to_v52:9919 - Migrating 'rag_char_chat_schema' schema from V51 to V52 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.883 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v51_to_v52:9931 - [rag_char_chat_schema] Migration to V52 completed.
+2026-09-16 15:33:07.883 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v52_to_v53:9945 - Migrating 'rag_char_chat_schema' schema from V52 to V53 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.892 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v52_to_v53:9958 - [rag_char_chat_schema] Migration to V53 completed.
+2026-09-16 15:33:07.892 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v53_to_v54:9972 - Migrating 'rag_char_chat_schema' schema from V53 to V54 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.893 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v53_to_v54:9984 - [rag_char_chat_schema] Migration to V54 completed.
+2026-09-16 15:33:07.893 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v54_to_v55:9998 - Migrating 'rag_char_chat_schema' schema from V54 to V55 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:07.895 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v54_to_v55:10076 - [rag_char_chat_schema] Migration to V55 completed.
+2026-09-16 15:33:07.895 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v55_to_v56:10180 - Migrating 'rag_char_chat_schema' schema from V55 to V56 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:08.193 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v64_to_v65:17609 - Migrating 'rag_char_chat_schema' schema from V64 to V65 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db...
+2026-09-16 15:33:08.205 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v64_to_v65:17626 - [rag_char_chat_schema] Migration to V65 completed.
+2026-09-16 15:33:08.309 | WARNING  | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_self_heal_character_cards_fts_sqlite:24635 - character_cards_fts out of sync (active=1 indexed=0); rebuilding.
+2026-09-16 15:33:08.309 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20934 - Database schema 'rag_char_chat_schema' successfully initialized/migrated to version 67.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:44679 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8196 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS message_metadata(
+                  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+                  tool_calls_json TEXT,
+                  extra_json TEXT,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAM... Params: None...
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8222 - Committed directly by execute_query.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8196 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  persona_id TEXT NOT NULL,
+                  session_id TEXT NOT NULL,
+                  created_at D... Params: None...
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8222 - Committed directly by execute_query.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8196 - Executing SQL (script=False, backend=sqlite):
+                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
+                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
+                ... Params: None...
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8222 - Committed directly by execute_query.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8196 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS conversation_settings(
+                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >=... Params: None...
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8222 - Committed directly by execute_query.
+2026-09-16 15:33:08.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:44651 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:44679 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:44651 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:44679 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:44651 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:44679 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:44651 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:44679 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 15:33:08.310 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8196 - Executing SQL (script=False, backend=sqlite):
+            SELECT fa.uuid, fa.mime_type, fa.original_filename, fa.byte_size, fa.sha256,
+                   fa.width, fa.height, fa.created_at, fa.last_modified, fa.deleted,
+                   fa.client_id, fa.version, f.uuid AS card_uuid
+              FROM flashcard_assets fa
+              LEFT JO... Params: ('4b7ec7f7-2ac2-4a68-b7e1-84aefb874fd7',)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 15:33:08.346 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8019 - Attempting WAL checkpoint (TRUNCATE) before closing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db on thread 8346099072.
+2026-09-16 15:33:08.347 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8025 - WAL checkpoint TRUNCATE executed for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db.
+2026-09-16 15:33:08.347 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8030 - Closed SQLite connection for thread 8346099072 to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili0/count.db.
+2026-09-16 15:33:08.349 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 15:33:08.349 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 15:33:08.353 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 15:33:08.357 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 15:33:08.358 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 15:33:08.362 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 15:33:08.366 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 15:33:08.367 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 15:33:08.370 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 15:33:08.370 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 15:33:08.370 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:<module>:355 - Using LRUCache for ChaChaNotes DB instances (maxsize=20).
+2026-09-16 15:33:08.370 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 15:33:08.370 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 15:33:08.381 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 15:33:08.381 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+____ test_flashcard_asset_reconciliation_round_trips_real_rows[postgresql] _____
+tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py:55: in test_flashcard_asset_reconciliation_round_trips_real_rows
+    assert count_db.reconcile_flashcard_asset_refs(
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:37250: in reconcile_flashcard_asset_refs
+    card_id = int(card_row[0])
+                  ^^^^^^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 15:33:08.405 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 15:33:08.405 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:08.405 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili1/count.db [Client ID: 1] (backend=postgresql)
+2026-09-16 15:33:09.879 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-90/test_flashcard_asset_reconcili1/count.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 15:33:09.881 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 83460990722026-09-16 15:33:10.204 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 15:33:10.204 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 15:33:10.208 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 15:33:10.212 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 15:33:10.213 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 15:33:10.217 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 15:33:10.221 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 15:33:10.223 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 15:33:10.225 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 15:33:10.225 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 15:33:10.225 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-16 15:33:10.225 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-16 15:33:10.225 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-16 15:33:10.236 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 15:33:10.236 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 15:33:10.236 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 15:33:10.237 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-16 15:33:10.310 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 15:33:10.316 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 15:33:10.355 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-16 15:33:10.356 | INFO     | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-16 15:33:10.425 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-16 15:33:10.425 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-16 15:33:10.425 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-16 15:33:10.426 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-16 15:33:10.426 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-16 15:33:10.426 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a
+2026-09-16 15:33:10.427 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a/1/workflows/workflows_scheduler.db
+2026-09-16 15:33:10.428 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-8de82b8a/1/workflows/workflows_scheduler.db
+2026-09-16 15:33:10.428 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-16 15:33:10.428 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 15:33:10.428 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 15:33:10.433 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-16 15:33:10.532 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_get_total
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_put_total
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_frontmatter_duration_seconds
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_header_extract_seconds
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_chunking_duration_seconds
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_normalization_seconds
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_last_chunk_count
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_output_bytes
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_input_bytes
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total_seconds
+2026-09-16 15:33:10.533 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 15:33:10.535 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 15:33:10.153 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8037 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 15:33:10.175 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 15:33:10.175 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 15:33:10.176 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 15:33:10.176 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py::test_flashcard_asset_reconciliation_round_trips_real_rows[sqlite]
+FAILED tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py::test_flashcard_asset_reconciliation_round_trips_real_rows[postgresql]
+================= 2 failed, 6 deselected, 4 warnings in 3.12s ==================

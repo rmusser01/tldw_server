@@ -319,7 +319,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         return
       }
       const successCopy = t("option:flashcards.generateSuccess", {
-        defaultValue: "Generated {{count}} cards.",
+        defaultValue: "Generated {count, plural, one {# card} other {# cards}}.",
         count: drafts.length
       })
       message.success(successCopy)
@@ -457,7 +457,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
       if (created > 0 && failed === 0) {
         const successCopy = t("option:flashcards.generateSaveSuccess", {
-          defaultValue: "Saved {{count}} generated cards.",
+          defaultValue: "Saved {count, plural, one {# generated card} other {# generated cards}}.",
           count: created
         })
         message.success(successCopy)
@@ -480,7 +480,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
       if (created > 0 && failed > 0) {
         const warningCopy = t("option:flashcards.generateSavePartial", {
-          defaultValue: "Saved {{created}} cards; {{failed}} failed.",
+          defaultValue: "Saved {created, plural, one {# card} other {# cards}}; {failed} failed.",
           created,
           failed
         })

@@ -1,0 +1,6 @@
+### Result
+{"at":"2026-09-16T22:43:06.358Z","selectors":[{"box":{"x":333,"y":563,"width":12,"height":12,"top":563,"right":345,"bottom":575,"left":333},"visible":true},{"box":{"x":333,"y":656.28125,"width":12,"height":12,"top":656.28125,"right":345,"bottom":668.28125,"left":333},"visible":true}]}
+### Ran Playwright code
+```js
+await (async page => ({at:new Date().toISOString(),selectors:await page.getByText("Set your defaults",{exact:true}).evaluate(el=>[...el.parentElement.parentElement.querySelectorAll("[aria-label=down]")].map(a=>({box:a.getBoundingClientRect().toJSON(),visible:a.getBoundingClientRect().right<=innerWidth})))}))(page);
+```

@@ -1,0 +1,458 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:80529) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx (48 tests | 3 failed | 41 skipped) 2935ms
+     ↓ keeps transfer summary free of top-level primary CTAs
+     ↓ shows expandable import help references for columns/delimiter/json mapping
+     ↓ shows imported/skipped counts and line-level errors on partial imports
+     ↓ matches baseline snapshot for import result state
+     ↓ shows preflight warning when selected delimiter does not match sample content
+     ↓ documents current invalid import failure preserving input and exiting loading
+     ↓ requires confirmation before importing very large batches
+     ↓ routes JSON/JSONL imports through the JSON upload mutation
+     ↓ routes APKG imports through the APKG upload mutation
+     ↓ previews structured q and a drafts and saves only selected cards
+     ↓ renders structured preview warnings with design-system alerts
+     ↓ keeps selected invalid structured drafts in the editor when saving
+     ↓ keeps structured drafts editable when bulk save returns zero created cards without details
+     ↓ keeps structured drafts editable when zero created cards still have local errors
+     ↓ allows clearing the structured target deck without auto-restoring the first deck
+     ↓ requires confirmation before importing large APKG files
+     ↓ imports small APKG files without confirmation
+     ↓ maps export options and normalized tag filters to preview and export params
+     ↓ serializes object payloads before creating JSON export blobs
+     ↓ renders transfer summary cards for formats, limits, and last action
+     ↓ falls back to concrete import limit copy when a translation leaves placeholders unresolved
+     ↓ keeps invalid import payloads editable and shows retryable validation recovery
+     ↓ classifies HTTP 400 import rejection as validation
+     ↓ classifies HTTP 422 import rejection as validation
+     ↓ classifies HTTP 401 import rejection as operational
+     ↓ classifies HTTP 403 import rejection as operational
+     ↓ classifies HTTP 500 import rejection as operational
+     ↓ classifies status-less JSON endpoint request failures as operational
+     ↓ updates transfer summary after import actions
+       × reports normalized draft count: 'Generated 1 card.' 316ms
+       ✓ reports normalized draft count: 'Generated 2 cards.' 100ms
+       ✓ keeps zero valid drafts as a warning rather than successful generation 87ms
+       × reports successful saved count: 'Saved 1 generated card.' 1097ms
+       ✓ reports successful saved count: 'Saved 2 generated cards.' 120ms
+       × reports the actual partial saved count: 'Saved 1 card; 1 failed.' 1097ms
+       ✓ reports the actual partial saved count: 'Saved 2 cards; 1 failed.' 118ms
+     ↓ supports generate preview, edit, and save flow
+     ↓ sends an advanced generation mix and labels true false previews
+     ↓ updates advanced generation totals and disables invalid totals
+     ↓ retains only failed generated drafts after partial save
+     ↓ shows an inline retryable recovery state after partial generated-card saves
+     ↓ keeps generated drafts when all generated-card saves fail
+     ↓ shows an inline retryable recovery state when all generated-card saves fail
+     ↓ shows inline recovery when generated-card deck resolution fails
+     ↓ clears retryable generated-card save status when the remaining draft is removed
+     ↓ attaches source attribution when launched from deep-link intent
+     ↓ preserves manual source attribution for selected-page generate handoffs
+     ↓ offers undo rollback for the latest import batch
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx > ImportExportTab import result details > localized generated-card feedback > reports normalized draft count: 'Generated 1 card.'
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'Generated 1 card.' ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   "Generated 1 card.",
++   "Generated 1 cards.",
+  ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx:1411:36
+    1409|       await prepareGeneration(count)
+    1410|       await generate(count)
+    1411|       expect(messageSpies.success).toHaveBeenCalledWith(text)
+       |                                    ^
+    1412|       expect(screen.getByTestId("flashcards-transfer-summary-last-acti…
+    1413|         .toHaveTextContent("Generate Flashcards · " + text)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx > ImportExportTab import result details > localized generated-card feedback > reports successful saved count: 'Saved 1 generated card.'
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'Saved 1 generated card.' ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   "Saved 1 generated card.",
++   "Generated 1 cards.",
+  ]
+
+  2nd vi.fn() call:
+
+  [
+-   "Saved 1 generated card.",
++   "Saved 1 generated cards.",
+  ]
+
+
+Number of calls: 2
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-transfer-task-switcher"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-head-title"[39m
+              [36m>[39m
+                [0mTask[0m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"Create, import, or export task"[39m
+              [33maria-orientation[39m=[32m"horizontal"[39m
+              [33mclass[39m=[32m"ant-segmented ant-segmented-block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mrole[39m=[32m"radiogroup"[39m
+              [33mtabindex[39m=[32m"0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-group"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mchecked[39m=[32m""[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Create cards"[39m
+                  [36m>[39m
+                    [0mCreate cards[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Import file"[39m
+                  [36m>[39m
+                    [0mImport file[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Export backup"[39m
+                  [36m>[39m
+                    [0mExport backup[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"flashcards-create-generate-heading"[39m
+          [33mdata-testid[39m=[32m"flashcards-create-generate-section"[39m
+          [33mrole[39m=[32m"region"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-2"[39m
+          [36m>[39m
+            [36m<h5[39m
+              [33mclass[39m=[32m"ant-typography !mb-0 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-create-generate-heading"[39m
+            [36m>[39m
+              [0mCreate and generate[0m
+            [36m</h5>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [0mStart new study material from study packs, source text, or images.[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<section[39m
+            [33mclass[39m=[32m"grid gap-4 grid-cols-1 xl:grid-cols-2"[39m
+            [33mdata-testid[39m=[32m"flashcards-create-task-panel"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card ant-card-bordered xl:col-span-2 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-study-pack-launcher"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-head"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-card-head-title"[39m
+                  [36m>[39m
+                    [0mStudy packs[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-body"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"max-w-3xl space-y-1"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [36m<strong>[39m
+                        [0mTurn media or notes into a review queue.[0m
+                      [36m</strong>[39m
+                    [36m</span>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [0mCreate a study pack from supported sources, then review the generated deck in Flashcards.[0m
+                    [36m</span>[39m
+                  [36m</div>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root...
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx:1436:56
+    1434|       await generate(count)
+    1435|       fireEvent.click(screen.getByTestId("flashcards-generate-save-but…
+    1436|       await waitFor(() => expect(messageSpies.success).toHaveBeenCalle…
+       |                                                        ^
+    1437|       expect(screen.getByTestId("flashcards-transfer-summary-last-acti…
+    1438|         .toHaveTextContent("Generate Flashcards · " + text)
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx > ImportExportTab import result details > localized generated-card feedback > reports the actual partial saved count: 'Saved 1 card; 1 failed.'
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'Saved 1 card; 1 failed.' ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   "Saved 1 card; 1 failed.",
++   "Saved 1 cards; 1 failed.",
+  ]
+
+
+Number of calls: 1
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-card ant-card-bordered css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-transfer-task-switcher"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-head"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-head-title"[39m
+              [36m>[39m
+                [0mTask[0m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-card-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33maria-label[39m=[32m"Create, import, or export task"[39m
+              [33maria-orientation[39m=[32m"horizontal"[39m
+              [33mclass[39m=[32m"ant-segmented ant-segmented-block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mrole[39m=[32m"radiogroup"[39m
+              [33mtabindex[39m=[32m"0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-group"[39m
+              [36m>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mchecked[39m=[32m""[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Create cards"[39m
+                  [36m>[39m
+                    [0mCreate cards[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Import file"[39m
+                  [36m>[39m
+                    [0mImport file[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"ant-segmented-item"[39m
+                [36m>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                    [33mname[39m=[32m"test-id"[39m
+                    [33mtype[39m=[32m"radio"[39m
+                  [36m/>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                    [33mtitle[39m=[32m"Export backup"[39m
+                  [36m>[39m
+                    [0mExport backup[0m
+                  [36m</div>[39m
+                [36m</label>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"flashcards-create-generate-heading"[39m
+          [33mdata-testid[39m=[32m"flashcards-create-generate-section"[39m
+          [33mrole[39m=[32m"region"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mb-2"[39m
+          [36m>[39m
+            [36m<h5[39m
+              [33mclass[39m=[32m"ant-typography !mb-0 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mid[39m=[32m"flashcards-create-generate-heading"[39m
+            [36m>[39m
+              [0mCreate and generate[0m
+            [36m</h5>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+            [36m>[39m
+              [0mStart new study material from study packs, source text, or images.[0m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<section[39m
+            [33mclass[39m=[32m"grid gap-4 grid-cols-1 xl:grid-cols-2"[39m
+            [33mdata-testid[39m=[32m"flashcards-create-task-panel"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-card ant-card-bordered xl:col-span-2 css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+              [33mdata-testid[39m=[32m"flashcards-study-pack-launcher"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-head"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-card-head-wrapper"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-card-head-title"[39m
+                  [36m>[39m
+                    [0mStudy packs[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-card-body"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-3"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"max-w-3xl space-y-1"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [36m<strong>[39m
+                        [0mTurn media or notes into a review queue.[0m
+                      [36m</strong>[39m
+                    [36m</span>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [0mCreate a study pack from supported sources, then review the generated deck in Flashcards.[0m
+                    [36m</span>[39m
+                  [36m</div>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root...
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx:1457:56
+    1455|       await generate(created + 1)
+    1456|       fireEvent.click(screen.getByTestId("flashcards-generate-save-but…
+    1457|       await waitFor(() => expect(messageSpies.warning).toHaveBeenCalle…
+       |                                                        ^
+    1458|       expect(screen.getByTestId("flashcards-transfer-summary-last-acti…
+    1459|         .toHaveTextContent("Generate Flashcards · " + text)
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 4 passed | 41 skipped (48)
+   Start at  15:32:55
+   Duration  4.54s (transform 694ms, setup 79ms, import 1.23s, tests 2.94s, environment 207ms)

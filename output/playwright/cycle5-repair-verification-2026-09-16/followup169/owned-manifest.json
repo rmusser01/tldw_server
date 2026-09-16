@@ -1,0 +1,33 @@
+{
+  "task": "TASK-13260.106",
+  "uat": "UAT169",
+  "head_at_initial_capture": "588d6c3cef7bb29ec9a4fef9f726b65f9330fb5f",
+  "head_at_freeze": "15af5a6693b3c2585c1ed49e160b0bdff3109af0",
+  "production_baseline_sha256": "de4fd8a2429c64ca13bb7218752eb62112b10bd338a66837181830d42410b30e",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/AuthNZ/scheduler.py",
+      "sha256": "61cf62e93b392b0cf61a0dd74ddb70fce62e7f3518fa6ae7290d4b10d394441a",
+      "snapshot_sha256": "61cf62e93b392b0cf61a0dd74ddb70fce62e7f3518fa6ae7290d4b10d394441a"
+    },
+    {
+      "path": "tldw_Server_API/tests/AuthNZ/integration/test_scheduler_auth_failure_monitor_postgres.py",
+      "sha256": "c905d130e4621f361c3f996f92159764052f4d3a482e5e75154a1829d2452147",
+      "snapshot_sha256": "c905d130e4621f361c3f996f92159764052f4d3a482e5e75154a1829d2452147"
+    },
+    {
+      "path": "tldw_Server_API/tests/AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py",
+      "sha256": "d776e245ba7e5a49338c3bdd0edda3c70047e3734ca4207f7f391341e129521b",
+      "snapshot_sha256": "d776e245ba7e5a49338c3bdd0edda3c70047e3734ca4207f7f391341e129521b"
+    }
+  ],
+  "patch_sha256": "ce081dfedf3752e10f2fe749d100edc8b85de46a3bb528fa425c260d6b728d55",
+  "verification": {
+    "meaningful_red": "2 failed (real PostgreSQL asyncpg timestamp DataError), 2 passed (SQLite), 0 skipped",
+    "green": "4 passed, 8 warnings, 0 skipped",
+    "adjacent_controls": "5 passed, 10 warnings, 0 skipped",
+    "ruff": "1 pre-existing I001 exactly unchanged; no diagnostics in new tests",
+    "bandit_production": "0 findings, 0 errors",
+    "bandit_tests": "0 findings, 0 errors; B101 excluded for pytest behavioral assertions"
+  }
+}

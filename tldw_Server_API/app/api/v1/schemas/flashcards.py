@@ -177,6 +177,12 @@ class Deck(BaseModel):
     scheduler_settings_json: Optional[str] = None
     scheduler_settings: DeckSchedulerSettingsEnvelope = Field(default_factory=DeckSchedulerSettingsEnvelope)
 
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
     @model_validator(mode="before")
     def _populate_scheduler_settings(cls, data: Any) -> Any:
         if not isinstance(data, dict):
@@ -358,6 +364,12 @@ class Flashcard(BaseModel):
     reverse: bool
     scheduler_type: Optional[DeckSchedulerType] = None
     next_intervals: Optional[FlashcardReviewIntervalPreviews] = None
+
+    @field_validator("created_at", "last_modified", "due_at", "last_reviewed_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
     @model_validator(mode="before")
     def _populate_tags(cls, data):

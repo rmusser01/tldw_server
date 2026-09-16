@@ -1,0 +1,75 @@
+{
+  "at": "2026-09-16T22:47:12.194Z",
+  "files": [
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat167-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "eff1509751f574f3a28de5c111681616b341ff1f675aac8f135f6d365bb8c1ad",
+      "retained_sha256": "eff1509751f574f3a28de5c111681616b341ff1f675aac8f135f6d365bb8c1ad",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat167-repair-20260916/owned-manifest.json",
+      "original_sha256": "7b0d2153fce98ca3ed82a9ca872227320edd0ed2ea5288ca1f9beebfca9cdd7d",
+      "retained_sha256": "7b0d2153fce98ca3ed82a9ca872227320edd0ed2ea5288ca1f9beebfca9cdd7d",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat167-repair-20260916/owned.patch",
+      "original_sha256": "373801671f1aacdc983738b9d8ac89a02c7e94b1544cc97909220bb1a85e7339",
+      "retained_sha256": "1c90dc4e62d95e7dcdc7b517972c12f4b0a793f9acd3925da0ad048691831e0f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "pg-red.log",
+      "source": ".tmp/uat167-repair-20260916/pg-red.log",
+      "original_sha256": "b4acbc3f98c8fe59ec76fca5af8e9ee88d70c7b7c77deb193f2643368eec150b",
+      "retained_sha256": "90d7b6b0a53295e575629e0f03641e9837ec32e2d602ce6e7bdb609352a131d2",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "pg-schema-green.log",
+      "source": ".tmp/uat167-repair-20260916/pg-schema-green.log",
+      "original_sha256": "bc8409efd1a7372de2d333205f0bba5aaff6512ea29fc2010abb67b8763b0e86",
+      "retained_sha256": "7be73b88a1cb1c3289e66b8fb082644bc6eb6f84764f210147fe2969fe3ce344",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "combined-final-green.log",
+      "source": ".tmp/uat167-repair-20260916/combined-final-green.log",
+      "original_sha256": "657f6f8b735be01fb0e14ffbab4e66407601aca273fcfc2e9f78f55ce6460146",
+      "retained_sha256": "657f6f8b735be01fb0e14ffbab4e66407601aca273fcfc2e9f78f55ce6460146",
+      "normalization": "none"
+    },
+    {
+      "file": "sqlite-regressions.log",
+      "source": ".tmp/uat167-repair-20260916/sqlite-regressions.log",
+      "original_sha256": "1fe648989b40bb780700dd470493d448bc45e4cbd4ac011471a155dda32a0bb6",
+      "retained_sha256": "1fe648989b40bb780700dd470493d448bc45e4cbd4ac011471a155dda32a0bb6",
+      "normalization": "none"
+    },
+    {
+      "file": "root-independent-review.md",
+      "source": ".tmp/uat167-repair-20260916/root-independent-review.md",
+      "original_sha256": "76026c5164dc4618cbcb36869578c9f1cfef5be8b69af59438541dcdf4defdda",
+      "retained_sha256": "76026c5164dc4618cbcb36869578c9f1cfef5be8b69af59438541dcdf4defdda",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff.json",
+      "source": ".tmp/uat167-repair-20260916/ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "bandit.json",
+      "source": ".tmp/uat167-repair-20260916/bandit.json",
+      "original_sha256": "2c559ceb1e30963a0723a928262587419914b123c13c186b6159cb32947580a9",
+      "retained_sha256": "f9463b797e97079afec170159928635288d0691cbc2f51f8d030118eaf42a158",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

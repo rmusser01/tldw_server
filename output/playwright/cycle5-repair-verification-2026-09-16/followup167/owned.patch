@@ -1,0 +1,208 @@
+diff --git a/tldw_Server_API/app/api/v1/schemas/flashcards.py b/tldw_Server_API/app/api/v1/schemas/flashcards.py
+index d4a34efd5a..32c4e45de2 100644
+--- a/tldw_Server_API/app/api/v1/schemas/flashcards.py
++++ b/tldw_Server_API/app/api/v1/schemas/flashcards.py
+@@ -177,6 +177,12 @@ class Deck(BaseModel):
+     scheduler_settings_json: Optional[str] = None
+     scheduler_settings: DeckSchedulerSettingsEnvelope = Field(default_factory=DeckSchedulerSettingsEnvelope)
+
++    @field_validator("created_at", "last_modified", mode="before")
++    @classmethod
++    def _serialize_timestamps(cls, value: Any) -> Any:
++        """Keep database datetimes compatible with the public string contract."""
++        return value.isoformat() if isinstance(value, datetime) else value
++
+     @model_validator(mode="before")
+     def _populate_scheduler_settings(cls, data: Any) -> Any:
+         if not isinstance(data, dict):
+@@ -359,6 +365,12 @@ class Flashcard(BaseModel):
+     scheduler_type: Optional[DeckSchedulerType] = None
+     next_intervals: Optional[FlashcardReviewIntervalPreviews] = None
+
++    @field_validator("created_at", "last_modified", "due_at", "last_reviewed_at", mode="before")
++    @classmethod
++    def _serialize_timestamps(cls, value: Any) -> Any:
++        """Keep database datetimes compatible with the public string contract."""
++        return value.isoformat() if isinstance(value, datetime) else value
++
+     @model_validator(mode="before")
+     def _populate_tags(cls, data):
+         if not isinstance(data, dict):
+diff --git a/tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py b/tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py
+new file mode 100644
+index 0000000000..473d4eae35
+--- /dev/null
++++ b/tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py
+@@ -0,0 +1,172 @@
++"""Flashcards responses preserve the string timestamp contract on both databases."""
++
++from datetime import datetime, timedelta, timezone
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++from pydantic import ValidationError
++
++from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
++from tldw_Server_API.app.api.v1.endpoints.flashcards import router
++from tldw_Server_API.app.api.v1.schemas.flashcards import Deck, Flashcard
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def timestamp_db(request, tmp_path):
++    """Use the official isolated PostgreSQL fixture or a temporary SQLite DB."""
++    backend = None
++    if request.param == "postgres":
++        config = request.getfixturevalue("pg_database_config")
++        backend = DatabaseBackendFactory.create_backend(config)
++    db = CharactersRAGDB(str(tmp_path / "flashcards.db"), client_id="1", backend=backend)
++    try:
++        yield db
++    finally:
++        db.close_connection()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++@pytest.fixture
++def timestamp_client(timestamp_db):
++    app = FastAPI()
++    app.include_router(router, prefix="/api/v1")
++    app.dependency_overrides[get_chacha_db_for_user] = lambda: timestamp_db
++    with TestClient(app) as client:
++        yield client
++
++
++def _assert_timestamp_strings(row, fields=("created_at", "last_modified")):
++    for field in fields:
++        assert isinstance(row[field], str), field
++        assert datetime.fromisoformat(row[field].replace("Z", "+00:00")).tzinfo is not None
++
++
++@pytest.mark.integration
++def test_deck_create_returns_written_row_with_string_timestamps(timestamp_client, timestamp_db):
++    response = timestamp_client.post("/api/v1/flashcards/decks", json={"name": "Generated notes"})
++    assert response.status_code == 200
++    deck = response.json()
++    assert deck["id"] == timestamp_db.get_deck_by_name("Generated notes")["id"]
++    assert len(timestamp_db.list_decks()) == 1
++    _assert_timestamp_strings(deck)
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("operation", ["list", "update"])
++def test_existing_deck_responses_have_string_timestamps(timestamp_client, timestamp_db, operation):
++    deck_id = timestamp_db.add_deck("Existing deck")
++    if operation == "list":
++        response = timestamp_client.get("/api/v1/flashcards/decks")
++    else:
++        response = timestamp_client.patch(
++            f"/api/v1/flashcards/decks/{deck_id}",
++            json={"description": "Updated", "expected_version": 1},
++        )
++    assert response.status_code == 200
++    deck = response.json()[0] if operation == "list" else response.json()
++    assert deck["id"] == deck_id
++    assert deck["version"] == (1 if operation == "list" else 2)
++    _assert_timestamp_strings(deck)
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("bulk", [False, True], ids=["single", "bulk"])
++def test_generated_card_save_preserves_provenance_and_timestamp_contract(
++    timestamp_client,
++    timestamp_db,
++    bulk,
++):
++    deck_id = timestamp_db.add_deck("Generated deck")
++    payload = {
++        "deck_id": deck_id,
++        "front": "What is the Citrine marker?",
++        "back": "Amber",
++        "model_type": "basic",
++        "source_ref_type": "note",
++        "source_ref_id": "synthetic-note-167",
++    }
++    response = timestamp_client.post(
++        "/api/v1/flashcards/bulk" if bulk else "/api/v1/flashcards",
++        json=[payload] if bulk else payload,
++    )
++    assert response.status_code == 200
++    card = response.json()["items"][0] if bulk else response.json()
++    assert card["source_ref_type"] == "note"
++    assert card["source_ref_id"] == "synthetic-note-167"
++    assert card["deck_id"] == deck_id
++    assert timestamp_db.get_flashcard(card["uuid"])["back"] == "Amber"
++    _assert_timestamp_strings(card)
++    assert card["last_reviewed_at"] is None
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("operation", ["read", "update", "list"])
++def test_saved_card_responses_have_string_timestamps(timestamp_client, timestamp_db, operation):
++    card_uuid = timestamp_db.add_flashcard({"front": "Marker?", "back": "Amber"})
++    if operation == "read":
++        response = timestamp_client.get(f"/api/v1/flashcards/id/{card_uuid}")
++    elif operation == "update":
++        response = timestamp_client.patch(
++            f"/api/v1/flashcards/{card_uuid}",
++            json={"back": "Still amber", "expected_version": 1},
++        )
++    else:
++        response = timestamp_client.get("/api/v1/flashcards")
++    assert response.status_code == 200
++    card = response.json()["items"][0] if operation == "list" else response.json()
++    assert card["uuid"] == card_uuid
++    _assert_timestamp_strings(card)
++
++
++@pytest.fixture(params=[Deck, Flashcard], ids=["deck", "card"])
++def response_model_and_row(request):
++    row = {"created_at": None, "last_modified": None, "deleted": False, "client_id": "1", "version": 1}
++    if request.param is Deck:
++        row.update(id=1, name="Deck")
++    else:
++        row.update(
++            uuid="de78cd60-5a58-4a9e-b8a2-7b29b5615301",
++            front="Marker?",
++            back="Amber",
++            is_cloze=False,
++            ef=2.5,
++            interval_days=0,
++            repetitions=0,
++            lapses=0,
++            model_type="basic",
++            reverse=False,
++        )
++    return request.param, row
++
++
++@pytest.mark.parametrize(
++    ("value", "expected"),
++    [
++        (datetime(2026, 9, 16, 22, 25, 39, 993000, tzinfo=timezone.utc), "2026-09-16T22:25:39.993000+00:00"),
++        (datetime(2026, 9, 16, 15, 25, tzinfo=timezone(timedelta(hours=-7))), "2026-09-16T15:25:00-07:00"),
++        (datetime(2026, 9, 16, 22, 25), "2026-09-16T22:25:00"),
++        ("2026-09-16T22:25:39.993Z", "2026-09-16T22:25:39.993Z"),
++        (None, None),
++    ],
++    ids=["utc", "offset", "naive", "sqlite-string", "null"],
++)
++def test_response_timestamp_conversion_preserves_values(response_model_and_row, value, expected):
++    model, row = response_model_and_row
++    fields = ["created_at", "last_modified"]
++    if model is Flashcard:
++        fields += ["due_at", "last_reviewed_at"]
++    row.update(dict.fromkeys(fields, value))
++    response = model.model_validate(row).model_dump(mode="json")
++    assert {field: response[field] for field in fields} == dict.fromkeys(fields, expected)
++    assert model.model_validate(response).model_dump(mode="json") == response
++
++
++def test_response_timestamp_does_not_coerce_unrelated_types(response_model_and_row):
++    model, row = response_model_and_row
++    row["created_at"] = 123
++    with pytest.raises(ValidationError):
++        model.model_validate(row)
