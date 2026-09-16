@@ -1,0 +1,5 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: B101
+[json]	INFO	JSON output written to file: /private/tmp/cycle5-postgres-136-bandit.json
