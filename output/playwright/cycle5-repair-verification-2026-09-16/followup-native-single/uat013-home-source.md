@@ -1,0 +1,13 @@
+- region [ref=f7e1028]:
+  - generic [ref=f7e1029]:
+    - generic [ref=f7e1035]:
+      - heading "Add your first source" [level=2] [ref=f7e1036]
+      - paragraph [ref=f7e1037]: Your first source is ready for grounded chat.
+      - paragraph [ref=f7e1038]: cycle5-home-handoff-proof-20260916.md
+    - button "Dismiss" [ref=f7e1040] [cursor=pointer]
+  - generic [ref=f7e1044]:
+    - paragraph [ref=f7e1045]: Starter questions
+    - generic [ref=f7e1046]:
+      - button "Summarize this source." [ref=f7e1047] [cursor=pointer]
+      - button "List the key claims." [ref=f7e1048] [cursor=pointer]
+      - button "What should I remember?" [ref=f7e1049] [cursor=pointer]

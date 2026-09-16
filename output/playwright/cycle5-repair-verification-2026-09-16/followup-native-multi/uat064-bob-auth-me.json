@@ -1,0 +1,1 @@
+{"id":3,"uuid":null,"username":"cycle5_multi_bob","email":"cycle5-multi-bob@example.com","role":"user","is_active":true,"is_verified":true,"created_at":"2026-09-16T17:19:16.965434","last_login":null,"storage_quota_mb":1000,"storage_used_mb":0.0,"warning":"deprecated_endpoint","successor":"/api/v1/users/me/profile"}

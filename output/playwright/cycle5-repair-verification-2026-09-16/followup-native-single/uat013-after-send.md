@@ -1,0 +1,147 @@
+- log "Chat messages" [ref=f7e1223]:
+  - generic [ref=f7e1225]:
+    - article "System message 1 of 13" [ref=f7e1678]:
+      - generic [ref=f7e1232]:
+        - generic [ref=f7e1234]:
+          - generic [ref=f7e1235]: System prompt
+          - generic [ref=f7e1236]: • 1:55 AM
+        - paragraph [ref=f7e1238]: You are a helpful AI assistant.
+        - generic [ref=f7e1239]:
+          - generic [ref=f7e1240]:
+            - generic [ref=f7e1241]: Was this helpful?
+            - generic [ref=f7e1242]:
+              - button "Helpful" [ref=f7e1243] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1246] [cursor=pointer]
+              - button "More feedback" [ref=f7e1249] [cursor=pointer]
+          - button "More actions" [ref=f7e1255] [cursor=pointer]: •••
+    - article "User message 2 of 13" [ref=f7e1679]:
+      - generic [ref=f7e1259]:
+        - generic [ref=f7e1261]:
+          - generic [ref=f7e1262]: You
+          - generic [ref=f7e1263]: • 1:55 AM
+        - paragraph [ref=f7e1265]: "Chat with this media: cycle5-single-native-public-source Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00. According only to this source, who coordinates Project Cedar and where is its book return?"
+        - button "More actions" [ref=f7e1268] [cursor=pointer]: •••
+    - article "Assistant message 3 of 13" [ref=f7e1680]:
+      - generic [ref=f7e1278]:
+        - generic [ref=f7e1280]:
+          - generic [ref=f7e1281]: Assistant
+          - generic [ref=f7e1282]: • 1:56 AM
+        - paragraph [ref=f7e1746]: Jonah Patel coordinates Project Cedar, and its book return is beside the north entrance.
+        - generic [ref=f7e1286]:
+          - generic [ref=f7e1287]:
+            - generic [ref=f7e1288]: Was this helpful?
+            - generic [ref=f7e1289]:
+              - button "Helpful" [ref=f7e1290] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1293] [cursor=pointer]
+              - button "More feedback" [ref=f7e1296] [cursor=pointer]
+          - button "More actions" [ref=f7e1302] [cursor=pointer]: •••
+    - article "User message 4 of 13" [ref=f7e1682]:
+      - generic [ref=f7e1306]:
+        - generic [ref=f7e1308]:
+          - generic [ref=f7e1309]: You
+          - generic [ref=f7e1310]: • 2:00 AM
+        - paragraph [ref=f7e1312]: Greet a visitor to Project Cedar in one short sentence.
+        - button "More actions" [ref=f7e1315] [cursor=pointer]: •••
+    - article "Assistant message 5 of 13" [ref=f7e1683]:
+      - generic [ref=f7e1325]:
+        - generic [ref=f7e1327]:
+          - generic [ref=f7e1328]: Assistant
+          - generic [ref=f7e1329]: • 2:00 AM
+        - paragraph [ref=f7e1747]: Ahoy, welcome to Project Cedar, ARRR!
+        - generic [ref=f7e1333]:
+          - generic [ref=f7e1334]:
+            - generic [ref=f7e1335]: Was this helpful?
+            - generic [ref=f7e1336]:
+              - button "Helpful" [ref=f7e1337] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1340] [cursor=pointer]
+              - button "More feedback" [ref=f7e1343] [cursor=pointer]
+          - button "More actions" [ref=f7e1349] [cursor=pointer]: •••
+    - article "User message 6 of 13" [ref=f7e1685]:
+      - generic [ref=f7e1353]:
+        - generic [ref=f7e1355]:
+          - generic [ref=f7e1356]: You
+          - generic [ref=f7e1357]: • 2:15 AM
+        - paragraph [ref=f7e1359]: "For this fictional test, reply with exactly: CEDAR RETRY READY."
+        - button "More actions" [ref=f7e1362] [cursor=pointer]: •••
+    - article "Assistant message 7 of 13" [ref=f7e1686]:
+      - generic [ref=f7e1372]:
+        - generic [ref=f7e1374]:
+          - generic [ref=f7e1375]: Assistant
+          - generic [ref=f7e1376]: • 2:17 AM
+        - paragraph [ref=f7e1748]: Jonah Patel coordinates the library, and the book return is beside the north entrance.
+        - generic [ref=f7e1380]:
+          - generic [ref=f7e1381]:
+            - generic [ref=f7e1382]: Was this helpful?
+            - generic [ref=f7e1383]:
+              - button "Helpful" [ref=f7e1384] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1387] [cursor=pointer]
+              - button "More feedback" [ref=f7e1390] [cursor=pointer]
+          - button "More actions" [ref=f7e1396] [cursor=pointer]: •••
+    - article "User message 8 of 13" [ref=f7e1688]:
+      - generic [ref=f7e1400]:
+        - generic [ref=f7e1402]:
+          - generic [ref=f7e1403]: You
+          - generic [ref=f7e1404]: • 7:40 AM
+        - paragraph [ref=f7e1406]: "For this fictional test, reply with exactly: CEDAR RETRY VERIFIED."
+        - button "More actions" [ref=f7e1409] [cursor=pointer]: •••
+    - article "Assistant message 9 of 13" [ref=f7e1689]:
+      - generic [ref=f7e1419]:
+        - generic [ref=f7e1421]:
+          - generic [ref=f7e1422]: Assistant
+          - generic [ref=f7e1423]: • 7:42 AM
+        - paragraph [ref=f7e1749]: CEDAR RETRY VERIFIED.
+        - generic [ref=f7e1427]:
+          - generic [ref=f7e1428]:
+            - generic [ref=f7e1429]: Was this helpful?
+            - generic [ref=f7e1430]:
+              - button "Helpful" [ref=f7e1431] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1434] [cursor=pointer]
+              - button "More feedback" [ref=f7e1437] [cursor=pointer]
+          - generic [ref=f7e1442]:
+            - generic [ref=f7e1443]:
+              - button "Previous response" [ref=f7e1444] [cursor=pointer]
+              - generic [ref=f7e1447]: 2 of 2
+              - button "Next response" [disabled] [ref=f7e1448]
+            - button "More actions" [ref=f7e1451] [cursor=pointer]: •••
+    - article "User message 10 of 13" [ref=f7e1691]:
+      - generic [ref=f7e1455]:
+        - generic [ref=f7e1457]:
+          - generic [ref=f7e1458]: You
+          - generic [ref=f7e1459]: • 7:53 AM
+        - paragraph [ref=f7e1461]: "Chat with this media: cycle5-home-handoff-proof-20260916.md Summarize this source."
+        - button "More actions" [ref=f7e1692] [cursor=pointer]: •••
+    - article "Assistant message 11 of 13" [ref=f7e1693]:
+      - generic [ref=f7e1489]:
+        - generic [ref=f7e1491]:
+          - generic [ref=f7e1492]: Assistant
+          - generic [ref=f7e1493]: • 7:53 AM
+        - paragraph [ref=f7e1750]: Project Cedar is a fictional community library coordinated by Jonah Patel. It is scheduled to open on November 22, 2026. The library features a public reading room with seven oak tables, and the book return is located next to the north entrance. Additionally, volunteers are scheduled to meet every Thursday at 18:00.
+        - generic [ref=f7e1497]:
+          - generic [ref=f7e1498]:
+            - generic [ref=f7e1499]: Was this helpful?
+            - generic [ref=f7e1500]:
+              - button "Helpful" [ref=f7e1501] [cursor=pointer]
+              - button "Not helpful" [ref=f7e1504] [cursor=pointer]
+              - button "More feedback" [ref=f7e1507] [cursor=pointer]
+          - button "More actions" [ref=f7e1513] [cursor=pointer]: •••
+    - article "User message 12 of 13" [ref=f7e1696]:
+      - generic [ref=f7e1699]:
+        - generic [ref=f7e1701]:
+          - generic [ref=f7e1702]: You
+          - generic [ref=f7e1703]: • 10:23 AM
+        - paragraph [ref=f7e1705]: "Chat with this media: cycle5-home-handoff-proof-20260916.md Summarize this source."
+        - button "More actions" [ref=f7e1708] [cursor=pointer]: •••
+    - article "Assistant message 13 of 13" [ref=f7e1712]:
+      - generic [ref=f7e1724]:
+        - generic [ref=f7e1726]:
+          - generic [ref=f7e1727]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+          - generic [ref=f7e1728]: • 10:23 AM
+        - generic [ref=f7e1751]:
+          - paragraph [ref=f7e1752]: I couldn't retrieve evidence from the selected sources, so I did not send this as general chat. Check that the sources are ready and indexed, then try again.
+          - paragraph [ref=f7e1753]: "Details: RAG search timed out. Try again."
+        - generic [ref=f7e1755]:
+          - button "Copy to clipboard" [ref=f7e1756] [cursor=pointer]
+          - button "Edit" [ref=f7e1761] [cursor=pointer]
+          - button "Regenerate" [ref=f7e1765] [cursor=pointer]
+          - button "Generation Info" [ref=f7e1770] [cursor=pointer]
+          - button "More actions" [ref=f7e1774] [cursor=pointer]

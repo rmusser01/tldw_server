@@ -1,0 +1,18 @@
+- log "Chat messages" [ref=f7e187]:
+  - generic [ref=f7e193]:
+    - heading "Start a new chat" [level=2] [ref=f7e198]
+    - paragraph [ref=f7e199]: Experiment with different models, prompts, and knowledge sources here.
+    - generic [ref=f7e200]:
+      - button "Start chatting" [ref=f7e201] [cursor=pointer]
+      - button "Quick Ingest" [ref=f7e202] [cursor=pointer]
+    - generic [ref=f7e203]:
+      - generic [ref=f7e205]:
+        - generic [ref=f7e206]:
+          - paragraph [ref=f7e207]: Chat modes
+          - paragraph [ref=f7e208]: Use a different starting point when the conversation needs structure.
+        - button "Explore chat modes" [ref=f7e209] [cursor=pointer]
+      - generic [ref=f7e211]:
+        - generic [ref=f7e212]:
+          - generic [ref=f7e213]: Type / for commands like /search or /web
+          - generic [ref=f7e214]: Set a system prompt to customize AI behavior
+        - button "Take a quick tour" [ref=f7e215] [cursor=pointer]

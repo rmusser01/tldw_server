@@ -1,0 +1,140 @@
+- generic [active] [ref=f9e1]:
+  - generic [ref=f9e2276]:
+    - banner [ref=f9e2277]:
+      - generic [ref=f9e2278]:
+        - generic [ref=f9e2280]:
+          - generic [ref=f9e2281]: Study workspace
+          - heading "Flashcards" [level=1] [ref=f9e2282]
+        - navigation "Flashcards modes" [ref=f9e2283]:
+          - generic [ref=f9e2284]: Study
+          - generic [ref=f9e2285]: Manage
+          - generic [ref=f9e2286]: Import / Export
+          - generic [ref=f9e2287]: Templates
+          - generic [ref=f9e2288]: Scheduler
+    - generic [ref=f9e2291]:
+      - tablist [ref=f9e2292]:
+        - generic [ref=f9e2294]:
+          - tab "Study" [ref=f9e2296] [cursor=pointer]
+          - tab "Manage" [ref=f9e2298] [cursor=pointer]
+          - tab "Import / Export" [selected] [ref=f9e2300] [cursor=pointer]
+          - tab "Templates" [ref=f9e2302] [cursor=pointer]
+          - tab "Scheduler" [ref=f9e2304] [cursor=pointer]
+        - generic [ref=f9e2306]:
+          - button "Test with Quiz" [disabled] [ref=f9e2308]
+          - button "Keyboard Shortcuts" [ref=f9e2309] [cursor=pointer]
+      - tabpanel "Import / Export" [ref=f9e2316]:
+        - generic [ref=f9e2317]:
+          - generic [ref=f9e2318]:
+            - generic [ref=f9e2319]: Task
+            - radiogroup "Create, import, or export task" [ref=f9e2323]:
+              - generic [ref=f9e2324]:
+                - generic [ref=f9e2325] [cursor=pointer]:
+                  - radio "Create cards" [checked]
+                  - generic "Create cards" [ref=f9e2326]
+                - generic [ref=f9e2327] [cursor=pointer]:
+                  - radio "Import file"
+                  - generic "Import file" [ref=f9e2328]
+                - generic [ref=f9e2329] [cursor=pointer]:
+                  - radio "Export backup"
+                  - generic "Export backup" [ref=f9e2330]
+          - region [ref=f9e2331]:
+            - generic [ref=f9e2332]:
+              - heading "Create and generate" [level=5] [ref=f9e2333]
+              - text: Start new study material from study packs, source text, or images.
+            - generic [ref=f9e2334]:
+              - generic [ref=f9e2335]:
+                - generic [ref=f9e2336]: Study packs
+                - generic [ref=f9e2340]:
+                  - generic [ref=f9e2341]:
+                    - strong [ref=f9e2343]: Turn media or notes into a review queue.
+                    - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                  - button "Create study pack" [ref=f9e2344] [cursor=pointer]
+              - generic [ref=f9e2346]:
+                - generic [ref=f9e2347]: Generate Flashcards
+                - generic [ref=f9e2351]:
+                  - generic [ref=f9e2352]: Generate cards from pasted text, review/edit them, then save to a deck.
+                  - textbox "Paste transcript, notes, or study material..." [ref=f9e2353]
+                  - generic [ref=f9e2354]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                  - generic [ref=f9e2355]:
+                    - generic [ref=f9e2356]:
+                      - switch "Advanced mix" [ref=f9e2357] [cursor=pointer]
+                      - generic [ref=f9e2360]: Advanced mix
+                    - generic [ref=f9e2362]:
+                      - generic "Number of cards" [ref=f9e2364]: "Number of cards :"
+                      - spinbutton [ref=f9e2368]: "10"
+                    - generic [ref=f9e2370]:
+                      - generic "Card type" [ref=f9e2372]: "Card type :"
+                      - generic [ref=f9e2376] [cursor=pointer]:
+                        - generic [ref=f9e2377]:
+                          - generic "Basic" [ref=f9e2378]
+                          - combobox [ref=f9e2379]
+                        - img "down" [ref=f9e2381]
+                    - generic [ref=f9e2385]:
+                      - generic "Difficulty" [ref=f9e2387]: "Difficulty :"
+                      - generic [ref=f9e2391] [cursor=pointer]:
+                        - generic [ref=f9e2392]:
+                          - generic "Mixed" [ref=f9e2393]
+                          - combobox [ref=f9e2394]
+                        - img "down" [ref=f9e2396]
+                    - generic [ref=f9e2400]:
+                      - generic "Deck" [ref=f9e2402]: "Deck :"
+                      - generic [ref=f9e2406] [cursor=pointer]:
+                        - generic [ref=f9e2407]:
+                          - generic "Cycle5 Alice Biology" [ref=f9e2408]
+                          - combobox [ref=f9e2409]
+                        - img "down" [ref=f9e2411]
+                    - generic [ref=f9e2414]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                    - generic [ref=f9e2416]:
+                      - generic "Provider (optional)" [ref=f9e2418]: "Provider (optional) :"
+                      - textbox [ref=f9e2422]
+                    - generic [ref=f9e2424]:
+                      - generic "Model (optional)" [ref=f9e2426]: "Model (optional) :"
+                      - textbox [ref=f9e2430]
+                  - generic [ref=f9e2432]:
+                    - generic "Focus topics (comma-separated)" [ref=f9e2434]: "Focus topics (comma-separated) :"
+                    - textbox "exam 1, chapter 3, formulas" [ref=f9e2438]
+                  - button "Generate cards" [disabled] [ref=f9e2440]
+              - generic [ref=f9e2441]:
+                - generic [ref=f9e2442]: Image Occlusion
+                - generic [ref=f9e2446]:
+                  - generic [ref=f9e2447]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                  - generic [ref=f9e2448]:
+                    - generic [ref=f9e2450]:
+                      - generic "Deck" [ref=f9e2452]: "Deck :"
+                      - generic [ref=f9e2456] [cursor=pointer]:
+                        - generic [ref=f9e2457]:
+                          - generic "Cycle5 Alice Biology" [ref=f9e2458]
+                          - combobox [ref=f9e2459]
+                        - img "down" [ref=f9e2461]
+                        - img "close-circle" [ref=f9e2465]
+                    - generic [ref=f9e2468]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                    - generic [ref=f9e2470]:
+                      - generic "Tags" [ref=f9e2472]: "Tags :"
+                      - textbox "tag-1, tag-2" [ref=f9e2476]
+                  - generic [ref=f9e2477]:
+                    - generic [ref=f9e2478]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                    - generic [ref=f9e2479]:
+                      - generic [ref=f9e2480]: Source image
+                      - button "Upload image occlusion source" [ref=f9e2481]
+                    - status [ref=f9e2482]:
+                      - paragraph [ref=f9e2487]: Choose an image to begin authoring occlusions.
+                  - button "Generate occlusion drafts" [ref=f9e2488] [cursor=pointer]
+          - region [ref=f9e2490]:
+            - generic [ref=f9e2491]:
+              - heading "Import and export" [level=5] [ref=f9e2492]
+              - text: Move cards in and out without changing the flashcards route.
+            - generic [ref=f9e2493]:
+              - generic [ref=f9e2494]: Import/export summary
+              - generic [ref=f9e2498]:
+                - generic [ref=f9e2499]:
+                  - strong [ref=f9e2501]: Supported formats
+                  - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                - generic [ref=f9e2502]:
+                  - strong [ref=f9e2504]: Current import limits
+                  - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                - generic [ref=f9e2505]:
+                  - strong [ref=f9e2507]: Last action
+                  - text: No import/export actions yet in this session.
+            - text: ": : : : : :"
+  - button "Open Next.js Dev Tools" [ref=f9e427] [cursor=pointer]
+  - alert [ref=f9e431]: Flashcards | tldw

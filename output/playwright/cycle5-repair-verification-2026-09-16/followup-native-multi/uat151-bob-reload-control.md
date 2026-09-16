@@ -1,0 +1,238 @@
+- generic [active] [ref=f8e1]:
+  - generic [ref=f8e4]:
+    - link "Skip to main content" [ref=f8e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e6]:
+      - button "Expand sidebar" [ref=f8e7] [cursor=pointer]
+      - button "New Chat" [ref=f8e11] [cursor=pointer]
+      - generic [ref=f8e14]:
+        - button "Quick Ingest" [ref=f8e15] [cursor=pointer]
+        - button "Chat" [ref=f8e19] [cursor=pointer]
+        - button "Prompts" [ref=f8e22] [cursor=pointer]
+        - button "Characters" [ref=f8e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e31] [cursor=pointer]
+        - button "World Books" [ref=f8e35] [cursor=pointer]
+        - button "Notes" [ref=f8e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e42] [cursor=pointer]
+        - button "Media" [ref=f8e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e59] [cursor=pointer]
+        - button "Kanban" [ref=f8e65] [cursor=pointer]
+        - button "Watchlists" [ref=f8e67] [cursor=pointer]
+      - generic [ref=f8e72]:
+        - button "Open Notes Dock" [ref=f8e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e78] [cursor=pointer]
+        - button "Settings" [ref=f8e81] [cursor=pointer]
+    - main [ref=f8e85]:
+      - generic [ref=f8e86]:
+        - generic [ref=f8e89]:
+          - generic [ref=f8e90]:
+            - button "Expand sidebar" [ref=f8e91] [cursor=pointer]
+            - generic [ref=f8e93]:
+              - img "tldw Assistant" [ref=f8e94]
+              - generic [ref=f8e95]: tldw Assistant
+              - button "Companion Home" [ref=f8e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e100] [cursor=pointer]
+          - generic [ref=f8e103]:
+            - button "Search - Open command palette" [ref=f8e104] [cursor=pointer]:
+              - generic [ref=f8e108]: Search
+              - generic [ref=f8e109]: ⌘K
+            - button "Open settings" [ref=f8e110] [cursor=pointer]
+            - generic [ref=f8e122]:
+              - button "Notifications, connecting" [ref=f8e123] [cursor=pointer]
+              - status [ref=f8e126]: Notifications are connecting
+            - button "Switch to light theme" [ref=f8e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e134] [cursor=pointer]:
+              - generic [ref=f8e135]: "?"
+        - generic [ref=f8e137]:
+          - generic [ref=f8e139]:
+            - generic [ref=f8e141]:
+              - generic [ref=f8e142]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f8e143]
+            - navigation "Flashcards modes" [ref=f8e144]:
+              - generic [ref=f8e145]: Study
+              - generic [ref=f8e146]: Manage
+              - generic [ref=f8e147]: Import / Export
+              - generic [ref=f8e148]: Templates
+              - generic [ref=f8e149]: Scheduler
+          - generic [ref=f8e152]:
+            - tablist [ref=f8e153]:
+              - generic [ref=f8e155]:
+                - tab "Study" [ref=f8e157] [cursor=pointer]
+                - tab "Manage" [ref=f8e159] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=f8e161] [cursor=pointer]
+                - tab "Templates" [ref=f8e163] [cursor=pointer]
+                - tab "Scheduler" [ref=f8e165] [cursor=pointer]
+              - generic [ref=f8e167]:
+                - button "Test with Quiz" [disabled] [ref=f8e169]
+                - button "Keyboard Shortcuts" [ref=f8e170] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=f8e177]:
+              - generic [ref=f8e178]:
+                - generic [ref=f8e179]:
+                  - generic [ref=f8e180]: Task
+                  - radiogroup "Create, import, or export task" [ref=f8e184]:
+                    - generic [ref=f8e185]:
+                      - generic [ref=f8e186] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=f8e187]
+                      - generic [ref=f8e188] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=f8e189]
+                      - generic [ref=f8e190] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=f8e191]
+                - region [ref=f8e192]:
+                  - generic [ref=f8e193]:
+                    - heading "Create and generate" [level=5] [ref=f8e194]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=f8e195]:
+                    - generic [ref=f8e196]:
+                      - generic [ref=f8e197]: Study packs
+                      - generic [ref=f8e201]:
+                        - generic [ref=f8e202]:
+                          - strong [ref=f8e204]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=f8e205] [cursor=pointer]
+                    - generic [ref=f8e207]:
+                      - generic [ref=f8e208]: Generate Flashcards
+                      - generic [ref=f8e212]:
+                        - generic [ref=f8e213]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - textbox "Paste transcript, notes, or study material..." [ref=f8e214]
+                        - generic [ref=f8e215]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=f8e216]:
+                          - generic [ref=f8e217]:
+                            - switch "Advanced mix" [ref=f8e218] [cursor=pointer]
+                            - generic [ref=f8e221]: Advanced mix
+                          - generic [ref=f8e223]:
+                            - generic "Number of cards" [ref=f8e225]: "Number of cards :"
+                            - spinbutton [ref=f8e229]: "10"
+                          - generic [ref=f8e231]:
+                            - generic "Card type" [ref=f8e233]: "Card type :"
+                            - generic [ref=f8e237] [cursor=pointer]:
+                              - generic [ref=f8e238]:
+                                - generic "Basic" [ref=f8e239]
+                                - combobox [ref=f8e240]
+                              - img "down" [ref=f8e242]
+                          - generic [ref=f8e246]:
+                            - generic "Difficulty" [ref=f8e248]: "Difficulty :"
+                            - generic [ref=f8e252] [cursor=pointer]:
+                              - generic [ref=f8e253]:
+                                - generic "Mixed" [ref=f8e254]
+                                - combobox [ref=f8e255]
+                              - img "down" [ref=f8e257]
+                          - generic [ref=f8e261]:
+                            - generic "Deck" [ref=f8e263]: "Deck :"
+                            - generic [ref=f8e267] [cursor=pointer]:
+                              - generic [ref=f8e268]:
+                                - generic "Create new deck" [ref=f8e269]
+                                - combobox [ref=f8e270]
+                              - img "down" [ref=f8e272]
+                          - generic [ref=f8e275]:
+                            - generic [ref=f8e276]:
+                              - strong [ref=f8e278]: New deck name
+                              - textbox "New deck name" [ref=f8e279]: Generated Flashcards
+                            - generic [ref=f8e280]:
+                              - strong [ref=f8e282]: Review prompt side
+                              - generic [ref=f8e283] [cursor=pointer]:
+                                - generic [ref=f8e284]:
+                                  - generic "Front first" [ref=f8e285]
+                                  - combobox "Review prompt side" [ref=f8e286]
+                                - img "down" [ref=f8e288]
+                            - generic [ref=f8e291]:
+                              - generic [ref=f8e292]:
+                                - strong [ref=f8e294]: Scheduler type
+                                - generic [ref=f8e295] [cursor=pointer]:
+                                  - generic [ref=f8e296]:
+                                    - generic "SM-2+" [ref=f8e297]
+                                    - combobox "Scheduler type SM-2+ down" [ref=f8e298]
+                                  - img "down" [ref=f8e300]
+                              - generic [ref=f8e303]:
+                                - strong [ref=f8e305]: Presets
+                                - generic [ref=f8e306]:
+                                  - button "Default" [ref=f8e307] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=f8e309] [cursor=pointer]
+                                  - button "Conservative review" [ref=f8e311] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=f8e313] [cursor=pointer]
+                              - generic [ref=f8e315]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=f8e317] [cursor=pointer]
+                          - generic [ref=f8e320]:
+                            - generic "Provider (optional)" [ref=f8e322]: "Provider (optional) :"
+                            - textbox [ref=f8e326]
+                          - generic [ref=f8e328]:
+                            - generic "Model (optional)" [ref=f8e330]: "Model (optional) :"
+                            - textbox [ref=f8e334]
+                        - generic [ref=f8e336]:
+                          - generic "Focus topics (comma-separated)" [ref=f8e338]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=f8e342]
+                        - button "Generate cards" [disabled] [ref=f8e344]
+                    - generic [ref=f8e345]:
+                      - generic [ref=f8e346]: Image Occlusion
+                      - generic [ref=f8e350]:
+                        - generic [ref=f8e351]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=f8e352]:
+                          - generic [ref=f8e354]:
+                            - generic "Deck" [ref=f8e356]: "Deck :"
+                            - generic [ref=f8e360] [cursor=pointer]:
+                              - generic [ref=f8e361]:
+                                - generic "Create new deck" [ref=f8e362]
+                                - combobox [ref=f8e363]
+                              - img "down" [ref=f8e365]
+                              - img "close-circle" [ref=f8e369]
+                          - generic [ref=f8e372]:
+                            - generic [ref=f8e373]:
+                              - strong [ref=f8e375]: New deck name
+                              - textbox "New deck name" [ref=f8e376]: Image Occlusion
+                            - generic [ref=f8e377]:
+                              - strong [ref=f8e379]: Review prompt side
+                              - generic [ref=f8e380] [cursor=pointer]:
+                                - generic [ref=f8e381]:
+                                  - generic "Front first" [ref=f8e382]
+                                  - combobox "Review prompt side" [ref=f8e383]
+                                - img "down" [ref=f8e385]
+                            - generic [ref=f8e388]:
+                              - generic [ref=f8e389]:
+                                - strong [ref=f8e391]: Scheduler type
+                                - generic [ref=f8e392] [cursor=pointer]:
+                                  - generic [ref=f8e393]:
+                                    - generic "SM-2+" [ref=f8e394]
+                                    - combobox "Scheduler type SM-2+ down" [ref=f8e395]
+                                  - img "down" [ref=f8e397]
+                              - generic [ref=f8e400]:
+                                - strong [ref=f8e402]: Presets
+                                - generic [ref=f8e403]:
+                                  - button "Default" [ref=f8e404] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=f8e406] [cursor=pointer]
+                                  - button "Conservative review" [ref=f8e408] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=f8e410] [cursor=pointer]
+                              - generic [ref=f8e412]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=f8e414] [cursor=pointer]
+                          - generic [ref=f8e417]:
+                            - generic "Tags" [ref=f8e419]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=f8e423]
+                        - generic [ref=f8e424]:
+                          - generic [ref=f8e425]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=f8e426]:
+                            - generic [ref=f8e427]: Source image
+                            - button "Upload image occlusion source" [ref=f8e428]
+                          - status [ref=f8e429]:
+                            - paragraph [ref=f8e434]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=f8e435] [cursor=pointer]
+                - region [ref=f8e437]:
+                  - generic [ref=f8e438]:
+                    - heading "Import and export" [level=5] [ref=f8e439]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=f8e440]:
+                    - generic [ref=f8e441]: Import/export summary
+                    - generic [ref=f8e445]:
+                      - generic [ref=f8e446]:
+                        - strong [ref=f8e448]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=f8e449]:
+                        - strong [ref=f8e451]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=f8e452]:
+                        - strong [ref=f8e454]: Last action
+                        - text: No import/export actions yet in this session.
+                  - text: ": : : : : :"
+  - button "Open Next.js Dev Tools" [ref=f8e460] [cursor=pointer]
+  - alert [ref=f8e464]

@@ -1,0 +1,85 @@
+{
+  "source": "1ea5402c83",
+  "at": "2026-09-16T17:39:35.483Z",
+  "secretScan": {
+    "knownValues": 62,
+    "findings": 0
+  },
+  "files": [
+    {
+      "name": "README.md",
+      "sha256": "3f24d427bfc33d0070d7c50a05d275964d08633f7f1894ccfeed22d6ceda1088",
+      "bytes": 1711
+    },
+    {
+      "name": "uat064-alice-fresh-auth-me.json",
+      "sha256": "45f13e6514e5d899a94bd12101520df86652f5bd5f6863cabd58e520bd2509b9",
+      "bytes": 321
+    },
+    {
+      "name": "uat064-alice-fresh-positive.md",
+      "sha256": "d8cc651a07654e5777751a2f5691961154e6226b0f6b38f3088f6ef2202dfeaf",
+      "bytes": 11891
+    },
+    {
+      "name": "uat064-alice-hydrated.md",
+      "sha256": "02d31cb32db172818cd6a9f2492e5f8a6b2d9a2082c97221bb27e9183b27262a",
+      "bytes": 11750
+    },
+    {
+      "name": "uat064-alice-return-back.md",
+      "sha256": "162008f9dd03015e6a265e4122449cfa6053d114fc6e915bdd405546445bf569",
+      "bytes": 11595
+    },
+    {
+      "name": "uat064-alice-return-forward-back.md",
+      "sha256": "a6309a24861243f5be1b4a0352e04b577ac092b6ae9469366c901b0fe0ddb5db",
+      "bytes": 8136
+    },
+    {
+      "name": "uat064-bob-auth-me.json",
+      "sha256": "cf1ec8de3a4f9c11598c62ec581d9410123e83ad0a6db56f9380a8fec2bfca64",
+      "bytes": 317
+    },
+    {
+      "name": "uat064-bob-back-settled.md",
+      "sha256": "ebf56835938acc4c9b05d3ddc8f56d76f58e1edcf41abf3d43dc35823aab8c60",
+      "bytes": 7957
+    },
+    {
+      "name": "uat064-bob-back.md",
+      "sha256": "ebf56835938acc4c9b05d3ddc8f56d76f58e1edcf41abf3d43dc35823aab8c60",
+      "bytes": 7957
+    },
+    {
+      "name": "uat064-bob-decks-response.json",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    {
+      "name": "uat064-bob-forward-back.md",
+      "sha256": "aaeaeef8d8d0ad98e1d7fb0ed29bc147df8cef8bbdf659767814d6ae43bbd6bf",
+      "bytes": 11594
+    },
+    {
+      "name": "uat064-bob-hydrated.md",
+      "sha256": "8dab7d762932d7ff74b2a557bc8204c59545dbbccaa1571f56b4f6c58adcc79c",
+      "bytes": 15272
+    },
+    {
+      "name": "uat151-bob-reload-control.md",
+      "sha256": "2a8ec80ab8911d11e195df66e75ba6278d7b13f0d1a58c7b0de4ed3d9a4a16bd",
+      "bytes": 14888
+    },
+    {
+      "name": "uat151-bob-stale-alice-deck.png",
+      "sha256": "4351c180265e0716a6189a2731b99b855ea032fc45d411abb4e16c388165c992",
+      "bytes": 71850
+    },
+    {
+      "name": "uat151-console.txt",
+      "sha256": "e738f51a1c0c2f1ba04561c9411c03cb97b65f536fea6b599fc17bd4cd8842d3",
+      "bytes": 3047
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e4]:
+    - link "Skip to main content" [ref=f10e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f10e6]:
+      - button "Expand sidebar" [ref=f10e7] [cursor=pointer]
+      - button "New Chat" [ref=f10e11] [cursor=pointer]
+      - generic [ref=f10e14]:
+        - button "Quick Ingest" [ref=f10e15] [cursor=pointer]
+        - button "Chat" [ref=f10e19] [cursor=pointer]
+        - button "Prompts" [ref=f10e22] [cursor=pointer]
+        - button "Characters" [ref=f10e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f10e31] [cursor=pointer]
+        - button "World Books" [ref=f10e35] [cursor=pointer]
+        - button "Notes" [ref=f10e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f10e42] [cursor=pointer]
+        - button "Media" [ref=f10e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f10e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f10e59] [cursor=pointer]
+        - button "Kanban" [ref=f10e65] [cursor=pointer]
+        - button "Watchlists" [ref=f10e67] [cursor=pointer]
+      - generic [ref=f10e72]:
+        - button "Open Notes Dock" [ref=f10e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f10e78] [cursor=pointer]
+        - button "Settings" [ref=f10e81] [cursor=pointer]
+    - main [ref=f10e85]:
+      - generic [ref=f10e86]:
+        - generic [ref=f10e89]:
+          - generic [ref=f10e90]:
+            - button "Expand sidebar" [ref=f10e91] [cursor=pointer]
+            - generic [ref=f10e93]:
+              - img "tldw Assistant" [ref=f10e94]
+              - generic [ref=f10e95]: tldw Assistant
+              - button "Companion Home" [ref=f10e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f10e100] [cursor=pointer]
+          - generic [ref=f10e103]:
+            - button "Search - Open command palette" [ref=f10e104] [cursor=pointer]:
+              - generic [ref=f10e108]: Search
+              - generic [ref=f10e109]: ⌘K
+            - button "Open settings" [ref=f10e110] [cursor=pointer]
+            - generic [ref=f10e122]:
+              - button "Notifications, 0 unread" [ref=f10e123] [cursor=pointer]
+              - status [ref=f10e127]: Notifications are active
+            - button "Switch to light theme" [ref=f10e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f10e135] [cursor=pointer]:
+              - generic [ref=f10e136]: "?"
+        - generic [ref=f10e587]:
+          - generic [ref=f10e589]:
+            - generic [ref=f10e591]:
+              - generic [ref=f10e592]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f10e593]
+            - navigation "Flashcards modes" [ref=f10e594]:
+              - generic [ref=f10e595]: Study
+              - generic [ref=f10e596]: Manage
+              - generic [ref=f10e597]: Import / Export
+              - generic [ref=f10e598]: Templates
+              - generic [ref=f10e599]: Scheduler
+          - generic [ref=f10e602]:
+            - tablist [ref=f10e603]:
+              - generic [ref=f10e605]:
+                - tab "Study" [ref=f10e607] [cursor=pointer]
+                - tab "Manage" [ref=f10e609] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=f10e611] [cursor=pointer]
+                - tab "Templates" [ref=f10e613] [cursor=pointer]
+                - tab "Scheduler" [ref=f10e615] [cursor=pointer]
+              - generic [ref=f10e617]:
+                - button "Test with Quiz" [disabled] [ref=f10e619]
+                - button "Keyboard Shortcuts" [ref=f10e620] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=f10e627]:
+              - generic [ref=f10e628]:
+                - generic [ref=f10e629]:
+                  - generic [ref=f10e630]: Task
+                  - radiogroup "Create, import, or export task" [ref=f10e634]:
+                    - generic [ref=f10e635]:
+                      - generic [ref=f10e636] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=f10e637]
+                      - generic [ref=f10e638] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=f10e639]
+                      - generic [ref=f10e640] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=f10e641]
+                - region [ref=f10e642]:
+                  - generic [ref=f10e643]:
+                    - heading "Create and generate" [level=5] [ref=f10e644]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=f10e645]:
+                    - generic [ref=f10e646]:
+                      - generic [ref=f10e647]: Study packs
+                      - generic [ref=f10e651]:
+                        - generic [ref=f10e652]:
+                          - strong [ref=f10e654]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=f10e655] [cursor=pointer]
+                    - generic [ref=f10e657]:
+                      - generic [ref=f10e658]: Generate Flashcards
+                      - generic [ref=f10e662]:
+                        - generic [ref=f10e663]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - status [ref=f10e664]:
+                          - generic [ref=f10e668]:
+                            - paragraph [ref=f10e669]: Source context attached
+                            - generic [ref=f10e670]: Cards saved from this draft will be linked to note Cycle5 Alice Biology five facts.
+                        - textbox "Paste transcript, notes, or study material..." [ref=f10e671]: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.
+                        - generic [ref=f10e672]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=f10e673]:
+                          - generic [ref=f10e674]:
+                            - switch "Advanced mix" [ref=f10e675] [cursor=pointer]
+                            - generic [ref=f10e678]: Advanced mix
+                          - generic [ref=f10e680]:
+                            - generic "Number of cards" [ref=f10e682]: "Number of cards :"
+                            - spinbutton [ref=f10e686]: "10"
+                          - generic [ref=f10e688]:
+                            - generic "Card type" [ref=f10e690]: "Card type :"
+                            - generic [ref=f10e694] [cursor=pointer]:
+                              - generic [ref=f10e695]:
+                                - generic "Basic" [ref=f10e696]
+                                - combobox [ref=f10e697]
+                              - img "down" [ref=f10e699]
+                          - generic [ref=f10e703]:
+                            - generic "Difficulty" [ref=f10e705]: "Difficulty :"
+                            - generic [ref=f10e709] [cursor=pointer]:
+                              - generic [ref=f10e710]:
+                                - generic "Mixed" [ref=f10e711]
+                                - combobox [ref=f10e712]
+                              - img "down" [ref=f10e714]
+                          - generic [ref=f10e718]:
+                            - generic "Deck" [ref=f10e720]: "Deck :"
+                            - generic [ref=f10e724] [cursor=pointer]:
+                              - generic [ref=f10e725]:
+                                - generic "Cycle5 Alice Biology" [ref=f10e726]
+                                - combobox [ref=f10e727]
+                              - img "down" [ref=f10e729]
+                          - generic [ref=f10e732]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f10e734]:
+                            - generic "Provider (optional)" [ref=f10e736]: "Provider (optional) :"
+                            - textbox [ref=f10e740]
+                          - generic [ref=f10e742]:
+                            - generic "Model (optional)" [ref=f10e744]: "Model (optional) :"
+                            - textbox [ref=f10e748]
+                        - generic [ref=f10e750]:
+                          - generic "Focus topics (comma-separated)" [ref=f10e752]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=f10e756]
+                        - button "Generate cards" [ref=f10e758] [cursor=pointer]
+                    - generic [ref=f10e760]:
+                      - generic [ref=f10e761]: Image Occlusion
+                      - generic [ref=f10e765]:
+                        - generic [ref=f10e766]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=f10e767]:
+                          - generic [ref=f10e769]:
+                            - generic "Deck" [ref=f10e771]: "Deck :"
+                            - generic [ref=f10e775] [cursor=pointer]:
+                              - generic [ref=f10e776]:
+                                - generic "Cycle5 Alice Biology" [ref=f10e777]
+                                - combobox [ref=f10e778]
+                              - img "down" [ref=f10e780]
+                              - img "close-circle" [ref=f10e784]
+                          - generic [ref=f10e787]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                          - generic [ref=f10e789]:
+                            - generic "Tags" [ref=f10e791]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=f10e795]
+                        - generic [ref=f10e796]:
+                          - generic [ref=f10e797]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=f10e798]:
+                            - generic [ref=f10e799]: Source image
+                            - button "Upload image occlusion source" [ref=f10e800]
+                          - status [ref=f10e801]:
+                            - paragraph [ref=f10e806]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=f10e807] [cursor=pointer]
+                - region [ref=f10e809]:
+                  - generic [ref=f10e810]:
+                    - heading "Import and export" [level=5] [ref=f10e811]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=f10e812]:
+                    - generic [ref=f10e813]: Import/export summary
+                    - generic [ref=f10e817]:
+                      - generic [ref=f10e818]:
+                        - strong [ref=f10e820]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=f10e821]:
+                        - strong [ref=f10e823]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=f10e824]:
+                        - strong [ref=f10e826]: Last action
+                        - text: No import/export actions yet in this session.
+                  - text: ": : : : : :"
+  - button "Open Next.js Dev Tools" [ref=f10e472] [cursor=pointer]
+  - alert [ref=f10e476]: Flashcards | tldw
