@@ -40,6 +40,8 @@ Targeted native setup at03:37UTC reopened Task2/UAT106: the browser has no API k
 
 Correction`8097d672d5` is independently reviewed and now passes a second fresh native setup→ordinary Chat without an API restart. Native103canonical reload/111Note backlink and104Minimize also pass. Targeted checks exposed two remaining boundaries before the full run:105projects a saved-source Warning as generic failure in the frontend, and108Retry sends correct context but duplicates the failed user row in canonical server persistence. Existing tasks46/49 own these bounded corrections. Their independent file ownership permits parallel implementation; root continues native analysis/UI checks. No full fresh run begins before these are corrected and reviewed.
 
+Frontend105 correction is reviewed and committed`d94077c354`:359focused cases plus independent173permanent/2poller probes pass. The results UI separates saved warnings from clean successes and retains Media navigation. A review-discovered pre-existing nested unknown/cancelled classification gap is covered by a narrow guard. Native115analysis selection/save and110local failure preservation passed;113new Character reload passed in preserved multi. Browser checks are paused during108source edits/HMR, with both targeted Next servers stopped;060Review/109QA/116 and the corrected105native check resume after freeze.114native hidden-tab coverage remains explicitly unverified due harness/native-control limits.
+
 ### Task1: Canonical user acknowledgement — TASK13260.44/51, UAT103/111
 **Files:** `apps/packages/ui/src/models/ChatTldw.ts`, `hooks/chat-modes/chatModePipeline.ts`, `hooks/chat/useChatActions.ts`, `hooks/chat-helper/index.ts`, their existing tests; `tldw_Server_API/app/core/Chat/chat_service.py`, streaming metadata helper and associated Chat tests as needed.
 **Inputs:** `read-only-diagnoses/uat103-read-only-diagnosis.md`, `uat111-read-only-diagnosis.md`, retained RED probes; paths relative to cycle4 evidence root.
@@ -126,6 +128,10 @@ Task8 code reviewed/committed: feedback102 andMinimize104 `6d2f3abc55`, accessib
 - [ ] Reproduce exact New-character disconnected useForm warning, then fix actual mount/unmount access boundary and preserve create/cancel/reopen.
 - [ ] Compare Review Markdown presentation to intended renderer/nearby tests. Record reasoned defect/expected classification; create/find child task before any newly scoped repair.
 - [ ] Run affected tests/lint, independent review and native titles/form checks; commit.
+
+Final108source review is clear after an actual successful-Regenerate probe found an overly broad local ACK update; explicit failed-only intent now gates it. Independent113frontend/76backend controls pass. Combined1467frontend/367backend+1existing skip passed before that final frontend-only correction, and final compiler retains exactly90baseline diagnostics. Native105/108/060/109/116 controls resume on intentionally restarted isolated APIs; the existing107no-restart proof is preserved.
+
+Targeted native105/060/109/116 now pass: source-preserving warning and Media link, Review Markdown reload, real stream timeout/local recovery, and generation-enabled missing-answer guidance.108 follow-up `7dcee3d72c` remains incomplete: after the initial502, the loader materializes another unacknowledged user before Retry; Retry then persists both. A permanent mounted action+loader+mirror RED reproduces this. TASK13260.49 adds durable identity correlation and rejection of Retry requests that retain extra user rows, with independent review. Both Next frontends are stopped for this repair. No full fresh matrix has started.
 
 ## Stage5: Integrated verification and another full fresh UAT
 **Goal:** Verify repaired behavior together, then execute both full named matrices on frozen code.

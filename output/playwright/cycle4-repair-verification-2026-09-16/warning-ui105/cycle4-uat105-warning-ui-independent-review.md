@@ -26,3 +26,13 @@ Command from `apps/packages/ui`:
 ## Limits and baseline
 
 No native browser, inference, full UAT, backend tests, full compiler or independent lint run in this review. Author's broader final log reports359 /22. Inspected author static comparisons show ESLint0errors/97unchanged warnings and initial TypeScript90existing diagnostics with no added/removed normalized diagnostics; final author compiler refresh was still completing at review time. Do not describe the baseline compiler as clean. Bandit is not applicable to this TS/TSX-only change. No auth, transport orchestration or permission changes occur in the production diff. Live warning rendering remains the parent's targeted verification step; this review does not provide native signoff.
+
+## Private probe reproduction
+
+Config: `/private/tmp/cycle4-uat105-warning-probe.config.mts`; test: `/private/tmp/cycle4-uat105-warning-probe.test.ts`. From `apps/packages/ui` run:
+
+```
+./node_modules/.bin/vitest run --config /private/tmp/cycle4-uat105-warning-probe.config.mts
+```
+
+The config imports the existing absolute UI `vitest.config.ts`, preserving aliases, setup and jsdom, and overrides only test.include to the private probe path. Author's completed post-guard compiler comparison subsequently confirmed exact90 baseline diagnostics, zero added/removed. No product hashes changed.

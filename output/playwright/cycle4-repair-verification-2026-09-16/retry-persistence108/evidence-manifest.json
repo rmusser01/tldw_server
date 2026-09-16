@@ -253,6 +253,11 @@
       "sha256": "0ed94b7fb979fdcd065dc525becaceed8a395718e42cce414b31a9a800c433ab"
     },
     {
+      "file": "cycle4-uat108-successful-regeneration-probe.test.tsx",
+      "bytes": 56397,
+      "sha256": "3cd801845bd4abef7c51048f7c057965fd9123ac2ac3d7eb88cadb3d5ad5061f"
+    },
+    {
       "file": "cycle4-uat108-valid-envelope-actual-red.log",
       "bytes": 6325,
       "sha256": "1acf61d9576e3d6fb19db66a063f74338d102b528b0940e877b7ab9fee215cfb"

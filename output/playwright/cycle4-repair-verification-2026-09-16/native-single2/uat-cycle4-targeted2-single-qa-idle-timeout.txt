@@ -1,0 +1,6 @@
+### Result
+{"snapshot":"- main:\n  - 'button \"Open source scope and saved profiles. Sources: 4 selected\"': \"Sources: 4 selected\"\n  - button \"Balanced\"\n  - button \"Web fallback is currently disabled. Click to toggle.\": Web\n  - button \"Choose answer model\": \"AI: Server default\"\n  - button \"Refresh source health\": \"Sources ready: 8 of 8\"\n  - button \"Open Knowledge QA settings\"\n  - paragraph: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.\n  - textbox \"Search your knowledge base\":\n    - /placeholder: What are the key findings from the research?\n    - text: Who leads the Willow Observatory project, and when does it open?\n  - button \"Clear search\"\n  - button \"Ask\"\n  - text: Press / to focus, Cmd+K for new search Search error. Search timed out. Try the Fast preset or reduce sources.\n  - paragraph: Search timed out\n  - paragraph: \"Answer status: Failed search\"\n  - paragraph: Search timed out. Try the Fast preset or reduce sources.\n  - paragraph: Try the Fast preset or reduce the scope of your query.\n  - complementary \"Open evidence panel\":\n    - button \"Open evidence panel (0 sources)\""}
+### Ran Playwright code
+```js
+await (async(page)=>({snapshot:await page.getByRole("main").last().ariaSnapshot()}))(page);
+```

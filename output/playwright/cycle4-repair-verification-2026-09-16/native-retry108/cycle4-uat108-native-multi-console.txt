@@ -1,0 +1,17 @@
+### Result
+Total messages: 14 (Errors: 0, Warnings: 0)
+
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18381/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[LOG] [HMR] connected @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 790ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 767ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 722ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 593ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 585ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[LOG] [Fast Refresh] done in 591ms @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

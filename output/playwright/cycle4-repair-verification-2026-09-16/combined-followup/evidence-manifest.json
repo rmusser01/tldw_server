@@ -1,0 +1,66 @@
+{
+  "unit": "combined-followup",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-followup-combined-backend.log",
+      "bytes": 66129,
+      "sha256": "f5b0276377d09bf560e4de013275284fa499464dbce39fae1111e86146200cfa"
+    },
+    {
+      "file": "cycle4-followup-combined-bandit.json",
+      "bytes": 2214,
+      "sha256": "f4e27039cc70fcbfe9c3c174874cd9a5f205ea6de33f1982279707eb4eba616f"
+    },
+    {
+      "file": "cycle4-followup-combined-bandit.log",
+      "bytes": 243,
+      "sha256": "bd83d4c208af06e363a3f826ff621d935f6ef006c4562a10fe280b7eaf13d828"
+    },
+    {
+      "file": "cycle4-followup-combined-command.json",
+      "bytes": 8722,
+      "sha256": "abdbf51b70011c90bcd15dc9b4178a2a4f5e1df20991ea7cc137d02889151b63"
+    },
+    {
+      "file": "cycle4-followup-combined-summary.md",
+      "bytes": 1243,
+      "sha256": "37b9936901d1f4e8cbce3603020b8b97209e8a84df1342201cab25ab3878ff6f"
+    },
+    {
+      "file": "cycle4-followup-combined-typecheck-comparison.json",
+      "bytes": 345,
+      "sha256": "4e8d290da744fe91e3471971c0d723772b9e13340770f36b4d813fd4f1802f1b"
+    },
+    {
+      "file": "cycle4-followup-combined-typecheck-comparison.txt",
+      "bytes": 345,
+      "sha256": "4e8d290da744fe91e3471971c0d723772b9e13340770f36b4d813fd4f1802f1b"
+    },
+    {
+      "file": "cycle4-followup-combined-typecheck-final-comparison.json",
+      "bytes": 351,
+      "sha256": "669e1802f225b208294252e267904f965db7a2564e8e42895ee50819315afc0e"
+    },
+    {
+      "file": "cycle4-followup-combined-typecheck-final.log",
+      "bytes": 24428,
+      "sha256": "cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6"
+    },
+    {
+      "file": "cycle4-followup-combined-typecheck.log",
+      "bytes": 24428,
+      "sha256": "cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6"
+    },
+    {
+      "file": "cycle4-followup-combined-ui.log",
+      "bytes": 67657,
+      "sha256": "ae5584f6754ea8bcace889156631516e6ef7c1429bbef79431779f50c943c00c"
+    },
+    {
+      "file": "cycle4-followup-combined-web.log",
+      "bytes": 914,
+      "sha256": "5bd7883eb621e33cccfbf922b0d423b271fd59882a2d65e9269b52780bffa465"
+    }
+  ]
+}

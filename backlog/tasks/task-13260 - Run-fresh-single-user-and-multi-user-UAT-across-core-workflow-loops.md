@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 04:20'
+updated_date: '2026-09-16 05:01'
 labels:
   - uat
   - testing
@@ -141,6 +141,10 @@ Final Task5 independent review clear: Retry11 focused and remaining173 focused t
 Targeted native recheck reopened UAT106/TASK13260.47: fresh manual-key browser gets real first-chat200 Hello and server complete200, but UI handoff demands an unavailable protected model catalog before the browser key exists. Source guard correctly returns[], no catalog network request. Evidence native-single retained, API never restarted. Bounded correction using same-authority server-verified provider/model underway with independent review; next fullfresh run remains gated. Multi targeted titles/cold form and existing reasoning-only warning currently pass; finalmulti report pending.
 
 Targeted native checkpoint:106corrected8097 passes fresh setup and107ordinaryChat without APIrestart;103reload/111Note backlink,104Minimize,115explicitanalysis/save,110localfailurepreservation,113newCharacterreload pass bounded. Native105Warning UI misclassification and108failedRetry duplicate canonical user persistence remain under tasks46/49 repairs.114hidden-tab native remains unverified due documented harness/nativefallback limits. Root pauses browser checks during shared model edits to avoid HMR invalidating Review/QA checks; full fresh run notstarted. Devbranch historical answer unchanged:initially32commitsbehind, correctedmerges, HEAD..origin/dev0 atcheckpoint.
+
+Cycle4 follow-up combined checks:1467frontend/92suites;367backend/1existing skip;Bandit5prod0findings. Final failed-Retry-only correction independently passes113frontend/76unchanged backend + original reviewer probe. Final compiler retains exact90existing diagnostics0added/removed. Native105/108/060/109/116 pending; isolated APIs18402/18301 intentionally restarted to load correction after preserving107no-restart evidence. No cycle5 full fresh run started.
+
+Targeted native rechecks:105 saved-source warning/Open in Media,060 Review Markdown reload,109 actual streaming timeout with same-page retrieval recovery,116 generation-enabled missing-answer guidance now pass. Timeouts and Balanced preset restored.108 still fails after the reviewed forward retry fix: initial502 followed by loader creates a second visible user, then Retry sends/persists both. Actual mounted action+loader regression reproduces; durable identity correlation repair underway with independent review. Both test frontends paused. Fresh origin/dev fetch remains59049e094e,zero dev-only commits. Full fresh cycle5 not started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

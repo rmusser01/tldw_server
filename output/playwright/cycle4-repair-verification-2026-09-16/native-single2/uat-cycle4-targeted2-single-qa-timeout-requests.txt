@@ -1,0 +1,49 @@
+### Result
+38. [GET] http://127.0.0.1:18482/api/_tldw-webui/runtime-config => [200] OK
+39. [GET] http://127.0.0.1:18482/_next/static/development/_devMiddlewareManifest.json => [200] OK
+47. [GET] http://127.0.0.1:18402/health => [200] OK
+48. [GET] http://127.0.0.1:18402/health => [200] OK
+87. [GET] http://127.0.0.1:18402/api/v1/persona/profiles => [200] OK
+139. [GET] http://127.0.0.1:18402/api/v1/health/live => [200] OK
+140. [GET] http://127.0.0.1:18402/api/v1/rag/health => [200] OK
+141. [GET] http://127.0.0.1:18402/api/v1/notifications/unread-count => [200] OK
+142. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+143. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+144. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+145. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+146. [GET] http://127.0.0.1:18402/api/v1/llm/providers => [200] OK
+147. [GET] http://127.0.0.1:18402/api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__ => [200] OK
+148. [GET] http://127.0.0.1:18402/api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__ => [200] OK
+149. [GET] http://127.0.0.1:18402/api/v1/rag/source-health => [200] OK
+150. [GET] http://127.0.0.1:18402/api/v1/notifications?limit=1&offset=0&include_archived=false => [200] OK
+151. [GET] http://127.0.0.1:18402/api/v1/notifications/stream?after=0 => [200] OK
+162. [GET] http://127.0.0.1:18402/openapi.json => [200] OK
+163. [GET] http://127.0.0.1:18402/api/v1/characters/search/?query=Helpful+AI+Assistant&limit=5 => [200] OK
+164. [POST] http://127.0.0.1:18402/api/v1/chats/ => [201] Created
+165. [GET] http://127.0.0.1:18402/api/v1/chat/conversations/64b97bbb-4d5e-43b3-85ca-e006602aa2de => [200] OK
+166. [PATCH] http://127.0.0.1:18402/api/v1/chat/conversations/64b97bbb-4d5e-43b3-85ca-e006602aa2de => [200] OK
+167. [POST] http://127.0.0.1:18402/api/v1/chats/64b97bbb-4d5e-43b3-85ca-e006602aa2de/messages?scope_type=global => [201] Created
+168. [POST] http://127.0.0.1:18402/api/v1/rag/search/stream => [200] OK
+170. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+171. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+172. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+173. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+176. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+177. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+178. [POST] http://127.0.0.1:18402/api/v1/chats/64b97bbb-4d5e-43b3-85ca-e006602aa2de/messages?scope_type=global => [201] Created
+179. [POST] http://127.0.0.1:18402/api/v1/chat/messages/cf27b2f3-d7c4-4602-9654-b11250b0ec9a/rag-context => [200] OK
+180. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+181. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+182. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+183. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+184. [GET] http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0 => [200] OK
+185. [GET] http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default => [200] OK
+186. [GET] http://127.0.0.1:18402/api/v1/health/live => [200] OK
+187. [GET] http://127.0.0.1:18402/api/v1/notifications/unread-count => [200] OK
+
+Note: 146 static requests not shown, run with --static option to see them.
+### Page
+- Page URL: http://127.0.0.1:18482/knowledge
+- Page Title: Knowledge | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T04-54-15-120Z.log#L7-L18

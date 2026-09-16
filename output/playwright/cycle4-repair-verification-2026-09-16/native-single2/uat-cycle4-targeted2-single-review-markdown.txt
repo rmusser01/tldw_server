@@ -1,0 +1,188 @@
+### Page
+- Page URL: http://127.0.0.1:18482/media-multi
+- Page Title: Media Analysis | tldw
+### Snapshot
+```yaml
+- generic [ref=f3e10]:
+  - generic [ref=f3e13]:
+    - link "Skip to main content" [ref=f3e14] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e15]:
+      - button "Expand sidebar" [ref=f3e16] [cursor=pointer]
+      - button "New Chat" [ref=f3e20] [cursor=pointer]
+      - generic [ref=f3e23]:
+        - button "Quick Ingest" [ref=f3e24] [cursor=pointer]
+        - button "Chat" [ref=f3e28] [cursor=pointer]
+        - button "Prompts" [ref=f3e31] [cursor=pointer]
+        - button "Characters" [ref=f3e35] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e40] [cursor=pointer]
+        - button "World Books" [ref=f3e44] [cursor=pointer]
+        - button "Notes" [ref=f3e47] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e51] [cursor=pointer]
+        - button "Media" [ref=f3e59] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e62] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e68] [cursor=pointer]
+        - button "Kanban" [ref=f3e74] [cursor=pointer]
+        - button "Watchlists" [ref=f3e76] [cursor=pointer]
+      - generic [ref=f3e81]:
+        - button "Open Notes Dock" [ref=f3e82] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e87] [cursor=pointer]
+        - button "Settings" [ref=f3e90] [cursor=pointer]
+    - main [ref=f3e94]:
+      - generic [ref=f3e95]:
+        - generic [ref=f3e98]:
+          - generic [ref=f3e99]:
+            - button "Expand sidebar" [ref=f3e100] [cursor=pointer]
+            - generic [ref=f3e102]:
+              - img "tldw Assistant" [ref=f3e103]
+              - generic [ref=f3e104]: tldw Assistant
+              - button "Companion Home" [ref=f3e105] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e109] [cursor=pointer]
+          - generic [ref=f3e112]:
+            - button "Search - Open command palette" [ref=f3e113] [cursor=pointer]:
+              - generic [ref=f3e117]: Search
+              - generic [ref=f3e118]: ⌘K
+            - button "Open settings" [ref=f3e119] [cursor=pointer]
+            - generic [ref=f3e131]:
+              - button "Notifications, 0 unread" [ref=f3e132] [cursor=pointer]
+              - status [ref=f3e136]: Notifications are active
+            - button "Switch to light theme" [ref=f3e137] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e144] [cursor=pointer]:
+              - generic [ref=f3e145]: "?"
+        - generic [ref=f3e147]:
+          - status [ref=f3e148]: 0 items selected, 30 remaining
+          - generic [ref=f3e150]:
+            - generic [ref=f3e152]:
+              - generic [ref=f3e153]:
+                - textbox "Search media (title/content)" [ref=f3e154]
+                - generic [ref=f3e155]:
+                  - button "Search" [ref=f3e156] [cursor=pointer]
+                  - button "Clear" [ref=f3e158] [cursor=pointer]
+              - generic [ref=f3e160]:
+                - generic [ref=f3e161]:
+                  - generic [ref=f3e162]:
+                    - generic: Media types
+                    - combobox "Media types" [ref=f3e164]
+                  - img "down" [ref=f3e166]
+                - generic [ref=f3e169] [cursor=pointer]:
+                  - generic [ref=f3e170]:
+                    - generic "Relevance" [ref=f3e171]
+                    - combobox "Sort" [ref=f3e172]
+                  - img "down" [ref=f3e174]
+                - group "Date range" [ref=f3e177]:
+                  - textbox "Start date" [ref=f3e179]
+                  - generic [ref=f3e180]: to
+                  - textbox "End date" [ref=f3e181]
+                - generic [ref=f3e182]:
+                  - generic [ref=f3e183]:
+                    - generic: Keywords
+                    - combobox "Keywords" [ref=f3e185]
+                  - img "down" [ref=f3e187]
+                - generic [ref=f3e190]:
+                  - generic [ref=f3e191] [cursor=pointer]:
+                    - checkbox "Search full content (slower)" [ref=f3e193]
+                    - generic [ref=f3e195]: Search full content (slower)
+                  - generic [ref=f3e196]: Scans current page results.
+            - separator "Resize filter panel" [ref=f3e197]
+            - generic [ref=f3e200]:
+              - generic [ref=f3e201]:
+                - generic [ref=f3e203]: 0 / 30
+                - generic [ref=f3e204]: "Selection status: Safe"
+              - generic [ref=f3e205]:
+                - generic [ref=f3e206]:
+                  - heading "Results (1)" [level=2] [ref=f3e207]
+                  - generic [ref=f3e208]: Click to stack, Shift+click for range
+                - button "uat-cycle4-targeted-single-juniper document 9/15/2026, 9:09:26 PM" [ref=f3e212] [cursor=pointer]:
+                  - generic [ref=f3e213]:
+                    - checkbox [ref=f3e217]
+                    - generic [ref=f3e219]:
+                      - generic [ref=f3e220]: uat-cycle4-targeted-single-juniper
+                      - generic [ref=f3e221]:
+                        - generic [ref=f3e222]: document
+                        - generic [ref=f3e223]: 9/15/2026, 9:09:26 PM
+                - generic [ref=f3e224]:
+                  - generic [ref=f3e225]: Use pagination or open all visible items
+                  - list [ref=f3e226]:
+                    - listitem "Previous Page" [ref=f3e227]:
+                      - button [disabled] [ref=f3e228]:
+                        - img "left" [ref=f3e229]
+                    - listitem "1" [ref=f3e232] [cursor=pointer]
+                    - listitem "Next Page" [ref=f3e234]:
+                      - button [disabled] [ref=f3e235]:
+                        - img "right" [ref=f3e236]
+            - separator "Resize results panel" [ref=f3e239]
+            - generic [active] [ref=f3e242]:
+              - generic [ref=f3e243]:
+                - generic [ref=f3e245]:
+                  - generic [ref=f3e246]:
+                    - generic [ref=f3e247]: Viewer
+                    - generic [ref=f3e248]: 0 open
+                  - radiogroup [ref=f3e250]:
+                    - generic [ref=f3e251] [cursor=pointer]:
+                      - generic [ref=f3e252]:
+                        - radio "Compare" [checked]
+                      - generic [ref=f3e253]: Compare
+                    - generic [ref=f3e259] [cursor=pointer]:
+                      - generic [ref=f3e260]:
+                        - radio "Focus"
+                      - generic [ref=f3e261]: Focus
+                    - generic [ref=f3e268] [cursor=pointer]:
+                      - generic [ref=f3e269]:
+                        - radio "Stack"
+                      - generic [ref=f3e270]: Stack
+                  - radiogroup [ref=f3e274]:
+                    - generic [ref=f3e275] [cursor=pointer]:
+                      - generic [ref=f3e276]:
+                        - radio "Vertical" [checked]
+                      - text: Vertical
+                    - generic [ref=f3e277] [cursor=pointer]:
+                      - generic [ref=f3e278]:
+                        - radio "Horizontal"
+                      - text: Horizontal
+                  - button "Options" [ref=f3e279] [cursor=pointer]
+                - generic [ref=f3e287]:
+                  - generic [ref=f3e288]:
+                    - button "Prev" [disabled] [ref=f3e289]
+                    - generic [ref=f3e290]: Item 1 of 1
+                    - button "Next" [disabled] [ref=f3e291]
+                  - generic [ref=f3e292]:
+                    - button "Expand/Collapse" [ref=f3e293] [cursor=pointer]
+                    - button "Multi-Item Review keyboard shortcuts" [ref=f3e302] [cursor=pointer]:
+                      - generic [ref=f3e303]: "?"
+                - button "Search in content..." [ref=f3e342] [cursor=pointer]
+              - generic [ref=f3e344]:
+                - generic [ref=f3e345]:
+                  - generic [ref=f3e346]:
+                    - generic [ref=f3e347]: uat-cycle4-targeted-single-juniper
+                    - generic [ref=f3e351]:
+                      - generic [ref=f3e352]: document
+                      - generic [ref=f3e353]: 9/15/2026, 9:09:26 PM
+                      - generic [ref=f3e354]: uat-cycle4-targeted-single-juniper.txt
+                  - generic [ref=f3e355]:
+                    - button "Unstack" [ref=f3e356] [cursor=pointer]
+                    - button "Copy" [ref=f3e358] [cursor=pointer]
+                - generic [ref=f3e366]:
+                  - generic [ref=f3e367]:
+                    - generic [ref=f3e368]: Media Content
+                    - button "Expand" [ref=f3e370] [cursor=pointer]
+                  - generic [ref=f3e375]: Juniper Community Library Mira Sol leads the Juniper Community Library project. The library opens on October 12, 2026. It has 24 volunteer readers. Its seed cabinet is in the west reading room. The catalog code is JUNIPER-42.
+                - generic [ref=f3e377]:
+                  - generic [ref=f3e378]:
+                    - generic [ref=f3e379]: Analysis
+                    - button "Expand" [ref=f3e381] [cursor=pointer]
+                  - generic [ref=f3e388]:
+                    - heading "Juniper Community Library" [level=1] [ref=f3e397]
+                    - list [ref=f3e390]:
+                      - listitem [ref=f3e398]: "Project Lead: Mira Sol"
+                      - listitem [ref=f3e399]: "Opening Date: October 12, 2026"
+                      - listitem [ref=f3e400]: "Volunteers: 24 readers"
+                      - listitem [ref=f3e401]: "Seed Cabinet: West reading room"
+                      - listitem [ref=f3e402]: "Catalog Code: JUNIPER-42"
+          - generic [ref=f3e327]:
+            - generic [ref=f3e328]:
+              - generic [ref=f3e329]: No selection
+              - generic [ref=f3e396]: Previewing 1 of 1
+            - generic [ref=f3e330]: "? for shortcuts"
+  - button "Open Next.js Dev Tools" [ref=f3e336] [cursor=pointer]
+  - alert [ref=f3e340]
+```

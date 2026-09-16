@@ -1,0 +1,224 @@
+### Page
+- Page URL: http://127.0.0.1:18482/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f5e20]:
+  - generic [ref=f5e23]:
+    - link "Skip to main content" [ref=f5e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f5e25]:
+      - button "Expand sidebar" [ref=f5e26] [cursor=pointer]
+      - button "New Chat" [ref=f5e30] [cursor=pointer]
+      - generic [ref=f5e33]:
+        - button "Quick Ingest" [ref=f5e34] [cursor=pointer]
+        - button "Chat" [ref=f5e38] [cursor=pointer]
+        - button "Prompts" [ref=f5e41] [cursor=pointer]
+        - button "Characters" [ref=f5e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f5e50] [cursor=pointer]
+        - button "World Books" [ref=f5e54] [cursor=pointer]
+        - button "Notes" [ref=f5e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f5e61] [cursor=pointer]
+        - button "Media" [ref=f5e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f5e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f5e78] [cursor=pointer]
+        - button "Kanban" [ref=f5e84] [cursor=pointer]
+        - button "Watchlists" [ref=f5e86] [cursor=pointer]
+      - generic [ref=f5e91]:
+        - button "Open Notes Dock" [ref=f5e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f5e97] [cursor=pointer]
+        - button "Settings" [ref=f5e100] [cursor=pointer]
+    - main [ref=f5e104]:
+      - generic [ref=f5e105]:
+        - generic [ref=f5e108]:
+          - generic [ref=f5e109]:
+            - button "Expand sidebar" [ref=f5e110] [cursor=pointer]
+            - generic [ref=f5e112]:
+              - img "tldw Assistant" [ref=f5e113]
+              - generic [ref=f5e114]: tldw Assistant
+              - button "Companion Home" [ref=f5e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f5e119] [cursor=pointer]
+          - generic [ref=f5e122]:
+            - button "Search - Open command palette" [ref=f5e123] [cursor=pointer]:
+              - generic [ref=f5e127]: Search
+              - generic [ref=f5e128]: ⌘K
+            - button "Open settings" [ref=f5e129] [cursor=pointer]
+            - generic [ref=f5e141]:
+              - button "Notifications, 0 unread" [ref=f5e142] [cursor=pointer]
+              - status [ref=f5e146]: Notifications are active
+            - button "Switch to light theme" [ref=f5e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f5e154] [cursor=pointer]:
+              - generic [ref=f5e155]: "?"
+        - generic [ref=f5e159]:
+          - link "Skip to search" [ref=f5e160] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f5e161]:
+            - generic [ref=f5e162]:
+              - generic [ref=f5e164]:
+                - generic [ref=f5e165]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f5e166] [cursor=pointer]': "Sources: 4 selected"
+                  - button "Balanced" [ref=f5e173] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f5e176] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f5e181] [cursor=pointer]:
+                    - generic [ref=f5e185]: "AI: Server default"
+                  - button "Refresh source health" [ref=f5e188] [cursor=pointer]: "Sources ready: 6 of 8"
+                  - button "Open Knowledge QA settings" [ref=f5e189] [cursor=pointer]
+                - generic [ref=f5e193]:
+                  - paragraph [ref=f5e194]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f5e195]:
+                    - textbox "Search your knowledge base" [disabled] [ref=f5e196]:
+                      - /placeholder: What are the key findings from the research?
+                      - text: What is the Juniper Community Library catalog code?
+                    - button "Clear search" [ref=f5e197] [cursor=pointer]
+                    - button "Searching..." [disabled] [ref=f5e202]
+                  - generic [ref=f5e205]:
+                    - generic [ref=f5e206]: Press / to focus, Cmd+K for new search
+                    - generic [ref=f5e207]:
+                      - button "New search" [ref=f5e208] [cursor=pointer]
+                      - button "Cancel search" [ref=f5e209] [cursor=pointer]: Stop
+              - generic [ref=f5e213]:
+                - button "Export" [ref=f5e215] [cursor=pointer]
+                - generic [ref=f5e219]:
+                  - generic [ref=f5e220]: Ranking retrieved sources.
+                  - generic [ref=f5e222]: Ranking best evidence
+                  - generic [ref=f5e230]:
+                    - paragraph [ref=f5e231]:
+                      - text: Generating answer...
+                      - generic [ref=f5e232]: (18s)
+                    - paragraph [ref=f5e233]: Balanced preset typically completes within about 10 seconds.
+                  - generic [ref=f5e234]:
+                    - generic [ref=f5e235]:
+                      - generic [ref=f5e236]:
+                        - textbox "Ask a follow-up question" [disabled] [ref=f5e237]:
+                          - /placeholder: Ask a follow-up question...
+                        - button "Submit follow-up question" [disabled] [ref=f5e238]
+                      - button "Start new topic" [disabled] [ref=f5e241]:
+                        - generic [ref=f5e243]: New Topic
+                    - paragraph [ref=f5e244]: Follow-up questions maintain context. Click "New Topic" to start fresh.
+            - complementary "Evidence panel" [ref=f5e245]:
+              - generic [ref=f5e246]:
+                - generic [ref=f5e247]: Evidence updated. 4 sources and 0 citations.
+                - generic [ref=f5e248]:
+                  - heading "Evidence" [level=2] [ref=f5e249]
+                  - generic [ref=f5e250]: 4 sources • 0 citations
+                  - button "Close evidence panel" [ref=f5e251] [cursor=pointer]
+                - generic [ref=f5e256]:
+                  - button "Sources" [pressed] [ref=f5e257] [cursor=pointer]
+                  - button "Details" [ref=f5e261] [cursor=pointer]
+                - generic [ref=f5e264]:
+                  - paragraph [ref=f5e265]: Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
+                  - generic [ref=f5e266]:
+                    - generic [ref=f5e267]:
+                      - heading "Sources (4)" [level=3] [ref=f5e272]
+                      - generic [ref=f5e273]:
+                        - generic [ref=f5e274]: Filter sources by keyword
+                        - searchbox "Filter sources by keyword" [ref=f5e275]
+                        - generic [ref=f5e276]: Sort sources
+                        - combobox "Sort sources" [ref=f5e277]:
+                          - option "By Relevance" [selected]
+                          - option "By Title"
+                          - option "By Date"
+                          - option "Cited First"
+                        - button "Reset source filters" [disabled] [ref=f5e278]: Reset filters
+                    - button "More filters" [ref=f5e279] [cursor=pointer]
+                    - generic [ref=f5e280]:
+                      - generic [ref=f5e281]: Showing 4 of 4 sources
+                      - generic [ref=f5e282]:
+                        - generic [ref=f5e283]: "Jump: 1-9 • Tab cycles"
+                        - button "Open source keyboard shortcuts" [ref=f5e284] [cursor=pointer]: "?"
+                    - list "Retrieved sources" [ref=f5e287]:
+                      - listitem [ref=f5e288]:
+                        - generic [ref=f5e289]:
+                          - generic [ref=f5e290]: "1"
+                          - generic [ref=f5e296]:
+                            - generic [ref=f5e297]:
+                              - heading "uat-cycle4-targeted-single-juniper" [level=4] [ref=f5e298]
+                              - generic [ref=f5e299]: Relevance not measured
+                            - generic [ref=f5e300]: Document
+                        - generic [ref=f5e302]:
+                          - paragraph [ref=f5e303]:
+                            - text: Mira Sol leads the
+                            - mark [ref=f5e304]: Juniper
+                            - mark [ref=f5e305]: Community
+                            - mark [ref=f5e306]: Library
+                            - text: project. The
+                            - mark [ref=f5e307]: library
+                            - text: opens on October 12, 2026. It has 24 volunteer readers. Its seed cabinet is in the west reading room. The
+                            - mark [ref=f5e308]: catalog
+                            - text: ...
+                          - button "Show more" [ref=f5e309] [cursor=pointer]
+                        - generic [ref=f5e311]:
+                          - button "View source 1" [ref=f5e312] [cursor=pointer]: View
+                          - button "Copy citation for source 1" [ref=f5e316] [cursor=pointer]: Copy citation
+                          - button "More actions for source 1" [ref=f5e318] [cursor=pointer]
+                        - generic [ref=f5e323]:
+                          - button "Yes" [ref=f5e324] [cursor=pointer]
+                          - button "No" [ref=f5e327] [cursor=pointer]
+                      - listitem [ref=f5e330]:
+                        - generic [ref=f5e331]:
+                          - generic [ref=f5e332]: "2"
+                          - generic [ref=f5e338]:
+                            - generic [ref=f5e339]:
+                              - heading "uat-cycle4-targeted-single-juniper" [level=4] [ref=f5e340]
+                              - generic [ref=f5e341]: Relevance not measured
+                            - generic [ref=f5e342]: Document
+                        - paragraph [ref=f5e345]:
+                          - text: uat-cycle4-targeted-single-
+                          - mark [ref=f5e346]: juniper
+                          - mark [ref=f5e347]: Juniper
+                          - mark [ref=f5e348]: Community
+                          - mark [ref=f5e349]: Library
+                        - generic [ref=f5e351]:
+                          - button "View source 2" [ref=f5e352] [cursor=pointer]: View
+                          - button "Copy citation for source 2" [ref=f5e356] [cursor=pointer]: Copy citation
+                          - button "More actions for source 2" [ref=f5e358] [cursor=pointer]
+                        - generic [ref=f5e363]:
+                          - button "Yes" [ref=f5e364] [cursor=pointer]
+                          - button "No" [ref=f5e367] [cursor=pointer]
+                      - listitem [ref=f5e370]:
+                        - generic [ref=f5e371]:
+                          - generic [ref=f5e372]: "3"
+                          - generic [ref=f5e378]:
+                            - generic [ref=f5e379]:
+                              - heading "uat-cycle4-targeted-single-willow" [level=4] [ref=f5e380]
+                              - generic [ref=f5e381]: Relevance not measured
+                            - generic [ref=f5e382]: Document
+                        - generic [ref=f5e384]:
+                          - paragraph [ref=f5e385]:
+                            - text: Nia Vale leads the Willow Observatory project. The observatory opens on November 4, 2026. It has 18 volunteer astronomers. The telescope is on the east terrace. The
+                            - mark [ref=f5e386]: catalog
+                            - mark [ref=f5e387]: code
+                            - text: is...
+                          - button "Show more" [ref=f5e388] [cursor=pointer]
+                        - generic [ref=f5e390]:
+                          - button "View source 3" [ref=f5e391] [cursor=pointer]: View
+                          - button "Copy citation for source 3" [ref=f5e395] [cursor=pointer]: Copy citation
+                          - button "More actions for source 3" [ref=f5e397] [cursor=pointer]
+                        - generic [ref=f5e402]:
+                          - button "Yes" [ref=f5e403] [cursor=pointer]
+                          - button "No" [ref=f5e406] [cursor=pointer]
+                      - listitem [ref=f5e409]:
+                        - generic [ref=f5e410]:
+                          - generic [ref=f5e411]: "4"
+                          - generic [ref=f5e417]:
+                            - generic [ref=f5e418]:
+                              - heading "uat-cycle4-targeted-single-willow" [level=4] [ref=f5e419]
+                              - generic [ref=f5e420]: Relevance not measured
+                            - generic [ref=f5e421]: Document
+                        - paragraph [ref=f5e424]: uat-cycle4-targeted-single-willow Willow Observatory
+                        - generic [ref=f5e426]:
+                          - button "View source 4" [ref=f5e427] [cursor=pointer]: View
+                          - button "Copy citation for source 4" [ref=f5e431] [cursor=pointer]: Copy citation
+                          - button "More actions for source 4" [ref=f5e433] [cursor=pointer]
+                        - generic [ref=f5e438]:
+                          - button "Yes" [ref=f5e439] [cursor=pointer]
+                          - button "No" [ref=f5e442] [cursor=pointer]
+          - generic [ref=f5e445]:
+            - button "Switch to detailed view" [ref=f5e446] [cursor=pointer]
+            - link "Help & Documentation" [ref=f5e450] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f5e15] [cursor=pointer]
+  - alert [ref=f5e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T04-54-15-120Z.log#L5-L6

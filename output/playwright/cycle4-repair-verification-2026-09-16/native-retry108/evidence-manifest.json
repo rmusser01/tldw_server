@@ -1,0 +1,116 @@
+{
+  "unit": "native-retry108",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat108-native-multi-canonical-after-reload.txt",
+      "bytes": 2058,
+      "sha256": "267418e3fe5283d11b3650ed790254f9e262988b75cde066f1e7a90bf850fb68"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-canonical-before-reload.txt",
+      "bytes": 1996,
+      "sha256": "808593ab3a87a983dc067f5b471a263623839e4d44cea6af91fc38320de42e4e"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-canonical-open.txt",
+      "bytes": 13206,
+      "sha256": "6e5465d7d238e5dfdec78a525fab45c4d7b4c7af23e864b4ae77538669ae39f7"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-console.txt",
+      "bytes": 1756,
+      "sha256": "d7db6fcf71180c63f904008fef20d62f9c6d2ccf88bb9b2681f8c3f0d9349a58"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-credential-scan.json",
+      "bytes": 242,
+      "sha256": "0d48388a9e79af0ec533a427b8cdad92fd9291e17bc0536e55e6b369b61f2743"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-evidence-manifest.json",
+      "bytes": 4160,
+      "sha256": "6b6c8ed5b6335f1a5c9e7fa4804a800622e13e0d2d40ba29420a72404f4c436e"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-final-report.md",
+      "bytes": 4766,
+      "sha256": "eebc3e2e2d41a4383cc6f793b520fcc2759071c4a2b04b63dcf408fb9a3de891"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-general-menu.txt",
+      "bytes": 12236,
+      "sha256": "1e6abaf106b16f21e87e16061cec37623c25094e9922f8e58becc35ddd0e945a"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-local-mirror-after-reload.txt",
+      "bytes": 3669,
+      "sha256": "bfd026c9c31905056b41a31d1517b0ac377c3e3fe61b77aa346a1347d5b66dd4"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-mode-menu.txt",
+      "bytes": 14227,
+      "sha256": "d2b6220aa0c26fc2f94afdd29b9c2344ee0d250b33de77f358bf9b0458153ed7"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-models.txt",
+      "bytes": 13759,
+      "sha256": "8ebdad52877e8f00ff7cf6408f069428e1b6174b94587ca84dafd1e08c98c6f4"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-negative-request.txt",
+      "bytes": 421,
+      "sha256": "9ad42751abda2198ddd328bf66e0b90f172d97d8ba672d0f9076c9e30b27900b"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-negative.txt",
+      "bytes": 13126,
+      "sha256": "a3a2e241bbe1d9592c4035bc22cda0898052102976137a70d723bc08187fe69b"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-new-chat.txt",
+      "bytes": 9705,
+      "sha256": "5828cd0e9fafc2a5a5a6189d26df32689ed7b90a904d70f18a455f8878ea35e6"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-plan.md",
+      "bytes": 2721,
+      "sha256": "1d3644595c10447866a1bac9dd4508786bab833cc25b5336a9631b3dcd06d2f0"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-reloaded.png",
+      "bytes": 136893,
+      "sha256": "a37984627270530e2fb374b34f2ea2061de6af2f586fdc8cf35d78d5225d4039"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-reloaded.txt",
+      "bytes": 13206,
+      "sha256": "2ba5b627fc90812ac076947c4b78b3584ff0c24494684db31abf6806303f8f1c"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-requests.txt",
+      "bytes": 896,
+      "sha256": "95d858729ba0ecc6840499e9501fed87bbaa10fb7f2796c78a451dc49a9a5699"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-restore-model.txt",
+      "bytes": 15018,
+      "sha256": "4c474345a2cbd148c444bd29023aaf4c6e4779d2a423c12959ee0ee3dce27ac6"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-retry-after.txt",
+      "bytes": 12454,
+      "sha256": "f3855e24d726a712774239f8a8e0922e83bb4a99412cbbffded7320c03992c20"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-settled-new.txt",
+      "bytes": 10156,
+      "sha256": "27f69510a375e1ea6a2934e9937c9d201901ba0139453ed15031ad52b49a9486"
+    },
+    {
+      "file": "cycle4-uat108-native-multi-tracker.md",
+      "bytes": 1561,
+      "sha256": "3a5d2d5638062efff64bf87135ae0025b026271efa967ef266d6454eba52a23c"
+    }
+  ]
+}
