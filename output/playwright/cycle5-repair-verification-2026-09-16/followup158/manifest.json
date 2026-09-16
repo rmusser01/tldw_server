@@ -1,0 +1,81 @@
+{
+  "task": "TASK-13260.96",
+  "uat": "UAT158",
+  "baseHead": "82d61258f3a026c24418f3616a059b28d6d7d28e",
+  "finalHead": "38fd4948216d36043ad9ea1191cbb8fff614642f",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Admin/LlamacppAssetsPanel.tsx",
+      "sha256": "1c93e2b8b006da97690721c40232ae1f5defdeb19b05213d00aa9cdf07507560"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Admin/LlamacppProfilesPanel.tsx",
+      "sha256": "b16a3370c0b46ddd134e2eaa981bfe09a2a2f9366f52652bbe034d461aced9ea"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Admin/LlamacppRuntimePanel.tsx",
+      "sha256": "f979b5de65faa20bb5418869ebe8e88091be8d1c8969d2d56b1998d04ba23808"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Admin/LlamacppInventoryPanel.tsx",
+      "sha256": "1fb6dc59517463a4d9e3bdf0ce6b18d26f135d639d889adf6b126a4fa27a95f2"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Admin/__tests__/LlamacppPanels.list-rendering.test.tsx",
+      "sha256": "27e2d72fa9d5dd055598060986200a8dcdbf2e364fed7340427f182eeef4149f"
+    }
+  ],
+  "before": [
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/before/LlamacppAssetsPanel.tsx",
+      "sha256": "5b9c77f21e1bc74f1f2d8d37dc2182fde63c3dc2795ea69ceae237f8df0c620a"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/before/LlamacppInventoryPanel.tsx",
+      "sha256": "8eba4a709a25fd7e4010cabb4513a7275b23a7424c6d59f6e8380d6f2ae9bbb9"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/before/LlamacppProfilesPanel.tsx",
+      "sha256": "ed5097eb343fa263cb1bc8a9d75c90b70a67577f367edbeee53b62a219929cb4"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/before/LlamacppRuntimePanel.tsx",
+      "sha256": "ab0d686fda5afa7ccce94b5ad69921e7c491112136fb872e2afdcc3621afeba8"
+    }
+  ],
+  "checks": {
+    "red": {
+      "failed": 5,
+      "passed": 2,
+      "reason": "Exact AntD List deprecation console.error from all five rendering sites"
+    },
+    "green": {
+      "passed": 30,
+      "files": 5
+    },
+    "eslint": {
+      "files": 5,
+      "errors": 0,
+      "warnings": 0
+    },
+    "diffCheck": 0
+  },
+  "artifacts": [
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/red.log",
+      "sha256": "cd4da542d3cf49f32908624cf52d1bc78ea040526155d159557c3d9f470c9ce7"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/green.log",
+      "sha256": "b3ca33097636e9877fd043632e105250609ce93e3efa912f1983a277eca6db15"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/eslint.json",
+      "sha256": "38c610567582b55c3ae53615d501ccec05faa4914f776b6e0c2f14e481dc7c9a"
+    },
+    {
+      "path": ".tmp/uat158-llamacpp-lists-20260916/diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

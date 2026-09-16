@@ -1,0 +1,32 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:38102) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:38103) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Admin/__tests__/LlamacppAssetsPanel.test.tsx (7 tests) 1159ms
+     ✓ queues downloads and renders cancellable acquisition status  358ms
+(node:38122) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Admin/__tests__/LlamacppPanels.list-rendering.test.tsx (8 tests) 744ms
+(node:38126) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Admin/__tests__/LlamacppProfilesPanel.test.tsx (8 tests) 2970ms
+     ✓ creates a saved launch profile from local assets  686ms
+     ✓ updates an existing profile without changing runtime state  429ms
+     ✓ duplicates an existing profile as a create request  359ms
+     ✓ keeps the form open when server args JSON is invalid  368ms
+     ✓ blocks saving when no model asset or model path is available  378ms
+     ✓ blocks conflicting mmproj asset and server args projector settings  317ms
+     ✓ surfaces unserializable saved server args instead of silently replacing them  306ms
+(node:38127) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Admin/__tests__/LlamacppInventoryPanel.test.tsx (2 tests) 277ms
+ ✓ src/components/Option/Admin/__tests__/LlamacppRuntimePanel.test.tsx (5 tests) 182ms
+
+ Test Files  5 passed (5)
+      Tests  30 passed (30)
+   Start at  13:21:18
+   Duration  5.02s (transform 158ms, setup 300ms, import 2.63s, tests 5.33s, environment 1.07s)
+

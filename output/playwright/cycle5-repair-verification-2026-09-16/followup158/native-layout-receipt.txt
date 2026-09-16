@@ -1,0 +1,26 @@
+### Result
+{"viewport":{"width":390,"height":844},"lists":[{"name":"GGUF models","bounds":{"x":41,"y":230.4921875,"width":308,"height":383,"top":230.4921875,"right":349,"bottom":613.4921875,"left":41},"scrollWidth":483,"clientWidth":306,"actions":[]},{"name":"mmproj projectors","bounds":{"x":41,"y":540.9921875,"width":308,"height":303,"top":540.9921875,"right":349,"bottom":843.9921875,"left":41},"scrollWidth":306,"clientWidth":306,"actions":[]},{"name":"Saved profiles","bounds":{"x":41,"y":309.9921875,"width":308,"height":224,"top":309.9921875,"right":349,"bottom":533.9921875,"left":41},"scrollWidth":306,"clientWidth":306,"actions":[{"text":"Edit","disabled":false,"bounds":{"x":58,"y":500.9921875,"width":62.9609375,"height":24,"top":500.9921875,"right":120.9609375,"bottom":524.9921875,"left":58}},{"text":"Duplicate","disabled":false,"bounds":{"x":128.9609375,"y":500.9921875,"width":100.34375,"height":24,"top":500.9921875,"right":229.3046875,"bottom":524.9921875,"left":128.9609375}},{"text":"Delete","disabled":false,"bounds":{"x":237.3046875,"y":500.9921875,"width":80.4296875,"height":24,"top":500.9921875,"right":317.734375,"bottom":524.9921875,"left":237.3046875}}]},{"name":"Runtime profiles","bounds":{"x":41,"y":649.9921875,"width":308,"height":194,"top":649.9921875,"right":349,"bottom":843.9921875,"left":41},"scrollWidth":306,"clientWidth":306,"actions":[{"text":"Slot snapshots","disabled":false,"bounds":{"x":58,"y":810.9921875,"width":113.28125,"height":24,"top":810.9921875,"right":171.28125,"bottom":834.9921875,"left":58}},{"text":"Start","disabled":false,"bounds":{"x":179.28125,"y":810.9921875,"width":69.5625,"height":24,"top":810.9921875,"right":248.84375,"bottom":834.9921875,"left":179.28125}}]},{"name":"Local GGUF models","bounds":{"x":41,"y":285.4921875,"width":308,"height":273,"top":285.4921875,"right":349,"bottom":558.4921875,"left":41},"scrollWidth":306,"clientWidth":306,"actions":[{"text":"Selected","disabled":true,"bounds":{"x":58,"y":525.4921875,"width":73.875,"height":24,"top":525.4921875,"right":131.875,"bottom":549.4921875,"left":58}}]}]}
+### Ran Playwright code
+```js
+await (async page => {
+  const result = {viewport: page.viewportSize(), lists: []};
+  for (const label of ['GGUF models', 'mmproj projectors', 'Saved profiles', 'Runtime profiles', 'Local GGUF models']) {
+    const list = page.getByRole('list', {name: label, exact:true});
+    await list.scrollIntoViewIfNeeded();
+    result.lists.push(await list.evaluate((el) => ({name: el.getAttribute('aria-label'), bounds: el.getBoundingClientRect().toJSON(), scrollWidth: el.scrollWidth, clientWidth:el.clientWidth, actions: [...el.querySelectorAll('button')].map(b=>({text:b.textContent, disabled:b.disabled, bounds:b.getBoundingClientRect().toJSON()}))})));
+    await page.screenshot({path: '.tmp/uat158-llamacpp-lists-20260916/admin-narrow-'+label.toLowerCase().replaceAll(' ','-')+'.png'});
+  }
+  return result;
+}
+)(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [Describe the attached image in one short sentence. | tldw](http://127.0.0.1:18580/chat)
+- 2: (current) [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/admin/llamacpp
+- Page Title: Llama.cpp · Admin · tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T20-21-47-789Z.log#L3-L4
+

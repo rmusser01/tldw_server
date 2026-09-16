@@ -1,0 +1,14 @@
+### Result
+Total messages: 10 (Errors: 0, Warnings: 0)
+Returning 0 messages for level "error"
+
+### Open tabs
+- 0: [](about:blank)
+- 1: [Describe the attached image in one short sentence. | tldw](http://127.0.0.1:18580/chat)
+- 2: (current) [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/admin/llamacpp
+- Page Title: Llama.cpp · Admin · tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T20-21-47-789Z.log#L5-L10
+

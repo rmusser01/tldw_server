@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Card, Input, List, Space, Tag, Typography } from "antd"
+import { Button, Card, Input, Space, Spin, Tag, Typography } from "antd"
 import { RefreshCw } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
@@ -371,70 +371,71 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
               </Space>
 
               {downloadJobs.length > 0 && (
-                <List
-                  size="small"
-                  bordered
-                  loading={loadingDownloads}
-                  rowKey="job_id"
-                  dataSource={downloadJobs}
-                  renderItem={(job) => {
-                    const status = job.status.toLowerCase()
-                    const percent = progressPercent(job)
-                    const canCancel = cancelableDownloadStatuses.has(status)
-                    return (
-                      <List.Item
-                        actions={
-                          canCancel && onCancelDownload
-                            ? [
-                                <Button
-                                  key="cancel"
-                                  size="small"
-                                  danger
-                                  loading={cancelingDownloadId === job.job_id}
-                                  onClick={() => {
-                                    void onCancelDownload(job.job_id)
-                                  }}
-                                >
-                                  Cancel download {job.job_id}
-                                </Button>
-                              ]
-                            : undefined
-                        }
-                      >
-                        <Space orientation="vertical" size={4} className="w-full">
-                          <Space wrap size="small">
-                            <Text strong>{downloadLabel(job)}</Text>
-                            <Tag color={acquisitionStatusColors[status] || "default"}>
-                              {job.status}
-                            </Tag>
-                            {percent !== null && <Tag>{percent}%</Tag>}
-                            {job.asset_id && <Tag>{job.asset_id}</Tag>}
+                <Spin spinning={loadingDownloads}>
+                  <ul
+                    role="list"
+                    aria-label="Downloads"
+                    aria-busy={loadingDownloads}
+                    className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+                  >
+                    {downloadJobs.map((job) => {
+                      const status = job.status.toLowerCase()
+                      const percent = progressPercent(job)
+                      const canCancel = cancelableDownloadStatuses.has(status)
+                      return (
+                        <li
+                          key={job.job_id}
+                          className="flex flex-col gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <Space orientation="vertical" size={4} className="min-w-0 flex-1">
+                            <Space wrap size="small">
+                              <Text strong>{downloadLabel(job)}</Text>
+                              <Tag color={acquisitionStatusColors[status] || "default"}>
+                                {job.status}
+                              </Tag>
+                              {percent !== null && <Tag>{percent}%</Tag>}
+                              {job.asset_id && <Tag>{job.asset_id}</Tag>}
+                            </Space>
+                            {job.destination_path && (
+                              <Text type="secondary" className="break-all">
+                                {job.destination_path}
+                              </Text>
+                            )}
+                            {job.error_message && (
+                              <DesignSystemAlert
+                                variant="error"
+                                {...passiveAlertProps}
+                                title={job.error_message}
+                              />
+                            )}
+                            {job.warnings.map((warning, index) => (
+                              <DesignSystemAlert
+                                key={`${job.job_id}-warning-${index}`}
+                                variant="warning"
+                                {...passiveAlertProps}
+                                title={warning}
+                              />
+                            ))}
                           </Space>
-                          {job.destination_path && (
-                            <Text type="secondary" className="break-all">
-                              {job.destination_path}
-                            </Text>
+                          {canCancel && onCancelDownload && (
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <Button
+                                size="small"
+                                danger
+                                loading={cancelingDownloadId === job.job_id}
+                                onClick={() => {
+                                  void onCancelDownload(job.job_id)
+                                }}
+                              >
+                                Cancel download {job.job_id}
+                              </Button>
+                            </div>
                           )}
-                          {job.error_message && (
-                            <DesignSystemAlert
-                              variant="error"
-                              {...passiveAlertProps}
-                              title={job.error_message}
-                            />
-                          )}
-                          {job.warnings.map((warning, index) => (
-                            <DesignSystemAlert
-                              key={`${job.job_id}-warning-${index}`}
-                              variant="warning"
-                              {...passiveAlertProps}
-                              title={warning}
-                            />
-                          ))}
-                        </Space>
-                      </List.Item>
-                    )
-                  }}
-                />
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </Spin>
               )}
             </Space>
           </section>
@@ -462,15 +463,18 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
             {assetGroups.map((group) => (
               <section key={group.kind} aria-label={group.label}>
                 <Title level={5}>{group.label}</Title>
-                <List
-                  size="small"
-                  bordered
-                  rowKey="asset_id"
-                  dataSource={group.items}
-                  renderItem={(asset) => {
+                <ul
+                  role="list"
+                  aria-label={group.label}
+                  className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+                >
+                  {group.items.map((asset) => {
                     const size = formatBytes(asset.size_bytes)
                     return (
-                      <List.Item>
+                      <li
+                        key={asset.asset_id}
+                        className="px-4 py-2"
+                      >
                         <Space orientation="vertical" size={4} className="w-full">
                           <Space wrap size="small">
                             <Text strong>{asset.display_name}</Text>
@@ -498,10 +502,10 @@ export const LlamacppAssetsPanel: React.FC<LlamacppAssetsPanelProps> = ({
                             </Space>
                           )}
                         </Space>
-                      </List.Item>
+                      </li>
                     )
-                  }}
-                />
+                  })}
+                </ul>
               </section>
             ))}
           </Space>

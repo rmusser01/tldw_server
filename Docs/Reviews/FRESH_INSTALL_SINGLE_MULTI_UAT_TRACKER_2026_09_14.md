@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **20:27 UTC targeted follow-up: 160 unique findings.** UAT158's deprecated admin List rendering passes independent30/5 tests and native populated-list/console acceptance. New159 maps the avoidable blank-key persona request to reopened TASK12918; anonymous identity scope denial is not quota exhaustion. New160/TASK13260.97 records clipped long asset metadata/warnings at390px. UAT103's independent214/14 run passed, but review/compiler checks found two corrections still required before its commit. UAT157 remains queued behind that shared-file review. No full UAT restart.
+
 - **20:12 UTC console reconciliation: 158 unique findings.** New158 tracks the deprecated AntD List console error on the actual Llama.cpp administration route; rendering-only repair is in progress under13260.96. Inventory is **140 verified, 13 awaiting acceptance, 1 blocked check, 4 unresolved defects** (013/103/157/158). The first-run persona read also returned429 before credentials were entered; an isolated unauthenticated read reproduces `rate_limited`, policy `character_chat.default`, retry_after1. Setup and authenticated Chat succeeded. Retain this as a pre-auth observation pending classification, not an inferred authentication bypass or a proven rate-limit regression. Expected controlled-outage502, pre-key configuration warnings and development Fast Refresh messages are retained separately.
 
 - **20:06 UTC image acceptance checkpoint: 157 unique findings.** The actual PNG Send returned200 and correctly described the image. A second image turn failed during a controlled provider outage; after browser reload and provider restoration, Retry reused the exact client message ID and PNG bytes, returned200/“3”, and survived another reload with one canonical user for that failed question.118 is no longer provider-blocked; final reviewed-source acceptance remains pending because this targeted run used held in-progress103 source hashes. New157 records duplicate canonical writes for the first successful image exchange. Exact timestamps and two frontend fallback POST201s place the duplication immediately after the first completion, **before** the later Send; this corrects the initial chronology inference. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native-image118-157/README.md). [Current reconciliation](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-157-image-checkpoint.json): **140 verified, 13 awaiting acceptance, 1 blocked check, 3 unresolved defects**. No full UAT restart.
@@ -74,7 +76,19 @@
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
 
+## UAT-160 — P3: Narrow Llama.cpp asset tags clip metadata and warnings
+
+- Actual390×844 admin route: GGUF list width308/clientWidth306, scrollWidth483. Long model metadata and two warning sentences extend beyond the card and are visibly clipped. Profile/runtime actions remain reachable. Introduction point is not established.
+- TASK13260.97: wrap long asset metadata/warnings within their available width and retain complete text, grouping and actions. Before evidence: [native screenshot and geometry](../../output/playwright/cycle5-repair-verification-2026-09-16/followup158/README.md).
+
+## UAT-159 — P3: Blank-key Home sends an authenticated persona request
+
+- Fresh single-user Home before credentials dispatches persona/profiles and receives429, policy character_chat.default. Source analysis identifies an anonymous identity scope denial, not exhausted quota; authenticated reads200.
+- Reopened TASK12918: auth resolution alone mounts FirstRunGate, whose bypass still invokes the check hook. Gate the authenticated read using established auth readiness, preserving cookie sessions and setup routing. Native receipt is retained with the [image-run console evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native-image118-157/README.md).
+
 ## UAT-158 — P3: Llama.cpp administration emits deprecated List console errors
+
+- Targeted repair accepted: four semantic lists retain real controls; independent30/5 tests pass, and actual admin route has zero errors/warnings with populated assets/profile/runtime/inventory. Narrow Edit/Cancel passes. Populated download behavior is mounted-test coverage; no unnecessary native model download. [Evidence and limits](../../output/playwright/cycle5-repair-verification-2026-09-16/followup158/README.md). Separate160 tracks clipped asset tags.
 
 - Opening the real `/admin/llamacpp` page for vision setup emits `Warning: [antd: List] The List component is deprecated. And will be removed in next major version.` via console.error. The actual profile configuration succeeds, so this is a rendering/dependency UX finding, not a runtime failure.
 - Status: unresolved, TASK13260.96; bounded replacement of the route's Assets/Profiles/Runtime/Inventory list rendering is in progress. This is separate from the previously repaired Study/Manage lists in055. Preserve each panel's loading, empty, action and selection behavior.
