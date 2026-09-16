@@ -1,0 +1,138 @@
+[
+  {
+    "cell": null,
+    "code": "UP028",
+    "end_location": {
+      "column": 23,
+      "row": 151
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "yield from self._lines",
+          "end_location": {
+            "column": 23,
+            "row": 151
+          },
+          "location": {
+            "column": 9,
+            "row": 150
+          }
+        }
+      ],
+      "message": "Replace with `yield from`"
+    },
+    "location": {
+      "column": 9,
+      "row": 150
+    },
+    "message": "Replace `yield` over `for` loop with `yield from`",
+    "noqa_row": 150,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/yield-in-for-loop"
+  },
+  {
+    "cell": null,
+    "code": "C408",
+    "end_location": {
+      "column": 10,
+      "row": 673
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "{\n            \"api_name\": \"openai\",\n            \"input_data\": \"Public Cedar source\",\n            \"custom_prompt_arg\": \"Summarize\",\n            \"api_key\": \"test-key\",\n            \"model_override\": \"test-model\",\n            \"raise_on_error\": typed,\n        }",
+          "end_location": {
+            "column": 10,
+            "row": 673
+          },
+          "location": {
+            "column": 18,
+            "row": 666
+          }
+        }
+      ],
+      "message": "Rewrite as a literal"
+    },
+    "location": {
+      "column": 18,
+      "row": 666
+    },
+    "message": "Unnecessary `dict()` call (rewrite as a literal)",
+    "noqa_row": 666,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unnecessary-collection-call"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 84,
+      "row": 42
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    from types import SimpleNamespace\n\n    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl\n",
+          "end_location": {
+            "column": 1,
+            "row": 43
+          },
+          "location": {
+            "column": 1,
+            "row": 41
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 41
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 41,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 75,
+      "row": 81
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    import json\n    from types import SimpleNamespace\n\n    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker\n    from tldw_Server_API.app.core.DB_Management.media_db.api import get_document_version\n    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase\n    from tldw_Server_API.app.core.Jobs.manager import JobManager\n    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl\n",
+          "end_location": {
+            "column": 1,
+            "row": 82
+          },
+          "location": {
+            "column": 1,
+            "row": 75
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 75
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 75,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

@@ -354,25 +354,17 @@ def _summarize_via_adapter(
                     code="provider_failure",
                     provider=provider,
                     raise_on_error=raise_on_error,
-                    legacy_message=(
-                        "Error: Provider analysis was truncated before completion. "
-                        "Try a shorter source or a higher output limit."
-                    ),
+                    legacy_message="Error: Provider analysis was truncated before completion. Try a shorter source or a higher output limit.",
                 )
         answer = extract_response_content(response)
         if isinstance(answer, str):
-            # Strip only well-formed flat blocks. Remaining delimiters (including
-            # nested or unclosed blocks) make the final answer ambiguous.
-            reasoning_tag = r"(?:think|reason|reasoning|thought)"
-            reasoning_delimiter = rf"<\s*/?\s*{reasoning_tag}\b"
+            # Reasoning is not analysis. An unclosed block also has no final text.
             answer = re.sub(
-                rf"<({reasoning_tag})>(?:(?!{reasoning_delimiter}).)*</\1>",
+                r"<(think|reason|reasoning|thought)>.*?(?:</\1>|\Z)",
                 "",
                 answer,
                 flags=re.IGNORECASE | re.DOTALL,
             ).strip()
-            if re.search(reasoning_delimiter, answer, flags=re.IGNORECASE):
-                answer = None
         if not isinstance(answer, str) or not answer:
             return _summary_failure(
                 code="provider_failure",
@@ -870,7 +862,6 @@ def analyze(
 ###################################################################################
 
 
-
 def extract_metadata_and_content(input_data):
     metadata = {}
     content = ""
@@ -911,7 +902,6 @@ def format_input_with_metadata(metadata, content):
     formatted_input += f"Author: {metadata.get('author', 'Unknown author')}\n\n"
     formatted_input += content
     return formatted_input
-
 
 
 def extract_text_from_input(input_data):  # noqa: F811

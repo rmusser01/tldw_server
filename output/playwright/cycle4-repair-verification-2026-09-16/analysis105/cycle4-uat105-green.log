@@ -1,0 +1,396 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=307267844
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 70 items
+
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py F [  1%]
+FF.FF..                                                                  [ 11%]
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py .......... [ 25%]
+....................................................                     [100%]
+
+=================================== FAILURES ===================================
+__ test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success] ___
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:83: in test_real_analysis_job_persists_source_and_truthful_outcome
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/services/media_ingest_jobs_worker.py:586: in _handle_job
+    result = await process_document_like_item(
+tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py:5362: in process_document_like_item
+    process_result_dict = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py:511: in process_document_content
+    analysis_text_for_chunk = analyze(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:817: in analyze
+    final_result = _dispatch_to_api(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:578: in _dispatch_to_api
+    adapter_result = _summarize_via_adapter(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:288: in _summarize_via_adapter
+    else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/LLM_Calls/adapter_utils.py:189: in resolve_provider_api_key_from_config
+    api_key, _debug = resolve_provider_api_key(
+tldw_Server_API/app/core/Chat/chat_service.py:2188: in resolve_provider_api_key
+    override = get_llm_provider_override(provider_key)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:723: in get_llm_provider_override
+    return _get_healthy_override_snapshot(provider_norm).get(provider_norm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:714: in _get_healthy_override_snapshot
+    raise ByokResolutionError(
+E   tldw_Server_API.app.core.AuthNZ.byok_runtime.ByokResolutionError: credential_store_unavailable: llama.cpp
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:23:14.819 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+2026-09-15 19:23:14.820 | DEBUG    | tldw_Server_API.app.core.DB_Management.db_path_utils:get_user_base_directory:534 - Created user directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49/1
+2026-09-15 19:23:14.821 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+2026-09-15 19:23:14.822 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+2026-09-15 19:23:14.822 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:23:15.006 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-15 19:23:15.013 | INFO     | tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create:exponential_backoff:1166 - ExponentialBackoff decorator configured with max_retries=3, base_delay=1s.
+2026-09-15 19:23:15.043 | INFO     | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/jobs.db
+2026-09-15 19:23:15.044 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queued -> jobs_queued
+2026-09-15 19:23:15.044 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queued
+2026-09-15 19:23:15.044 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.sla_breaches_total -> jobs_sla_breaches_total
+2026-09-15 19:23:15.044 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_sla_breaches_total
+2026-09-15 19:23:15.045 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_flag -> jobs_queue_flag
+2026-09-15 19:23:15.045 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_flag
+2026-09-15 19:23:15.045 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.scheduled -> jobs_scheduled
+2026-09-15 19:23:15.046 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_scheduled
+2026-09-15 19:23:15.046 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.processing -> jobs_processing
+2026-09-15 19:23:15.046 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_processing
+2026-09-15 19:23:15.046 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.backlog -> jobs_backlog
+2026-09-15 19:23:15.047 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_backlog
+2026-09-15 19:23:15.047 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_seconds -> jobs_duration_seconds
+2026-09-15 19:23:15.047 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_seconds
+2026-09-15 19:23:15.047 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_seconds -> jobs_queue_latency_seconds
+2026-09-15 19:23:15.048 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_seconds
+2026-09-15 19:23:15.048 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.retries_total -> jobs_retries_total
+2026-09-15 19:23:15.048 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_retries_total
+2026-09-15 19:23:15.048 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.failures_total -> jobs_failures_total
+2026-09-15 19:23:15.049 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_failures_total
+2026-09-15 19:23:15.049 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.failures_by_code_total -> jobs_failures_by_code_total
+2026-09-15 19:23:15.049 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_failures_by_code_total
+2026-09-15 19:23:15.049 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.created_total -> jobs_created_total
+2026-09-15 19:23:15.050 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_created_total
+2026-09-15 19:23:15.050 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.completed_total -> jobs_completed_total
+2026-09-15 19:23:15.050 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_completed_total
+2026-09-15 19:23:15.051 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.cancelled_total -> jobs_cancelled_total
+2026-09-15 19:23:15.051 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_cancelled_total
+2026-09-15 19:23:15.051 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.json_truncated_total -> jobs_json_truncated_total
+2026-09-15 19:23:15.051 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_json_truncated_total
+2026-09-15 19:23:15.052 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.stale_processing -> jobs_stale_processing
+2026-09-15 19:23:15.052 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_stale_processing
+2026-09-15 19:23:15.052 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.time_to_expiry_seconds -> jobs_time_to_expiry_seconds
+2026-09-15 19:23:15.053 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_time_to_expiry_seconds
+2026-09-15 19:23:15.053 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.retry_after_seconds -> jobs_retry_after_seconds
+2026-09-15 19:23:15.053 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_retry_after_seconds
+2026-09-15 19:23:15.053 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p50_seconds -> jobs_queue_latency_p50_seconds
+2026-09-15 19:23:15.054 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p50_seconds
+2026-09-15 19:23:15.054 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p90_seconds -> jobs_queue_latency_p90_seconds
+2026-09-15 19:23:15.054 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p90_seconds
+2026-09-15 19:23:15.055 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p99_seconds -> jobs_queue_latency_p99_seconds
+2026-09-15 19:23:15.055 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p99_seconds
+2026-09-15 19:23:15.055 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p50_seconds -> jobs_duration_p50_seconds
+2026-09-15 19:23:15.055 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p50_seconds
+2026-09-15 19:23:15.056 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p90_seconds -> jobs_duration_p90_seconds
+2026-09-15 19:23:15.056 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p90_seconds
+2026-09-15 19:23:15.056 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p99_seconds -> jobs_duration_p99_seconds
+2026-09-15 19:23:15.056 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p99_seconds
+2026-09-15 19:23:15.060 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/media.db [Client ID: 1]
+2026-09-15 19:23:15.061 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/media.db
+2026-09-15 19:23:15.061 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 0. Code supports: 26
+2026-09-15 19:23:15.062 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:276 - Applying initial schema (Version 1) to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/media.db...
+2026-09-15 19:23:15.062 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:280 - [Schema V1] Applying full schema script...
+2026-09-15 19:23:15.076 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:282 - [Schema V1] Full schema script executed.
+2026-09-15 19:23:15.079 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:288 - [Schema V1] Media table structure validated successfully.
+2026-09-15 19:23:15.079 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:298 - [Schema V1] Version check confirmed version is 26.
+2026-09-15 19:23:15.080 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:302 - [Schema V1] Core Schema V1 (incl. version update) applied successfully for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/media.db.
+2026-09-15 19:23:15.080 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:308 - [Schema V1] Applying FTS Tables...
+2026-09-15 19:23:15.081 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:310 - [Schema V1] FTS Tables created successfully.
+2026-09-15 19:23:15.083 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:267 - Database schema initialized to version 26.
+2026-09-15 19:23:15.084 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/media.db
+2026-09-15 19:23:15.084 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options:resolve_chunking_options_and_plan:275 - Chunking disabled.
+2026-09-15 19:23:15.167 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-15 19:23:15.369 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+2026-09-15 19:23:15.548 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:process_document_like_item:5354 - Calling document-like processor 'process_document_content' for 'cedar.md' in executor
+2026-09-15 19:23:15.550 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:15.551 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_processing_attempt
+2026-09-15 19:23:15.551 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/cedar.md (type: .md)
+2026-09-15 19:23:15.551 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:23:15.552 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:23:15.552 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist0/cedar.md.
+2026-09-15 19:23:15.552 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:15.553 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_analysis_attempt
+2026-09-15 19:23:15.553 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:670 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:23:15.553 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:679 - Using default system message.
+2026-09-15 19:23:15.554 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:23:15.554 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:694 - Extracted text content length: 39 characters.
+2026-09-15 19:23:15.555 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:814 - Performing direct summarization (no chunking).
+2026-09-15 19:23:15.555 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:576 - Dispatching to API: llama
+2026-09-15 19:23:15.555 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:23:16.125 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.125 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:23:16.129 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:16.134 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:16.138 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:23:16.140 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:23:16.142 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.143 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+________ test_real_summarizer_failure_preserves_plaintext_source[-stop] ________
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:47: in test_real_summarizer_failure_preserves_plaintext_source
+    result = docs.process_document_content(source, False, None, True, False, "llama", None, None, None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py:511: in process_document_content
+    analysis_text_for_chunk = analyze(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:817: in analyze
+    final_result = _dispatch_to_api(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:578: in _dispatch_to_api
+    adapter_result = _summarize_via_adapter(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:288: in _summarize_via_adapter
+    else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/LLM_Calls/adapter_utils.py:189: in resolve_provider_api_key_from_config
+    api_key, _debug = resolve_provider_api_key(
+tldw_Server_API/app/core/Chat/chat_service.py:2188: in resolve_provider_api_key
+    override = get_llm_provider_override(provider_key)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:723: in get_llm_provider_override
+    return _get_healthy_override_snapshot(provider_norm).get(provider_norm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:714: in _get_healthy_override_snapshot
+    raise ByokResolutionError(
+E   tldw_Server_API.app.core.AuthNZ.byok_runtime.ByokResolutionError: credential_store_unavailable: llama.cpp
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:23:16.144 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.145 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p0/cedar.md (type: .md)
+2026-09-15 19:23:16.145 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:23:16.146 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:23:16.146 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p0/cedar.md.
+2026-09-15 19:23:16.146 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.147 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:670 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:23:16.147 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:679 - Using default system message.
+2026-09-15 19:23:16.147 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:23:16.148 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:694 - Extracted text content length: 39 characters.
+2026-09-15 19:23:16.148 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:814 - Performing direct summarization (no chunking).
+2026-09-15 19:23:16.149 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:576 - Dispatching to API: llama
+2026-09-15 19:23:16.149 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:23:16.261 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.261 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:23:16.262 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.262 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning] __
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:83: in test_real_analysis_job_persists_source_and_truthful_outcome
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/services/media_ingest_jobs_worker.py:586: in _handle_job
+    result = await process_document_like_item(
+tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py:5362: in process_document_like_item
+    process_result_dict = await loop.run_in_executor(
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py:511: in process_document_content
+    analysis_text_for_chunk = analyze(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:817: in analyze
+    final_result = _dispatch_to_api(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:578: in _dispatch_to_api
+    adapter_result = _summarize_via_adapter(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:288: in _summarize_via_adapter
+    else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/LLM_Calls/adapter_utils.py:189: in resolve_provider_api_key_from_config
+    api_key, _debug = resolve_provider_api_key(
+tldw_Server_API/app/core/Chat/chat_service.py:2188: in resolve_provider_api_key
+    override = get_llm_provider_override(provider_key)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:723: in get_llm_provider_override
+    return _get_healthy_override_snapshot(provider_norm).get(provider_norm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:714: in _get_healthy_override_snapshot
+    raise ByokResolutionError(
+E   tldw_Server_API.app.core.AuthNZ.byok_runtime.ByokResolutionError: credential_store_unavailable: llama.cpp
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:23:16.268 | INFO     | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/jobs.db
+2026-09-15 19:23:16.271 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/media.db [Client ID: 1]
+2026-09-15 19:23:16.272 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/media.db
+2026-09-15 19:23:16.272 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 0. Code supports: 26
+2026-09-15 19:23:16.274 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:276 - Applying initial schema (Version 1) to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/media.db...
+2026-09-15 19:23:16.274 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:280 - [Schema V1] Applying full schema script...
+2026-09-15 19:23:16.289 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:282 - [Schema V1] Full schema script executed.
+2026-09-15 19:23:16.292 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:288 - [Schema V1] Media table structure validated successfully.
+2026-09-15 19:23:16.292 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:298 - [Schema V1] Version check confirmed version is 26.
+2026-09-15 19:23:16.292 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:302 - [Schema V1] Core Schema V1 (incl. version update) applied successfully for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/media.db.
+2026-09-15 19:23:16.293 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:308 - [Schema V1] Applying FTS Tables...
+2026-09-15 19:23:16.294 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:310 - [Schema V1] FTS Tables created successfully.
+2026-09-15 19:23:16.296 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:267 - Database schema initialized to version 26.
+2026-09-15 19:23:16.297 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/media.db
+2026-09-15 19:23:16.297 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options:resolve_chunking_options_and_plan:275 - Chunking disabled.
+2026-09-15 19:23:16.298 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:process_document_like_item:5354 - Calling document-like processor 'process_document_content' for 'cedar.md' in executor
+2026-09-15 19:23:16.299 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.299 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/cedar.md (type: .md)
+2026-09-15 19:23:16.300 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:23:16.300 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:23:16.300 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_analysis_job_persist1/cedar.md.
+2026-09-15 19:23:16.301 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.301 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:670 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:23:16.301 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:679 - Using default system message.
+2026-09-15 19:23:16.302 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:23:16.302 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:694 - Extracted text content length: 39 characters.
+2026-09-15 19:23:16.303 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:814 - Performing direct summarization (no chunking).
+2026-09-15 19:23:16.303 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:576 - Dispatching to API: llama
+2026-09-15 19:23:16.303 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:23:16.304 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:16.309 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:16.313 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:23:16.316 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:23:16.556 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.557 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:23:16.557 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.558 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_summarizer_failure_preserves_plaintext_source[Partial analysis-length] _
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:47: in test_real_summarizer_failure_preserves_plaintext_source
+    result = docs.process_document_content(source, False, None, True, False, "llama", None, None, None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py:511: in process_document_content
+    analysis_text_for_chunk = analyze(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:817: in analyze
+    final_result = _dispatch_to_api(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:578: in _dispatch_to_api
+    adapter_result = _summarize_via_adapter(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:288: in _summarize_via_adapter
+    else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/LLM_Calls/adapter_utils.py:189: in resolve_provider_api_key_from_config
+    api_key, _debug = resolve_provider_api_key(
+tldw_Server_API/app/core/Chat/chat_service.py:2188: in resolve_provider_api_key
+    override = get_llm_provider_override(provider_key)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:723: in get_llm_provider_override
+    return _get_healthy_override_snapshot(provider_norm).get(provider_norm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:714: in _get_healthy_override_snapshot
+    raise ByokResolutionError(
+E   tldw_Server_API.app.core.AuthNZ.byok_runtime.ByokResolutionError: credential_store_unavailable: llama.cpp
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:23:16.641 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.641 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p1/cedar.md (type: .md)
+2026-09-15 19:23:16.642 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:23:16.642 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:23:16.642 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p1/cedar.md.
+2026-09-15 19:23:16.643 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.643 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:670 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:23:16.643 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:679 - Using default system message.
+2026-09-15 19:23:16.644 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:23:16.644 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:694 - Extracted text content length: 39 characters.
+2026-09-15 19:23:16.645 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:814 - Performing direct summarization (no chunking).
+2026-09-15 19:23:16.645 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:576 - Dispatching to API: llama
+2026-09-15 19:23:16.645 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:23:16.646 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:16.650 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:16.655 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:23:16.657 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:23:16.771 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.772 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:23:16.772 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.772 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_summarizer_failure_preserves_plaintext_source[<think>private-provider-sentinel</think>-stop] _
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:47: in test_real_summarizer_failure_preserves_plaintext_source
+    result = docs.process_document_content(source, False, None, True, False, "llama", None, None, None)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/Ingestion_Media_Processing/Plaintext/Plaintext_Files.py:511: in process_document_content
+    analysis_text_for_chunk = analyze(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py2026-09-15 19:23:18.072 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 19:23:18.073 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:18.077 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:18.082 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:23:18.082 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:18.087 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:18.091 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:23:18.094 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:23:18.096 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 19:23:18.097 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 19:23:18.097 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 19:23:18.097 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 19:23:18.109 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-15 19:23:18.109 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 19:23:18.109 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 19:23:18.110 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 19:23:18.163 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-15 19:23:18.163 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-15 19:23:18.164 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-15 19:23:18.164 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-15 19:23:18.165 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-15 19:23:18.166 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49
+2026-09-15 19:23:18.166 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49/1/workflows/workflows_scheduler.db
+2026-09-15 19:23:18.168 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-7304eb49/1/workflows/workflows_scheduler.db
+2026-09-15 19:23:18.168 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 19:23:18.169 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:18.169 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+:817: in analyze
+    final_result = _dispatch_to_api(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:578: in _dispatch_to_api
+    adapter_result = _summarize_via_adapter(
+tldw_Server_API/app/core/LLM_Calls/Summarization_General_Lib.py:288: in _summarize_via_adapter
+    else api_key or resolve_provider_api_key_from_config(provider, effective_app_config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/LLM_Calls/adapter_utils.py:189: in resolve_provider_api_key_from_config
+    api_key, _debug = resolve_provider_api_key(
+tldw_Server_API/app/core/Chat/chat_service.py:2188: in resolve_provider_api_key
+    override = get_llm_provider_override(provider_key)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:723: in get_llm_provider_override
+    return _get_healthy_override_snapshot(provider_norm).get(provider_norm)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py:714: in _get_healthy_override_snapshot
+    raise ByokResolutionError(
+E   tldw_Server_API.app.core.AuthNZ.byok_runtime.ByokResolutionError: credential_store_unavailable: llama.cpp
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:23:16.774 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.774 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p2/cedar.md (type: .md)
+2026-09-15 19:23:16.775 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:23:16.775 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:23:16.776 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11746/test_real_summarizer_failure_p2/cedar.md.
+2026-09-15 19:23:16.776 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:23:16.776 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:670 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:23:16.777 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:679 - Using default system message.
+2026-09-15 19:23:16.777 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:23:16.778 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:694 - Extracted text content length: 39 characters.
+2026-09-15 19:23:16.778 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:814 - Performing direct summarization (no chunking).
+2026-09-15 19:23:16.778 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:576 - Dispatching to API: llama
+2026-09-15 19:23:16.779 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:23:16.779 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:23:16.783 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:23:16.788 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:23:16.790 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:23:16.909 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.909 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:23:16.910 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:23:16.910 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[-stop]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[Partial analysis-length]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[<think>private-provider-sentinel</think>-stop]
+=================== 5 failed, 65 passed, 9 warnings in 3.90s ===================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-fc4b7cd8-f87d-4abc-880a-0bbf7f958328/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-fc4b7cd8-f87d-4abc-880a-0bbf7f958328
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-fc4b7cd8-f87d-4abc-880a-0bbf7f958328'
+  warnings.warn(

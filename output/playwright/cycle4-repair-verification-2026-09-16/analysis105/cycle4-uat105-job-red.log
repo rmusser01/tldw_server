@@ -1,0 +1,660 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=3547617539
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 8 items / 6 deselected / 2 selected
+
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py F [ 50%]
+F                                                                        [100%]
+
+=================================== FAILURES ===================================
+_ test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning] __
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:84: in test_real_analysis_job_persists_source_and_truthful_outcome
+    assert result["status"] == expected_status
+E   AssertionError: assert 'Error' == 'Warning'
+E     
+E     - Warning
+E     + Error
+---------------------------- Captured stderr setup -----------------------------
+2026-09-15 19:22:15.375 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+2026-09-15 19:22:15.375 | DEBUG    | tldw_Server_API.app.core.DB_Management.db_path_utils:get_user_base_directory:534 - Created user directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f/1
+2026-09-15 19:22:15.377 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+2026-09-15 19:22:15.377 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+2026-09-15 19:22:15.378 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:22:15.589 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-15 19:22:15.597 | INFO     | tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create:exponential_backoff:1166 - ExponentialBackoff decorator configured with max_retries=3, base_delay=1s.
+2026-09-15 19:22:15.632 | INFO     | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/jobs.db
+2026-09-15 19:22:15.632 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queued -> jobs_queued
+2026-09-15 19:22:15.633 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queued
+2026-09-15 19:22:15.633 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.sla_breaches_total -> jobs_sla_breaches_total
+2026-09-15 19:22:15.633 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_sla_breaches_total
+2026-09-15 19:22:15.634 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_flag -> jobs_queue_flag
+2026-09-15 19:22:15.634 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_flag
+2026-09-15 19:22:15.634 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.scheduled -> jobs_scheduled
+2026-09-15 19:22:15.635 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_scheduled
+2026-09-15 19:22:15.635 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.processing -> jobs_processing
+2026-09-15 19:22:15.635 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_processing
+2026-09-15 19:22:15.635 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.backlog -> jobs_backlog
+2026-09-15 19:22:15.636 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_backlog
+2026-09-15 19:22:15.636 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_seconds -> jobs_duration_seconds
+2026-09-15 19:22:15.636 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_seconds
+2026-09-15 19:22:15.636 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_seconds -> jobs_queue_latency_seconds
+2026-09-15 19:22:15.637 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_seconds
+2026-09-15 19:22:15.637 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.retries_total -> jobs_retries_total
+2026-09-15 19:22:15.637 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_retries_total
+2026-09-15 19:22:15.638 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.failures_total -> jobs_failures_total
+2026-09-15 19:22:15.638 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_failures_total
+2026-09-15 19:22:15.638 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.failures_by_code_total -> jobs_failures_by_code_total
+2026-09-15 19:22:15.638 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_failures_by_code_total
+2026-09-15 19:22:15.639 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.created_total -> jobs_created_total
+2026-09-15 19:22:15.639 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_created_total
+2026-09-15 19:22:15.639 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.completed_total -> jobs_completed_total
+2026-09-15 19:22:15.639 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_completed_total
+2026-09-15 19:22:15.640 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.cancelled_total -> jobs_cancelled_total
+2026-09-15 19:22:15.640 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_cancelled_total
+2026-09-15 19:22:15.640 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.json_truncated_total -> jobs_json_truncated_total
+2026-09-15 19:22:15.641 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_json_truncated_total
+2026-09-15 19:22:15.641 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.stale_processing -> jobs_stale_processing
+2026-09-15 19:22:15.641 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_stale_processing
+2026-09-15 19:22:15.641 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.time_to_expiry_seconds -> jobs_time_to_expiry_seconds
+2026-09-15 19:22:15.642 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_time_to_expiry_seconds
+2026-09-15 19:22:15.642 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.retry_after_seconds -> jobs_retry_after_seconds
+2026-09-15 19:22:15.643 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_retry_after_seconds
+2026-09-15 19:22:15.643 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p50_seconds -> jobs_queue_latency_p50_seconds
+2026-09-15 19:22:15.644 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p50_seconds
+2026-09-15 19:22:15.644 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p90_seconds -> jobs_queue_latency_p90_seconds
+2026-09-15 19:22:15.644 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p90_seconds
+2026-09-15 19:22:15.645 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.queue_latency_p99_seconds -> jobs_queue_latency_p99_seconds
+2026-09-15 19:22:15.645 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_queue_latency_p99_seconds
+2026-09-15 19:22:15.645 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p50_seconds -> jobs_duration_p50_seconds
+2026-09-15 19:22:15.646 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p50_seconds
+2026-09-15 19:22:15.646 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p90_seconds -> jobs_duration_p90_seconds
+2026-09-15 19:22:15.646 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p90_seconds
+2026-09-15 19:22:15.647 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1852 - Normalizing metric name: jobs.duration_p99_seconds -> jobs_duration_p99_seconds
+2026-09-15 19:22:15.647 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: jobs_duration_p99_seconds
+2026-09-15 19:22:15.652 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/media.db [Client ID: 1]
+2026-09-15 19:22:15.652 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/media.db
+2026-09-15 19:22:15.653 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 0. Code supports: 26
+2026-09-15 19:22:15.653 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:276 - Applying initial schema (Version 1) to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/media.db...
+2026-09-15 19:22:15.653 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:280 - [Schema V1] Applying full schema script...
+2026-09-15 19:22:15.669 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:282 - [Schema V1] Full schema script executed.
+2026-09-15 19:22:15.672 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:288 - [Schema V1] Media table structure validated successfully.
+2026-09-15 19:22:15.672 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:298 - [Schema V1] Version check confirmed version is 26.
+2026-09-15 19:22:15.672 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:302 - [Schema V1] Core Schema V1 (incl. version update) applied successfully for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/media.db.
+2026-09-15 19:22:15.673 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:308 - [Schema V1] Applying FTS Tables...
+2026-09-15 19:22:15.675 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:310 - [Schema V1] FTS Tables created successfully.
+2026-09-15 19:22:15.678 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:267 - Database schema initialized to version 26.
+2026-09-15 19:22:15.679 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/media.db
+2026-09-15 19:22:15.679 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options:resolve_chunking_options_and_plan:275 - Chunking disabled.
+2026-09-15 19:22:15.783 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-15 19:22:16.007 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+2026-09-15 19:22:16.214 | WARNING  | tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils:resolve_safe_local_path:46 - Rejected path outside of base directory for local media source: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/cedar.md (base: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_tw_3r25d)
+2026-09-15 19:22:16.215 | ERROR    | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:process_document_like_item:5097 - File preparation/download error for cedar.md: Uploaded file path rejected outside temp directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/cedar.md (FileNotFoundError) | context: is_url=False temp_dir=/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_tw_3r25d temp_dir_exists=True processing_source=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/cedar.md processing_source_exists=True downloaded_path=None downloaded_path_exists=None processing_filepath=None processing_filepath_exists=None processing_filename=None
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+                     │      └ <function console_main at 0x10904ff60>
+                     └ <module 'pytest' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest/__init__.py'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/config/__init__.py", line 201, in console_main
+    code = main()
+           └ <function main at 0x10904fec0>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/config/__init__.py", line 175, in main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+         │                │      │    │                          └ <_pytest.config.Config object at 0x109345950>
+         │                │      │    └ <HookCaller 'pytest_cmdline_main'>
+         │                │      └ <_pytest.config.compat.PathAwareHookProxy object at 0x109347d90>
+         │                └ <_pytest.config.Config object at 0x109345950>
+         └ <enum 'ExitCode'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'config': <_pytest.config.Config object at 0x109345950>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_cmdline_main'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_cmdline_main'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_cmdline_main'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'config': <_pytest.config.Config object at 0x109345950>}
+           │    │               │          └ [<HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib...
+           │    │               └ 'pytest_cmdline_main'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<_pytest.config.Config object at 0x109345950>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 336, in pytest_cmdline_main
+    return wrap_session(config, _main)
+           │            │       └ <function _main at 0x109126e80>
+           │            └ <_pytest.config.Config object at 0x109345950>
+           └ <function wrap_session at 0x109126d40>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 289, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+    │       │            │    │       └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>
+    │       │            │    └ <_pytest.config.Config object at 0x109345950>
+    │       │            └ <function _main at 0x109126e80>
+    │       └ <ExitCode.OK: 0>
+    └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 343, in _main
+    config.hook.pytest_runtestloop(session=session)
+    │      │    │                          └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>
+    │      │    └ <HookCaller 'pytest_runtestloop'>
+    │      └ <_pytest.config.compat.PathAwareHookProxy object at 0x109347d90>
+    └ <_pytest.config.Config object at 0x109345950>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'session': <Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtestloop'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtestloop'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtestloop'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'session': <Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>}
+           │    │               │          └ [<HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib...
+           │    │               └ 'pytest_runtestloop'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Session  exitstatus=<ExitCode.OK: 0> testsfailed=0 testscollected=2>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 367, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+    │    │                                        │              └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    │    │                                        └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+    │    └ <member 'config' of 'Node' objects>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>, 'nextitem': <Coroutine test...
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtest_protocol'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtest_protocol'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtest_protocol'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>, 'nextitem': <Coroutine test...
+           │    │               │          └ [<HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv...
+           │    │               └ 'pytest_runtest_protocol'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>, <Coroutine test_real_analysis_job_p...
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 117, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+    │               │              └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    │               └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+    └ <function runtestprotocol at 0x109126020>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 136, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+    │       │      │               │             └ True
+    │       │      │               └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+    │       │      └ <function call_and_report at 0x109126480>
+    │       └ <method 'append' of 'list' objects>
+    └ [<TestReport 'tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persi...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 245, in call_and_report
+    call = CallInfo.from_call(
+           │        └ <classmethod(<function CallInfo.from_call at 0x1091267a0>)>
+           └ <class '_pytest.runner.CallInfo'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 344, in from_call
+    result: TResult | None = func()
+            │                └ <function call_and_report.<locals>.<lambda> at 0x110bcee80>
+            └ +TResult
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 246, in <lambda>
+    lambda: runtest_hook(item=item, **kwds), when=when, reraise=reraise
+            │                 │       └ {}
+            │                 └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+            └ <HookCaller 'pytest_runtest_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ False
+           │    │         │    │     │    │                  └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtest_call'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtest_call'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtest_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ False
+           │    │               │          │        └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>}
+           │    │               │          └ [<HookImpl plugin_name='threadexception', plugin=<module '_pytest.threadexception' from '/Users/macbook-dev/Documents/GitHub/...
+           │    │               └ 'pytest_runtest_call'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 178, in pytest_runtest_call
+    item.runtest()
+    │    └ <function Coroutine.runtest at 0x1097c6520>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py", line 426, in runtest
+    super().runtest()
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/python.py", line 1671, in runtest
+    self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+    │    │                                   └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+    │    └ <property object at 0x10908d7b0>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'pyfuncitem': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_pyfunc_call'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_pyfunc_call'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_pyfunc_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'pyfuncitem': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>}
+           │    │               │          └ [<HookImpl plugin_name='python', plugin=<module '_pytest.python' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv...
+           │    │               └ 'pytest_pyfunc_call'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='python', plugin=<module '_pytest.python' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/python.py", line 157, in pytest_pyfunc_call
+    result = testfunction(**testargs)
+             │              └ {'tmp_path': PosixPath('/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real...
+             └ <function test_real_analysis_job_persists_source_and_truthful_outcome at 0x1130c8540>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py", line 642, in inner
+    _loop.run_until_complete(task)
+    │     │                  └ <Task pending name='Task-1' coro=<test_real_analysis_job_persists_source_and_truthful_outcome() running at /Users/macbook-dev...
+    │     └ <function BaseEventLoop.run_until_complete at 0x109653420>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 641, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x109653380>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 608, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x1096551c0>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 1936, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x1095c56c0>
+    └ <Handle <TaskStepMethWrapper object at 0x1130278e0>()>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle <TaskStepMethWrapper object at 0x1130278e0>()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle <TaskStepMethWrapper object at 0x1130278e0>()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle <TaskStepMethWrapper object at 0x1130278e0>()>
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py", line 83, in test_real_analysis_job_persists_source_and_truthful_outcome
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+                   │      │           │       │           │            │        │      └ <class 'tldw_Server_API.app.services.media_ingest_jobs_worker._ProgressState'>
+                   │      │           │       │           │            │        └ <module 'tldw_Server_API.app.services.media_ingest_jobs_worker' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_S...
+                   │      │           │       │           │            └ <tldw_Server_API.app.core.Jobs.manager.JobManager object at 0x11406b110>
+                   │      │           │       │           └ {'id': 1, 'uuid': '26155ebe-6b0f-4c04-8156-c01e95819672', 'domain': 'media_ingest', 'queue': 'default', 'job_type': 'media_in...
+                   │      │           │       └ <function JobManager.get_job at 0x113593880>
+                   │      │           └ <tldw_Server_API.app.core.Jobs.manager.JobManager object at 0x11406b110>
+                   │      └ <function _handle_job at 0x1144fb060>
+                   └ <module 'tldw_Server_API.app.services.media_ingest_jobs_worker' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_S...
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/services/media_ingest_jobs_worker.py", line 586, in _handle_job
+    result = await process_document_like_item(
+                   └ <function process_document_like_item at 0x1144c82c0>
+
+> File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py", line 5053, in process_document_like_item
+    raise FileNotFoundError(
+
+FileNotFoundError: Uploaded file path rejected outside temp directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist0/cedar.md
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:22:16.348 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:22:16.349 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:22:16.353 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:22:16.357 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:22:16.362 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:22:16.364 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:22:16.366 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:22:16.367 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+__ test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success] ___
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:84: in test_real_analysis_job_persists_source_and_truthful_outcome
+    assert result["status"] == expected_status
+E   AssertionError: assert 'Error' == 'Success'
+E     
+E     - Success
+E     + Error
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:22:16.374 | INFO     | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/jobs.db
+2026-09-15 19:22:16.378 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/media.db [Client ID: 1]
+2026-09-15 19:22:16.378 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/media.db
+2026-09-15 19:22:16.379 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 0. Code supports: 26
+2026-09-15 19:22:16.380 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:276 - Applying initial schema (Version 1) to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/media.db...
+2026-09-15 19:22:16.380 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:280 - [Schema V1] Applying full schema script...
+2026-09-15 19:22:16.397 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:282 - [Schema V1] Full schema script executed.
+2026-09-15 19:22:16.401 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:288 - [Schema V1] Media table structure validated successfully.
+2026-09-15 19:22:16.402 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:298 - [Schema V1] Version check confirmed version is 26.
+2026-09-15 19:22:16.403 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:302 - [Schema V1] Core Schema V1 (incl. version update) applied successfully for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/media.db.
+2026-09-15 19:22:16.403 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:308 - [Schema V1] Applying FTS Tables...
+2026-09-15 19:22:16.405 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:310 - [Schema V1] FTS Tables created successfully.
+2026-09-15 19:22:16.408 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:267 - Database schema initialized to version 26.
+2026-09-15 19:22:16.408 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/media.db
+2026-09-15 19:22:16.409 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options:resolve_chunking_options_and_plan:275 - Chunking disabled.
+2026-09-15 19:22:16.411 | WARNING  | tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils:resolve_safe_local_path:46 - Rejected path outside of base directory for local media source: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/cedar.md (base: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_t31ajb2a)
+2026-09-15 19:22:16.411 | ERROR    | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:process_document_like_item:5097 - File preparation/download error for cedar.md: Uploaded file path rejected outside temp directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/cedar.md (FileNotFoundError) | context: is_url=False temp_dir=/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/media_ingest_job_t31ajb2a temp_dir_exists=True processing_source=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/cedar.md processing_source_exists=True downloaded_path=None downloaded_path_exists=None processing_filepath=None processing_filepath_exists=None processing_filename=None
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+                     │      └ <function console_main at 0x10904ff60>
+                     └ <module 'pytest' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest/__init__.py'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/config/__init__.py", line 201, in console_main
+    code = main()
+           └ <function main at 0x10904fec0>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/config/__init__.py", line 175, in main
+    ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+         │                │      │    │                          └ <_pytest.config.Config object at 0x109345950>
+         │                │      │    └ <HookCaller 'pytest_cmdline_main'>
+         │                │      └ <_pytest.config.compat.PathAwareHookProxy object at 0x109347d90>
+         │                └ <_pytest.config.Config object at 0x109345950>
+         └ <enum 'ExitCode'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'config': <_pytest.config.Config object at 0x109345950>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_cmdline_main'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_cmdline_main'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_cmdline_main'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'config': <_pytest.config.Config object at 0x109345950>}
+           │    │               │          └ [<HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib...
+           │    │               └ 'pytest_cmdline_main'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<_pytest.config.Config object at 0x109345950>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 336, in pytest_cmdline_main
+    return wrap_session(config, _main)
+           │            │       └ <function _main at 0x109126e80>
+           │            └ <_pytest.config.Config object at 0x109345950>
+           └ <function wrap_session at 0x109126d40>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 289, in wrap_session
+    session.exitstatus = doit(config, session) or 0
+    │       │            │    │       └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>
+    │       │            │    └ <_pytest.config.Config object at 0x109345950>
+    │       │            └ <function _main at 0x109126e80>
+    │       └ <ExitCode.OK: 0>
+    └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 343, in _main
+    config.hook.pytest_runtestloop(session=session)
+    │      │    │                          └ <Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>
+    │      │    └ <HookCaller 'pytest_runtestloop'>
+    │      └ <_pytest.config.compat.PathAwareHookProxy object at 0x109347d90>
+    └ <_pytest.config.Config object at 0x109345950>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'session': <Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtestloop'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtestloop'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtestloop'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'session': <Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>}
+           │    │               │          └ [<HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib...
+           │    │               └ 'pytest_runtestloop'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Session  exitstatus=<ExitCode.OK: 0> testsfailed=1 testscollected=2>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='main', plugin=<module '_pytest.main' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/main.py", line 367, in pytest_runtestloop
+    item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+    │    │                                        │              └ None
+    │    │                                        └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    │    └ <member 'config' of 'Node' objects>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>, 'nextitem': None}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtest_protocol'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtest_protocol'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtest_protocol'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>, 'nextitem': None}
+           │    │               │          └ [<HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv...
+           │    │               └ 'pytest_runtest_protocol'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>, None]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 117, in pytest_runtest_protocol
+    runtestprotocol(item, nextitem=nextitem)
+    │               │              └ None
+    │               └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    └ <function runtestprotocol at 0x109126020>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 136, in runtestprotocol
+    reports.append(call_and_report(item, "call", log))
+    │       │      │               │             └ True
+    │       │      │               └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    │       │      └ <function call_and_report at 0x109126480>
+    │       └ <method 'append' of 'list' objects>
+    └ [<TestReport 'tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persi...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 245, in call_and_report
+    call = CallInfo.from_call(
+           │        └ <classmethod(<function CallInfo.from_call at 0x1091267a0>)>
+           └ <class '_pytest.runner.CallInfo'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 344, in from_call
+    result: TResult | None = func()
+            │                └ <function call_and_report.<locals>.<lambda> at 0x103a52f20>
+            └ +TResult
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 246, in <lambda>
+    lambda: runtest_hook(item=item, **kwds), when=when, reraise=reraise
+            │                 │       └ {}
+            │                 └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+            └ <HookCaller 'pytest_runtest_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ False
+           │    │         │    │     │    │                  └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_runtest_call'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_runtest_call'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_runtest_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ False
+           │    │               │          │        └ {'item': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>}
+           │    │               │          └ [<HookImpl plugin_name='threadexception', plugin=<module '_pytest.threadexception' from '/Users/macbook-dev/Documents/GitHub/...
+           │    │               └ 'pytest_runtest_call'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='runner', plugin=<module '_pytest.runner' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/runner.py", line 178, in pytest_runtest_call
+    item.runtest()
+    │    └ <function Coroutine.runtest at 0x1097c6520>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py", line 426, in runtest
+    super().runtest()
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/python.py", line 1671, in runtest
+    self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+    │    │                                   └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+    │    └ <property object at 0x10908d7b0>
+    └ <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           │    │         │    │     │    │                  │       └ True
+           │    │         │    │     │    │                  └ {'pyfuncitem': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>}
+           │    │         │    │     │    └ <member '_hookimpls' of 'HookCaller' objects>
+           │    │         │    │     └ <HookCaller 'pytest_pyfunc_call'>
+           │    │         │    └ <member 'name' of 'HookCaller' objects>
+           │    │         └ <HookCaller 'pytest_pyfunc_call'>
+           │    └ <member '_hookexec' of 'HookCaller' objects>
+           └ <HookCaller 'pytest_pyfunc_call'>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           │    │               │          │        │       └ True
+           │    │               │          │        └ {'pyfuncitem': <Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>}
+           │    │               │          └ [<HookImpl plugin_name='python', plugin=<module '_pytest.python' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv...
+           │    │               └ 'pytest_pyfunc_call'
+           │    └ <function _multicall at 0x103cab4c0>
+           └ <_pytest.config.PytestPluginManager object at 0x103987510>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          │         │         └ [<Coroutine test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]>]
+          │         └ <member 'function' of 'HookImpl' objects>
+          └ <HookImpl plugin_name='python', plugin=<module '_pytest.python' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/python.py", line 157, in pytest_pyfunc_call
+    result = testfunction(**testargs)
+             │              └ {'tmp_path': PosixPath('/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real...
+             └ <function test_real_analysis_job_persists_source_and_truthful_outcome at 0x1130c8360>
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pytest_asyncio/plugin.py", line 642, in inner
+    _loop.run_until_complete(task)
+    │     │                  └ <Task pending name='Task-6' coro=<test_real_analysis_job_persists_source_and_truthful_outcome() running at /Users/macbook-dev...
+    │     └ <function BaseEventLoop.run_until_complete at 0x109653420>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 641, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x109653380>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 608, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x1096551c0>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 1936, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x1095c56c0>
+    └ <Handle <TaskStepMethWrapper object at 0x1179610f0>()>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle <TaskStepMethWrapper object at 0x1179610f0>()>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle <TaskStepMethWrapper object at 0x1179610f0>()>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle <TaskStepMethWrapper object at 0x1179610f0>()>
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py", line 83, in test_real_analysis_job_persists_source_and_truthful_outcome
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+                   │      │           │       │           │            │        │      └ <class 'tldw_Server_API.app.services.media_ingest_jobs_worker._ProgressState'>
+                   │      │           │       │           │            │        └ <module 'tldw_Server_API.app.services.media_ingest_jobs_worker' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_S...
+                   │      │           │       │           │            └ <tldw_Server_API.app.core.Jobs.manager.JobManager object at 0x117714cd0>
+                   │      │           │       │           └ {'id': 1, 'uuid': 'a19c1852-4f71-44f7-ad3b-634292de86af', 'domain': 'media_ingest', 'queue': 'default', 'job_type': 'media_in...
+                   │      │           │       └ <function JobManager.get_job at 0x113593880>
+                   │      │           └ <tldw_Server_API.app.core.Jobs.manager.JobManager object at 0x117714cd0>
+                   │      └ <function _handle_job at 0x1144fb060>
+                   └ <module 'tldw_Server_API.app.services.media_ingest_jobs_worker' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_S...
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/services/media_ingest_jobs_worker.py", line 586, in _handle_job
+    result = await process_document_like_item(
+                   └ <function process_document_like_item at 0x1144c82c0>
+
+> File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py", line 5053, in process_document_like_item
+    raise FileNotFoundError(
+
+FileNotFoundError: Uploaded file path rejected outside temp directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11743/test_real_analysis_job_persist1/cedar.md2026-09-15 19:22:16.514 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 19:22:16.515 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:22:16.520 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:22:16.525 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:22:16.526 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:22:16.530 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:22:16.535 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:22:16.537 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:22:16.540 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 19:22:16.540 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 19:22:16.541 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 19:22:16.541 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 19:22:16.553 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-15 19:22:16.554 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 19:22:16.554 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 19:22:16.555 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 19:22:16.617 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-15 19:22:16.617 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-15 19:22:16.618 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-15 19:22:16.619 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-15 19:22:16.620 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-15 19:22:16.621 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f
+2026-09-15 19:22:16.622 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f/1/workflows/workflows_scheduler.db
+2026-09-15 19:22:16.624 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-56dc4b7f/1/workflows/workflows_scheduler.db
+2026-09-15 19:22:16.625 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 19:22:16.626 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:22:16.626 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:22:16.482 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:22:16.483 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:22:16.484 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:22:16.484 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persists_source_and_truthful_outcome[stop-Success]
+================= 2 failed, 6 deselected, 8 warnings in 1.82s ==================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-4ea47d00-f9b5-4e56-88d0-b076014058bc/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-4ea47d00-f9b5-4e56-88d0-b076014058bc
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-4ea47d00-f9b5-4e56-88d0-b076014058bc'
+  warnings.warn(

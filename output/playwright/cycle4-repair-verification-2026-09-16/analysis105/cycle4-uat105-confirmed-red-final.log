@@ -1,0 +1,962 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=2814285973
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 70 items
+
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py .F.F.F.FFF [ 14%]
+F...FF...FF.F.F.....FFF...FF....FFF.F...FF.F.F..FFF.                     [ 88%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py F [ 90%]
+.F..F.F                                                                  [100%]
+
+=================================== FAILURES ===================================
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[partial-length-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10e02e7b0>('Error:')
+E    +    where <built-in method startswith of str object at 0x10e02e7b0> = 'Partial answer'.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.100 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.100 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.101 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.101 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.102 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.102 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.102 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.104 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.105 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 14
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.160 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.160 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.161 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.161 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[wrapped-think-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.187 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.187 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.188 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.188 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.189 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.189 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.189 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.190 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.194 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.199 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.201 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.203 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.203 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 35
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.207 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-length-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   assert False
+E    +  where False = <built-in method startswith of str object at 0x1106b7510>('Error:')
+E    +    where <built-in method startswith of str object at 0x1106b7510> = "{'choices': [{'message': {'content': ''}, 'finish_reason': 'length'}]}".startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.233 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.233 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.234 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.235 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.235 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.236 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.236 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.237 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.241 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.245 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.248 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.250 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.250 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 70
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.254 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.255 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.255 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.256 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x110762770>('Error:')
+E    +    where <built-in method startswith of str object at 0x110762770> = 'None'.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.265 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.265 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.266 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.267 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.267 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.267 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.267 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.268 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.272 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.277 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.279 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.281 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.281 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 4
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.285 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.286 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.286 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.286 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.289 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.290 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.290 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.291 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.291 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.291 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.292 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.293 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.297 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.301 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.303 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.305 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.306 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 3
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.310 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.310 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.311 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.311 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[no-choices-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   assert False
+E    +  where False = <built-in method startswith of str object at 0x1107cd7a0>('Error:')
+E    +    where <built-in method startswith of str object at 0x1107cd7a0> = "{'choices': []}".startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.314 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.315 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.315 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.316 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.316 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.316 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.317 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.317 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.322 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.326 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.329 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.331 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.331 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 15
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.335 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.335 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.336 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.336 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[unclosed-think-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10fe5d9d0>('Error:')
+E    +    where <built-in method startswith of str object at 0x10fe5d9d0> = '<think>upstream-secret-body'.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.339 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.340 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.341 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.341 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.342 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.342 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.342 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.343 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.347 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.352 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.354 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.356 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.357 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 27
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.361 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.361 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.362 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.362 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[partial-length-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.412 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.413 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.413 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.414 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.414 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.415 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.415 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.416 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.420 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.425 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.428 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.430 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.430 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 14
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.435 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.435 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.436 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.436 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.439 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.440 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.441 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.441 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.442 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.442 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.443 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.444 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.449 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.454 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.456 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.458 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.458 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 4
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.462 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.463 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.463 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.464 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.503 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.504 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.504 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.505 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.505 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.505 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.506 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.506 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.511 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.517 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.519 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.522 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.522 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 0
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.526 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.527 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.527 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.528 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-content-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.531 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.531 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.531 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.532 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.532 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.533 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.533 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.534 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.538 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.543 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.545 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.547 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.548 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 90
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.552 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.552 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.553 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.553 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[reasoning-field-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   assert False
+E    +  where False = <built-in method startswith of str object at 0x110940b70>('Error:')
+E    +    where <built-in method startswith of str object at 0x110940b70> = "{'choices': [{'message': {'content': '', 'reasoning_content': 'upstream-secret-body'}}]}".startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.559 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.560 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.560 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.561 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.562 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.562 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.562 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.563 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.568 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.573 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.575 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.577 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.578 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 88
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.582 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.583 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.583 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.584 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_retains_only_supported_final_answer[<think>upstream-secret-body</think>Cedar opens in January.] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:715: in test_analysis_retains_only_supported_final_answer
+    assert result == "Cedar opens in January."
+E   AssertionError: assert '<think>upstr...s in January.' == 'Cedar opens in January.'
+E     
+E     - Cedar opens in January.
+E     + <think>upstream-secret-body</think>Cedar opens in January.
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.588 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.588 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.589 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.590 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.590 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.591 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.591 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.592 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.597 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.602 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.605 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.607 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.608 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 58
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.613 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.613 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.614 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.615 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[object-content-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.670 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.671 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.671 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.672 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.672 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.672 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.673 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.673 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.678 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.682 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.685 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.687 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.687 | ERROR    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:823 - Unexpected final result type after processing: <class 'dict'>
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.691 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.691 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.692 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.692 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-content-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   assert False
+E    +  where False = <built-in method startswith of str object at 0x110941e30>('Error:')
+E    +    where <built-in method startswith of str object at 0x110941e30> = "{'choices': [{'message': {'content': None, 'reasoning_content': 'upstream-secret-body'}}]}".startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.695 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.696 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.696 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.697 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.697 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.698 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.698 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.699 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.703 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.707 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.709 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.711 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.712 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 90
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.716 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.717 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.717 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.717 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[wrapped-think-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10fe68ed0>('Error:')
+E    +    where <built-in method startswith of str object at 0x10fe68ed0> = '<think>upstream-secret-body</think>'.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.720 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.721 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.721 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.722 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.722 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.723 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.723 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.724 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.728 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.733 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.735 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.737 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.737 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 35
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.741 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.742 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.742 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.742 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[no-choices-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.774 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.775 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.775 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.776 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.776 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.777 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.777 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.778 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.782 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.787 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.790 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.792 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.793 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 15
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.836 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.836 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.837 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.837 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-content-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10e02e9b0>('Error:')
+E    +    where <built-in method startswith of str object at 0x10e02e9b0> = ' \n '.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.840 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.841 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.841 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.842 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.843 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.843 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.843 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.844 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.848 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.853 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.855 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.857 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.857 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 3
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.862 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.862 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.863 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.863 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-length-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.924 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.924 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.924 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.925 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.926 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.926 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.926 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.927 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.931 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.936 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.938 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.940 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.940 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 70
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.944 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.945 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.945 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.946 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[malformed-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   assert False
+E    +  where False = <built-in method startswith of str object at 0x110962a90>('Error:')
+E    +    where <built-in method startswith of str object at 0x110962a90> = "{'metadata': 'upstream-secret-body'}".startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.949 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.949 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.950 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.950 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.951 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.951 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.951 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.952 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.956 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.961 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.963 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.965 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.965 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 36
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.970 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.970 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.971 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.971 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x1022dc218>('Error:')
+E    +    where <built-in method startswith of str object at 0x1022dc218> = ''.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:12.974 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:12.974 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:12.975 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:12.975 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:12.976 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:12.976 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:12.976 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:12.977 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:12.982 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:12.987 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:12.989 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:12.991 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:12.991 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 0
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:12.995 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.996 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:12.996 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:12.997 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[think-only-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.006 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.006 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.006 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.007 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.008 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.008 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.008 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.009 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.014 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.018 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.021 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.023 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.023 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 35
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.028 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.028 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.029 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.029 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[think-only-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10fe68e70>('Error:')
+E    +    where <built-in method startswith of str object at 0x10fe68e70> = '<think>upstream-secret-body</think>'.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.065 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.065 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.066 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.067 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.067 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.067 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.068 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.069 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.075 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.079 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.082 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.084 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.084 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 35
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.088 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.089 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.089 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.090 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[unclosed-think-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.093 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.093 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.094 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.094 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.095 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.095 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.095 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.096 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.100 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.105 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.107 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.109 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.110 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 27
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.114 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.115 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.116 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.116 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[reasoning-field-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.133 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.133 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.134 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.134 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.135 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.135 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.136 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.136 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.141 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.146 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.149 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.151 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.151 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 88
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.155 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.156 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.156 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.157 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-content-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.168 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.168 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.169 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.170 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.170 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.171 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.171 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.172 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.178 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.184 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.187 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.189 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.189 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 3
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.193 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.194 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.194 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.195 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[malformed-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.210 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.210 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.211 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.211 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.212 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.212 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.212 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.213 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.217 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.222 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.224 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.226 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.227 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 36
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.232 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.232 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.233 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.233 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-legacy] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:681: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    assert output.startswith("Error:")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x10e042670>('Error:')
+E    +    where <built-in method startswith of str object at 0x10e042670> = '   '.startswith
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.236 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.237 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.237 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.238 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.238 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.238 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.239 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.239 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.244 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.249 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.251 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.253 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.253 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 3
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.258 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.258 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.259 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.259 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blocks-typed] _
+tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py:675: in test_analysis_rejects_unusable_provider_output_without_leaking_envelope
+    with pytest.raises(sgl.SummaryProviderError) as error:
+E   Failed: DID NOT RAISE <class 'tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.SummaryProviderError'>
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.262 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: openai, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.263 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.263 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.264 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 19 characters.
+2026-09-15 19:28:13.264 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.264 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: openai
+2026-09-15 19:28:13.265 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:13.265 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:13.270 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:13.275 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:13.277 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:13.279 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.280 | ERROR    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:823 - Unexpected final result type after processing: <class 'list'>
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.284 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.284 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.285 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.285 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_summarizer_failure_preserves_plaintext_source[<think>private-provider-sentinel</think>-stop] _
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:60: in test_real_summarizer_failure_preserves_plaintext_source
+    assert result["status"] == "Warning"
+E   AssertionError: assert 'Success' == 'Warning'
+E     
+E     - Warning
+E     + Success
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.311 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.312 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_processing_attempt
+2026-09-15 19:28:13.312 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p0/cedar.md (type: .md)
+2026-09-15 19:28:13.313 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:28:13.313 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:28:13.314 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p0/cedar.md.
+2026-09-15 19:28:13.314 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.314 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_analysis_attempt
+2026-09-15 19:28:13.315 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.315 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.316 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.316 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 39 characters.
+2026-09-15 19:28:13.317 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.317 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: llama
+2026-09-15 19:28:13.317 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.318 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 40
+2026-09-15 19:28:13.318 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:573 - Using single chunk analysis as final analysis.
+2026-09-15 19:28:13.318 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.319 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_chunks_analyzed
+2026-09-15 19:28:13.319 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:577 - Analysis processing completed for document /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p0/cedar.md.
+2026-09-15 19:28:13.319 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.320 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_processing_success
+2026-09-15 19:28:13.320 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_histogram:114 - metric
+2026-09-15 19:28:13.320 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: document_processing_duration
+2026-09-15 19:28:13.321 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:625 - Document 'cedar' processed with status: Success in 0.01s
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.374 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.375 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.376 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.376 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+________ test_real_summarizer_failure_preserves_plaintext_source[-stop] ________
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:60: in test_real_summarizer_failure_preserves_plaintext_source
+    assert result["status"] == "Warning"
+E   AssertionError: assert 'Success' == 'Warning'
+E     
+E     - Warning
+E     + Success
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.426 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.427 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p1/cedar.md (type: .md)
+2026-09-15 19:28:13.427 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:28:13.427 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:28:13.428 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p1/cedar.md.
+2026-09-15 19:28:13.428 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.428 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.429 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.429 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.430 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 39 characters.
+2026-09-15 19:28:13.430 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.431 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: llama
+2026-09-15 19:28:13.431 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.431 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 118
+2026-09-15 19:28:13.432 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:573 - Using single chunk analysis as final analysis.
+2026-09-15 19:28:13.432 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.432 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:577 - Analysis processing completed for document /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p1/cedar.md.
+2026-09-15 19:28:13.433 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.433 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_histogram:114 - metric
+2026-09-15 19:28:13.433 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:625 - Document 'cedar' processed with status: Success in 0.01s
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.473 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.474 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.474 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.475 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_summarizer_failure_preserves_plaintext_source[Partial analysis-length] _
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:60: in test_real_summarizer_failure_preserves_plaintext_source
+    assert result["status"] == "Warning"
+E   AssertionError: assert 'Success' == 'Warning'
+E     
+E     - Warning
+E     + Success
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:13.573 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.573 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p2/cedar.md (type: .md)
+2026-09-15 19:28:13.574 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:28:13.574 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:28:13.574 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p2/cedar.md.
+2026-09-15 19:28:13.575 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.575 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:13.576 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:13.576 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:13.577 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 39 characters.
+2026-09-15 19:28:13.577 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:13.577 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: llama
+2026-09-15 19:28:13.578 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:13.578 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 16
+2026-09-15 19:28:13.578 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:573 - Using single chunk analysis as final analysis.
+2026-09-15 19:28:13.579 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.579 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:577 - Analysis processing completed for document /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_summarizer_failure_p2/cedar.md.
+2026-09-15 19:28:13.579 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:13.580 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_histogram:114 - metric
+2026-09-15 19:28:13.580 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:625 - Document 'cedar' processed with status: Success in 0.01s
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:13.618 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.619 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:13.619 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:13.620 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+_ test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning] __
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py:138: in test_real_analysis_job_persists_source_and_truthful_outcome
+    assert result["status"] == expected_status
+E   AssertionError: assert 'Success' == 'Warning'
+E     
+E     - Warning
+E     + Success
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 19:28:14.519 | INFO     | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/jobs.db
+2026-09-15 19:28:14.521 | INFO     | tldw_Server_API.app.core.Jobs.manager:acquire_next_job:6185 - [JM TEST] acquire_next_job enter backend=sqlite domain=media_ingest queue=default job_type=None owner=None gate=False db=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/jobs.db
+2026-09-15 19:28:14.522 | INFO     | tldw_Server_API.app.core.Jobs.manager:acquire_next_job:6196 - [JM TEST] queue flags paused=False drain=False
+2026-09-15 19:28:14.523 | INFO     | tldw_Server_API.app.core.Jobs.manager:acquire_next_job:6209 - [JM TEST] inflight quota=0 owner=None
+2026-09-15 19:28:14.525 | INFO     | tldw_Server_API.app.core.Jobs.manager:acquire_next_job:6307 - [JM TEST] acquired id=1 status=processing leased_until=2026-09-16 02:28:44 worker_id=analysis-outcome lease_id=56ccebf9-ae99-4be8-9f54-3e53ede28fc2
+2026-09-15 19:28:14.526 | INFO     | tldw_Server_API.app.core.Jobs.manager:acquire_next_job:6379 - [JM TEST] post-acquire counts queued=0 processing=1
+2026-09-15 19:28:14.529 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db [Client ID: 1]
+2026-09-15 19:28:14.530 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db
+2026-09-15 19:28:14.531 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 0. Code supports: 26
+2026-09-15 19:28:14.531 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:276 - Applying initial schema (Version 1) to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db...
+2026-09-15 19:28:14.532 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:280 - [Schema V1] Applying full schema script...
+2026-09-15 19:28:14.549 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:282 - [Schema V1] Full schema script executed.
+2026-09-15 19:28:14.553 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:288 - [Schema V1] Media table structure validated successfully.
+2026-09-15 19:28:14.553 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:298 - [Schema V1] Version check confirmed version is 26.
+2026-09-15 19:28:14.554 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:302 - [Schema V1] Core Schema V1 (incl. version update) applied successfully for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db.
+2026-09-15 19:28:14.554 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:308 - [Schema V1] Applying FTS Tables...
+2026-09-15 19:28:14.556 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media:apply_sqlite_core_media_schema:310 - [Schema V1] FTS Tables created successfully.
+2026-09-15 19:28:14.558 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:267 - Database schema initialized to version 26.
+2026-09-15 19:28:14.559 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db
+2026-09-15 19:28:14.559 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options:resolve_chunking_options_and_plan:275 - Chunking disabled.
+2026-09-15 19:28:14.561 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:process_document_like_item:5354 - Calling document-like processor 'process_document_content' for 'cedar.md' in executor
+2026-09-15 19:28:14.562 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:14.562 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:convert_document_to_text:175 - Attempting conversion for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/cedar.md (type: .md)
+2026-09-15 19:28:14.563 | DEBUG    | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:449 - Document metadata - Title: cedar, Author: Unknown
+2026-09-15 19:28:14.563 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:484 - Chunking disabled. Using full text as one chunk.
+2026-09-15 19:28:14.564 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:494 - Analysis enabled for 1 chunks of /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/cedar.md.
+2026-09-15 19:28:14.564 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:14.564 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:643 - Starting summarization process. API: llama, Recursive: False, Chunked: False, Streaming: False
+2026-09-15 19:28:14.565 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:652 - Using default system message.
+2026-09-15 19:28:14.565 | DEBUG    | tldw_Server_API.app.core.Utils.prompt_loader:_prompts_dir:29 - Prompt loader resolved Prompts dir: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/Prompts
+2026-09-15 19:28:14.566 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:667 - Extracted text content length: 39 characters.
+2026-09-15 19:28:14.566 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:787 - Performing direct summarization (no chunking).
+2026-09-15 19:28:14.567 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:_dispatch_to_api:549 - Dispatching to API: llama
+2026-09-15 19:28:14.567 | DEBUG    | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:808 - Consuming final result (if generator) as streaming=False or chunking was used.
+2026-09-15 19:28:14.567 | INFO     | tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib:analyze:819 - Summarization completed successfully. Final Length: 23
+2026-09-15 19:28:14.568 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:573 - Using single chunk analysis as final analysis.
+2026-09-15 19:28:14.568 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:14.568 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:577 - Analysis processing completed for document /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/cedar.md.
+2026-09-15 19:28:14.569 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_counter:99 - metric
+2026-09-15 19:28:14.569 | INFO     | tldw_Server_API.app.core.Metrics.metrics_logger:log_histogram:114 - metric
+2026-09-15 19:28:14.569 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files:process_document_content:625 - Document 'cedar' processed with status: Success in 0.01s
+2026-09-15 19:28:14.571 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:14.573 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:14.577 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:14.582 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:14.584 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:14.587 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 19:28:14.588 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:14.592 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:14.597 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:14.600 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 19:28:14.600 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 19:28:14.601 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:persist_doc_item_and_children:5677 - Archive parent keywords set for cedar.md: []
+2026-09-15 19:28:14.601 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:persist_doc_item_and_children:5699 - Attempting DB persistence for item: cedar.md using user DB
+2026-09-15 19:28:14.602 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:79 - Initializing Database object for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db [Client ID: 1]
+2026-09-15 19:28:14.604 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:223 - Checking DB schema. Current version: 26. Code supports: 26
+2026-09-15 19:28:14.604 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:235 - Database schema is up to date.
+2026-09-15 19:28:14.607 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers:bootstrap_sqlite_schema:241 - Verified FTS tables and visibility columns exist.
+2026-09-15 19:28:14.607 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.bootstrap_lifecycle_ops:initialize_media_database:138 - Database initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-11756/test_real_analysis_job_persist1/media.db
+2026-09-15 19:28:14.607 | INFO     | tldw_Server_API.app.core.DB_Management.media_db.repositories.media_repository:add_media_with_keywords:141 - add_media_with_keywords: url=cedar.md, title=cedar, client=1
+2026-09-15 19:28:14.610 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.runtime.fts_ops:_update_fts_media:94 - Updated SQLite FTS entry for Media ID 1
+2026-09-15 19:28:14.610 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repository:replace_keywords:246 - No keyword changes media 1.
+2026-09-15 19:28:14.610 | DEBUG    | tldw_Server_API.app.core.DB_Management.media_db.repositories.document_versions_repository:create:65 - Creating document version 1 for media ID 1, UUID eda18289-876f-4505-ac22-79eb79977955
+2026-09-15 19:28:14.612 | INFO     | tldw_Server_API.app.core.Ingestion_Media_Processing.persistence:persist_doc_item_and_children:5883 - DB persistence result for cedar.md: ID=1, UUID=40072095-2971-4011-b6a7-f8c82351d753, Msg='Media 'cedar' added.'
+2026-09-15 19:28:14.616 | INFO     | tldw_Server_API.app.core.Jobs.manager:complete_job:7499 - [JM TEST MUT] complete_job enter job_id=1 enforce=True backend=sqlite
+2026-09-15 19:28:14.616 | INFO     | tldw_Server_API.app.core.Jobs.manager:complete_job:7606 - [JM TEST MUT] complete_job affected ok=True row={'id': 1, 'status': 'completed'} total=1 dist={'completed': 1}2026-09-15 19:28:14.713 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-15 19:28:14.713 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:14.718 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:14.722 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-15 19:28:14.723 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-15 19:28:14.727 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-15 19:28:14.733 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-15 19:28:14.735 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-15 19:28:14.737 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-15 19:28:14.738 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-15 19:28:14.738 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-15 19:28:14.739 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-15 19:28:14.751 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-15 19:28:14.751 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-15 19:28:14.752 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-15 19:28:14.752 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-15 19:28:14.810 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-15 19:28:14.810 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-15 19:28:14.810 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-15 19:28:14.811 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-15 19:28:14.812 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-15 19:28:14.812 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e68293ef
+2026-09-15 19:28:14.813 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e68293ef/1/workflows/workflows_scheduler.db
+2026-09-15 19:28:14.814 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e68293ef/1/workflows/workflows_scheduler.db
+2026-09-15 19:28:14.815 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-15 19:28:14.815 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:14.816 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-15 19:28:14.682 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:14.682 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-15 19:28:14.683 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:862 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-15 19:28:14.684 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:878 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[partial-length-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[wrapped-think-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-length-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[no-choices-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[unclosed-think-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[partial-length-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-content-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[reasoning-field-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_retains_only_supported_final_answer[<think>upstream-secret-body</think>Cedar opens in January.]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[object-content-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[null-content-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[wrapped-think-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[no-choices-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-content-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-length-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[malformed-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[empty-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[think-only-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[think-only-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[unclosed-think-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[reasoning-field-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-content-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[malformed-typed]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blank-legacy]
+FAILED tldw_Server_API/tests/LLM_Calls/test_summarization_adapter.py::test_analysis_rejects_unusable_provider_output_without_leaking_envelope[blocks-typed]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[<think>private-provider-sentinel</think>-stop]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[-stop]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_summarizer_failure_preserves_plaintext_source[Partial analysis-length]
+FAILED tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_analysis_outcomes.py::test_real_analysis_job_persists_source_and_truthful_outcome[length-Warning]
+================== 33 failed, 37 passed, 8 warnings in 3.31s ===================
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-a8330bb7-bb93-439b-a591-0b8fea8edce1/test_kokoro_constructor_direct3
+<class 'OSError'>: [Errno 66] Directory not empty: 'test_kokoro_constructor_direct3'
+  warnings.warn(
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/_pytest/pathlib.py:96: PytestWarning: (rm_rf) error removing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-a8330bb7-bb93-439b-a591-0b8fea8edce1
+<class 'OSError'>: [Errno 66] Directory not empty: '/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/garbage-a8330bb7-bb93-439b-a591-0b8fea8edce1'
+  warnings.warn(
