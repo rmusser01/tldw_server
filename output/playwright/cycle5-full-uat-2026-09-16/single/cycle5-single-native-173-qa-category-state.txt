@@ -1,0 +1,194 @@
+### Page
+- Page URL: http://127.0.0.1:18580/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [ref=f5e1]:
+  - generic [ref=f5e4]:
+    - link "Skip to main content" [ref=f5e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f5e6]:
+      - button "Expand sidebar" [ref=f5e7] [cursor=pointer]
+      - button "New Chat" [ref=f5e11] [cursor=pointer]
+      - generic [ref=f5e14]:
+        - button "Quick Ingest" [ref=f5e15] [cursor=pointer]
+        - button "Chat" [ref=f5e19] [cursor=pointer]
+        - button "Prompts" [ref=f5e22] [cursor=pointer]
+        - button "Characters" [ref=f5e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f5e31] [cursor=pointer]
+        - button "World Books" [ref=f5e35] [cursor=pointer]
+        - button "Notes" [ref=f5e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f5e42] [cursor=pointer]
+        - button "Media" [ref=f5e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f5e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f5e59] [cursor=pointer]
+        - button "Kanban" [ref=f5e65] [cursor=pointer]
+        - button "Watchlists" [ref=f5e67] [cursor=pointer]
+      - generic [ref=f5e72]:
+        - button "Open Notes Dock" [ref=f5e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f5e78] [cursor=pointer]
+        - button "Settings" [ref=f5e81] [cursor=pointer]
+    - main [ref=f5e85]:
+      - generic [ref=f5e86]:
+        - generic [ref=f5e89]:
+          - generic [ref=f5e90]:
+            - button "Expand sidebar" [ref=f5e91] [cursor=pointer]
+            - generic [ref=f5e93]:
+              - img "tldw Assistant" [ref=f5e94]
+              - generic [ref=f5e95]: tldw Assistant
+              - button "Companion Home" [ref=f5e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f5e100] [cursor=pointer]
+          - generic [ref=f5e103]:
+            - button "Search - Open command palette" [ref=f5e104] [cursor=pointer]:
+              - generic [ref=f5e108]: Search
+              - generic [ref=f5e109]: ⌘K
+            - button "Open settings" [ref=f5e110] [cursor=pointer]
+            - generic [ref=f5e122]:
+              - button "Notifications, 0 unread" [ref=f5e123] [cursor=pointer]
+              - status [ref=f5e127]: Notifications are active
+            - button "Switch to light theme" [ref=f5e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f5e135] [cursor=pointer]:
+              - generic [ref=f5e136]: "?"
+        - generic [ref=f5e140]:
+          - link "Skip to search" [ref=f5e141] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f5e142]:
+            - generic [ref=f5e145]:
+              - generic [ref=f5e146]:
+                - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f5e147] [cursor=pointer]': "Sources: 4 selected"
+                - button "Balanced" [ref=f5e154] [cursor=pointer]
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f5e157] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=f5e162] [cursor=pointer]:
+                  - generic [ref=f5e166]: "AI: Server default"
+                - button "Refresh source health" [ref=f5e169] [cursor=pointer]: "Sources ready: 6 of 8"
+                - button "Open Knowledge QA settings" [ref=f5e170] [cursor=pointer]
+              - generic [ref=f5e174]:
+                - generic [ref=f5e175]:
+                  - heading "Ask Your Library" [level=1] [ref=f5e178]
+                  - paragraph [ref=f5e179]: Search selected personal-library sources and get cited answers
+                  - paragraph [ref=f5e180]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                  - paragraph [ref=f5e181]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                - generic [ref=f5e182]:
+                  - button "How it works" [expanded] [ref=f5e183] [cursor=pointer]
+                  - list [ref=f5e185]:
+                    - listitem [ref=f5e186]:
+                      - generic [ref=f5e187]: "1"
+                      - generic [ref=f5e188]: Select sources
+                    - listitem [ref=f5e190]:
+                      - generic [ref=f5e191]: "2"
+                      - generic [ref=f5e192]: Ask a question
+                    - listitem [ref=f5e195]:
+                      - generic [ref=f5e196]: "3"
+                      - generic [ref=f5e197]: Review cited answer
+                - generic [ref=f5e201]:
+                  - button "Explain the methodology used in this study" [ref=f5e202] [cursor=pointer]
+                  - button "Summarize the key findings in my latest sources" [ref=f5e203] [cursor=pointer]
+                  - button "What claims have direct citations?" [ref=f5e204] [cursor=pointer]
+                  - button "Compare conclusions across my documents" [ref=f5e205] [cursor=pointer]
+                - generic [ref=f5e206]:
+                  - paragraph [ref=f5e207]: No previous QA sessions yet.
+                  - button "Continue recent session" [disabled] [ref=f5e208]
+                  - button "Select sources" [ref=f5e212] [cursor=pointer]
+                - paragraph [ref=f5e214]:
+                  - text: Need a full workspace?
+                  - link "Try Research Workspace →" [ref=f5e215] [cursor=pointer]:
+                    - /url: /research-workspace
+              - generic [ref=f5e216]:
+                - paragraph [ref=f5e217]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                - generic [ref=f5e218]:
+                  - textbox "Search your knowledge base" [ref=f5e219]:
+                    - /placeholder: Compare the conclusions across my PDFs
+                  - button "Ask" [disabled] [ref=f5e221]
+                - generic [ref=f5e222]: Press / to focus, Cmd+K for new search
+          - button [aria-hidden] [ref=f5e242] [cursor=pointer]
+          - dialog [ref=f5e243]:
+            - generic [ref=f5e244]:
+              - heading "Source scope and profiles" [level=2] [ref=f5e246]
+              - button "Close source scope" [ref=f5e247] [cursor=pointer]
+            - generic [ref=f5e252]:
+              - generic [ref=f5e253]:
+                - generic [ref=f5e254]:
+                  - generic [ref=f5e255]:
+                    - heading "Source Scope" [level=3] [ref=f5e260]
+                    - generic [ref=f5e261]: "Sources ready: 6 of 8"
+                  - generic [ref=f5e264]:
+                    - generic [ref=f5e265]:
+                      - 'button "Sources: 4 selected" [expanded] [active] [ref=f5e266] [cursor=pointer]'
+                      - menu "Source selector" [ref=f5e326]:
+                        - generic [ref=f5e327]:
+                          - generic [ref=f5e328]: Source categories
+                          - generic [ref=f5e329]:
+                            - button "Refresh source health" [ref=f5e330] [cursor=pointer]
+                            - button "All" [ref=f5e331] [cursor=pointer]
+                            - button "None" [ref=f5e332] [cursor=pointer]
+                        - generic [ref=f5e333]:
+                          - menuitemcheckbox "Documents & Media Uploaded files, transcripts, and web pages Ready" [checked] [ref=f5e334] [cursor=pointer]:
+                            - generic [ref=f5e335]:
+                              - generic [ref=f5e336]: Documents & Media
+                              - generic [ref=f5e337]: Uploaded files, transcripts, and web pages
+                            - generic [ref=f5e338]: Ready
+                          - menuitemcheckbox "Notes Your personal notes and clips Ready" [checked] [ref=f5e343] [cursor=pointer]:
+                            - generic [ref=f5e344]:
+                              - generic [ref=f5e345]: Notes
+                              - generic [ref=f5e346]: Your personal notes and clips
+                            - generic [ref=f5e347]: Ready
+                          - menuitemcheckbox "Chats Previous chat conversations and message history Ready" [checked] [ref=f5e352] [cursor=pointer]:
+                            - generic [ref=f5e353]:
+                              - generic [ref=f5e354]: Chats
+                              - generic [ref=f5e355]: Previous chat conversations and message history
+                            - generic [ref=f5e356]: Ready
+                          - menuitemcheckbox "Characters Character cards and persona definitions Ready" [checked] [ref=f5e361] [cursor=pointer]:
+                            - generic [ref=f5e362]:
+                              - generic [ref=f5e363]: Characters
+                              - generic [ref=f5e364]: Character cards and persona definitions
+                            - generic [ref=f5e365]: Ready
+                          - menuitemcheckbox "Task Boards Kanban board items and tasks Empty" [ref=f5e370] [cursor=pointer]:
+                            - generic [ref=f5e371]:
+                              - generic [ref=f5e372]: Task Boards
+                              - generic [ref=f5e373]: Kanban board items and tasks
+                            - generic [ref=f5e374]: Empty
+                          - menuitemcheckbox "Prompts Saved prompts and reusable prompt templates Empty" [ref=f5e377] [cursor=pointer]:
+                            - generic [ref=f5e378]:
+                              - generic [ref=f5e379]: Prompts
+                              - generic [ref=f5e380]: Saved prompts and reusable prompt templates
+                            - generic [ref=f5e381]: Empty
+                          - menuitemcheckbox "World Books World book entries, lore, keys, and comments Ready" [ref=f5e384] [cursor=pointer]:
+                            - generic [ref=f5e385]:
+                              - generic [ref=f5e386]: World Books
+                              - generic [ref=f5e387]: World book entries, lore, keys, and comments
+                            - generic [ref=f5e388]: Ready
+                          - menuitemcheckbox "Dictionaries Chat dictionaries, entries, replacements, and notes Ready" [ref=f5e391] [cursor=pointer]:
+                            - generic [ref=f5e392]:
+                              - generic [ref=f5e393]: Dictionaries
+                              - generic [ref=f5e394]: Chat dictionaries, entries, replacements, and notes
+                            - generic [ref=f5e395]: Ready
+                    - 'button "Specific: All items" [ref=f5e274] [cursor=pointer]'
+                    - button "Explain source categories" [ref=f5e279] [cursor=pointer]
+                  - paragraph [ref=f5e283]: "Scope: 4 selected • Specific filters: All items — 4 of 8 categories selected"
+                - generic [ref=f5e284]:
+                  - heading "Search Profile" [level=3] [ref=f5e289]
+                  - group "Preset selection" [ref=f5e292]:
+                    - button "Fast Fastest" [ref=f5e293] [cursor=pointer]:
+                      - generic [ref=f5e294]: Fast
+                      - generic [ref=f5e295]: Fastest
+                    - button "Balanced Moderate" [pressed] [ref=f5e296] [cursor=pointer]:
+                      - generic [ref=f5e297]: Balanced
+                      - generic [ref=f5e298]: Moderate
+                    - button "Deep Slower" [ref=f5e299] [cursor=pointer]:
+                      - generic [ref=f5e300]: Deep
+                      - generic [ref=f5e301]: Slower
+                  - paragraph [ref=f5e302]: "Balanced retrieval depth for quality and speed. Response time: Moderate. Sources checked: Moderate. Best for: Default day-to-day research."
+              - generic [ref=f5e303]:
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f5e304] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=f5e309] [cursor=pointer]:
+                  - generic [ref=f5e313]: "AI: Server default"
+                - paragraph [ref=f5e316]: Queries stay on your tldw server unless web fallback is enabled. When enabled, fallback uses your configured server default provider.
+                - button "Profiles" [ref=f5e317] [cursor=pointer]
+                - button "Settings" [ref=f5e322] [cursor=pointer]
+          - generic [ref=f5e224]:
+            - button "Switch to detailed view" [ref=f5e225] [cursor=pointer]
+            - link "Help & Documentation" [ref=f5e229] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f5e237] [cursor=pointer]
+  - alert [ref=f5e241]: Knowledge | tldw
+```

@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Sources: 4 selected', exact: true }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-47-01-023Z.yml)

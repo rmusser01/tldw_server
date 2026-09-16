@@ -1,0 +1,6 @@
+### Result
+{"status":200,"url":"http://127.0.0.1:18501/api/v1/flashcards/review","request":{"card_uuid":"78bd6449-2392-45e9-8dc5-7ac2da5ee8ae","rating":5,"answer_time_ms":152,"review_context":{"review_mode":"cram","deck_id":1,"tag_filter":null}},"body":{"uuid":"78bd6449-2392-45e9-8dc5-7ac2da5ee8ae","ef":2.55,"interval_days":13,"repetitions":2,"lapses":0,"due_at":"2026-09-29T09:23:20.738Z","last_reviewed_at":"2026-09-16T09:23:20.738Z","last_modified":"2026-09-16T09:23:20.738Z","version":4,"scheduler_type":"sm2_plus","queue_state":"review","step_index":null,"suspended_reason":null,"next_intervals":{"again":"10 min","hard":"18 days","good":"1 mo","easy":"1 mo"},"review_session_id":3}}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("button",{name:"Show answer (Space)",exact:true}).click();const p=page.waitForResponse(r=>r.url().includes("/flashcards/review")&&r.request().method()==="POST");await page.getByRole("button",{name:"Easy: I recalled it quickly and confidently. Press 4",exact:true}).click();const r=await p;return {status:r.status(),url:r.url(),request:r.request().postDataJSON(),body:await r.json()};})(page);
+```

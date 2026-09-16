@@ -1,0 +1,176 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Media | tldw](http://127.0.0.1:18581/media)
+### Page
+- Page URL: http://127.0.0.1:18581/media
+- Page Title: Media | tldw
+- Console: 1 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f14e20]:
+  - generic [ref=f14e23]:
+    - link "Skip to main content" [ref=f14e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f14e25]:
+      - button "Expand sidebar" [ref=f14e26] [cursor=pointer]
+      - button "New Chat" [ref=f14e30] [cursor=pointer]
+      - generic [ref=f14e33]:
+        - button "Quick Ingest" [ref=f14e34] [cursor=pointer]
+        - button "Chat" [ref=f14e38] [cursor=pointer]
+        - button "Prompts" [ref=f14e41] [cursor=pointer]
+        - button "Characters" [ref=f14e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f14e50] [cursor=pointer]
+        - button "World Books" [ref=f14e54] [cursor=pointer]
+        - button "Notes" [ref=f14e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f14e61] [cursor=pointer]
+        - button "Media" [ref=f14e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f14e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f14e78] [cursor=pointer]
+        - button "Kanban" [ref=f14e84] [cursor=pointer]
+        - button "Watchlists" [ref=f14e86] [cursor=pointer]
+      - generic [ref=f14e91]:
+        - button "Open Notes Dock" [ref=f14e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f14e97] [cursor=pointer]
+        - button "Settings" [ref=f14e100] [cursor=pointer]
+    - main [ref=f14e104]:
+      - generic [ref=f14e105]:
+        - generic [ref=f14e108]:
+          - generic [ref=f14e109]:
+            - button "Expand sidebar" [ref=f14e110] [cursor=pointer]
+            - generic [ref=f14e112]:
+              - img "tldw Assistant" [ref=f14e113]
+              - generic [ref=f14e114]: tldw Assistant
+              - button "Companion Home" [ref=f14e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f14e119] [cursor=pointer]
+          - generic [ref=f14e122]:
+            - button "Search - Open command palette" [ref=f14e123] [cursor=pointer]:
+              - generic [ref=f14e127]: Search
+              - generic [ref=f14e128]: ⌘K
+            - button "Open settings" [ref=f14e129] [cursor=pointer]
+            - generic [ref=f14e141]:
+              - button "Notifications, connecting" [ref=f14e142] [cursor=pointer]
+              - status [ref=f14e145]: Notifications are connecting
+            - button "Switch to light theme" [ref=f14e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f14e153] [cursor=pointer]:
+              - generic [ref=f14e154]: "?"
+        - generic [ref=f14e156]:
+          - generic [ref=f14e158]:
+            - generic [ref=f14e159]:
+              - generic [ref=f14e160]:
+                - heading "Media Inspector" [level=1] [ref=f14e161]
+                - generic [ref=f14e162]:
+                  - generic [ref=f14e163]: 1 / 1
+                  - button "Trash" [ref=f14e164] [cursor=pointer]
+                  - button "Bulk" [ref=f14e168] [cursor=pointer]
+              - generic [ref=f14e171]:
+                - button "Show media only" [pressed] [ref=f14e172] [cursor=pointer]:
+                  - generic [ref=f14e173]: Media
+                  - generic [ref=f14e174]: "1"
+                - button "Show notes only" [ref=f14e175] [cursor=pointer]:
+                  - generic [ref=f14e176]: Notes
+                  - generic [ref=f14e177]: "0"
+            - generic [ref=f14e179]:
+              - generic [ref=f14e180]:
+                - generic [ref=f14e181]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f14e183] [cursor=pointer]
+              - generic [ref=f14e186]:
+                - generic [ref=f14e187]:
+                  - textbox "Search media (title/content)" [ref=f14e192]
+                  - button "Search syntax help" [ref=f14e194] [cursor=pointer]: "?"
+                - button "Search" [ref=f14e195] [cursor=pointer]
+                - generic [ref=f14e196]:
+                  - generic [ref=f14e197]:
+                    - generic [ref=f14e198]: Filters
+                    - button "Clear all" [ref=f14e202] [cursor=pointer]
+                  - generic [ref=f14e203]:
+                    - generic [ref=f14e204]: Search mode
+                    - generic [ref=f14e205]:
+                      - button "Full-text search" [pressed] [ref=f14e206] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f14e207] [cursor=pointer]: Metadata
+                  - generic [ref=f14e208]:
+                    - generic [ref=f14e209]: Sort by
+                    - generic [ref=f14e210] [cursor=pointer]:
+                      - generic [ref=f14e211]:
+                        - generic "Relevance" [ref=f14e212]
+                        - combobox [ref=f14e213]
+                      - img "down" [ref=f14e215]
+                  - generic [ref=f14e218]:
+                    - generic [ref=f14e219]: Date range
+                    - generic [ref=f14e220]:
+                      - generic [ref=f14e221]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f14e222]
+                      - generic [ref=f14e223]:
+                        - text: End date
+                        - textbox "End date" [ref=f14e224]
+                  - button "Advanced search" [ref=f14e226] [cursor=pointer]
+                  - generic [ref=f14e230] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f14e231]
+                    - generic [ref=f14e234]: Favorites only
+                  - generic [ref=f14e235]:
+                    - button "Media types" [ref=f14e236] [cursor=pointer]
+                    - generic [ref=f14e242] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f14e243]
+                      - generic [ref=f14e244]: Document
+                  - button "Keywords" [ref=f14e246] [cursor=pointer]
+                  - generic [ref=f14e251]:
+                    - generic [ref=f14e252]: Exclude keywords
+                    - generic [ref=f14e254]:
+                      - generic [ref=f14e255]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f14e257]
+                      - img "down" [ref=f14e259]
+                    - generic [ref=f14e262]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f14e263]: 0 exclude keyword suggestions available
+                - generic [ref=f14e264]:
+                  - generic [ref=f14e265]:
+                    - generic [ref=f14e266]: Collection
+                    - combobox "Collection" [ref=f14e267]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f14e268]: Create collections from bulk selection to organize related items.
+            - generic [ref=f14e269]:
+              - generic [ref=f14e271]:
+                - generic [ref=f14e272]:
+                  - generic [ref=f14e273]:
+                    - generic [ref=f14e274]: Results
+                    - generic [ref=f14e275]: 1 / 1
+                  - generic [ref=f14e276]:
+                    - button "Standard view" [pressed] [ref=f14e277] [cursor=pointer]
+                    - button "Compact view" [ref=f14e283] [cursor=pointer]
+                - generic [ref=f14e285]:
+                  - 'button "Select media: Cycle5 Admin only restore fixture" [ref=f14e286] [cursor=pointer]':
+                    - generic [ref=f14e287]:
+                      - button "Add to favorites" [ref=f14e292]
+                      - generic [ref=f14e295]:
+                        - generic [ref=f14e296]:
+                          - generic [ref=f14e297]: MEDIA
+                          - generic [ref=f14e298]: document
+                          - generic [ref=f14e303]: Just now
+                        - generic [ref=f14e304]: Cycle5 Admin only restore fixture
+                  - generic [ref=f14e305]: Loading more results...
+              - generic [ref=f14e309]:
+                - generic [ref=f14e310]:
+                  - generic [ref=f14e311]: 1 of 1 results
+                  - generic [ref=f14e312]:
+                    - generic [ref=f14e313]: "Per page:"
+                    - combobox "Per page:" [ref=f14e314]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f14e316] [cursor=pointer]:
+                  - generic [ref=f14e317]: "?"
+                  - generic [ref=f14e318]: for shortcuts
+            - button "Library tools" [ref=f14e320] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f14e325] [cursor=pointer]
+          - generic [ref=f14e331]:
+            - button "Create study pack" [disabled] [ref=f14e333]
+            - generic [ref=f14e335]:
+              - heading "No media item selected" [level=2] [ref=f14e343]
+              - paragraph [ref=f14e344]: Select a media item from the left sidebar to view its content and analyses here.
+              - button "Keyboard Shortcuts" [ref=f14e345] [cursor=pointer]
+              - button "Open Quick Ingest" [ref=f14e347] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f14e15] [cursor=pointer]
+  - alert [ref=f14e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-12-52-477Z.log#L3-L4

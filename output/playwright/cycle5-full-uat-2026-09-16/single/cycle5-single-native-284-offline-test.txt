@@ -1,0 +1,15 @@
+### Result
+{"time":"2026-09-16T09:23:30.610Z","url":"http://127.0.0.1:18580/settings/tldw"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Test Connection",exact:true}).click(); return {time:new Date().toISOString(),url:page.url()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+- Page Title: Server Settings | tldw
+- Console: 21 errors, 20 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-49-49-466Z.log#L48-L85

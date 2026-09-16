@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-16T09:17:26.924Z","url":"http://127.0.0.1:18581/notes","title":"Notes | tldw","failures":[{"url":"http://127.0.0.1:18501/api/v1/auth/sessions","status":401},{"url":"http://127.0.0.1:18501/api/v1/auth/sessions","status":401}]}
+### Ran Playwright code
+```js
+await (async(page)=>{const failures=[];const listen=r=>{if(r.status()>=400&&r.url().includes("127.0.0.1:18501"))failures.push({url:r.url(),status:r.status()})};page.on("response",listen);await page.waitForTimeout(6500);page.off("response",listen);return {at:new Date().toISOString(),url:page.url(),title:await page.title(),failures};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Page Title: Notes | tldw
+- Console: 97 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-06-54-417Z.log#L16-L147

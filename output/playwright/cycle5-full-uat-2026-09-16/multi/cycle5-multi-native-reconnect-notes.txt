@@ -1,0 +1,15 @@
+### Result
+{"at":"2026-09-16T09:28:30.613Z","url":"http://127.0.0.1:18501/api/v1/notes/keywords/?limit=1000&offset=0&include_note_counts=true","status":200,"body":[{"keyword":"__knowledge_QA__","id":4,"sync_id":"aa08e7e6-3c67-4e43-9bb1-4c21f173d175","created_at":"2026-09-16T08:32:54.864000Z","last_modified":"2026-09-16T08:32:54.864000Z","version":1,"client_id":"2","deleted":false,"note_count":0},{"keyword":"anatomy","id":2,"sync_id":"36cef509-c692-4378-bd98-427eb3bb9eb5","created_at":"2026-09-16T08:17:45.299000Z","last_modified":"2026-09-16T08:17:45.299000Z","version":1,"client_id":"2","deleted":false,"note_count":0},{"keyword":"biology","id":1,"sync_id":"bf0c352e-ed91-43aa-bfd8-fdad7e21ea14","created_at":"2026-09-16T08:17:44.950000Z","last_modified":"2026-09-16T08:17:44.950000Z","version":1,"client_id":"2","deleted":false,"note_count":0},{"keyword":"science","id":3,"sync_id":"3c5e0c70-461c-474c-85ad-02d56499df19","created_at":"2026-09-16T08:17:45.373000Z","last_modified":"2026-09-16T08:17:45.373000Z","version":1,"client_id":"2","deleted":false,"note_count":0}]}
+### Ran Playwright code
+```js
+await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/api/v1/notes/")&&r.request().method()==="GET");await page.getByRole("button",{name:"Retry",exact:true}).click();const r=await p;const j=await r.json();return {at:new Date().toISOString(),url:r.url(),status:r.status(),body:j};})(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Notes | tldw](http://127.0.0.1:18581/notes)
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Page Title: Notes | tldw
+- Console: 11 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-26-41-954Z.log#L14

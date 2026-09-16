@@ -1,0 +1,11 @@
+### Result
+{"url":"http://127.0.0.1:18580/media?id=1"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Close the ingest wizard",exact:true}).click(); await page.getByRole("button",{name:"Knowledge QA",exact:true}).click(); return {url:page.url()}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18580/knowledge
+- Page Title: Knowledge | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L103-L105

@@ -1,0 +1,22 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [](http://127.0.0.1:18581/notes)
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Console: 3 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f24e20]:
+  - status [ref=f24e23]:
+    - generic [ref=f24e25]:
+      - generic [ref=f24e26]:
+        - generic [ref=f24e27]: Retrying
+        - generic [ref=f24e28]:
+          - heading "Retrying server readiness" [level=2] [ref=f24e29]
+          - generic [ref=f24e30]: The WebUI is retrying the health check before opening the app.
+      - button "Waiting" [disabled] [ref=f24e32]
+  - button "Open Next.js Dev Tools" [ref=f24e15] [cursor=pointer]
+  - alert [ref=f24e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-26-41-954Z.log#L3-L6

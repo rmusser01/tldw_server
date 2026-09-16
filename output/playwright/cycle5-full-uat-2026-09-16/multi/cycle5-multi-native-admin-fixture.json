@@ -1,0 +1,87 @@
+[
+  {
+    "who": "admin",
+    "action": "real API login",
+    "status": 200,
+    "expires_in": 1800
+  },
+  {
+    "who": "admin",
+    "method": "POST",
+    "path": "/api/v1/media/search",
+    "status": 200,
+    "request": {},
+    "body": {
+      "items": [],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 0,
+        "total_pages": 0,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 0
+      },
+      "results": []
+    }
+  },
+  {
+    "who": "admin",
+    "method": "POST",
+    "path": "/api/v1/media/add",
+    "status": 200,
+    "body": {
+      "results": [
+        {
+          "status": "Success",
+          "input_ref": "cycle5-admin-restore.txt",
+          "processing_source": "/private/tmp/tldw-onboarding-uat-cycle5-multi-20260916/tmp/media_processing_a3ni7s6k/cycle5-admin-restore.txt",
+          "media_type": "document",
+          "metadata": {
+            "title": "Cycle5 Admin only restore fixture",
+            "author": "Unknown",
+            "source_filename": "cycle5-admin-restore.txt",
+            "raw": {
+              "extracted_title": null,
+              "extracted_author": "Unknown"
+            }
+          },
+          "content": "CYCLE5-ADMIN-RESTORE synthetic only source. The coral cabinet stores 9 shells.",
+          "segments": null,
+          "chunks": [
+            {
+              "text": "CYCLE5-ADMIN-RESTORE synthetic only source. The coral cabinet stores 9 shells.",
+              "metadata": {
+                "chunk_index": 0,
+                "total_chunks": 1
+              }
+            }
+          ],
+          "analysis": null,
+          "summary": null,
+          "analysis_details": {
+            "analysis_model": null,
+            "custom_prompt_used": null,
+            "system_prompt_used": null,
+            "summarized_recursively": false,
+            "parser_used": "txt"
+          },
+          "error": null,
+          "warnings": null,
+          "db_id": 1,
+          "db_message": "Media 'Cycle5 Admin only restore fixture' added.",
+          "message": null,
+          "source_format": "txt",
+          "keywords": [],
+          "claims": null,
+          "claims_details": null,
+          "media_uuid": "6100a908-079a-4622-aea0-63f2f8ec6458",
+          "transcript": "CYCLE5-ADMIN-RESTORE synthetic only source. The coral cabinet stores 9 shells.",
+          "collections_item_id": 1,
+          "collections_origin": "media_add"
+        }
+      ]
+    }
+  }
+]

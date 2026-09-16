@@ -1,0 +1,1 @@
+{"output":"/private/tmp/cycle5-multi-native-admin-fixture.json","steps":3}

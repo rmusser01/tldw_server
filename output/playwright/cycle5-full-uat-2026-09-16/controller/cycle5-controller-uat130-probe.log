@@ -1,0 +1,63 @@
+$ vitest run --config "/private/tmp/cycle5-uat130-catalog-identity-probe.config.ts"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:47036) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > UAT130 preserves configured identity after delayed qualified catalog hydration
+UAT130 safe identity probe {"shape":"qualified","hydrated":"tldw:custom-openai-api:../../../Working/Language_Models/Gemma/exact-model.gguf","stored":"tldw:custom-openai-api:../../../Working/Language_Models/Gemma/exact-model.gguf","dispatchedModel":"custom-openai-api:../../../Working/Language_Models/Gemma/exact-model.gguf","dispatchedProvider":"custom-openai-api"}
+
+stdout | src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > UAT130 preserves configured identity after delayed bare catalog hydration
+UAT130 safe identity probe {"shape":"bare","hydrated":"tldw:gemma3:1b","stored":"tldw:custom-openai-api:../../../Working/Language_Models/Gemma/exact-model.gguf","dispatchedModel":"gemma3:1b","dispatchedProvider":"ollama"}
+
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (3 tests | 1 failed | 1 skipped) 140ms
+     ↓ keeps the explicit choice in store and storage and sends its model and provider
+     ✓ UAT130 preserves configured identity after delayed qualified catalog hydration 104ms
+     × UAT130 preserves configured identity after delayed bare catalog hydration 35ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > UAT130 preserves configured identity after delayed bare catalog hydration
+AssertionError: expected [ …(2) ] to include 'tldw:gemma3:1b'
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx:262:48
+    239|     }
+    240|   });
+    241| });
+       |    ^
+    242| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > UAT130 preserves configured identity after delayed bare catalog hydration
+AssertionError: expected 'ollama' to be 'custom-openai-api' // Object.is equality
+
+Expected: "custom-openai-api"
+Received: "ollama"
+
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx:269:38
+    239|     }
+    240|   });
+    241| });
+       |    ^
+    242| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > UAT130 preserves configured identity after delayed bare catalog hydration
+AssertionError: expected [ …(2) ] to include 'gemma3:1b'
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx:270:58
+    239|     }
+    240|   });
+    241| });
+       |    ^
+    242| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 1 skipped (3)
+   Start at  01:43:35
+   Duration  1.70s (transform 333ms, setup 106ms, import 976ms, tests 140ms, environment 366ms)
+
+error: script "test" exited with code 1

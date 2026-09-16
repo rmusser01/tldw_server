@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 08:10'
+updated_date: '2026-09-16 09:24'
 labels:
   - uat
   - testing
@@ -154,12 +154,18 @@ Targeted follow-up on4bd4e2dfda: ordinary text108 failed send/correlation/Retry/
 Follow-up checkpoint: ordinary text Retry108 and Settings title/disconnect/reconnect058 pass native checks on4bd4e2dfda; Prompt failure-feedback102 passes with separate119 background and120 status findings. Reopened111 reviewed repair committed142cc2f1cc;120 reviewed repair committed28dc9ddffa;119 committeda8e5430d76. Root independently repeated136 tests/4 across111 and120; targeted native acceptance remains pending. Character121 captures four supported current-chat settings and is under final review; image recovery118 remains in implementation. Both Next frontends stopped; no cycle5 profiles started. Branch codex/fresh-install-uat-fixes includes all current origin/dev59049e094e, while the initial32-commit baseline gap and later six-commit merge remain recorded accurately.
 
 2026-09-16T08:10Z: all final124/125 repairs independently reviewed and natively verified onab527eb3b4, evidencecommita325e01010. Combined2604frontendtests/97files pass,90existingcompilerdiagnosticsunchanged, priorbackend456pass/2skips andBandit0unchanged. Freshfetch07:55 confirmsorigin/dev59049e included0missing; original32commitbehind baseline remainsdisclosed. Cycle5 fullfreshsingle/multi started07:59 with separateemptyconfig/data/browser andexistingdependencies. Singlewizard/firstordinaryChatwithoutAPIrestart/twoturncanonicalreload/ChatNoteactualbacklink nowPASSbounded. MultiadminCLIthenAliceBobcreatedthroughUI; provideroperatorINIadaptationexplicit. SeparateAliceexpirycontextparked08:08:59 afterreal1800slogin; returnafter08:39:10. Full12rowmatricesinprogress, nofullsignoff.
+
+Cycle5 checkpoint08:48UTC: source remains ab527eb3b4; docs/evidence d9c8854ec0.283 retained captures independently SHA256-verified, scanned0credential matches. New findings126-130/TASK13260.66-.70 tracked during frozen matrix. Both Biology5 and ordinary Chat/reload pass; multi naturalexpiredtoken refresh passes with1830.947sec untouched interval and ownNotes200; realfailedChat Retry preserves canonicaluser. Singlefile/soleDeleteTrashRestore/Review/reanalysis/failurepreserve pass. ExactsingleWikipedia AccessBlockedtruthful; dependentjourneyblocked. Read-only actualcomponent probes confirm127reattachStrictMode,128Cramreorder,130catalogidentity. Remainingworkflowrows stillrunning; no fullUATsignoff.
+
+Prepared bounded post-cycle5 design Docs/Design/2026-09-16-uat-cycle-5-repairs.md and unique IMPLEMENTATION_PLAN_uat_cycle_5.md while product remainsfrozen. Five new126-130 plus reopened068/task15 require repairs. Stage1currentmatricesstillrunning; no implementation dispatch untilbothfinishand evidencepreserved. Four-stageplan recordsdisjoint existingagentownership andindependentreview, targetednative acceptance, thennextfreshmatrix.
+
+Cycle5 checkpoint09:23UTC: frozen ab527eb3b4 remains source-clean. New findings126-133 plus reopened068 tracked; task72 owns Retry context ordering133, task73 owns FTS fallback132. Both real Media reanalysis/failure-preservation workflows pass. Both new Character completion/reload pass but picker replacement fails. Reciprocal owner API/browser controls pass with search filtering kept separate. Natural away-return expiry passes; later active sessions401 polling under diagnosis. Single intentional API offline window now beginning after successful visible disconnect/key reentry. 636 evidence captures independently verified by SHA256/length at latest checkpoint; no credential matches. Design and new plan updated before implementation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fresh cycle5 UAT is in progress on reviewed product ab527eb3b4 with current dev59049e included. All preceding findings have reviewed repairs with targeted evidence or explicit native coverage limits. Full single/multi workflow acceptance is pending; existing dependency reuse, unavailable vision and hidden-tab tooling limits remain disclosed.
+Fresh cycle5 UAT remains in progress on frozen ab527eb3b4 with fetched dev59049e included. Five new findings126-130 and reopened068 are tracked for bounded repairs after the current matrices finish. Several core workflows and naturalmulti expiry pass; full acceptance and subsequent repair verification remain pending. Existing dependency reuse, external Wikipedia denial, unavailable vision and native hidden-tab tooling limits remain explicit.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

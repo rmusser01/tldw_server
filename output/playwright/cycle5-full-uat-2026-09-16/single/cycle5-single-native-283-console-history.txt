@@ -1,0 +1,63 @@
+[      84ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18580/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[     133ms] [LOG] [HMR] connected @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[     287ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[     551ms] [LOG] [Fast Refresh] done in 363ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   65117ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   65262ms] [LOG] [Fast Refresh] done in 246ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  367501ms] [LOG] Using normalChatMode @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  407271ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  407273ms] [LOG] [Fast Refresh] done in 102ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  407374ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  410950ms] [LOG] [Fast Refresh] done in 3676ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  411105ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  411825ms] [LOG] [Fast Refresh] done in 869ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  564753ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  564915ms] [LOG] [Fast Refresh] done in 263ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  624529ms] [LOG] Using normalChatMode @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  673922ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18580/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[  673949ms] [LOG] [HMR] connected @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  704513ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  709706ms] [LOG] [Fast Refresh] done in 5294ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  709810ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  710648ms] [LOG] [Fast Refresh] done in 939ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  978748ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18580/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[  978776ms] [LOG] [HMR] connected @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1197519ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1198149ms] [LOG] [Fast Refresh] done in 844ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1257065ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1257845ms] [LOG] [Fast Refresh] done in 943ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1543271ms] [LOG] Using normalChatMode @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1543490ms] [ERROR] Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://127.0.0.1:18500/api/v1/chat/completions:0
+[ 1543492ms] [WARNING] Stream completion failed: The chat service provider is currently unavailable. @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1630745ms] [LOG] Using normalChatMode @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1691588ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18580/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[ 1691615ms] [LOG] [HMR] connected @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1795686ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1798240ms] [LOG] [Fast Refresh] done in 2656ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1798355ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1798508ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) @ http://127.0.0.1:18580/settings/tldw:0
+[ 1798960ms] [LOG] [Fast Refresh] done in 707ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1823517ms] [WARNING] tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing. @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1823543ms] [WARNING] [tldw:request] GET /api/v1/ingestion-sources/capabilities 401 Add or update your API key in Settings -> tldw server, then try again. @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1823544ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:18580/settings/tldw:0
+[ 1823645ms] [WARNING] tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing. @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1921724ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1922120ms] [LOG] [Fast Refresh] done in 497ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1931574ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1932115ms] [LOG] [Fast Refresh] done in 642ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1986676ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies?limit=100&offset=0:0
+[ 1986677ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1986677ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies/attachment?client_slot=default:0
+[ 1986677ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1991676ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies?limit=100&offset=0:0
+[ 1991676ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1991676ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies/attachment?client_slot=default:0
+[ 1991676ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1996675ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies?limit=100&offset=0:0
+[ 1996675ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1996675ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies/attachment?client_slot=default:0
+[ 1996676ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2001677ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies?limit=100&offset=0:0
+[ 2001677ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2001677ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18500/api/v1/buddies/attachment?client_slot=default:0
+[ 2001677ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

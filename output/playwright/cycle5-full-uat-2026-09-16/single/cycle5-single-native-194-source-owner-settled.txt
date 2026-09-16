@@ -1,0 +1,12 @@
+### Result
+{"url":"http://127.0.0.1:18580/media?id=1","source":"Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Media",exact:true}).click(); await page.getByRole("button",{name:"Select media: cycle5-single-native-public-source",exact:true}).click(); const body=page.getByRole("region",{name:"Media content",exact:true}); await body.waitFor(); await page.waitForFunction(()=>Array.from(document.querySelectorAll("[role=region]")).some(e=>e.getAttribute("aria-label")==="Media content"&&e.textContent.includes("Jonah Patel")),{},{timeout:15000}); return {url:page.url(),source:await body.innerText()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Media | tldw](http://127.0.0.1:18580/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18580/media?id=1
+- Page Title: Media | tldw

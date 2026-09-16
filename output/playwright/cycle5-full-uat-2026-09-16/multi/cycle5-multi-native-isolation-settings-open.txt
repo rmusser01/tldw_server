@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18581/settings/tldw');
+```
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995)
+- 1: (current) [](http://127.0.0.1:18581/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18581/settings/tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-09-51-983Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-09-51-800Z.log#L1-L2

@@ -1,0 +1,140 @@
+$ vitest run --config "/private/tmp/cycle5-uat068-saved-route-picker-probe.config.ts"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:52012) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from legacy-handoff route
+UAT068 safe picker state {"routeKind":"legacy-handoff","route":"/chat","selected":{"id":"7","name":"New choice","kind":"character","buddy_summary":null,"extensions":null,"metadata":{"selectionMode":"tracked"}},"serverChatId":null,"characterId":null,"messages":[],"getChatCalls":1}
+
+stdout | src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from canonical-saved route
+UAT068 safe picker state {"routeKind":"canonical-saved","route":"/chat?mode=character&characterId=5&chatId=robot","selected":{"id":"5","name":"Robot","kind":"character","buddy_summary":null,"extensions":null},"serverChatId":"robot","characterId":5,"messages":["BEEP BOOP"],"getChatCalls":7}
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (49 tests | 1 failed | 47 skipped) 2709ms
+     ↓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1
+     ↓ promotes accepted entry to saved route and restores its transcript on remount: /options.html#/chat?mode=character&characterId=4&keep=1
+     ↓ does not publish a superseded saved target after delayed scope hydration (return to A: false)
+     ↓ does not publish a superseded saved target after delayed scope hydration (return to A: true)
+     ↓ registers the webui chat route context on mount
+     ↓ waits for session scope readiness before consuming the one-time restore pass
+     ↓ falls back to recent chat only when restore reports nothing restored
+     ↓ stops recent-chat initialization when restore reports cancellation
+     ↓ does not overwrite a server chat selected while session scope initializes
+     ↓ applies explicit character chat route ids before persisted session restore
+     ↓ applies character route ids before persisted session restore
+     ↓ applies a settings-return server chat before persisted session restore
+     ↓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer
+     ↓ applies a sidepanel handoff before persisted session restore
+     ↓ starts a fresh character route chat over an active server chat
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false)
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true)
+     ↓ cancels pending generic restoration before applying an explicit settings target
+     ↓ finishes a delayed current settings local-history load
+     ↓ finishes a delayed current timeline local-history load
+     ↓ does not complete a failed local settings return as a successful server selection
+     ↓ uses canonical ordinary workflow after history load despite a persisted Character preference
+     ↓ uses canonical ordinary workflow after cold load despite a persisted Character preference
+     ↓ preserves the intended workflow for pending chat state
+     ↓ preserves the intended workflow for scope-pending chat state
+     ↓ preserves the intended workflow for fresh chat state
+     ↓ preserves the intended workflow for unsaved chat state
+     ↓ preserves the intended workflow for character chat state
+     ↓ preserves the intended workflow for persona chat state
+     ↓ keeps a saved target over a previous character while profile is delayed
+     ↓ keeps a saved target over a previous character while messages is delayed
+     ↓ does not install a late saved identity after picker changes during metadata fetch
+     ↓ does not install a late saved identity after picker-roundtrip changes during metadata fetch
+     ↓ does not install a late saved identity after replacement changes during metadata fetch
+     ↓ does not install a late saved identity after principal changes during metadata fetch
+     ↓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)
+     ↓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)
+     ↓ discards optional profile completion after replacement
+     ↓ discards optional profile completion after principal
+     ↓ discards optional profile completion after unmount
+     ↓ loads canonical messages without waiting for optional global selection persistence
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: immediate
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: profile
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: messages
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: cross-tab
+     ✓ UAT068 real picker replaces a fully loaded target from legacy-handoff route  1410ms
+     × UAT068 real picker replaces a fully loaded target from canonical-saved route 1298ms
+     ↓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from canonical-saved route
+AssertionError: expected 'robot' to be null // Object.is equality
+
+- Expected: 
+null
+
++ Received: 
+"robot"
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:1025:66
+    1023|       fireEvent.click(buttons.at(-1)!)
+    1024|       // The handler detaches synchronously, before selection persiste…
+    1025|       expect(useStoreMessageOption.getState().serverChatId).toBe(choic…
+       |                                                                  ^
+    1026|       await act(async () => { release(); await pending })
+    1027|       await waitFor(async () => expect(await selectedAssistantStorage.…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from canonical-saved route
+AssertionError: expected { id: '5', name: 'Robot', …(3) } to match object { id: '7', name: 'New choice' }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "id": "7",
+-   "name": "New choice",
++   "id": "5",
++   "name": "Robot",
+  }
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:1027:589
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from canonical-saved route
+AssertionError: expected '?mode=character&characterId=5&chatId=…' not to contain 'chatId=robot'
+
+Expected: "chatId=robot"
+Received: "?mode=character&characterId=5&chatId=robot"
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:1027:671
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > UAT068 real picker replaces a fully loaded target from canonical-saved route
+AssertionError: expected 'robot' to be null // Object.is equality
+
+- Expected: 
+null
+
++ Received: 
+"robot"
+
+ ❯ src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:1028:66
+    1026|       await act(async () => { release(); await pending })
+    1027|       await waitFor(async () => expect(await selectedAssistantStorage.…
+    1028|       expect(useStoreMessageOption.getState().serverChatId).toBe(choic…
+       |                                                                  ^
+    1029|     } finally { release(); view.unmount(); queryClient.clear() }
+    1030|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 47 skipped (49)
+   Start at  01:54:27
+   Duration  5.91s (transform 1.20s, setup 134ms, import 2.48s, tests 2.71s, environment 486ms)
+
+error: script "test" exited with code 1

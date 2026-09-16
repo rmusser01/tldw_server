@@ -1,0 +1,15 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18581/knowledge-qa');
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [](http://127.0.0.1:18581/knowledge-qa)
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge-qa
+- HTTP status: 404 Not Found
+- Console: 1 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-11-21-513Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-11-19-923Z.log#L1-L4

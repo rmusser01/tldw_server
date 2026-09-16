@@ -1,0 +1,6 @@
+### Result
+{"status":201,"url":"http://127.0.0.1:18501/api/v1/notes/","body":{"title":"Cycle5 Bob browser private note","content":"BOB-BROWSER-ONLY-CYCLE5 violet orchard has 17 bells.","conversation_id":null,"message_id":null,"id":"7c2f4588-ee4b-42a3-93f9-a2cd6f7f6661","created_at":"2026-09-16T09:10:47.961000Z","last_modified":"2026-09-16T09:10:47.961000Z","version":1,"client_id":"3","deleted":false,"studio":null,"keywords":[],"folders":[],"keyword_sync":null}}
+### Ran Playwright code
+```js
+await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/api/v1/notes/")&&r.request().method()==="POST");await page.getByRole("button",{name:"Save note",exact:true}).click();const r=await p;return {status:r.status(),url:r.url(),body:await r.json()};})(page);
+```

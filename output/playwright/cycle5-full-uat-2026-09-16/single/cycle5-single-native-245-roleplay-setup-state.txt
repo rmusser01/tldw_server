@@ -1,0 +1,265 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [E2E-TestBot Chat (20260916_090445) | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: E2E-TestBot Chat (20260916_090445) | tldw
+### Snapshot
+```yaml
+- generic [ref=f2e1]:
+  - generic [ref=f2e2]:
+    - generic [ref=f2e4]:
+      - link "Skip to main content" [ref=f2e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f2e6]:
+        - button "Expand sidebar" [ref=f2e7] [cursor=pointer]
+        - button "New Chat" [ref=f2e11] [cursor=pointer]
+        - generic [ref=f2e14]:
+          - button "Quick Ingest" [ref=f2e15] [cursor=pointer]
+          - button "Chat" [ref=f2e19] [cursor=pointer]
+          - button "Prompts" [ref=f2e22] [cursor=pointer]
+          - button "Characters" [ref=f2e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f2e31] [cursor=pointer]
+          - button "World Books" [ref=f2e35] [cursor=pointer]
+          - button "Notes" [ref=f2e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f2e42] [cursor=pointer]
+          - button "Media" [ref=f2e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f2e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f2e59] [cursor=pointer]
+          - button "Kanban" [ref=f2e65] [cursor=pointer]
+          - button "Watchlists" [ref=f2e67] [cursor=pointer]
+        - generic [ref=f2e72]:
+          - button "Open Notes Dock" [ref=f2e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f2e78] [cursor=pointer]
+          - button "Settings" [ref=f2e81] [cursor=pointer]
+      - main [ref=f2e85]:
+        - generic [ref=f2e86]:
+          - generic [ref=f2e89]:
+            - generic [ref=f2e90]:
+              - button "Expand sidebar" [ref=f2e91] [cursor=pointer]
+              - generic [ref=f2e93]:
+                - img "tldw Assistant" [ref=f2e94]
+                - generic [ref=f2e95]: tldw Assistant
+                - button "Companion Home" [ref=f2e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f2e100] [cursor=pointer]
+              - button "E2E-TestBot Chat (20260916_090445)" [ref=f2e551] [cursor=pointer]
+              - generic [ref=f2e105]:
+                - generic "Saved chat. History is persisted." [ref=f2e106]: Saved
+                - generic "Character mode is active." [ref=f2e552]: "Character: E2E-TestBot"
+            - generic [ref=f2e113]:
+              - button "Search - Open command palette" [ref=f2e114] [cursor=pointer]:
+                - generic [ref=f2e118]: Search
+                - generic [ref=f2e119]: ⌘K
+              - button "New saved chat" [ref=f2e120] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f2e124] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f2e125] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f2e126] [cursor=pointer]
+              - button "Open settings" [ref=f2e133] [cursor=pointer]
+              - generic [ref=f2e145]:
+                - button "Notifications, 0 unread" [ref=f2e146] [cursor=pointer]
+                - status [ref=f2e150]: Notifications are active
+              - button "Switch to light theme" [ref=f2e151] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f2e158] [cursor=pointer]:
+                - generic [ref=f2e159]: "?"
+          - generic [ref=f2e160]:
+            - heading "Chat" [level=1] [ref=f2e161]
+            - generic [ref=f2e164]:
+              - paragraph [ref=f2e165]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f2e166]:
+                - main [ref=f2e167]:
+                  - generic [ref=f2e168]:
+                    - generic [ref=f2e170]:
+                      - generic [ref=f2e171]:
+                        - generic [ref=f2e172]:
+                          - text: Character Chat
+                          - generic [ref=f2e558]: E2E-TestBot
+                        - generic [ref=f2e174]: Conversation timeline
+                      - generic [ref=f2e175]:
+                        - button "Switch to light theme" [ref=f2e176] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f2e183] [cursor=pointer]:
+                          - generic [ref=f2e189]: Focus
+                        - button "Shortcuts" [ref=f2e190] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f2e194]
+                    - log "Chat messages" [ref=f2e196]:
+                      - generic [ref=f2e198]:
+                        - article "User message 1 of 2" [ref=f2e559]:
+                          - generic [ref=f2e562]:
+                            - generic [ref=f2e564]:
+                              - generic [ref=f2e565]: You
+                              - generic [ref=f2e566]: • 2:04 AM
+                            - paragraph [ref=f2e568]: Say hello.
+                            - button "More actions" [ref=f2e571] [cursor=pointer]: •••
+                        - article "Assistant message 2 of 2" [ref=f2e575]:
+                          - generic [ref=f2e581]:
+                            - generic [ref=f2e583]:
+                              - generic [ref=f2e584]: E2E-TestBot
+                              - generic [ref=f2e585]: • 2:05 AM
+                            - generic [ref=f2e586]:
+                              - button "collapsed Model’s reasoning (optional)" [ref=f2e589] [cursor=pointer]:
+                                - img "collapsed" [ref=f2e591]
+                                - generic [ref=f2e594]: Model’s reasoning (optional)
+                              - paragraph [ref=f2e866]: BEEP BOOP
+                            - generic [ref=f2e599]:
+                              - generic [ref=f2e600]:
+                                - generic [ref=f2e601]: Was this helpful?
+                                - generic [ref=f2e602]:
+                                  - button "Helpful" [ref=f2e603] [cursor=pointer]
+                                  - button "Not helpful" [ref=f2e606] [cursor=pointer]
+                                  - button "More feedback" [ref=f2e609] [cursor=pointer]
+                              - button "More actions" [ref=f2e615] [cursor=pointer]: •••
+                    - generic [ref=f2e256]:
+                      - generic [ref=f2e257]: Composer
+                      - generic [ref=f2e265]:
+                        - button [aria-hidden] [ref=f2e266]
+                        - button [aria-hidden] [ref=f2e267]
+                        - generic [ref=f2e268]:
+                          - generic [ref=f2e270]:
+                            - button "Hide composer options" [expanded] [ref=f2e271] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f2e276]
+                            - generic [ref=f2e277]:
+                              - button "Improve prompt" [ref=f2e280] [cursor=pointer]
+                              - generic [ref=f2e285]:
+                                - button "Send message" [ref=f2e286] [cursor=pointer]:
+                                  - generic [ref=f2e287]: Send
+                                - button "Open message delivery options" [ref=f2e292] [cursor=pointer]
+                          - generic [ref=f2e297]:
+                            - generic [ref=f2e299]:
+                              - group "Mode and context controls" [ref=f2e300]:
+                                - button "Modes" [ref=f2e301] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f2e308] [cursor=pointer]':
+                                  - generic [ref=f2e309]:
+                                    - generic [ref=f2e310]: MCP
+                                    - generic [ref=f2e311]: None
+                                - button "Search & Context" [ref=f2e314] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f2e319] [cursor=pointer]:
+                                  - generic [ref=f2e322]: Prompt
+                                - button "E2E-TestBot" [ref=f2e323] [cursor=pointer]
+                                - button "Role-play setup" [ref=f2e328] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f2e335] [cursor=pointer]
+                              - group "Run input controls" [ref=f2e341]:
+                                - button "OpenUI" [ref=f2e342] [cursor=pointer]
+                                - button "Start dictation" [ref=f2e348] [cursor=pointer]
+                                - generic [ref=f2e352]:
+                                  - button "Attach image" [ref=f2e354] [cursor=pointer]
+                                  - button "More attachments" [ref=f2e358] [cursor=pointer]
+                                - button "More tools" [ref=f2e361] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f2e364] [cursor=pointer]:
+                                  - generic [ref=f2e368]: Chat Settings
+                            - generic "Active context" [ref=f2e369]:
+                              - button "Custom OpenAI API / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f2e371] [cursor=pointer]:
+                                - generic "Provider status" [ref=f2e376]: Healthy
+                              - button "Character E2E-TestBot" [ref=f2e616] [cursor=pointer]:
+                                - generic [ref=f2e617]: Character
+                                - generic [ref=f2e618]: E2E-TestBot
+                              - 'generic "Character context: Included" [ref=f2e619]':
+                                - generic [ref=f2e620]: Character context
+                                - generic [ref=f2e621]: Included
+                              - button "Chat 2 messages" [ref=f2e622] [cursor=pointer]:
+                                - generic [ref=f2e623]: Chat
+                                - generic [ref=f2e624]: 2 messages
+                              - button "Configure context window size" [ref=f2e387] [cursor=pointer]:
+                                - generic [ref=f2e388]: 2,501 + ~0 = 2,501 tokens
+                              - button "Saved" [ref=f2e390] [cursor=pointer]
+                              - button "Advanced controls" [ref=f2e392] [cursor=pointer]
+                          - status [ref=f2e625]:
+                            - generic [ref=f2e626]: Add expression images for E2E-TestBot.
+                            - generic [ref=f2e627]:
+                              - link "Edit expressions" [ref=f2e628] [cursor=pointer]:
+                                - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                              - button "Dismiss expression image setup" [ref=f2e629] [cursor=pointer]: Dismiss
+                - generic [ref=f2e401]:
+                  - button "Restore context sidechannel" [ref=f2e402] [cursor=pointer]:
+                    - generic [ref=f2e406]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f2e407]:
+                  - button "Restore runtime sidechannel" [ref=f2e408] [cursor=pointer]:
+                    - generic [ref=f2e409]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - dialog "Role-play setup" [ref=f2e868]:
+      - generic [ref=f2e870]:
+        - button "Close" [ref=f2e871] [cursor=pointer]
+        - generic [ref=f2e875]: Role-play setup
+      - group [ref=f2e877]:
+        - region "Role-play preview" [ref=f2e878]:
+          - heading "Role-play preview" [level=3] [ref=f2e880]
+          - generic [ref=f2e881]:
+            - generic [ref=f2e882]: Character
+            - generic [ref=f2e883]: E2E-TestBot
+          - generic [ref=f2e884]:
+            - generic [ref=f2e885]: Behavior
+            - generic [ref=f2e886]: No behavior
+          - generic [ref=f2e887]:
+            - generic [ref=f2e888]: Scene
+            - generic [ref=f2e889]: No scene
+          - generic [ref=f2e890]:
+            - generic [ref=f2e891]: Generation style
+            - generic [ref=f2e892]: No generation style
+          - generic [ref=f2e893]:
+            - generic [ref=f2e894]: Context
+            - generic [ref=f2e895]: No context
+        - region "Saved role-play setups" [ref=f2e896]:
+          - generic [ref=f2e897]:
+            - heading "Saved role-play setups" [level=3] [ref=f2e898]
+            - paragraph [ref=f2e899]: Save and reuse character, behavior, scene, generation, and pinned context.
+          - generic [ref=f2e900]:
+            - textbox "Saved setup name" [ref=f2e901]:
+              - /placeholder: E2E-TestBot · tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-
+            - button "Save setup" [ref=f2e902] [cursor=pointer]
+          - paragraph [ref=f2e904]: No saved role-play setups yet.
+        - region "Role-play layers" [ref=f2e905]:
+          - generic [ref=f2e906]:
+            - generic [ref=f2e907]:
+              - generic [ref=f2e908]: Character
+              - button "E2E-TestBot" [ref=f2e909] [cursor=pointer]
+            - generic [ref=f2e915]:
+              - generic [ref=f2e916]: Behavior
+              - button "Choose behavior template" [ref=f2e917] [cursor=pointer]
+          - radiogroup "Generation style" [ref=f2e919]:
+            - generic [ref=f2e920] [cursor=pointer]:
+              - radio "Creative" [ref=f2e921]
+              - generic [ref=f2e922]: Creative
+            - generic [ref=f2e923] [cursor=pointer]:
+              - radio "Balanced" [ref=f2e924]
+              - generic [ref=f2e925]: Balanced
+            - generic [ref=f2e926] [cursor=pointer]:
+              - radio "Precise" [ref=f2e927]
+              - generic [ref=f2e928]: Precise
+            - generic [ref=f2e929] [cursor=pointer]:
+              - radio "Custom" [ref=f2e930]
+              - generic [ref=f2e931]: Custom
+          - generic [ref=f2e932]:
+            - button "Clear identity" [ref=f2e933] [cursor=pointer]
+            - button "Clear behavior" [disabled] [ref=f2e935]
+            - button "Reset generation" [disabled] [ref=f2e936]
+        - region "Scene" [ref=f2e937]:
+          - generic [ref=f2e938]:
+            - generic [ref=f2e939]:
+              - heading "Scene" [level=3] [ref=f2e940]
+              - paragraph [ref=f2e941]: No scene draft
+            - switch "Scene enabled" [ref=f2e942] [cursor=pointer]
+          - textbox "Scene notes" [ref=f2e945]:
+            - /placeholder: Describe the current scene context.
+          - generic [ref=f2e946]:
+            - generic [ref=f2e947]:
+              - text: User role
+              - textbox "User role" [ref=f2e948]
+            - generic [ref=f2e949]:
+              - text: User emotional state
+              - textbox "User emotional state" [ref=f2e950]
+            - generic [ref=f2e951]:
+              - text: User focus/objective
+              - textbox "User focus/objective" [ref=f2e952]
+            - generic [ref=f2e953]:
+              - text: Character role
+              - textbox "Character role" [ref=f2e954]
+          - generic [ref=f2e955]:
+            - button "Clear scene" [ref=f2e956] [cursor=pointer]
+            - button "Reset scene" [ref=f2e958] [cursor=pointer]
+      - generic [ref=f2e962]:
+        - button "Cancel" [ref=f2e963] [cursor=pointer]
+        - button "Apply" [ref=f2e965] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f2e418] [cursor=pointer]
+  - alert [ref=f2e422]: Chat | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-49-49-466Z.log#L28

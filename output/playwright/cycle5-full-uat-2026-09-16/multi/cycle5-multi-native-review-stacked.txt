@@ -1,0 +1,220 @@
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995)
+- 1: (current) [Media Analysis | tldw](http://127.0.0.1:18581/media-multi)
+### Page
+- Page URL: http://127.0.0.1:18581/media-multi
+- Page Title: Media Analysis | tldw
+### Snapshot
+```yaml
+- generic [ref=f6e20]:
+  - generic [ref=f6e23]:
+    - link "Skip to main content" [ref=f6e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f6e25]:
+      - button "Expand sidebar" [ref=f6e26] [cursor=pointer]
+      - button "New Chat" [ref=f6e30] [cursor=pointer]
+      - generic [ref=f6e33]:
+        - button "Quick Ingest" [ref=f6e34] [cursor=pointer]
+        - button "Chat" [ref=f6e38] [cursor=pointer]
+        - button "Prompts" [ref=f6e41] [cursor=pointer]
+        - button "Characters" [ref=f6e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f6e50] [cursor=pointer]
+        - button "World Books" [ref=f6e54] [cursor=pointer]
+        - button "Notes" [ref=f6e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f6e61] [cursor=pointer]
+        - button "Media" [ref=f6e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f6e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f6e78] [cursor=pointer]
+        - button "Kanban" [ref=f6e84] [cursor=pointer]
+        - button "Watchlists" [ref=f6e86] [cursor=pointer]
+      - generic [ref=f6e91]:
+        - button "Open Notes Dock" [ref=f6e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f6e97] [cursor=pointer]
+        - button "Settings" [ref=f6e100] [cursor=pointer]
+    - main [ref=f6e104]:
+      - generic [ref=f6e105]:
+        - generic [ref=f6e108]:
+          - generic [ref=f6e109]:
+            - button "Expand sidebar" [ref=f6e110] [cursor=pointer]
+            - generic [ref=f6e112]:
+              - img "tldw Assistant" [ref=f6e113]
+              - generic [ref=f6e114]: tldw Assistant
+              - button "Companion Home" [ref=f6e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f6e119] [cursor=pointer]
+          - generic [ref=f6e122]:
+            - button "Search - Open command palette" [ref=f6e123] [cursor=pointer]:
+              - generic [ref=f6e127]: Search
+              - generic [ref=f6e128]: ⌘K
+            - button "Open settings" [ref=f6e129] [cursor=pointer]
+            - generic [ref=f6e141]:
+              - button "Notifications, 0 unread" [ref=f6e347] [cursor=pointer]
+              - status [ref=f6e145]: Notifications are active
+            - button "Switch to light theme" [ref=f6e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f6e153] [cursor=pointer]:
+              - generic [ref=f6e154]: "?"
+        - generic [ref=f6e795]:
+          - status [ref=f6e796]: 1 items selected, 29 remaining
+          - generic [ref=f6e798]:
+            - generic [ref=f6e800]:
+              - generic [ref=f6e801]:
+                - textbox "Search media (title/content)" [ref=f6e802]
+                - generic [ref=f6e803]:
+                  - button "Search" [ref=f6e804] [cursor=pointer]
+                  - button "Clear" [ref=f6e806] [cursor=pointer]
+              - generic [ref=f6e808]:
+                - generic [ref=f6e809]:
+                  - generic [ref=f6e810]:
+                    - generic: Media types
+                    - combobox "Media types" [ref=f6e812]
+                  - img "down" [ref=f6e814]
+                - generic [ref=f6e817] [cursor=pointer]:
+                  - generic [ref=f6e818]:
+                    - generic "Relevance" [ref=f6e819]
+                    - combobox "Sort" [ref=f6e820]
+                  - img "down" [ref=f6e822]
+                - group "Date range" [ref=f6e825]:
+                  - textbox "Start date" [ref=f6e827]
+                  - generic [ref=f6e828]: to
+                  - textbox "End date" [ref=f6e829]
+                - generic [ref=f6e830]:
+                  - generic [ref=f6e831]:
+                    - generic: Keywords
+                    - combobox "Keywords" [ref=f6e833]
+                  - img "down" [ref=f6e835]
+                - generic [ref=f6e838]:
+                  - generic [ref=f6e839] [cursor=pointer]:
+                    - checkbox "Search full content (slower)" [ref=f6e841]
+                    - generic [ref=f6e843]: Search full content (slower)
+                  - generic [ref=f6e844]: Scans current page results.
+            - separator "Resize filter panel" [ref=f6e845]
+            - generic [ref=f6e848]:
+              - generic [ref=f6e849]:
+                - generic [ref=f6e851]: 1 / 30
+                - generic [ref=f6e852]: "Selection status: Safe"
+              - generic [ref=f6e1042]:
+                - generic [ref=f6e1043]: "Selected across pages: 1"
+                - button "View selected items" [ref=f6e1044] [cursor=pointer]
+              - generic [ref=f6e853]:
+                - generic [ref=f6e854]:
+                  - heading "Results (1)" [level=2] [ref=f6e855]
+                  - generic [ref=f6e856]:
+                    - generic [ref=f6e857]: Click to stack, Shift+click for range
+                    - button "Deselect all" [ref=f6e1046] [cursor=pointer]
+                - button "cycle5-multi-native-aurora-public document 9/16/2026, 1:23:07 AM" [ref=f6e860] [cursor=pointer]:
+                  - generic [ref=f6e861]:
+                    - checkbox [checked] [ref=f6e865]
+                    - generic [ref=f6e867]:
+                      - generic [ref=f6e868]: cycle5-multi-native-aurora-public
+                      - generic [ref=f6e869]:
+                        - generic [ref=f6e870]: document
+                        - generic [ref=f6e871]: 9/16/2026, 1:23:07 AM
+                - generic [ref=f6e872]:
+                  - generic [ref=f6e873]: Use pagination or open all visible items
+                  - list [ref=f6e874]:
+                    - listitem "Previous Page" [ref=f6e875]:
+                      - button [disabled] [ref=f6e876]:
+                        - img "left" [ref=f6e877]
+                    - listitem "1" [ref=f6e880] [cursor=pointer]
+                    - listitem "Next Page" [ref=f6e882]:
+                      - button [disabled] [ref=f6e883]:
+                        - img "right" [ref=f6e884]
+              - generic [ref=f6e1048]:
+                - generic [ref=f6e1049]: 1 selected
+                - textbox "Batch keywords" [ref=f6e1050]:
+                  - /placeholder: Batch keywords (comma-separated)
+                - button "Add tags" [ref=f6e1051] [cursor=pointer]
+                - generic [ref=f6e1053] [cursor=pointer]:
+                  - generic [ref=f6e1054]:
+                    - generic "JSON" [ref=f6e1055]
+                    - combobox "Export format" [ref=f6e1056]
+                  - img "down" [ref=f6e1058]
+                - button "Export selected" [ref=f6e1061] [cursor=pointer]
+                - button "Reprocess" [ref=f6e1063] [cursor=pointer]
+                - button "Move to trash" [disabled] [ref=f6e1065]
+            - separator "Resize results panel" [ref=f6e887]
+            - generic [active] [ref=f6e890]:
+              - generic [ref=f6e891]:
+                - generic [ref=f6e893]:
+                  - generic [ref=f6e894]:
+                    - generic [ref=f6e895]: Viewer
+                    - generic [ref=f6e896]: Single item view
+                  - radiogroup [ref=f6e898]:
+                    - generic [ref=f6e899] [cursor=pointer]:
+                      - generic [ref=f6e900]:
+                        - radio "Compare(1)"
+                      - generic [ref=f6e901]:
+                        - text: Compare
+                        - generic [ref=f6e1066]: (1)
+                    - generic [ref=f6e907] [cursor=pointer]:
+                      - generic [ref=f6e908]:
+                        - radio "Focus(1/1)" [checked]
+                      - generic [ref=f6e909]:
+                        - text: Focus
+                        - generic [ref=f6e1067]: (1/1)
+                    - generic [ref=f6e916] [cursor=pointer]:
+                      - generic [ref=f6e917]:
+                        - radio "Stack(1)"
+                      - generic [ref=f6e918]:
+                        - text: Stack
+                        - generic [ref=f6e1068]: (1)
+                  - generic [ref=f6e1069] [cursor=pointer]:
+                    - generic [ref=f6e1070]:
+                      - generic "1. cycle5-multi-native-aurora-public" [ref=f6e1071]
+                      - combobox [ref=f6e1072]
+                    - img "down" [ref=f6e1074]
+                  - radiogroup [ref=f6e922]:
+                    - generic [ref=f6e923] [cursor=pointer]:
+                      - generic [ref=f6e924]:
+                        - radio "Vertical" [checked]
+                      - text: Vertical
+                    - generic [ref=f6e925] [cursor=pointer]:
+                      - generic [ref=f6e926]:
+                        - radio "Horizontal"
+                      - text: Horizontal
+                  - button "Options" [ref=f6e927] [cursor=pointer]
+                - generic [ref=f6e935]:
+                  - generic [ref=f6e936]:
+                    - button "Prev" [disabled] [ref=f6e937]
+                    - generic [ref=f6e938]: Item 1 of 1
+                    - button "Next" [disabled] [ref=f6e939]
+                  - generic [ref=f6e940]:
+                    - button "Expand/Collapse" [ref=f6e941] [cursor=pointer]
+                    - button "Chat about selection (1)" [ref=f6e1077] [cursor=pointer]
+                    - button "Multi-Item Review keyboard shortcuts" [ref=f6e950] [cursor=pointer]:
+                      - generic [ref=f6e951]: "?"
+                - button "Search in content..." [ref=f6e988] [cursor=pointer]
+                - generic [ref=f6e1082]:
+                  - generic [ref=f6e1083]: Open items
+                  - generic [ref=f6e1084]: Search/filter in sidebar, inspect in viewer, jump using Open items.
+                  - button "1. cycle5-multi-native-aurora-public (document)" [ref=f6e1086] [cursor=pointer]
+              - generic [ref=f6e1089]:
+                - generic [ref=f6e1090]:
+                  - generic [ref=f6e1091]:
+                    - generic [ref=f6e1092]: cycle5-multi-native-aurora-public
+                    - generic [ref=f6e1096]:
+                      - generic [ref=f6e1097]: document
+                      - generic [ref=f6e1098]: 9/16/2026, 1:23:07 AM
+                      - generic [ref=f6e1099]: cycle5-multi-native-aurora-public.txt
+                      - generic [ref=f6e1100]: 1k chars
+                  - button "Copy" [ref=f6e1102] [cursor=pointer]
+                - generic [ref=f6e1110]:
+                  - generic [ref=f6e1111]:
+                    - generic [ref=f6e1112]: Media Content
+                    - button "Expand" [ref=f6e1114] [cursor=pointer]
+                  - generic [ref=f6e1119]: "Cycle5 Aurora Public Station Brief This is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps. Aurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report. The station uses the phrase \"AURORA-CYCLE5-MULTI-23\" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials."
+                - generic [ref=f6e1121]:
+                  - generic [ref=f6e1122]:
+                    - generic [ref=f6e1123]: Analysis
+                    - button "Expand" [ref=f6e1125] [cursor=pointer]
+                  - list [ref=f6e1133]:
+                    - listitem [ref=f6e1134]: "Keeper: Maya Chen"
+                    - listitem [ref=f6e1135]: "Lantern count: 23"
+                    - listitem [ref=f6e1136]: "Supply boat schedule: Thursday at 09:30"
+          - generic [ref=f6e975]:
+            - generic [ref=f6e976]:
+              - generic [ref=f6e977]: 1 selected
+              - generic [ref=f6e1040]: Previewing 1 of 1
+            - generic [ref=f6e978]: "? for shortcuts"
+  - button "Open Next.js Dev Tools" [ref=f6e15] [cursor=pointer]
+  - alert [ref=f6e19]: Media Analysis | tldw
+```

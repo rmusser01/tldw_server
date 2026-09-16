@@ -1,0 +1,32 @@
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+const root = '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui'
+const testPath = root + '/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx'
+export default {
+  ...base,
+  plugins: [{ name: 'uat131-read-only-greeting-probe', enforce: 'pre' as const, transform(code: string, id: string) {
+    if (id !== testPath) return null
+    const anchor = '  it.each([true, false])("recovers an old partial mirror'
+    const at = code.indexOf(anchor)
+    if (at < 0) throw new Error('Existing fixture changed')
+    const probe = `
+  it.each(["neutral-unacknowledged", "neutral-acknowledged", "character-unacknowledged", "legitimate-equal-rows"])("UAT131 actual loader keeps greeting identity for %s", async kind => {
+    const greeting = "Hello! How can I help you today?"
+    const saved = [{ id: "saved-greeting", sender: "assistant", content: greeting, timestamp: "2026-09-16T08:56:28Z", version: 1, metadata_extra: null }]
+    if (kind === "legitimate-equal-rows") saved.push({ ...saved[0], id: "different-reply", timestamp: "2026-09-16T08:56:29Z" })
+    const isCharacter = kind === "character-unacknowledged"
+    state.request.mockImplementation(async ({ path }) => path.includes("/messages") ? { messages: saved } : { id: "cedar", title: "WebUI chat", character_id: isCharacter ? 4 : null, assistant_kind: isCharacter ? "character" : null, assistant_id: isCharacter ? "4" : null, source: "webui-chat", scope_type: "global" })
+    const current = kind === "legitimate-equal-rows" ? [] : [{ id: "local-greeting", isBot: true, name: "Default Assistant", role: "assistant", message: greeting, messageType: "character:greeting", images: [], sources: [], createdAt: 1, ...(kind === "neutral-acknowledged" ? { serverMessageId: "saved-greeting", serverMessageVersion: 1 } : {}) }]
+    useStoreMessageOption.setState({ messages: current, history: current.map(row => ({role: row.role, content: row.message, messageType: row.messageType})) })
+    const view = mountLoader()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+    const result = useStoreMessageOption.getState()
+    console.info("UAT131 safe loader state", JSON.stringify({ kind, rows: result.messages.map(row => ({ id: row.id, serverMessageId: row.serverMessageId, messageType: row.messageType, text: row.message })), history: result.history }))
+    view.unmount()
+    expect(result.messages.filter(row => row.message === greeting)).toHaveLength(kind === "legitimate-equal-rows" ? 2 : 1)
+    expect(result.history.filter(row => row.content === greeting)).toHaveLength(kind === "legitimate-equal-rows" ? 2 : 1)
+  })
+`
+    return { code: code.slice(0, at) + probe + code.slice(at), map: null }
+  }}],
+  test: { ...base.test, setupFiles: [root + '/vitest.setup.ts'], include: [testPath], testNamePattern: 'UAT131 actual loader', maxWorkers: 1, fileParallelism: false }
+}

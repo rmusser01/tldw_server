@@ -1,0 +1,1 @@
+{"output":"/private/tmp/cycle5-multi-native-indigo-upload.json","steps":2}

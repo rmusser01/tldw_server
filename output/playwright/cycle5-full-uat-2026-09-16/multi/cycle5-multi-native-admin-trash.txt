@@ -1,0 +1,91 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Trash | tldw](http://127.0.0.1:18581/media-trash)
+### Page
+- Page URL: http://127.0.0.1:18581/media-trash
+- Page Title: Trash | tldw
+- Console: 4 errors, 4 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f14e20]:
+  - generic [ref=f14e23]:
+    - link "Skip to main content" [ref=f14e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f14e25]:
+      - button "Expand sidebar" [ref=f14e26] [cursor=pointer]
+      - button "New Chat" [ref=f14e30] [cursor=pointer]
+      - generic [ref=f14e33]:
+        - button "Quick Ingest" [ref=f14e34] [cursor=pointer]
+        - button "Chat" [ref=f14e38] [cursor=pointer]
+        - button "Prompts" [ref=f14e41] [cursor=pointer]
+        - button "Characters" [ref=f14e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f14e50] [cursor=pointer]
+        - button "World Books" [ref=f14e54] [cursor=pointer]
+        - button "Notes" [ref=f14e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f14e61] [cursor=pointer]
+        - button "Media" [ref=f14e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f14e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f14e78] [cursor=pointer]
+        - button "Kanban" [ref=f14e84] [cursor=pointer]
+        - button "Watchlists" [ref=f14e86] [cursor=pointer]
+      - generic [ref=f14e91]:
+        - button "Open Notes Dock" [ref=f14e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f14e97] [cursor=pointer]
+        - button "Settings" [ref=f14e100] [cursor=pointer]
+    - main [ref=f14e104]:
+      - generic [ref=f14e105]:
+        - generic [ref=f14e108]:
+          - generic [ref=f14e109]:
+            - button "Expand sidebar" [ref=f14e110] [cursor=pointer]
+            - generic [ref=f14e112]:
+              - img "tldw Assistant" [ref=f14e113]
+              - generic [ref=f14e114]: tldw Assistant
+              - button "Companion Home" [ref=f14e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f14e119] [cursor=pointer]
+          - generic [ref=f14e122]:
+            - button "Search - Open command palette" [ref=f14e123] [cursor=pointer]:
+              - generic [ref=f14e127]: Search
+              - generic [ref=f14e128]: ⌘K
+            - button "Open settings" [ref=f14e129] [cursor=pointer]
+            - generic [ref=f14e141]:
+              - button "Notifications, 0 unread" [ref=f14e351] [cursor=pointer]
+              - status [ref=f14e145]: Notifications are active
+            - button "Switch to light theme" [ref=f14e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f14e153] [cursor=pointer]:
+              - generic [ref=f14e154]: "?"
+        - generic [ref=f14e589]:
+          - generic [ref=f14e590]:
+            - generic [ref=f14e591]:
+              - heading "Trash" [level=1] [ref=f14e592]
+              - paragraph [ref=f14e593]: Items moved to trash stay here until you restore or permanently delete them.
+              - paragraph [ref=f14e594]: Auto-purge policy is not configured or not reported by this server.
+              - searchbox "Search trash" [ref=f14e596]
+            - generic [ref=f14e597]:
+              - button "Refresh" [ref=f14e598] [cursor=pointer]
+              - button "Empty trash" [ref=f14e604] [cursor=pointer]
+          - generic [ref=f14e608]:
+            - generic [ref=f14e609]:
+              - checkbox "Select all visible" [ref=f14e610]
+              - generic [ref=f14e611]: Select all visible
+            - generic [ref=f14e612]:
+              - generic [ref=f14e613]: 0 selected
+              - button "Restore selected" [disabled] [ref=f14e614]
+              - button "Delete selected" [disabled] [ref=f14e618]
+          - generic [ref=f14e624]:
+            - generic [ref=f14e625]:
+              - checkbox "Select item 1" [ref=f14e626]
+              - generic [ref=f14e627]:
+                - generic [ref=f14e628]: Cycle5 Admin only restore fixture
+                - generic [ref=f14e629]:
+                  - generic [ref=f14e630]: document
+                  - generic [ref=f14e631]: "#1"
+                  - generic [ref=f14e632]: "Deleted: Sep 16, 2026, 2:13 AM"
+            - generic [ref=f14e633]:
+              - button "Restore" [ref=f14e634] [cursor=pointer]
+              - button "Delete permanently" [ref=f14e638] [cursor=pointer]
+          - generic [ref=f14e642]: 1 of 1 results
+  - button "Open Next.js Dev Tools" [ref=f14e15] [cursor=pointer]
+  - alert [ref=f14e19]: Trash | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-12-52-477Z.log#L14

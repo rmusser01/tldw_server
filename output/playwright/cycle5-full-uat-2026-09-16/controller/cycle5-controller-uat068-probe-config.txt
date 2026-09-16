@@ -1,0 +1,21 @@
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+const root = '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui'
+const testPath = root + '/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx'
+export default {
+  ...base,
+  plugins: [{ name: 'uat068-read-only-saved-route-picker', enforce: 'pre' as const, transform(code: string, id: string) {
+    if (id !== testPath) return null
+    const start = code.indexOf('  it.each(["Robot", "New choice"])("uses the real picker')
+    const end = code.indexOf('  it("keeps the saved conversation and preference after cancelling', start)
+    if (start < 0 || end < 0) throw new Error('Existing actual-picker test anchors changed')
+    let probe = code.slice(start, end)
+    probe = probe.replace('it.each(["Robot", "New choice"])("uses the real picker to deliberately select %s with a saved target", async choice => {', 'it.each(["legacy-handoff", "canonical-saved"])("UAT068 real picker replaces a fully loaded target from %s route", async routeKind => { const choice = "New choice"; realLoader.route = true;')
+    probe = probe.replace('await pending; return { id: 5, name: "Late Robot" }', 'return { id: 5, name: "Robot" }')
+    probe = probe.replace('window.history.pushState({}, "", "/chat?settingsServerChatId=robot")', 'window.history.pushState({}, "", routeKind === "canonical-saved" ? "/chat?mode=character&characterId=5&chatId=robot" : "/chat?settingsServerChatId=robot")')
+    probe = probe.replace('await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled())', 'await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded")); await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: "5", name: "Robot" }))')
+    probe = probe.replaceAll('expect(useStoreMessageOption.getState().serverChatId).toBe(choice === "Robot" ? "robot" : null)', 'expect.soft(useStoreMessageOption.getState().serverChatId).toBe(null)')
+    probe = probe.replace('await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({ id: choice === "Robot" ? "5" : "7", name: choice }))', 'await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)) }); const selected = await selectedAssistantStorage.get("selectedAssistant"); console.info("UAT068 safe picker state", JSON.stringify({routeKind, route: window.location.pathname + window.location.search, selected, serverChatId: useStoreMessageOption.getState().serverChatId, characterId: useStoreMessageOption.getState().serverChatCharacterId, messages: useStoreMessageOption.getState().messages.map(row => row.message), getChatCalls: tldwClientState.getChat.mock.calls.length})); expect.soft(selected).toMatchObject({ id: "7", name: choice }); expect.soft(window.location.search).not.toContain("chatId=robot")')
+    return { code: code.slice(0, start) + probe + code.slice(end), map: null }
+  }}],
+  test: { ...base.test, setupFiles: [root + '/vitest.setup.ts'], include: [testPath], testNamePattern: 'UAT068 real picker replaces', maxWorkers: 1, fileParallelism: false },
+}

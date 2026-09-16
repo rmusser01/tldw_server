@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18580/chat"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"New saved chat",exact:true}).click(); return {url:page.url()}; })(page);
+```

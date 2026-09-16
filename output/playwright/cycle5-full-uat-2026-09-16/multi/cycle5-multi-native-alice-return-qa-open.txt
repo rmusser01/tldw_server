@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18581/knowledge');
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [](http://127.0.0.1:18581/knowledge)
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-15-43-374Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-15-43-152Z.log#L1-L2

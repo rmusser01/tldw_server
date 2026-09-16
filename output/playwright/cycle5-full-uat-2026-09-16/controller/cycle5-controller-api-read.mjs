@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 const [endpoint, label] = process.argv.slice(2);
 if (!label || !/^[a-z0-9-]+$/.test(label)) throw new Error('Invalid evidence label');
-if (!/^\/api\/v1\/(?:notes\/[a-f0-9-]+|flashcards(?:\/decks|\/review-sessions|\/id\/[a-f0-9-]+)?)(?:\?[^\s]*)?$/.test(endpoint)) throw new Error('Endpoint is outside read-only owned UAT evidence scope');
+if (!/^\/api\/v1\/(?:media\/1|notes\/[a-f0-9-]+|flashcards(?:\/decks|\/review-sessions|\/id\/[a-f0-9-]+)?)(?:\?[^\s]*)?$/.test(endpoint)) throw new Error('Endpoint is outside read-only owned UAT evidence scope');
 const runtime=JSON.parse(fs.readFileSync('/private/tmp/tldw-onboarding-uat-cycle5-single-20260916/runtime-private.json','utf8'));
 const response=await fetch(`http://127.0.0.1:18500${endpoint}`,{method:'GET',headers:{'X-API-KEY':runtime.env.SINGLE_USER_API_KEY}});
 const body=await response.json();

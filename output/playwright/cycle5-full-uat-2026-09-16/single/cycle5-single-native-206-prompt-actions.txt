@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByTestId('prompt-more-pa_60c8-fad2-fcb-ea27').click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Prompts | tldw](http://127.0.0.1:18580/prompts)
+### Page
+- Page URL: http://127.0.0.1:18580/prompts
+- Page Title: Prompts | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-58-27-363Z.yml)

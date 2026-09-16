@@ -1,0 +1,1014 @@
+[
+  {
+    "who": "alice",
+    "action": "real API login",
+    "status": 200,
+    "expires_in": 1800
+  },
+  {
+    "who": "bob",
+    "action": "real API login",
+    "status": 200,
+    "expires_in": 1800
+  },
+  {
+    "who": "alice",
+    "method": "POST",
+    "path": "/api/v1/notes/",
+    "status": 201,
+    "request": {
+      "title": "Cycle5 alice isolation API fixture",
+      "content": "CYCLE5-ALICE-PRIVATE-BOUNDARY synthetic note."
+    },
+    "body": {
+      "title": "Cycle5 alice isolation API fixture",
+      "content": "CYCLE5-ALICE-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "3bfcf451-7806-4717-8763-a7e1770bee10",
+      "created_at": "2026-09-16T09:08:35.294000Z",
+      "last_modified": "2026-09-16T09:08:35.294000Z",
+      "version": 1,
+      "client_id": "2",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/notes/3bfcf451-7806-4717-8763-a7e1770bee10",
+    "status": 200,
+    "body": {
+      "title": "Cycle5 alice isolation API fixture",
+      "content": "CYCLE5-ALICE-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "3bfcf451-7806-4717-8763-a7e1770bee10",
+      "created_at": "2026-09-16T09:08:35.294000Z",
+      "last_modified": "2026-09-16T09:08:35.294000Z",
+      "version": 1,
+      "client_id": "2",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "alice",
+    "method": "PUT",
+    "path": "/api/v1/notes/3bfcf451-7806-4717-8763-a7e1770bee10",
+    "status": 200,
+    "request": {
+      "title": "Cycle5 alice isolation API fixture updated"
+    },
+    "body": {
+      "title": "Cycle5 alice isolation API fixture updated",
+      "content": "CYCLE5-ALICE-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "3bfcf451-7806-4717-8763-a7e1770bee10",
+      "created_at": "2026-09-16T09:08:35.294000Z",
+      "last_modified": "2026-09-16T09:08:35.381000Z",
+      "version": 2,
+      "client_id": "2",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "POST",
+    "path": "/api/v1/notes/",
+    "status": 201,
+    "request": {
+      "title": "Cycle5 bob isolation API fixture",
+      "content": "CYCLE5-BOB-PRIVATE-BOUNDARY synthetic note."
+    },
+    "body": {
+      "title": "Cycle5 bob isolation API fixture",
+      "content": "CYCLE5-BOB-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "7c5d0380-7371-426c-972d-95bf760a6ce3",
+      "created_at": "2026-09-16T09:08:36.184000Z",
+      "last_modified": "2026-09-16T09:08:36.184000Z",
+      "version": 1,
+      "client_id": "3",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/notes/7c5d0380-7371-426c-972d-95bf760a6ce3",
+    "status": 200,
+    "body": {
+      "title": "Cycle5 bob isolation API fixture",
+      "content": "CYCLE5-BOB-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "7c5d0380-7371-426c-972d-95bf760a6ce3",
+      "created_at": "2026-09-16T09:08:36.184000Z",
+      "last_modified": "2026-09-16T09:08:36.184000Z",
+      "version": 1,
+      "client_id": "3",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "PUT",
+    "path": "/api/v1/notes/7c5d0380-7371-426c-972d-95bf760a6ce3",
+    "status": 200,
+    "request": {
+      "title": "Cycle5 bob isolation API fixture updated"
+    },
+    "body": {
+      "title": "Cycle5 bob isolation API fixture updated",
+      "content": "CYCLE5-BOB-PRIVATE-BOUNDARY synthetic note.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "7c5d0380-7371-426c-972d-95bf760a6ce3",
+      "created_at": "2026-09-16T09:08:36.184000Z",
+      "last_modified": "2026-09-16T09:08:36.318000Z",
+      "version": 2,
+      "client_id": "3",
+      "deleted": false,
+      "studio": null,
+      "keywords": [],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/notes/3bfcf451-7806-4717-8763-a7e1770bee10",
+    "status": 404,
+    "body": {
+      "detail": "Note not found"
+    }
+  },
+  {
+    "who": "bob",
+    "method": "PUT",
+    "path": "/api/v1/notes/3bfcf451-7806-4717-8763-a7e1770bee10",
+    "status": 404,
+    "request": {
+      "title": "FORBIDDEN cross-account test"
+    },
+    "body": {
+      "detail": "Note not found."
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/notes/7c5d0380-7371-426c-972d-95bf760a6ce3",
+    "status": 404,
+    "body": {
+      "detail": "Note not found"
+    }
+  },
+  {
+    "who": "alice",
+    "method": "PUT",
+    "path": "/api/v1/notes/7c5d0380-7371-426c-972d-95bf760a6ce3",
+    "status": 404,
+    "request": {
+      "title": "FORBIDDEN cross-account test"
+    },
+    "body": {
+      "detail": "Note not found."
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/media/1",
+    "status": 200,
+    "body": {
+      "media_id": 1,
+      "source": {
+        "url": "cycle5-multi-native-aurora-public.txt",
+        "title": "cycle5-multi-native-aurora-public",
+        "duration": null,
+        "type": "document"
+      },
+      "processing": {
+        "prompt": "Summarize the source as exactly three short factual bullet points: keeper, lantern count, and supply boat schedule. Use only source facts. Return the final answer without a preamble.",
+        "analysis": "* Keeper: Maya Chen\n* Lantern count: 23\n* Supply boat schedule: Thursday at 09:30",
+        "safe_metadata": null,
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "completed",
+        "vector_processing_status": 1
+      },
+      "content": {
+        "metadata": {},
+        "text": "Cycle5 Aurora Public Station Brief\n\nThis is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps.\n\nAurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report.\n\nThe station uses the phrase \"AURORA-CYCLE5-MULTI-23\" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials.",
+        "word_count": 148
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "1f885484-a8d5-4794-9712-02969fb743b8",
+          "media_id": 1,
+          "version_number": 2,
+          "created_at": "2026-09-16T09:03:19.288000Z",
+          "prompt": "Summarize the source as exactly three short factual bullet points: keeper, lantern count, and supply boat schedule. Use only source facts. Return the final answer without a preamble.",
+          "analysis_content": "* Keeper: Maya Chen\n* Lantern count: 23\n* Supply boat schedule: Thursday at 09:30",
+          "safe_metadata": null,
+          "content": null
+        },
+        {
+          "uuid": "ef2ef4f1-f401-4a94-89b9-2c5068651935",
+          "media_id": 1,
+          "version_number": 1,
+          "created_at": "2026-09-16T08:23:07.419000Z",
+          "prompt": null,
+          "analysis_content": null,
+          "safe_metadata": {
+            "title": "cycle5-multi-native-aurora-public",
+            "author": "Unknown",
+            "chunking_plan": {
+              "mode": "auto",
+              "goal": "balanced",
+              "used_llm": false,
+              "method": "semantic",
+              "max_size": 900,
+              "overlap": 120,
+              "template_name": null,
+              "derived_views": [],
+              "fallback_reason": null,
+              "rationale": "Detected unstructured long text; selected semantic chunking.",
+              "profile": {
+                "media_type": "document",
+                "source_name": "cycle5-multi-native-aurora-public.txt",
+                "title": null,
+                "mime_type": null,
+                "extension": "txt",
+                "text_length": 963,
+                "has_headings": false,
+                "has_tables": false,
+                "has_lists": false,
+                "has_timecodes": true,
+                "has_speaker_labels": false,
+                "has_chapters": false,
+                "language": "en"
+              }
+            }
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/media/1",
+    "status": 404,
+    "body": {
+      "detail": "Media not found or is inactive/trashed"
+    }
+  },
+  {
+    "who": "bob",
+    "method": "PUT",
+    "path": "/api/v1/media/1",
+    "status": 404,
+    "request": {
+      "title": "FORBIDDEN Bob cross-account title"
+    },
+    "body": {
+      "detail": "Media item not found or is inactive/trashed"
+    }
+  },
+  {
+    "who": "bob",
+    "method": "POST",
+    "path": "/api/v1/media/add",
+    "status": 200,
+    "body": {
+      "results": [
+        {
+          "status": "Success",
+          "input_ref": "cycle5-bob-private-boundary.txt",
+          "processing_source": "/private/tmp/tldw-onboarding-uat-cycle5-multi-20260916/tmp/media_processing_r9ny3o0j/cycle5-bob-private-boundary.txt",
+          "media_type": "document",
+          "metadata": {
+            "title": "Cycle5 Bob private boundary source",
+            "author": "Unknown",
+            "source_filename": "cycle5-bob-private-boundary.txt",
+            "raw": {
+              "extracted_title": null,
+              "extracted_author": "Unknown"
+            }
+          },
+          "content": "CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.",
+          "segments": null,
+          "chunks": [
+            {
+              "text": "CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.",
+              "metadata": {
+                "chunk_index": 0,
+                "total_chunks": 1
+              }
+            }
+          ],
+          "analysis": null,
+          "summary": null,
+          "analysis_details": {
+            "analysis_model": null,
+            "custom_prompt_used": null,
+            "system_prompt_used": null,
+            "summarized_recursively": false,
+            "parser_used": "txt"
+          },
+          "error": null,
+          "warnings": null,
+          "db_id": 1,
+          "db_message": "Media 'Cycle5 Bob private boundary source' added.",
+          "message": null,
+          "source_format": "txt",
+          "keywords": [],
+          "claims": null,
+          "claims_details": null,
+          "media_uuid": "bfdc9d60-5ec8-43a7-96f6-03bfa6b72369",
+          "transcript": "CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.",
+          "collections_item_id": 1,
+          "collections_origin": "media_add"
+        }
+      ]
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/media/1",
+    "status": 200,
+    "body": {
+      "media_id": 1,
+      "source": {
+        "url": "cycle5-bob-private-boundary.txt",
+        "title": "Cycle5 Bob private boundary source",
+        "duration": null,
+        "type": "document"
+      },
+      "processing": {
+        "prompt": null,
+        "analysis": null,
+        "safe_metadata": {
+          "title": "Cycle5 Bob private boundary source",
+          "author": "Unknown"
+        },
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "pending",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.",
+        "word_count": 9
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "a8f5a77f-a0b6-4104-aa6c-05353c348fb3",
+          "media_id": 1,
+          "version_number": 1,
+          "created_at": "2026-09-16T09:08:36.709000Z",
+          "prompt": null,
+          "analysis_content": null,
+          "safe_metadata": {
+            "title": "Cycle5 Bob private boundary source",
+            "author": "Unknown"
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "PUT",
+    "path": "/api/v1/media/1",
+    "status": 200,
+    "request": {
+      "title": "Cycle5 Bob private boundary source updated"
+    },
+    "body": {
+      "media_id": 1,
+      "source": {
+        "url": "cycle5-bob-private-boundary.txt",
+        "title": "Cycle5 Bob private boundary source updated",
+        "duration": null,
+        "type": "document"
+      },
+      "processing": {
+        "prompt": null,
+        "analysis": null,
+        "safe_metadata": {
+          "title": "Cycle5 Bob private boundary source",
+          "author": "Unknown"
+        },
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "pending",
+        "vector_processing_status": 0
+      },
+      "content": {
+        "metadata": {},
+        "text": "CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.",
+        "word_count": 9
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "a8f5a77f-a0b6-4104-aa6c-05353c348fb3",
+          "media_id": 1,
+          "version_number": 1,
+          "created_at": "2026-09-16T09:08:36.709000Z",
+          "prompt": null,
+          "analysis_content": null,
+          "safe_metadata": {
+            "title": "Cycle5 Bob private boundary source",
+            "author": "Unknown"
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/media/1",
+    "status": 200,
+    "body": {
+      "media_id": 1,
+      "source": {
+        "url": "cycle5-multi-native-aurora-public.txt",
+        "title": "cycle5-multi-native-aurora-public",
+        "duration": null,
+        "type": "document"
+      },
+      "processing": {
+        "prompt": "Summarize the source as exactly three short factual bullet points: keeper, lantern count, and supply boat schedule. Use only source facts. Return the final answer without a preamble.",
+        "analysis": "* Keeper: Maya Chen\n* Lantern count: 23\n* Supply boat schedule: Thursday at 09:30",
+        "safe_metadata": null,
+        "model": "Imported",
+        "timestamp_option": null,
+        "chunking_status": "completed",
+        "vector_processing_status": 1
+      },
+      "content": {
+        "metadata": {},
+        "text": "Cycle5 Aurora Public Station Brief\n\nThis is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps.\n\nAurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report.\n\nThe station uses the phrase \"AURORA-CYCLE5-MULTI-23\" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials.",
+        "word_count": 148
+      },
+      "keywords": [],
+      "timestamps": [],
+      "versions": [
+        {
+          "uuid": "1f885484-a8d5-4794-9712-02969fb743b8",
+          "media_id": 1,
+          "version_number": 2,
+          "created_at": "2026-09-16T09:03:19.288000Z",
+          "prompt": "Summarize the source as exactly three short factual bullet points: keeper, lantern count, and supply boat schedule. Use only source facts. Return the final answer without a preamble.",
+          "analysis_content": "* Keeper: Maya Chen\n* Lantern count: 23\n* Supply boat schedule: Thursday at 09:30",
+          "safe_metadata": null,
+          "content": null
+        },
+        {
+          "uuid": "ef2ef4f1-f401-4a94-89b9-2c5068651935",
+          "media_id": 1,
+          "version_number": 1,
+          "created_at": "2026-09-16T08:23:07.419000Z",
+          "prompt": null,
+          "analysis_content": null,
+          "safe_metadata": {
+            "title": "cycle5-multi-native-aurora-public",
+            "author": "Unknown",
+            "chunking_plan": {
+              "mode": "auto",
+              "goal": "balanced",
+              "used_llm": false,
+              "method": "semantic",
+              "max_size": 900,
+              "overlap": 120,
+              "template_name": null,
+              "derived_views": [],
+              "fallback_reason": null,
+              "rationale": "Detected unstructured long text; selected semantic chunking.",
+              "profile": {
+                "media_type": "document",
+                "source_name": "cycle5-multi-native-aurora-public.txt",
+                "title": null,
+                "mime_type": null,
+                "extension": "txt",
+                "text_length": 963,
+                "has_headings": false,
+                "has_tables": false,
+                "has_lists": false,
+                "has_timecodes": true,
+                "has_speaker_labels": false,
+                "has_chapters": false,
+                "language": "en"
+              }
+            }
+          },
+          "content": null
+        }
+      ],
+      "has_original_file": false,
+      "original_file_url": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "POST",
+    "path": "/api/v1/media/search",
+    "status": 200,
+    "request": {
+      "query": "AURORA-CYCLE5-MULTI-23"
+    },
+    "body": {
+      "items": [
+        {
+          "id": 1,
+          "title": "Cycle5 Bob private boundary source updated",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-09-16T09:08:36.706Z",
+          "updated_at": "2026-09-16T09:08:36.759Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "Cycle5 Bob private boundary source updated",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-09-16T09:08:36.706Z",
+          "updated_at": "2026-09-16T09:08:36.759Z"
+        }
+      ]
+    }
+  },
+  {
+    "who": "alice",
+    "method": "POST",
+    "path": "/api/v1/media/search",
+    "status": 200,
+    "request": {
+      "query": "CYCLE5-BOB-PRIVATE-MEDIA"
+    },
+    "body": {
+      "items": [
+        {
+          "id": 1,
+          "title": "cycle5-multi-native-aurora-public",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-16T08:23:07.407Z",
+          "updated_at": "2026-09-16T09:05:20.767Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "cycle5-multi-native-aurora-public",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-16T08:23:07.407Z",
+          "updated_at": "2026-09-16T09:05:20.767Z"
+        }
+      ]
+    }
+  },
+  {
+    "who": "bob",
+    "method": "POST",
+    "path": "/api/v1/media/search",
+    "status": 200,
+    "request": {
+      "query": "CYCLE5-BOB-PRIVATE-MEDIA"
+    },
+    "body": {
+      "items": [
+        {
+          "id": 1,
+          "title": "Cycle5 Bob private boundary source updated",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-09-16T09:08:36.706Z",
+          "updated_at": "2026-09-16T09:08:36.759Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "Cycle5 Bob private boundary source updated",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "pending",
+          "created_at": "2026-09-16T09:08:36.706Z",
+          "updated_at": "2026-09-16T09:08:36.759Z"
+        }
+      ]
+    }
+  },
+  {
+    "who": "alice",
+    "method": "POST",
+    "path": "/api/v1/media/search",
+    "status": 200,
+    "request": {
+      "query": "AURORA-CYCLE5-MULTI-23"
+    },
+    "body": {
+      "items": [
+        {
+          "id": 1,
+          "title": "cycle5-multi-native-aurora-public",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-16T08:23:07.407Z",
+          "updated_at": "2026-09-16T09:05:20.767Z"
+        }
+      ],
+      "pagination": {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": false,
+        "results_per_page": 10,
+        "total_items": 1
+      },
+      "results": [
+        {
+          "id": 1,
+          "title": "cycle5-multi-native-aurora-public",
+          "url": "/api/v1/media/1",
+          "type": "document",
+          "status": "completed",
+          "created_at": "2026-09-16T08:23:07.407Z",
+          "updated_at": "2026-09-16T09:05:20.767Z"
+        }
+      ]
+    }
+  },
+  {
+    "who": "bob",
+    "method": "POST",
+    "path": "/api/v1/chats/",
+    "status": 201,
+    "request": {
+      "title": "Cycle5 Bob isolation empty Chat fixture",
+      "scope_type": "global"
+    },
+    "body": {
+      "id": "d2eba7d9-5793-45fb-adba-73578bd515ba",
+      "scope_type": "global",
+      "workspace_id": null,
+      "character_id": null,
+      "character_name": null,
+      "assistant_kind": null,
+      "assistant_id": null,
+      "assistant_name": null,
+      "persona_memory_mode": null,
+      "title": "Cycle5 Bob isolation empty Chat fixture",
+      "rating": null,
+      "state": "in-progress",
+      "topic_label": null,
+      "cluster_id": null,
+      "source": null,
+      "external_ref": null,
+      "created_at": "2026-09-16T09:08:36.933000Z",
+      "last_modified": "2026-09-16T09:08:36.933000Z",
+      "message_count": 0,
+      "version": 1,
+      "parent_conversation_id": null,
+      "root_id": "d2eba7d9-5793-45fb-adba-73578bd515ba",
+      "forked_from_message_id": null,
+      "settings": null,
+      "behavior_snapshot": {
+        "status": "missing",
+        "schema_version": null,
+        "digest": null
+      },
+      "resume_eligible": false,
+      "resume_ineligible_reason": "behavior_snapshot_missing",
+      "settings_version": null,
+      "history_version": 1,
+      "tail": {
+        "message_id": null,
+        "message_version": null
+      }
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/chats/d2eba7d9-5793-45fb-adba-73578bd515ba",
+    "status": 200,
+    "body": {
+      "id": "d2eba7d9-5793-45fb-adba-73578bd515ba",
+      "scope_type": "global",
+      "workspace_id": null,
+      "character_id": null,
+      "character_name": null,
+      "assistant_kind": null,
+      "assistant_id": null,
+      "assistant_name": null,
+      "persona_memory_mode": null,
+      "title": "Cycle5 Bob isolation empty Chat fixture",
+      "rating": null,
+      "state": "in-progress",
+      "topic_label": null,
+      "cluster_id": null,
+      "source": null,
+      "external_ref": null,
+      "created_at": "2026-09-16T09:08:36.933000Z",
+      "last_modified": "2026-09-16T09:08:36.933000Z",
+      "message_count": 0,
+      "version": 1,
+      "parent_conversation_id": null,
+      "root_id": "d2eba7d9-5793-45fb-adba-73578bd515ba",
+      "forked_from_message_id": null,
+      "settings": null,
+      "behavior_snapshot": {
+        "status": "missing",
+        "schema_version": null,
+        "digest": null
+      },
+      "resume_eligible": false,
+      "resume_ineligible_reason": "behavior_snapshot_missing",
+      "settings_version": null,
+      "history_version": 1,
+      "tail": {
+        "message_id": null,
+        "message_version": null
+      }
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/chats/d2eba7d9-5793-45fb-adba-73578bd515ba",
+    "status": 404,
+    "body": {
+      "detail": "Chat session d2eba7d9-5793-45fb-adba-73578bd515ba not found"
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/chats/849ac2ca-e2ff-4c27-8c88-212839e8310b",
+    "status": 200,
+    "body": {
+      "id": "849ac2ca-e2ff-4c27-8c88-212839e8310b",
+      "scope_type": "global",
+      "workspace_id": null,
+      "character_id": null,
+      "character_name": null,
+      "assistant_kind": null,
+      "assistant_id": null,
+      "assistant_name": null,
+      "persona_memory_mode": null,
+      "title": "Cycle5 retry identity: a fictional cobalt compass points east. Repeat this fact ",
+      "rating": null,
+      "state": "in-progress",
+      "topic_label": null,
+      "cluster_id": null,
+      "source": "webui-chat",
+      "external_ref": null,
+      "created_at": "2026-09-16T08:39:03.458000Z",
+      "last_modified": "2026-09-16T08:41:57.794000Z",
+      "message_count": 3,
+      "version": 1,
+      "parent_conversation_id": null,
+      "root_id": "849ac2ca-e2ff-4c27-8c88-212839e8310b",
+      "forked_from_message_id": null,
+      "settings": null,
+      "behavior_snapshot": {
+        "status": "missing",
+        "schema_version": null,
+        "digest": null
+      },
+      "resume_eligible": false,
+      "resume_ineligible_reason": "behavior_snapshot_missing",
+      "settings_version": null,
+      "history_version": 7,
+      "tail": {
+        "message_id": "64550040-d4de-4911-8f90-f7039de6da60",
+        "message_version": 1
+      }
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/chats/849ac2ca-e2ff-4c27-8c88-212839e8310b",
+    "status": 404,
+    "body": {
+      "detail": "Chat session 849ac2ca-e2ff-4c27-8c88-212839e8310b not found"
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/media/ingest/jobs/2",
+    "status": 200,
+    "body": {
+      "id": 2,
+      "uuid": "8bc86fde-d73f-42ce-b03b-6505670466e2",
+      "status": "completed",
+      "job_type": "media_ingest_item",
+      "owner_user_id": "2",
+      "created_at": "2026-09-16 08:22:08",
+      "started_at": "2026-09-16 08:22:10",
+      "completed_at": "2026-09-16 08:23:07",
+      "cancelled_at": null,
+      "cancellation_reason": null,
+      "progress_percent": 100,
+      "progress_message": "completed",
+      "result": {
+        "status": "Warning",
+        "media_id": 1,
+        "media_uuid": "bf70d305-27ae-42f9-9c85-1b733c3ab0e9",
+        "error": null,
+        "warnings": [
+          "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit.",
+          "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+        ],
+        "db_message": "Media 'cycle5-multi-native-aurora-public' added.",
+        "chunking_plan": {
+          "mode": "auto",
+          "goal": "balanced",
+          "used_llm": false,
+          "method": "semantic",
+          "max_size": 900,
+          "overlap": 120,
+          "template_name": null,
+          "derived_views": [],
+          "fallback_reason": null,
+          "rationale": "Detected unstructured long text; selected semantic chunking.",
+          "profile": {
+            "media_type": "document",
+            "source_name": "cycle5-multi-native-aurora-public.txt",
+            "title": null,
+            "mime_type": null,
+            "extension": "txt",
+            "text_length": 963,
+            "has_headings": false,
+            "has_tables": false,
+            "has_lists": false,
+            "has_timecodes": true,
+            "has_speaker_labels": false,
+            "has_chapters": false,
+            "language": "en"
+          }
+        }
+      },
+      "error_message": null,
+      "media_type": "document",
+      "source": "/private/tmp/tldw-onboarding-uat-cycle5-multi-20260916/tmp/media_ingest_job_i8t5_k16/cycle5-multi-native-aurora-public.txt",
+      "source_kind": "file",
+      "batch_id": "cf5e70fb-6325-4340-92ef-f6f0258c3740",
+      "collection_id": null,
+      "planned_item_id": null,
+      "idempotency_key": null
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/media/ingest/jobs/2",
+    "status": 403,
+    "body": {
+      "detail": "Not authorized for this job"
+    }
+  },
+  {
+    "who": "alice",
+    "method": "GET",
+    "path": "/api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__",
+    "status": 200,
+    "body": {
+      "items": [
+        {
+          "id": "08f7e61a-dbfe-4274-92f3-aa596c0b4b5e",
+          "scope_type": "global",
+          "workspace_id": null,
+          "character_id": 3,
+          "assistant_kind": "character",
+          "assistant_id": "3",
+          "persona_memory_mode": null,
+          "title": "According to the Aurora public station brief, who is the keeper and when does the weekly supply boat arrive? Cite the source.",
+          "state": "in-progress",
+          "topic_label": null,
+          "bm25_norm": null,
+          "last_modified": "2026-09-16T08:33:16.276000Z",
+          "created_at": "2026-09-16T08:32:54.764000Z",
+          "message_count": 2,
+          "keywords": [
+            "__knowledge_QA__"
+          ],
+          "cluster_id": null,
+          "source": "knowledge_qa",
+          "external_ref": null,
+          "version": 4
+        }
+      ],
+      "pagination": {
+        "limit": 50,
+        "offset": 0,
+        "total": 1,
+        "has_more": false
+      }
+    }
+  },
+  {
+    "who": "bob",
+    "method": "GET",
+    "path": "/api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__",
+    "status": 200,
+    "body": {
+      "items": [],
+      "pagination": {
+        "limit": 50,
+        "offset": 0,
+        "total": 0,
+        "has_more": false
+      }
+    }
+  }
+]

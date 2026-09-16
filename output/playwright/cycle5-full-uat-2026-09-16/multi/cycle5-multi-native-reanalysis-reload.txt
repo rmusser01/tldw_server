@@ -1,0 +1,14 @@
+### Result
+{"at":"2026-09-16T09:21:49.814Z","url":"http://127.0.0.1:18501/api/v1/media/1","status":200,"media_id":1,"analysis":"* Blue courtyard beside the library\n* 412 maps\n* North Pier, Willow Cove, and East Marsh","raw":"Cycle5 Aurora Public Station Brief\n\nThis is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps.\n\nAurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report.\n\nThe station uses the phrase \"AURORA-CYCLE5-MULTI-23\" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials.","versions":[{"uuid":"44d2cd1e-7be4-42eb-a91e-9d2883fea6fd","version_number":3,"analysis":"* Blue courtyard beside the library\n* 412 maps\n* North Pier, Willow Cove, and East Marsh"},{"uuid":"1f885484-a8d5-4794-9712-02969fb743b8","version_number":2,"analysis":"* Keeper: Maya Chen\n* Lantern count: 23\n* Supply boat schedule: Thursday at 09:30"},{"uuid":"ef2ef4f1-f401-4a94-89b9-2c5068651935","version_number":1,"analysis":null}]}
+### Ran Playwright code
+```js
+await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/api/v1/media/1")&&!r.url().includes("/chunks")&&r.request().method()==="GET");await page.reload();const r=await p;const j=await r.json();return {at:new Date().toISOString(),url:r.url(),status:r.status(),media_id:j.media_id,analysis:j.processing?.analysis,raw:j.content?.text,versions:j.versions?.map(v=>({uuid:v.uuid,version_number:v.version_number,analysis:v.analysis_content}))};})(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Media | tldw](http://127.0.0.1:18581/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18581/media?id=1
+- Page Title: Media | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-18-32-466Z.log#L11-L14

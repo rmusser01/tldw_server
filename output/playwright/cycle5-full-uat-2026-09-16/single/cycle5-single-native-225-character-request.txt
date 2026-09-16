@@ -1,0 +1,12 @@
+### Result
+{"status":200,"request":{"include_character_context":true,"model":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","provider":"custom-openai-api","save_to_db":true,"continue_as_user":false,"impersonate_user":false,"force_narrate":false,"message_steering_prompts":{"continue_as_user":"Continue the user's current thought in the same voice and perspective.","impersonate_user":"Write this reply as if it is authored by the user, in first person, while preserving the user's intent.","force_narrate":"Use narrative prose style for this reply."},"stream":true},"url":"http://127.0.0.1:18500/api/v1/chats/0aa4ee14-2311-447d-8c13-30a6997d22e3/complete-v2?scope_type=global","time":"2026-09-16T09:04:46.074Z"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Say hello."); const wait=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/complete-v2")); await page.getByRole("button",{name:"Send message",exact:true}).click(); const r=await wait; return {status:r.status(),request:r.request().postDataJSON(),url:r.url(),time:new Date().toISOString()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [E2E-TestBot Chat (20260916_090445) | tldw](http://127.0.0.1:18580/chat?mode=character&characterId=4&chatId=0aa4ee14-2311-447d-8c13-30a6997d22e3)
+### Page
+- Page URL: http://127.0.0.1:18580/chat?mode=character&characterId=4&chatId=0aa4ee14-2311-447d-8c13-30a6997d22e3
+- Page Title: E2E-TestBot Chat (20260916_090445) | tldw

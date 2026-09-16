@@ -1,0 +1,14 @@
+### Result
+{"url":"http://127.0.0.1:18580/chat"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Characters",exact:true}).click(); return {url:page.url()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Characters | tldw](http://127.0.0.1:18580/characters)
+### Page
+- Page URL: http://127.0.0.1:18580/characters
+- Page Title: Characters | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-49-49-466Z.log#L19-L21

@@ -1,0 +1,112 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Knowledge | tldw](http://127.0.0.1:18581/knowledge)
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [ref=f12e20]:
+  - generic [ref=f12e23]:
+    - link "Skip to main content" [ref=f12e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f12e25]:
+      - button "Expand sidebar" [ref=f12e26] [cursor=pointer]
+      - button "New Chat" [ref=f12e30] [cursor=pointer]
+      - generic [ref=f12e33]:
+        - button "Quick Ingest" [ref=f12e34] [cursor=pointer]
+        - button "Chat" [ref=f12e38] [cursor=pointer]
+        - button "Prompts" [ref=f12e41] [cursor=pointer]
+        - button "Characters" [ref=f12e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f12e50] [cursor=pointer]
+        - button "World Books" [ref=f12e54] [cursor=pointer]
+        - button "Notes" [ref=f12e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f12e61] [cursor=pointer]
+        - button "Media" [ref=f12e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f12e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f12e78] [cursor=pointer]
+        - button "Kanban" [ref=f12e84] [cursor=pointer]
+        - button "Watchlists" [ref=f12e86] [cursor=pointer]
+      - generic [ref=f12e91]:
+        - button "Open Notes Dock" [ref=f12e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f12e97] [cursor=pointer]
+        - button "Settings" [ref=f12e100] [cursor=pointer]
+    - main [ref=f12e104]:
+      - generic [ref=f12e105]:
+        - generic [ref=f12e108]:
+          - generic [ref=f12e109]:
+            - button "Expand sidebar" [ref=f12e110] [cursor=pointer]
+            - generic [ref=f12e112]:
+              - img "tldw Assistant" [ref=f12e113]
+              - generic [ref=f12e114]: tldw Assistant
+              - button "Companion Home" [ref=f12e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f12e119] [cursor=pointer]
+          - generic [ref=f12e122]:
+            - button "Search - Open command palette" [ref=f12e123] [cursor=pointer]:
+              - generic [ref=f12e127]: Search
+              - generic [ref=f12e128]: ⌘K
+            - button "Open settings" [ref=f12e129] [cursor=pointer]
+            - generic [ref=f12e141]:
+              - button "Notifications, connecting" [ref=f12e142] [cursor=pointer]
+              - status [ref=f12e145]: Notifications are connecting
+            - button "Switch to light theme" [ref=f12e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f12e153] [cursor=pointer]:
+              - generic [ref=f12e154]: "?"
+        - generic [ref=f12e158]:
+          - link "Skip to search" [ref=f12e159] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f12e160]:
+            - generic [ref=f12e163]:
+              - generic [ref=f12e164]:
+                - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f12e165] [cursor=pointer]': "Sources: 4 selected"
+                - button "Balanced" [ref=f12e172] [cursor=pointer]
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f12e175] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=f12e180] [cursor=pointer]:
+                  - generic [ref=f12e184]: "AI: Server default"
+                - button "Refresh source health" [ref=f12e187] [cursor=pointer]: Checking source health...
+                - button "Open Knowledge QA settings" [ref=f12e188] [cursor=pointer]
+              - generic [ref=f12e192]:
+                - generic [ref=f12e193]:
+                  - heading "Ask Your Library" [level=1] [ref=f12e196]
+                  - paragraph [ref=f12e197]: Search selected personal-library sources and get cited answers
+                  - paragraph [ref=f12e198]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                  - paragraph [ref=f12e199]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                - generic [ref=f12e200]:
+                  - button "How it works" [expanded] [ref=f12e201] [cursor=pointer]
+                  - list [ref=f12e203]:
+                    - listitem [ref=f12e204]:
+                      - generic [ref=f12e205]: "1"
+                      - generic [ref=f12e206]: Select sources
+                    - listitem [ref=f12e208]:
+                      - generic [ref=f12e209]: "2"
+                      - generic [ref=f12e210]: Ask a question
+                    - listitem [ref=f12e213]:
+                      - generic [ref=f12e214]: "3"
+                      - generic [ref=f12e215]: Review cited answer
+                - generic [ref=f12e219]:
+                  - button "Explain the methodology used in this study" [ref=f12e220] [cursor=pointer]
+                  - button "Summarize the key findings in my latest sources" [ref=f12e221] [cursor=pointer]
+                  - button "What claims have direct citations?" [ref=f12e222] [cursor=pointer]
+                  - button "Compare conclusions across my documents" [ref=f12e223] [cursor=pointer]
+                - generic [ref=f12e224]:
+                  - paragraph [ref=f12e225]: No previous QA sessions yet.
+                  - button "Continue recent session" [disabled] [ref=f12e226]
+                  - button "Select sources" [ref=f12e230] [cursor=pointer]
+                - paragraph [ref=f12e232]:
+                  - text: Need a full workspace?
+                  - link "Try Research Workspace →" [ref=f12e233] [cursor=pointer]:
+                    - /url: /research-workspace
+              - generic [ref=f12e234]:
+                - paragraph [ref=f12e235]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                - generic [ref=f12e236]:
+                  - textbox "Search your knowledge base" [active] [ref=f12e237]:
+                    - /placeholder: What are the key findings from the research?
+                  - button "Ask" [disabled] [ref=f12e239]
+                - generic [ref=f12e240]: Press / to focus, Cmd+K for new search
+          - generic [ref=f12e242]:
+            - button "Switch to detailed view" [ref=f12e243] [cursor=pointer]
+            - link "Help & Documentation" [ref=f12e247] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f12e15] [cursor=pointer]
+  - alert [ref=f12e19]
+```

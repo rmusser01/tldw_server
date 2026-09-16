@@ -1,0 +1,42 @@
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+const root = '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui'
+const testPath = root + '/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx'
+export default { ...base,
+ plugins: [{ name: 'private-new-saved-route-transition', enforce: 'pre' as const, transform(code: string, id: string) {
+  if (id !== testPath) return null
+  code = 'import { useClearChat } from "@/hooks/chat/useClearChat"\n' + code
+  code = code.replace('useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn() })', 'useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn(), reset: vi.fn() })')
+  const routeStart = code.indexOf('const navigateRoute = ')
+  const routeEnd = code.indexOf('vi.mock("react-router-dom"', routeStart)
+  code = code.slice(0, routeStart) + `let privateRouteDelay = false
+const navigateRoute = (to: string | { pathname?: string; search?: string; hash?: string }) => {
+ const commit = () => { window.history.replaceState({}, "", typeof to === "string" ? to : (to.pathname || "/chat") + (to.search || "") + (to.hash || "")); window.dispatchEvent(new PopStateEvent("popstate")) }
+ if (privateRouteDelay && typeof to === "string") setTimeout(commit, 70)
+ else commit()
+}
+const PrivateNewSavedButton = () => { const clear = useClearChat(); return <button onClick={() => { useStoreMessageOption.getState().setTemporaryChat(false); void setTestAssistant(null); clear() }}>Private actual reset</button> }
+` + code.slice(routeEnd)
+  const start = code.indexOf('  it.each(["Robot", "New choice"])("uses the real picker')
+  const end = code.indexOf('  it("keeps the saved conversation and preference after cancelling', start)
+  if (start < 0 || end < 0 || routeStart < 0) throw new Error('fixture anchors changed')
+  let probe = code.slice(start,end)
+  probe = probe.replace('it.each(["Robot", "New choice"])("uses the real picker to deliberately select %s with a saved target", async choice => {', 'it.each([false, true])("private actual New saved reset survives pending route navigation %s", async delay => { realLoader.route = true; privateRouteDelay = delay;')
+  probe = probe.replace('await pending; return { id: 5, name: "Late Robot" }', 'return { id: 5, name: "Robot" }')
+  probe = probe.replace('/chat?settingsServerChatId=robot', '/chat?mode=character&characterId=5&chatId=robot')
+  probe = probe.replace('<Playground /><AssistantSelect />', '<Playground /><PrivateNewSavedButton />')
+  const bodyStart = probe.indexOf('      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled())')
+  const bodyEnd = probe.indexOf('    } finally',bodyStart)
+  probe = probe.slice(0,bodyStart)+`      await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+      await waitFor(async () => expect(await selectedAssistantStorage.get("selectedAssistant")).toMatchObject({id:"5"}))
+      fireEvent.click(screen.getByRole("button", {name:"Private actual reset"}))
+      await act(async () => { await new Promise(resolve=>setTimeout(resolve,700)) })
+      const state=useStoreMessageOption.getState()
+      console.info("Private New saved settled", JSON.stringify({delay,route:window.location.pathname+window.location.search,serverChatId:state.serverChatId,messages:state.messages.map(row=>row.message),selection:await selectedAssistantStorage.get("selectedAssistant")}))
+      expect.soft(window.location.search).toBe("")
+      expect.soft(state.serverChatId).toBeNull()
+      expect.soft(state.messages).toEqual([])
+`+probe.slice(bodyEnd)
+  return {code: code.slice(0,start)+probe+code.slice(end),map:null}
+ }}],
+ test: {...base.test,setupFiles:[root+'/vitest.setup.ts'],include:[testPath],testNamePattern:'private actual New saved reset',maxWorkers:1,fileParallelism:false}
+}

@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'System prompt Custom' }).click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Chat | tldw](http://127.0.0.1:18580/chat?mode=character&characterId=4)
+### Page
+- Page URL: http://127.0.0.1:18580/chat?mode=character&characterId=4
+- Page Title: Chat | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-03-56-673Z.yml)

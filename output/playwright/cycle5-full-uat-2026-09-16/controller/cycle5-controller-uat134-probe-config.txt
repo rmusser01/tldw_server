@@ -1,0 +1,33 @@
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+const root='/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui'
+const testPath=root+'/src/services/__tests__/api-send.test.ts'
+export default {...base,plugins:[{name:'private-api-send-refresh',enforce:'pre' as const,transform(code:string,id:string){
+ if(id!==testPath)return null
+ const start=code.indexOf('vi.mock("@/services/tldw/request-core",')
+ const end=code.indexOf('vi.mock("@/utils/safe-storage",',start)
+ if(start<0||end<0)throw new Error('fixture changed')
+ code=code.slice(0,start)+code.slice(end)
+ const at=code.indexOf('  it("does not replay a captured write')
+ const probe=`
+  it.each(["expired", "valid"])("private actual apiSend GET handles %s multi-user credential", async mode => {
+    mocks.runtimeId = null
+    const token = "test." + btoa(JSON.stringify({sub:"synthetic-A", exp: mode === "valid" ? 4102444800 : 1})) + ".signature"
+    const config = {serverUrl:"http://auth.test",authMode:"multi-user",accessToken:token,refreshToken:"synthetic-valid-refresh"}
+    mocks.storageGet.mockImplementation(async key => key === "tldwConfig" ? config : null)
+    const calls: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url, options) => {
+      const path = new URL(String(url)).pathname; calls.push(path)
+      if(path === "/api/v1/auth/refresh") return new Response(JSON.stringify({access_token:"new-test-token", refresh_token:"rotated-test-refresh"}),{status:200,headers:{"content-type":"application/json"}})
+      return new Response(JSON.stringify(mode === "valid" ? {sessions:[]} : {detail:"Token expired"}),{status:mode === "valid"?200:401,headers:{"content-type":"application/json"}})
+    }))
+    const {apiSend}=await importApiSend()
+    try {
+      const result = await apiSend({path:"/api/v1/auth/sessions",method:"GET"})
+      console.info("private auth probe safe result",JSON.stringify({mode,status:result.status,calls}))
+      expect.soft(result.status).toBe(200)
+      expect.soft(calls.filter(path=>path==="/api/v1/auth/refresh")).toHaveLength(mode === "valid"?0:1)
+    } finally {vi.unstubAllGlobals()}
+  })
+`
+ return {code:code.slice(0,at)+probe+code.slice(at),map:null}
+}}],test:{...base.test,setupFiles:[root+'/vitest.setup.ts'],include:[testPath],testNamePattern:'private actual apiSend GET',maxWorkers:1,fileParallelism:false}}

@@ -1,0 +1,206 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Server Settings | tldw](http://127.0.0.1:18581/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18581/settings/tldw
+- Page Title: Server Settings | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f23e20]:
+  - generic [ref=f23e23]:
+    - link "Skip to main content" [ref=f23e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=f23e25]:
+      - generic [ref=f23e26]:
+        - generic [ref=f23e29]:
+          - generic [ref=f23e31]:
+            - img "tldw Assistant" [ref=f23e32]
+            - generic [ref=f23e33]: tldw Assistant
+            - button "Companion Home" [ref=f23e34] [cursor=pointer]
+            - button "Show shortcuts" [ref=f23e38] [cursor=pointer]
+          - generic [ref=f23e41]:
+            - button "Search - Open command palette" [ref=f23e42] [cursor=pointer]:
+              - generic [ref=f23e46]: Search
+              - generic [ref=f23e47]: ⌘K
+            - button "Open settings" [ref=f23e48] [cursor=pointer]
+            - generic [ref=f23e60]:
+              - button "Notifications, connecting" [ref=f23e61] [cursor=pointer]
+              - status [ref=f23e64]: Notifications are connecting
+            - button "Switch to light theme" [ref=f23e65] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f23e72] [cursor=pointer]:
+              - generic [ref=f23e73]: "?"
+        - generic [ref=f23e78]:
+          - complementary [ref=f23e79]:
+            - navigation "Settings navigation" [ref=f23e80]:
+              - button "Switch to Sidebar" [ref=f23e82] [cursor=pointer]
+              - generic [ref=f23e83]:
+                - generic [ref=f23e84]: Filter settings
+                - textbox "Filter settings" [ref=f23e85]:
+                  - /placeholder: Find a setting
+              - generic [ref=f23e86]:
+                - generic [ref=f23e87]:
+                  - generic [ref=f23e88]: Setup & Recovery
+                  - list [ref=f23e90]:
+                    - listitem [ref=f23e91]:
+                      - link "Setup & Recovery" [ref=f23e92] [cursor=pointer]:
+                        - /url: /settings
+                    - listitem [ref=f23e100]:
+                      - link "tldw Server" [ref=f23e101] [cursor=pointer]:
+                        - /url: /settings/tldw
+                    - listitem [ref=f23e107]:
+                      - link "Provider Keys" [ref=f23e108] [cursor=pointer]:
+                        - /url: /settings/provider-keys
+                    - listitem [ref=f23e113]:
+                      - link "Manage Models" [ref=f23e114] [cursor=pointer]:
+                        - /url: /settings/model
+                    - listitem [ref=f23e128]:
+                      - link "Health & Diagnostics" [ref=f23e129] [cursor=pointer]:
+                        - /url: /settings/health
+                - generic [ref=f23e133]:
+                  - generic [ref=f23e134]: Preferences & Workflow
+                  - list [ref=f23e136]:
+                    - listitem [ref=f23e137]:
+                      - link "Preferences" [ref=f23e138] [cursor=pointer]:
+                        - /url: /settings/preferences
+                    - listitem [ref=f23e141]:
+                      - link "Chat" [ref=f23e142] [cursor=pointer]:
+                        - /url: /settings/chat
+                    - listitem [ref=f23e146]:
+                      - link "Chat Macros" [ref=f23e147] [cursor=pointer]:
+                        - /url: /settings/chat-macros
+                    - listitem [ref=f23e156]:
+                      - link "UI customization" [ref=f23e157] [cursor=pointer]:
+                        - /url: /settings/ui
+                    - listitem [ref=f23e160]:
+                      - link "Splash screens" [ref=f23e161] [cursor=pointer]:
+                        - /url: /settings/splash
+                    - listitem [ref=f23e166]:
+                      - link "Quick Ingest" [ref=f23e167] [cursor=pointer]:
+                        - /url: /settings/quick-ingest
+                    - listitem [ref=f23e172]:
+                      - link "Speech" [ref=f23e173] [cursor=pointer]:
+                        - /url: /settings/speech
+                    - listitem [ref=f23e178]:
+                      - link "Image Generation" [ref=f23e179] [cursor=pointer]:
+                        - /url: /settings/image-generation
+                    - listitem [ref=f23e185]:
+                      - link "Knowledge QA" [ref=f23e186] [cursor=pointer]:
+                        - /url: /settings/knowledge
+                    - listitem [ref=f23e190]:
+                      - link "RAG Settings" [ref=f23e191] [cursor=pointer]:
+                        - /url: /settings/rag
+                    - listitem [ref=f23e200]:
+                      - link "Workflow prompts" [ref=f23e201] [cursor=pointer]:
+                        - /url: /settings/prompt
+                    - listitem [ref=f23e205]:
+                      - link "Prompt Studio" [ref=f23e206] [cursor=pointer]:
+                        - /url: /settings/prompt-studio
+                      - generic [ref=f23e212]: Beta
+                    - listitem [ref=f23e213]:
+                      - link "Chatbooks settings" [ref=f23e214] [cursor=pointer]:
+                        - /url: /settings/chatbooks
+                    - listitem [ref=f23e218]:
+                      - link "Characters" [ref=f23e219] [cursor=pointer]:
+                        - /url: /settings/characters
+                    - listitem [ref=f23e223]:
+                      - link "World Books" [ref=f23e224] [cursor=pointer]:
+                        - /url: /settings/world-books
+                    - listitem [ref=f23e228]:
+                      - link "Chat Dictionaries" [ref=f23e229] [cursor=pointer]:
+                        - /url: /settings/chat-dictionaries
+                - generic [ref=f23e234]:
+                  - generic [ref=f23e235]: Data & Administration
+                  - list [ref=f23e237]:
+                    - listitem [ref=f23e238]:
+                      - link "Data Management" [ref=f23e239] [cursor=pointer]:
+                        - /url: /settings/data
+                    - listitem [ref=f23e245]:
+                      - link "Manage Share" [ref=f23e246] [cursor=pointer]:
+                        - /url: /settings/share
+                    - listitem [ref=f23e251]:
+                      - link "Evaluations" [ref=f23e252] [cursor=pointer]:
+                        - /url: /settings/evaluations
+                    - listitem [ref=f23e256]:
+                      - link "Moderation Review" [ref=f23e257] [cursor=pointer]:
+                        - /url: /moderation
+                    - listitem [ref=f23e262]:
+                      - link "Content Rules" [ref=f23e263] [cursor=pointer]:
+                        - /url: /moderation/rules
+                    - listitem [ref=f23e268]:
+                      - link "MCP Hub" [ref=f23e269] [cursor=pointer]:
+                        - /url: /settings/mcp-hub
+                    - listitem [ref=f23e274]:
+                      - link "About" [ref=f23e275] [cursor=pointer]:
+                        - /url: /settings/about
+              - button "Hide beta badges" [ref=f23e280] [cursor=pointer]
+          - region [ref=f23e281]:
+            - button "Close" [ref=f23e283] [cursor=pointer]
+            - generic [ref=f23e288]:
+              - heading "tldw Server" [level=1] [ref=f23e289]
+              - paragraph [ref=f23e291]: Current section:tldw Server
+              - generic [ref=f23e294]:
+                - generic [ref=f23e295]:
+                  - heading "About tldw server integration" [level=3] [ref=f23e296]
+                  - paragraph [ref=f23e297]: Connect to tldw server for chat, knowledge search, and media.
+                  - generic [ref=f23e298]:
+                    - paragraph [ref=f23e299]: What your tldw server provides
+                    - list [ref=f23e300]:
+                      - listitem [ref=f23e301]: Powers chat, multi-turn memory, and server-backed history.
+                      - listitem [ref=f23e302]: Enables Knowledge search & RAG so chats can reference your own documents.
+                      - listitem [ref=f23e303]: Handles media ingest, transcription, and metrics so you can review calls and videos.
+                    - button "View server setup guide" [ref=f23e304] [cursor=pointer]
+                - generic [ref=f23e305]:
+                  - generic [ref=f23e306]: Server:http://127.0.0.1:18501
+                  - generic [ref=f23e307]:
+                    - link [ref=f23e309] [cursor=pointer]:
+                      - /url: /settings/health
+                      - button "Health" [ref=f23e310]
+                    - button "Recheck" [ref=f23e313] [cursor=pointer]
+                - generic [ref=f23e315]:
+                  - tablist [ref=f23e316]:
+                    - generic [ref=f23e318]:
+                      - tab "Connection" [selected] [ref=f23e320] [cursor=pointer]
+                      - tab "Timeouts" [ref=f23e322] [cursor=pointer]
+                  - generic:
+                    - generic:
+                      - tabpanel "Connection"
+                - heading "tldw Server Configuration" [level=2] [ref=f23e323]
+                - generic [ref=f23e324]:
+                  - generic [ref=f23e326]:
+                    - generic "Server URL" [ref=f23e328]: "* Server URL"
+                    - generic [ref=f23e329]:
+                      - textbox "* Server URL" [ref=f23e332]:
+                        - /placeholder: http://127.0.0.1:8000
+                        - text: http://127.0.0.1:18501
+                      - generic [ref=f23e333]: "The URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000"
+                  - generic [ref=f23e336]:
+                    - generic "Authentication Mode" [ref=f23e338]: "* Authentication Mode"
+                    - radiogroup "segmented control" [ref=f23e342]:
+                      - generic [ref=f23e343]:
+                        - generic [ref=f23e345] [cursor=pointer]:
+                          - radio "Single User (API Key)"
+                          - generic "Single User (API Key)" [ref=f23e346]
+                        - generic [ref=f23e347] [cursor=pointer]:
+                          - radio "Multi User (Login)" [checked]
+                          - generic "Multi User (Login)" [ref=f23e348]
+                  - status [ref=f23e349]:
+                    - generic [ref=f23e354]:
+                      - paragraph [ref=f23e355]: Logged In
+                      - generic [ref=f23e356]: You are currently logged in to tldw_server
+                      - button "Logout" [ref=f23e358] [cursor=pointer]
+                  - generic [ref=f23e359]:
+                    - generic [ref=f23e361]:
+                      - button "Save" [ref=f23e363] [cursor=pointer]
+                      - button "Test Connection" [ref=f23e366] [cursor=pointer]
+                    - generic [ref=f23e370]:
+                      - generic [ref=f23e371]: Checks
+                      - generic [ref=f23e372]: "Core: not checked yet"
+                      - generic [ref=f23e373]: "RAG: not checked yet"
+                  - button "collapsed Advanced Timeouts" [ref=f23e377] [cursor=pointer]:
+                    - img "collapsed" [ref=f23e379]
+                    - generic [ref=f23e382]: Advanced Timeouts
+  - button "Open Next.js Dev Tools" [ref=f23e15] [cursor=pointer]
+  - alert [ref=f23e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-25-19-842Z.log#L3-L4

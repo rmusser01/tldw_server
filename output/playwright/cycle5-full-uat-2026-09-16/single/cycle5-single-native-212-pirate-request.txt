@@ -1,0 +1,14 @@
+### Result
+{"status":200,"request":{"messages":[{"role":"system","content":"You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once."},{"role":"user","content":"Chat with this media: cycle5-single-native-public-source\n\nProject Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00.\n\nAccording only to this source, who coordinates Project Cedar and where is its book return?"},{"role":"assistant","content":"Jonah Patel coordinates Project Cedar, and its book return is beside the north entrance."},{"role":"user","content":"Greet a visitor to Project Cedar in one short sentence."}],"model":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","stream":true,"temperature":0.7,"top_p":1,"frequency_penalty":0,"presence_penalty":0,"save_to_db":true,"metadata":{"tldw_client_message_id":"pa_ef1c-9b6b-bac-9c6d"},"conversation_id":"1d4c6033-63eb-4cec-a406-41c579d7e791","api_provider":"custom-openai-api"},"time":"2026-09-16T09:00:14.388Z"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Greet a visitor to Project Cedar in one short sentence."); const wait=page.waitForResponse(r=>r.url().endsWith("/api/v1/chat/completions")&&r.request().method()==="POST"); await page.getByRole("button",{name:"Send message",exact:true}).click(); const r=await wait; return {status:r.status(),request:r.request().postDataJSON(),time:new Date().toISOString()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-49-49-466Z.log#L16

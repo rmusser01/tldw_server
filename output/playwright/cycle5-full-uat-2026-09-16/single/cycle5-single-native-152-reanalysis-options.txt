@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByText('../../../Working/').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-41-09-738Z.yml)

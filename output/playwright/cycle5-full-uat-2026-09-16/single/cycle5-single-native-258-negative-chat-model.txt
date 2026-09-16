@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByRole('menuitem', { name: 'gemma3:1b Add to favorites' }).click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Chat with this media: cycle5-single-native-public-source Project Cedar is a fic | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-15-15-878Z.yml)

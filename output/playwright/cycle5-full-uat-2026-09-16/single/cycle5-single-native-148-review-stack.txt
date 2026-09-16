@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByLabel('', { exact: true }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/media-multi
+- Page Title: Media Analysis | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-39-16-648Z.yml)

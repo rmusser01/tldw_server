@@ -1,0 +1,6 @@
+### Result
+{"clickedAt":"2026-09-16T08:55:05.145Z","observedAt":"2026-09-16T08:55:07.293Z","clickedLabel":"Default Assistant\nCharacter","url":"http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995","selected":"","mode":"Character Chat\nCycle5 Alice TestBot","dialogs":[]}
+### Ran Playwright code
+```js
+await (async (page) => { const at=new Date().toISOString(); const button=page.getByRole("button",{name:"Default Assistant",exact:true}); const label=await button.innerText(); await button.click(); await page.waitForTimeout(2000); return {clickedAt:at, observedAt:new Date().toISOString(),clickedLabel:label,url:page.url(),selected:await page.getByTestId("character-select").innerText(),mode:await page.getByTestId("playground-active-chat-mode").innerText(),dialogs:await page.getByRole("dialog").allTextContents()}; })(page);
+```

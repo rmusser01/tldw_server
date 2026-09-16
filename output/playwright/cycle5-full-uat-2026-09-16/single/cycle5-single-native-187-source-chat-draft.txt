@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18580/chat","draft":"Chat with this media: cycle5-single-native-public-source\n\nProject Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00.\n\nAccording only to this source, who coordinates Project Cedar and where is its book return?","time":"2026-09-16T08:51:39.458Z"}
+### Ran Playwright code
+```js
+await (async page => { const input=page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}); const source=await input.inputValue(); await input.fill(source+"\n\nAccording only to this source, who coordinates Project Cedar and where is its book return?"); return {url:page.url(),draft:await input.inputValue(),time:new Date().toISOString()}; })(page);
+```

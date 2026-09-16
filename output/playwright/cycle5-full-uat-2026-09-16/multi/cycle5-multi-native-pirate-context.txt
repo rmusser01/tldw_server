@@ -1,0 +1,317 @@
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995)
+- 1: (current) [Chat | tldw](http://127.0.0.1:18581/chat)
+### Page
+- Page URL: http://127.0.0.1:18581/chat
+- Page Title: Chat | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f3e20]:
+  - generic [ref=f3e23]:
+    - link "Skip to main content" [ref=f3e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e25]:
+      - button "Expand sidebar" [ref=f3e26] [cursor=pointer]
+      - button "New Chat" [ref=f3e30] [cursor=pointer]
+      - generic [ref=f3e33]:
+        - button "Quick Ingest" [ref=f3e34] [cursor=pointer]
+        - button "Chat" [ref=f3e38] [cursor=pointer]
+        - button "Prompts" [ref=f3e41] [cursor=pointer]
+        - button "Characters" [ref=f3e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e50] [cursor=pointer]
+        - button "World Books" [ref=f3e54] [cursor=pointer]
+        - button "Notes" [ref=f3e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e61] [cursor=pointer]
+        - button "Media" [ref=f3e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e78] [cursor=pointer]
+        - button "Kanban" [ref=f3e84] [cursor=pointer]
+        - button "Watchlists" [ref=f3e86] [cursor=pointer]
+      - generic [ref=f3e91]:
+        - button "Open Notes Dock" [ref=f3e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e97] [cursor=pointer]
+        - button "Settings" [ref=f3e100] [cursor=pointer]
+    - main [ref=f3e104]:
+      - generic [ref=f3e105]:
+        - generic [ref=f3e108]:
+          - generic [ref=f3e109]:
+            - button "Expand sidebar" [ref=f3e110] [cursor=pointer]
+            - generic [ref=f3e112]:
+              - img "tldw Assistant" [ref=f3e113]
+              - generic [ref=f3e114]: tldw Assistant
+              - button "Companion Home" [ref=f3e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e119] [cursor=pointer]
+            - generic [ref=f3e577]:
+              - generic "Saved chat. History is persisted." [ref=f3e578]: Saved
+              - generic "Character mode is active." [ref=f3e984]: "Character: Cycle5 Alice TestBot"
+          - generic [ref=f3e122]:
+            - button "Search - Open command palette" [ref=f3e123] [cursor=pointer]:
+              - generic [ref=f3e127]: Search
+              - generic [ref=f3e128]: ⌘K
+            - button "New saved chat" [ref=f3e585] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f3e589] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f3e590] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=f3e591]
+            - button "Open settings" [ref=f3e129] [cursor=pointer]
+            - generic [ref=f3e141]:
+              - button "Notifications, 0 unread" [ref=f3e502] [cursor=pointer]
+              - status [ref=f3e145]: Notifications are active
+            - button "Switch to light theme" [ref=f3e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e153] [cursor=pointer]:
+              - generic [ref=f3e154]: "?"
+        - generic [ref=f3e155]:
+          - heading "Chat" [level=1] [ref=f3e598]
+          - generic [ref=f3e601]:
+            - paragraph [ref=f3e602]: Runtime rail hidden. Context rail visible.
+            - generic [ref=f3e603]:
+              - complementary "Chat cockpit context" [ref=f3e1093]:
+                - generic [ref=f3e1094]:
+                  - generic [ref=f3e1095]: Context
+                  - generic [ref=f3e1096]:
+                    - button "Collapse context sidechannel" [expanded] [ref=f3e1097] [cursor=pointer]
+                    - tooltip "Collapse context sidechannel"
+                - generic [ref=f3e1102]:
+                  - region "Next message composition" [ref=f3e1104]:
+                    - generic [ref=f3e1105]:
+                      - generic [ref=f3e1106]:
+                        - heading "Composition" [level=2] [ref=f3e1107]
+                        - paragraph [ref=f3e1108]: Next message
+                        - paragraph [ref=f3e1109]: "Scope: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+                      - generic [ref=f3e1110]:
+                        - generic [ref=f3e1111]: Ready
+                        - button "Collapse Composition" [expanded] [ref=f3e1112] [cursor=pointer]
+                    - generic [ref=f3e1115]:
+                      - list [ref=f3e1116]:
+                        - listitem [ref=f3e1117]:
+                          - generic [ref=f3e1118]:
+                            - paragraph [ref=f3e1119]: Prompt
+                            - paragraph [ref=f3e1120]: Cycle5 Alice Pirate
+                            - paragraph [ref=f3e1121]: System prompt
+                          - generic [ref=f3e1122]: Active
+                        - listitem [ref=f3e1123]:
+                          - generic [ref=f3e1124]:
+                            - paragraph [ref=f3e1125]: Assistant
+                            - paragraph [ref=f3e1126]: Cycle5 Alice TestBot
+                            - paragraph [ref=f3e1127]: Character selected
+                          - generic [ref=f3e1128]: Active
+                        - listitem [ref=f3e1129]:
+                          - generic [ref=f3e1130]:
+                            - paragraph [ref=f3e1131]: Model
+                            - paragraph [ref=f3e1132]: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                          - generic [ref=f3e1133]: Active
+                        - listitem [ref=f3e1134]:
+                          - generic [ref=f3e1135]:
+                            - paragraph [ref=f3e1136]: Model settings
+                            - paragraph [ref=f3e1137]: tldw:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                          - generic [ref=f3e1138]: Empty
+                        - listitem [ref=f3e1139]:
+                          - generic [ref=f3e1140]:
+                            - paragraph [ref=f3e1141]: Context
+                            - paragraph [ref=f3e1142]: 2 active sources
+                            - paragraph [ref=f3e1143]: 2 configured sources
+                          - generic [ref=f3e1144]: Active
+                        - listitem [ref=f3e1145]:
+                          - generic [ref=f3e1146]:
+                            - paragraph [ref=f3e1147]: MCP tools
+                            - paragraph [ref=f3e1148]: MCP tools
+                            - paragraph [ref=f3e1149]: No MCP tools available
+                          - generic [ref=f3e1150]: Empty
+                      - button "Show composition details" [ref=f3e1151] [cursor=pointer]
+                  - region "Context stack" [ref=f3e1154]:
+                    - generic [ref=f3e1155]:
+                      - heading "Context stack" [level=2] [ref=f3e1156]
+                      - button "Collapse Context stack" [expanded] [ref=f3e1157] [cursor=pointer]
+                    - generic [ref=f3e1160]:
+                      - generic [ref=f3e1161]:
+                        - generic [ref=f3e1162]:
+                          - paragraph [ref=f3e1163]: Context active
+                          - paragraph [ref=f3e1164]: 2 active sources
+                        - generic [ref=f3e1165]: Armed
+                      - list "Context sources" [ref=f3e1166]:
+                        - listitem [ref=f3e1167]:
+                          - generic [ref=f3e1168]:
+                            - generic [ref=f3e1174]:
+                              - generic [ref=f3e1175]:
+                                - generic [ref=f3e1176]: Prompt
+                                - generic [ref=f3e1177]: Active
+                              - paragraph [ref=f3e1178]: Cycle5 Alice Pirate
+                              - paragraph [ref=f3e1179]: System prompt
+                            - generic [ref=f3e1180]:
+                              - button "Select prompt" [ref=f3e1181] [cursor=pointer]
+                              - button "Clear prompt context" [ref=f3e1185] [cursor=pointer]
+                        - listitem [ref=f3e1189]:
+                          - generic [ref=f3e1190]:
+                            - generic [ref=f3e1195]:
+                              - generic [ref=f3e1196]:
+                                - generic [ref=f3e1197]: Character
+                                - generic [ref=f3e1198]: Active
+                              - paragraph [ref=f3e1199]: Cycle5 Alice TestBot
+                              - paragraph [ref=f3e1200]: Character selected
+                            - generic [ref=f3e1201]:
+                              - button "Select character or persona" [ref=f3e1202] [cursor=pointer]
+                              - button "Clear assistant" [ref=f3e1206] [cursor=pointer]
+                  - region "Prompt management" [ref=f3e1210]:
+                    - generic [ref=f3e1211]:
+                      - heading "Prompt" [level=2] [ref=f3e1212]
+                      - button "Collapse Prompt" [expanded] [ref=f3e1213] [cursor=pointer]
+                    - generic [ref=f3e1216]:
+                      - generic [ref=f3e1217]:
+                        - generic [ref=f3e1218]:
+                          - paragraph [ref=f3e1219]: Cycle5 Alice Pirate
+                          - paragraph [ref=f3e1220]: System prompt
+                        - generic [ref=f3e1221]: Active
+                      - generic [ref=f3e1222]:
+                        - button "Select prompt" [ref=f3e1223] [cursor=pointer]
+                        - button "Clear prompt" [ref=f3e1224] [cursor=pointer]
+                  - region "Search & sources" [ref=f3e1225]:
+                    - generic [ref=f3e1226]:
+                      - heading "Search & sources" [level=2] [ref=f3e1227]
+                      - button "Collapse Search & sources" [expanded] [ref=f3e1228] [cursor=pointer]
+                    - generic [ref=f3e1231]:
+                      - paragraph [ref=f3e1232]: Manage web, files, knowledge, media, and research context.
+                      - paragraph [ref=f3e1233]: No files, knowledge, media, or research sources attached.
+                      - generic [ref=f3e1234]:
+                        - button "Web search" [ref=f3e1235] [cursor=pointer]: Web search off
+                        - button "Open Search & Context" [ref=f3e1236] [cursor=pointer]: Search & Context
+                  - region "Character chat sessions" [ref=f3e1237]:
+                    - region "Character sessions" [ref=f3e1238]:
+                      - generic [ref=f3e1239]:
+                        - heading "Recent character chats" [level=2] [ref=f3e1240]
+                        - button "Collapse Recent character chats" [expanded] [ref=f3e1241] [cursor=pointer]
+                      - generic [ref=f3e1244]:
+                        - generic [ref=f3e1245]:
+                          - generic [ref=f3e1246]:
+                            - paragraph [ref=f3e1247]: Resume role-play
+                            - paragraph [ref=f3e1248]: Recent character conversations stay separate from saved role-play setups.
+                          - generic [ref=f3e1249]: Available
+                        - 'button "Resume last character chat: Cycle5 Alice TestBot Chat (20260916_084418)" [ref=f3e1250] [cursor=pointer]': Resume last character chat
+                        - list "Recent sessions for Cycle5 Alice TestBot" [ref=f3e1251]:
+                          - listitem [ref=f3e1252]:
+                            - generic [ref=f3e1253]:
+                              - generic [ref=f3e1257]:
+                                - paragraph [ref=f3e1258]: Cycle5 Alice TestBot Chat (20260916_084418)
+                                - generic [ref=f3e1259]:
+                                  - generic [ref=f3e1260]: Cycle5 Alice TestBot
+                                  - generic [ref=f3e1261]: 11m ago
+                                  - generic [ref=f3e1265]: Saved
+                              - button "Resume Cycle5 Alice TestBot Chat (20260916_084418)" [ref=f3e1266] [cursor=pointer]: Resume
+                        - list "Other character sessions" [ref=f3e1267]:
+                          - listitem [ref=f3e1268]:
+                            - generic [ref=f3e1269]:
+                              - generic [ref=f3e1273]:
+                                - paragraph [ref=f3e1274]: According to the Aurora public station brief, who is the keeper and when does the weekly supply boat arrive? Cite the source.
+                                - generic [ref=f3e1275]:
+                                  - generic [ref=f3e1276]: Helpful AI Assistant
+                                  - generic [ref=f3e1277]: 22m ago
+                                  - generic [ref=f3e1281]: Saved
+                              - button "Resume According to the Aurora public station brief, who is the keeper and when does the weekly supply boat arrive? Cite the source." [ref=f3e1282] [cursor=pointer]: Resume
+                  - region "Conversation session" [ref=f3e1283]:
+                    - generic [ref=f3e1284]:
+                      - heading "Session" [level=2] [ref=f3e1285]
+                      - button "Collapse Session" [expanded] [ref=f3e1286] [cursor=pointer]
+                    - generic [ref=f3e1289]:
+                      - generic [ref=f3e1290]:
+                        - paragraph [ref=f3e1292]: Local chat
+                        - generic [ref=f3e1293]: Idle
+                      - paragraph [ref=f3e1294]: No saved history yet
+                      - paragraph [ref=f3e1295]: No saved history yet
+                      - button "Use temporary chat" [ref=f3e1296] [cursor=pointer]
+              - main [ref=f3e604]:
+                - generic [ref=f3e605]:
+                  - generic [ref=f3e607]:
+                    - generic [ref=f3e608]:
+                      - generic [ref=f3e609]:
+                        - text: Character Chat
+                        - generic [ref=f3e990]: Cycle5 Alice TestBot
+                      - generic [ref=f3e611]: Conversation timeline
+                    - generic [ref=f3e612]:
+                      - button "Switch to light theme" [ref=f3e613] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f3e620] [cursor=pointer]:
+                        - generic [ref=f3e626]: Focus
+                      - button "Shortcuts" [ref=f3e627] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f3e631]
+                  - log "Chat messages" [ref=f3e633]:
+                    - article "Assistant message 1 of 1" [ref=f3e991]:
+                      - generic [ref=f3e997]:
+                        - generic [ref=f3e999]:
+                          - generic [ref=f3e1000]: Cycle5 Alice TestBot
+                          - generic [ref=f3e1001]: • 1:55 AM
+                          - generic [ref=f3e1002]: greeting
+                        - paragraph [ref=f3e1297]: Hello! How can I help you today?
+                        - button "More actions" [ref=f3e1008] [cursor=pointer]: •••
+                  - generic [ref=f3e708]:
+                    - generic [ref=f3e709]: Composer
+                    - button "Scroll to latest messages" [ref=f3e1009] [cursor=pointer]
+                    - generic [ref=f3e717]:
+                      - button [aria-hidden] [ref=f3e718]
+                      - button [aria-hidden] [ref=f3e719]
+                      - generic [ref=f3e720]:
+                        - generic [ref=f3e722]:
+                          - button "Hide composer options" [expanded] [ref=f3e723] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f3e728]
+                          - generic [ref=f3e729]:
+                            - button "Improve prompt" [ref=f3e732] [cursor=pointer]
+                            - generic [ref=f3e737]:
+                              - button "Send message" [ref=f3e738] [cursor=pointer]:
+                                - generic [ref=f3e739]: Send
+                              - button "Open message delivery options" [ref=f3e744] [cursor=pointer]
+                        - generic [ref=f3e749]:
+                          - generic [ref=f3e751]:
+                            - group "Mode and context controls" [ref=f3e752]:
+                              - button "Modes" [ref=f3e753] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f3e760] [cursor=pointer]':
+                                - generic [ref=f3e761]:
+                                  - generic [ref=f3e762]: MCP
+                                  - generic [ref=f3e763]: None
+                              - button "Search & Context" [ref=f3e766] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f3e771] [cursor=pointer]:
+                                - generic [ref=f3e774]: Cycle5 Alice Pirate
+                              - button "Cycle5 Alice TestBot" [ref=f3e1012] [cursor=pointer]
+                              - button "Role-play setup" [ref=f3e780] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f3e787] [cursor=pointer]
+                            - group "Run input controls" [ref=f3e793]:
+                              - button "OpenUI" [ref=f3e794] [cursor=pointer]
+                              - button "Start dictation" [ref=f3e800] [cursor=pointer]
+                              - generic [ref=f3e804]:
+                                - button "Attach image" [ref=f3e806] [cursor=pointer]
+                                - button "More attachments" [ref=f3e810] [cursor=pointer]
+                              - button "More tools" [ref=f3e813] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f3e816] [cursor=pointer]:
+                                - generic [ref=f3e820]: Chat Settings
+                          - generic "Active context" [ref=f3e821]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f3e823] [cursor=pointer]:
+                              - generic "Provider status" [ref=f3e827]: Healthy
+                            - button "Character Cycle5 Alice TestBot" [ref=f3e1013] [cursor=pointer]:
+                              - generic [ref=f3e1014]: Character
+                              - generic [ref=f3e1015]: Cycle5 Alice TestBot
+                            - 'generic "Character context: Included" [ref=f3e1016]':
+                              - generic [ref=f3e1017]: Character context
+                              - generic [ref=f3e1018]: Included
+                            - button "System prompt Custom" [ref=f3e834] [cursor=pointer]:
+                              - generic [ref=f3e835]: System prompt
+                              - generic [ref=f3e836]: Custom
+                            - button "Chat 1 message" [ref=f3e1019] [cursor=pointer]:
+                              - generic [ref=f3e1020]: Chat
+                              - generic [ref=f3e1021]: 1 message
+                            - button "Configure context window size" [ref=f3e841] [cursor=pointer]:
+                              - generic [ref=f3e842]: 8 + ~0 = 8 tokens
+                            - button "Saved" [ref=f3e844] [cursor=pointer]
+                            - button "Advanced controls" [ref=f3e846] [cursor=pointer]
+                        - status [ref=f3e1022]:
+                          - generic [ref=f3e1023]: Add expression images for Cycle5 Alice TestBot.
+                          - generic [ref=f3e1024]:
+                            - link "Edit expressions" [ref=f3e1025] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                            - button "Dismiss expression image setup" [ref=f3e1026] [cursor=pointer]: Dismiss
+                        - status [ref=f3e1027]:
+                          - generic [ref=f3e1028]:
+                            - generic [ref=f3e1029]: Character mode and custom prompt steering are both active. Verify intended behavior before sending.
+                            - button "Review modes" [ref=f3e1030] [cursor=pointer]
+              - generic [ref=f3e865]:
+                - button "Restore runtime sidechannel" [ref=f3e866] [cursor=pointer]:
+                  - generic [ref=f3e867]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f3e15] [cursor=pointer]
+  - alert [ref=f3e19]: Chat | tldw
+```

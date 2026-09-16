@@ -1,0 +1,28 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [](http://127.0.0.1:18581/notes)
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Console: 10 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f24e20]:
+  - main [ref=f24e33]:
+    - alert [ref=f24e34]:
+      - generic [ref=f24e35]:
+        - generic [ref=f24e36]:
+          - generic [ref=f24e37]: Unavailable
+          - generic [ref=f24e38]:
+            - heading "Backend readiness check failed" [level=2] [ref=f24e39]
+            - generic [ref=f24e40]: The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing.
+        - group [ref=f24e41]:
+          - generic "Diagnostics" [ref=f24e42] [cursor=pointer]
+        - generic [ref=f24e43]:
+          - button "Retry" [ref=f24e44] [cursor=pointer]
+          - button "Health & diagnostics" [ref=f24e45] [cursor=pointer]
+          - button "Server settings" [ref=f24e46] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f24e15] [cursor=pointer]
+  - alert [ref=f24e19]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-26-41-954Z.log#L7-L13

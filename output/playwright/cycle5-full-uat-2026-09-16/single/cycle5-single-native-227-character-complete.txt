@@ -1,0 +1,12 @@
+### Result
+{"time":"2026-09-16T09:05:22.389Z","url":"http://127.0.0.1:18580/chat?mode=character&characterId=4&chatId=0aa4ee14-2311-447d-8c13-30a6997d22e3","articles":["You• 2:04 AMSay hello.•••","E2E-TestBot• 2:04 AMModel’s reasoning (optional)35sBEEP BOOPWas this helpful?•••Response complete"]}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Stop Streaming",exact:true}).waitFor({state:"hidden",timeout:45000}); return {time:new Date().toISOString(),url:page.url(),articles:await page.getByRole("article").allTextContents()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Chat | tldw](http://127.0.0.1:18580/chat?mode=character&characterId=4&chatId=0aa4ee14-2311-447d-8c13-30a6997d22e3)
+### Page
+- Page URL: http://127.0.0.1:18580/chat?mode=character&characterId=4&chatId=0aa4ee14-2311-447d-8c13-30a6997d22e3
+- Page Title: Chat | tldw

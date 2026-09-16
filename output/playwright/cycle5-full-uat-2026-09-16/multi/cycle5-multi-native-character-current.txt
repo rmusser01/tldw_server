@@ -1,0 +1,217 @@
+### Open tabs
+- 0: (current) [Characters | tldw](http://127.0.0.1:18581/characters)
+- 1: [Cycle5 retry identity: a fictional cobalt compass points east. Repeat this fact | tldw](http://127.0.0.1:18581/chat)
+### Page
+- Page URL: http://127.0.0.1:18581/characters
+- Page Title: Characters | tldw
+- Console: 3 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e4]:
+    - link "Skip to main content" [ref=f6e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f6e6]:
+      - button "Expand sidebar" [ref=f6e7] [cursor=pointer]
+      - button "New Chat" [ref=f6e11] [cursor=pointer]
+      - generic [ref=f6e14]:
+        - button "Quick Ingest" [ref=f6e15] [cursor=pointer]
+        - button "Chat" [ref=f6e19] [cursor=pointer]
+        - button "Prompts" [ref=f6e22] [cursor=pointer]
+        - button "Characters" [ref=f6e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f6e31] [cursor=pointer]
+        - button "World Books" [ref=f6e35] [cursor=pointer]
+        - button "Notes" [ref=f6e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f6e42] [cursor=pointer]
+        - button "Media" [ref=f6e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f6e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f6e59] [cursor=pointer]
+        - button "Kanban" [ref=f6e65] [cursor=pointer]
+        - button "Watchlists" [ref=f6e67] [cursor=pointer]
+      - generic [ref=f6e72]:
+        - button "Open Notes Dock" [ref=f6e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f6e78] [cursor=pointer]
+        - button "Settings" [ref=f6e81] [cursor=pointer]
+    - main [ref=f6e85]:
+      - generic [ref=f6e86]:
+        - generic [ref=f6e89]:
+          - generic [ref=f6e90]:
+            - button "Expand sidebar" [ref=f6e91] [cursor=pointer]
+            - generic [ref=f6e93]:
+              - img "tldw Assistant" [ref=f6e94]
+              - generic [ref=f6e95]: tldw Assistant
+              - button "Companion Home" [ref=f6e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f6e100] [cursor=pointer]
+          - generic [ref=f6e103]:
+            - button "Search - Open command palette" [ref=f6e104] [cursor=pointer]:
+              - generic [ref=f6e108]: Search
+              - generic [ref=f6e109]: ⌘K
+            - button "Open settings" [ref=f6e110] [cursor=pointer]
+            - generic [ref=f6e122]:
+              - button "Notifications, 0 unread" [ref=f6e123] [cursor=pointer]
+              - status [ref=f6e127]: Notifications are active
+            - button "Switch to light theme" [ref=f6e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f6e135] [cursor=pointer]:
+              - generic [ref=f6e136]: "?"
+        - generic [ref=f6e1538]:
+          - generic [ref=f6e2384]:
+            - heading "Characters" [level=1] [ref=f6e2385]
+            - paragraph [ref=f6e2386]: Create reusable characters you can pick from the chat header and reuse across conversations.
+          - generic [ref=f6e2387]:
+            - link "Skip to characters content" [ref=f6e2388] [cursor=pointer]:
+              - /url: "#characters-main-content"
+            - main [ref=f6e2389]:
+              - button [aria-hidden] [ref=f6e2394] [cursor=pointer]: Upload character
+              - generic [ref=f6e2395]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+              - generic [ref=f6e2397]:
+                - button "New character" [ref=f6e2398] [cursor=pointer]
+                - button "Import character" [ref=f6e2400] [cursor=pointer]
+                - generic [ref=f6e2405]:
+                  - textbox "Search characters" [ref=f6e2406]
+                  - generic [ref=f6e2407]: /
+                - radiogroup "View mode" [ref=f6e2409]:
+                  - generic [ref=f6e2410]:
+                    - generic [ref=f6e2411] [cursor=pointer]:
+                      - radio [checked]
+                      - generic "Table view" [ref=f6e2412]
+                    - generic [ref=f6e2415] [cursor=pointer]:
+                      - radio
+                      - generic "Gallery view" [ref=f6e2416]
+                - radiogroup "Character list view" [ref=f6e2423]:
+                  - generic [ref=f6e2424]:
+                    - generic [ref=f6e2425] [cursor=pointer]:
+                      - radio "Active" [checked]
+                      - generic "Active characters" [ref=f6e2426]: Active
+                    - generic [ref=f6e2427] [cursor=pointer]:
+                      - radio "Trash"
+                      - generic "Recently deleted characters" [ref=f6e2428]: Trash
+                - button "Filters" [ref=f6e2429] [cursor=pointer]
+                - button "Display options" [ref=f6e2434] [cursor=pointer]:
+                  - generic [ref=f6e2435]: Display
+              - status [ref=f6e2438]: 4 characters found
+              - generic [ref=f6e2443]:
+                - table [ref=f6e2447]:
+                  - rowgroup [ref=f6e2455]:
+                    - row [ref=f6e2456]:
+                      - columnheader "Select all on page" [ref=f6e2457]:
+                        - checkbox "Select all on page" [ref=f6e2460] [cursor=pointer]
+                      - columnheader "Name" [ref=f6e2462] [cursor=pointer]
+                      - columnheader "Tags" [ref=f6e2473]
+                      - columnheader "Creator" [ref=f6e2474] [cursor=pointer]
+                      - columnheader "Activity" [ref=f6e2485] [cursor=pointer]
+                      - columnheader "Actions" [ref=f6e2496]
+                  - rowgroup [ref=f6e2497]:
+                    - row [ref=f6e2498]:
+                      - cell "Select Cycle5 Alice TestBot" [ref=f6e2499]:
+                        - checkbox "Select Cycle5 Alice TestBot" [ref=f6e2502] [cursor=pointer]
+                      - cell [ref=f6e2504]:
+                        - button "Edit name inline for Cycle5 Alice TestBot" [ref=f6e2514]: Cycle5 Alice TestBot
+                      - cell [ref=f6e2517]
+                      - cell [ref=f6e2518]
+                      - cell "5m ago Updated 5m ago" [ref=f6e2519]:
+                        - generic [ref=f6e2520]:
+                          - generic [ref=f6e2521]: 5m ago
+                          - generic [ref=f6e2522]: Updated 5m ago
+                      - cell [ref=f6e2523]:
+                        - generic [ref=f6e2524]:
+                          - button "Chat as Cycle5 Alice TestBot" [ref=f6e2525] [cursor=pointer]
+                          - button "Edit character Cycle5 Alice TestBot" [ref=f6e2528] [cursor=pointer]
+                          - button "Delete character Cycle5 Alice TestBot" [ref=f6e2531] [cursor=pointer]
+                          - button "Add Cycle5 Alice TestBot to favorites" [ref=f6e2535] [cursor=pointer]
+                          - button "More actions for Cycle5 Alice TestBot" [ref=f6e2538] [cursor=pointer]
+                    - row [ref=f6e2543]:
+                      - cell "Select Helpful AI Assistant" [ref=f6e2544]:
+                        - checkbox "Select Helpful AI Assistant" [ref=f6e2547] [cursor=pointer]
+                      - cell [ref=f6e2549]:
+                        - generic [ref=f6e2556]:
+                          - generic [ref=f6e2557]:
+                            - button "Edit name inline for Helpful AI Assistant" [ref=f6e2559]: Helpful AI Assistant
+                            - generic [ref=f6e2562]: "1"
+                          - button "Edit description inline for Helpful AI Assistant" [ref=f6e2566]: A default, friendly assistant created automatically by the system.
+                      - cell [ref=f6e2569]:
+                        - generic [ref=f6e2570]:
+                          - button "default" [ref=f6e2571] [cursor=pointer]
+                          - button "neutral" [ref=f6e2573] [cursor=pointer]
+                          - button "Show and filter +1 hidden tags" [ref=f6e2575]: "+1"
+                      - cell "System" [ref=f6e2576]
+                      - cell "35m ago Updated 35m ago" [ref=f6e2578]:
+                        - generic [ref=f6e2579]:
+                          - generic [ref=f6e2580]: 35m ago
+                          - generic [ref=f6e2581]: Updated 35m ago
+                      - cell [ref=f6e2582]:
+                        - generic [ref=f6e2583]:
+                          - button "Chat as Helpful AI Assistant" [ref=f6e2584] [cursor=pointer]
+                          - button "Edit character Helpful AI Assistant" [ref=f6e2587] [cursor=pointer]
+                          - button "Delete character Helpful AI Assistant" [ref=f6e2590] [cursor=pointer]
+                          - button "Add Helpful AI Assistant to favorites" [ref=f6e2594] [cursor=pointer]
+                          - button "More actions for Helpful AI Assistant" [ref=f6e2597] [cursor=pointer]
+                    - row [ref=f6e2602]:
+                      - cell "Select pixel-migu" [ref=f6e2603]:
+                        - checkbox "Select pixel-migu" [ref=f6e2606] [cursor=pointer]
+                      - cell [ref=f6e2608]:
+                        - generic [ref=f6e2609]:
+                          - img "Avatar of pixel-migu" [ref=f6e2611]
+                          - generic [ref=f6e2612]:
+                            - button "Edit name inline for pixel-migu" [ref=f6e2615]: pixel-migu
+                            - button "Edit description inline for pixel-migu" [ref=f6e2619]: A tiny turquoise pixel-art robot with a rectangular face, chunky black outlines, and long twin tails. A companion for chatting, re...
+                      - cell [ref=f6e2622]:
+                        - generic [ref=f6e2623]:
+                          - button "pixel-art" [ref=f6e2624] [cursor=pointer]
+                          - button "robot" [ref=f6e2626] [cursor=pointer]
+                          - button "Show and filter +2 hidden tags" [ref=f6e2628]: "+2"
+                      - cell "User-directed pixel-migu adaptation" [ref=f6e2629]
+                      - cell "35m ago Updated 35m ago" [ref=f6e2631]:
+                        - generic [ref=f6e2632]:
+                          - generic [ref=f6e2633]: 35m ago
+                          - generic [ref=f6e2634]: Updated 35m ago
+                      - cell [ref=f6e2635]:
+                        - generic [ref=f6e2636]:
+                          - button "Chat as pixel-migu" [ref=f6e2637] [cursor=pointer]
+                          - button "Edit character pixel-migu" [ref=f6e2640] [cursor=pointer]
+                          - button "Delete character pixel-migu" [ref=f6e2643] [cursor=pointer]
+                          - button "Add pixel-migu to favorites" [ref=f6e2647] [cursor=pointer]
+                          - button "More actions for pixel-migu" [ref=f6e2650] [cursor=pointer]
+                    - row [ref=f6e2655]:
+                      - cell "Select Default Assistant" [ref=f6e2656]:
+                        - checkbox "Select Default Assistant" [ref=f6e2659] [cursor=pointer]
+                      - cell [ref=f6e2661]:
+                        - generic [ref=f6e2668]:
+                          - button "Edit name inline for Default Assistant" [ref=f6e2671]: Default Assistant
+                          - button "Edit description inline for Default Assistant" [ref=f6e2675]: A general-purpose assistant.
+                      - cell [ref=f6e2678]
+                      - cell "System" [ref=f6e2679]
+                      - cell "6h ago Updated 6h ago" [ref=f6e2681]:
+                        - generic [ref=f6e2682]:
+                          - generic [ref=f6e2683]: 6h ago
+                          - generic [ref=f6e2684]: Updated 6h ago
+                      - cell [ref=f6e2685]:
+                        - generic [ref=f6e2686]:
+                          - button "Chat as Default Assistant" [ref=f6e2687] [cursor=pointer]
+                          - button "Edit character Default Assistant" [ref=f6e2690] [cursor=pointer]
+                          - button "Delete character Default Assistant" [ref=f6e2693] [cursor=pointer]
+                          - button "Add Default Assistant to favorites" [ref=f6e2697] [cursor=pointer]
+                          - button "More actions for Default Assistant" [ref=f6e2700] [cursor=pointer]
+                - list [ref=f6e2705]:
+                  - listitem "Previous Page" [ref=f6e2706]:
+                    - button [disabled] [ref=f6e2707]:
+                      - img "left" [ref=f6e2708]
+                  - listitem "1" [ref=f6e2711] [cursor=pointer]
+                  - listitem "Next Page" [ref=f6e2713]:
+                    - button [disabled] [ref=f6e2714]:
+                      - img "right" [ref=f6e2715]
+                  - listitem [ref=f6e2718]:
+                    - generic [ref=f6e2719]:
+                      - generic [ref=f6e2720]:
+                        - generic "10 / page" [ref=f6e2721]
+                        - combobox "Page Size" [ref=f6e2722]
+                      - img "down" [ref=f6e2724]
+  - button "Open Next.js Dev Tools" [ref=f6e489] [cursor=pointer]
+  - alert [ref=f6e493]: Characters | tldw
+  - status "Ingest progress" [ref=f6e494]:
+    - generic [ref=f6e495]:
+      - generic [ref=f6e496]: Ingesting 0/1
+      - paragraph [ref=f6e501]: Waiting for server results. Open the wizard to see elapsed time.
+      - generic [ref=f6e502]:
+        - progressbar "Finished items" [ref=f6e503]
+        - button "Open ingest wizard" [ref=f6e504] [cursor=pointer]: Open
+```

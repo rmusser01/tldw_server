@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByLabel('', { exact: true }).click();
+```
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995)
+- 1: (current) [Media Analysis | tldw](http://127.0.0.1:18581/media-multi)
+### Page
+- Page URL: http://127.0.0.1:18581/media-multi
+- Page Title: Media Analysis | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-04-40-440Z.yml)

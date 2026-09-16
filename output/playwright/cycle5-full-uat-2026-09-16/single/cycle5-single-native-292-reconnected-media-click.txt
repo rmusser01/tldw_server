@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.getByTestId('chat-sidebar-shortcut-media').click();
+```
+### Open tabs
+- 0: (current) [Media | tldw](http://127.0.0.1:18580/media)
+- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/media
+- Page Title: Media | tldw
+- Console: 56 errors, 30 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-29-01-059Z.yml)

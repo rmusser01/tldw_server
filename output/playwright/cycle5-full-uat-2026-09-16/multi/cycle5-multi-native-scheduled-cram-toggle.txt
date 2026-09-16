@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await (async(page)=>{await page.getByRole("switch").check();})(page);
+```

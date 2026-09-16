@@ -1,0 +1,6 @@
+### Result
+"Quick Ingest (1)\nAdd\n1 items\nConfigure\nReview\nProcessing\nResults\n⚡\nQuick\nProcess fast, skip analysis\n★\nStandard\n(Recommended)\nAnalyze + chunk for RAG search\n🔬\nDeep\nAll options, review before save\nPresets are starting points. Adjust any settings below or in Advanced options to fit this run.\nIngestion options\nDefaults apply only to items added after you change them.\nAnalysis\n\nGenerate AI summary and key findings\n\nChunking\n\nSplit into searchable sections for Knowledge QA\n\nOverwrite existing\n\nReplace content if previously ingested\n\nAnalysis provider\nChoose or enter a provider\n\nConfigured providers are suggestions. This choice is only for this ingest.\n\nChunking mode\nAuto\nManual\nAuto chunking goal\nBalanced\nUse AI to improve chunk boundaries\nAdvanced options\nBack\nNext"
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Start a new ingest",exact:true}).click(); await page.getByRole("textbox",{name:"Paste URLs input",exact:true}).fill("https://en.wikipedia.org/wiki/Playwright_(software)"); await page.getByRole("button",{name:"Add URLs to queue",exact:true}).click(); await page.getByRole("button",{name:"Configure 1 items",exact:true}).click(); return await page.getByRole("dialog").innerText(); })(page);
+```

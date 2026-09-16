@@ -1,0 +1,14 @@
+### Result
+{"url":"http://127.0.0.1:18581/media-multi","at":"2026-09-16T09:11:05.685Z"}
+### Ran Playwright code
+```js
+await (async(page)=>{await page.goBack();return {url:page.url(),at:new Date().toISOString()};})(page);
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Media Analysis | tldw](http://127.0.0.1:18581/media-multi)
+### Page
+- Page URL: http://127.0.0.1:18581/media-multi
+- Page Title: Media Analysis | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-10-24-734Z.log#L5-L6

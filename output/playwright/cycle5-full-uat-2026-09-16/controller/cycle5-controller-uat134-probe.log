@@ -1,0 +1,76 @@
+$ vitest run --config "/private/tmp/cycle5-auth-probe-refresh.config.ts"
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:65626) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/services/__tests__/api-send.test.ts > apiSend timeout fallback policy > private actual apiSend GET handles expired multi-user credential
+private auth probe safe result {"mode":"expired","status":401,"calls":["/api/v1/auth/sessions"]}
+
+stdout | src/services/__tests__/api-send.test.ts > apiSend timeout fallback policy > private actual apiSend GET handles valid multi-user credential
+private auth probe safe result {"mode":"valid","status":200,"calls":["/api/v1/auth/sessions"]}
+
+ ❯ src/services/__tests__/api-send.test.ts (15 tests | 1 failed | 13 skipped) 77ms
+     ↓ does not acknowledge a receipt for an owner other than the requested owner
+     × private actual apiSend GET handles expired multi-user credential 75ms
+     ✓ private actual apiSend GET handles valid multi-user credential 1ms
+     ↓ does not replay a captured write after ambiguous extension rejection
+     ↓ does not replace unavailable extension reconciliation with page-local authority
+     ↓ does not coalesce captured reconciliation with an unowned GET
+     ↓ falls back to direct request for GET timeout
+     ↓ coalesces concurrent identical GET requests through direct fallback
+     ↓ does not coalesce unsafe POST requests
+     ↓ bypasses GET coalescing only for client-local fresh calls via extension
+     ↓ bypasses GET coalescing only for client-local fresh calls via direct
+     ↓ does not fall back to direct request for POST timeout
+     ↓ uses an eligible WebUI cookie marker in the direct fallback without stored auth
+     ↓ hydrates an exact-origin session credential in the direct fallback
+     ↓ forwards Prompt Studio recipe policy only as client-local metadata
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/api-send.test.ts > apiSend timeout fallback policy > private actual apiSend GET handles expired multi-user credential
+AssertionError: expected 401 to be 200 // Object.is equality
+
+- Expected
++ Received
+
+- 200
++ 401
+
+ ❯ src/services/__tests__/api-send.test.ts:90:34
+     89|     expect(result).toMatchObject({
+     90|       ok: false,
+     91|       recipePersistence: { state: "unknown", actualOwnerId: null }
+       |                 ^
+     92|     })
+     93|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/services/__tests__/api-send.test.ts > apiSend timeout fallback policy > private actual apiSend GET handles expired multi-user credential
+AssertionError: expected [] to have a length of 1 but got +0
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ src/services/__tests__/api-send.test.ts:91:70
+     90|       ok: false,
+     91|       recipePersistence: { state: "unknown", actualOwnerId: null }
+     92|     })
+       |   ^
+     93|   })
+     94| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 13 skipped (15)
+   Start at  02:21:29
+   Duration  671ms (transform 91ms, setup 114ms, import 20ms, tests 77ms, environment 355ms)
+
+error: script "test" exited with code 1

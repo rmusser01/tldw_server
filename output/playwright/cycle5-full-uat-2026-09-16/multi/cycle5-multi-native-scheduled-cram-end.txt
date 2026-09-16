@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18501/api/v1/flashcards/review-sessions/end","status":200,"request":{"review_session_id":3},"body":{"id":3,"deck_id":1,"deck_name_snapshot":"Cycle5 Alice Biology","review_mode":"cram","tag_filter":null,"scope_key":"cram:deck:1","status":"completed","started_at":"2026-09-16T09:23:20.738Z","last_activity_at":"2026-09-16T09:23:43.467Z","completed_at":"2026-09-16T09:23:43.467Z","cards_reviewed":1,"client_id":"2"}}
+### Ran Playwright code
+```js
+await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/flashcards/review")&&r.request().method()!=="GET");await page.getByRole("button",{name:"End Session",exact:true}).click();const r=await p;return {url:r.url(),status:r.status(),request:r.request().postDataJSON(),body:await r.json()};})(page);
+```

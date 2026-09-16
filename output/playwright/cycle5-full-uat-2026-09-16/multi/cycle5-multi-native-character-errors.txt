@@ -1,0 +1,7 @@
+### Result
+Total messages: 33 (Errors: 3, Warnings: 0)
+Returning 3 messages for level "error"
+
+[ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:18501/api/v1/prompts/collections:0
+[ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:18501/api/v1/prompts/collections:0
+[ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:18501/api/v1/auth/sessions:0

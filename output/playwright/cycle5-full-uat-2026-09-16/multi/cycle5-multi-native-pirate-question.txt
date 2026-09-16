@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await page.getByTestId('chat-input').fill('Tell me about the weather today.');
+```

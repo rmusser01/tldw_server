@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+await page.getByTestId('playground-cockpit-left-rail-restore').click();
+```
+### Open tabs
+- 0: [Cycle5 Alice TestBot Chat (20260916_084418) | tldw](http://127.0.0.1:18581/chat?mode=character&characterId=4&chatId=edaa65df-dd08-4668-a4cd-affadd033995)
+- 1: (current) [Chat | tldw](http://127.0.0.1:18581/chat)
+### Page
+- Page URL: http://127.0.0.1:18581/chat
+- Page Title: Chat | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-55-56-041Z.yml)

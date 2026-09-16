@@ -1,0 +1,5 @@
+### Ran Playwright code
+```js
+// Press Escape
+await page.keyboard.press('Escape');
+```

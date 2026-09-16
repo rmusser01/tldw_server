@@ -1,0 +1,209 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Media Analysis | tldw](http://127.0.0.1:18581/media-multi)
+### Page
+- Page URL: http://127.0.0.1:18581/media-multi
+- Page Title: Media Analysis | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e4]:
+    - link "Skip to main content" [ref=f10e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f10e6]:
+      - button "Expand sidebar" [ref=f10e7] [cursor=pointer]
+      - button "New Chat" [ref=f10e11] [cursor=pointer]
+      - generic [ref=f10e14]:
+        - button "Quick Ingest" [ref=f10e15] [cursor=pointer]
+        - button "Chat" [ref=f10e19] [cursor=pointer]
+        - button "Prompts" [ref=f10e22] [cursor=pointer]
+        - button "Characters" [ref=f10e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f10e31] [cursor=pointer]
+        - button "World Books" [ref=f10e35] [cursor=pointer]
+        - button "Notes" [ref=f10e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f10e42] [cursor=pointer]
+        - button "Media" [ref=f10e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f10e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f10e59] [cursor=pointer]
+        - button "Kanban" [ref=f10e65] [cursor=pointer]
+        - button "Watchlists" [ref=f10e67] [cursor=pointer]
+      - generic [ref=f10e72]:
+        - button "Open Notes Dock" [ref=f10e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f10e78] [cursor=pointer]
+        - button "Settings" [ref=f10e81] [cursor=pointer]
+    - main [ref=f10e85]:
+      - generic [ref=f10e86]:
+        - generic [ref=f10e89]:
+          - generic [ref=f10e90]:
+            - button "Expand sidebar" [ref=f10e91] [cursor=pointer]
+            - generic [ref=f10e93]:
+              - img "tldw Assistant" [ref=f10e94]
+              - generic [ref=f10e95]: tldw Assistant
+              - button "Companion Home" [ref=f10e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f10e100] [cursor=pointer]
+          - generic [ref=f10e103]:
+            - button "Search - Open command palette" [ref=f10e104] [cursor=pointer]:
+              - generic [ref=f10e108]: Search
+              - generic [ref=f10e109]: ⌘K
+            - button "Open settings" [ref=f10e110] [cursor=pointer]
+            - generic [ref=f10e122]:
+              - button "Notifications, 0 unread" [ref=f10e123] [cursor=pointer]
+              - status [ref=f10e127]: Notifications are active
+            - button "Switch to light theme" [ref=f10e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f10e135] [cursor=pointer]:
+              - generic [ref=f10e136]: "?"
+        - generic [ref=f10e138]:
+          - status [ref=f10e139]: 1 items selected, 29 remaining
+          - generic [ref=f10e141]:
+            - generic [ref=f10e143]:
+              - generic [ref=f10e144]:
+                - textbox "Search media (title/content)" [ref=f10e145]
+                - generic [ref=f10e146]:
+                  - button "Search" [ref=f10e147] [cursor=pointer]
+                  - button "Clear" [ref=f10e149] [cursor=pointer]
+              - generic [ref=f10e151]:
+                - generic [ref=f10e152]:
+                  - generic [ref=f10e153]:
+                    - generic: Media types
+                    - combobox "Media types" [ref=f10e155]
+                  - img "down" [ref=f10e157]
+                - generic [ref=f10e160] [cursor=pointer]:
+                  - generic [ref=f10e161]:
+                    - generic "Relevance" [ref=f10e162]
+                    - combobox "Sort" [ref=f10e163]
+                  - img "down" [ref=f10e165]
+                - group "Date range" [ref=f10e168]:
+                  - textbox "Start date" [ref=f10e170]
+                  - generic [ref=f10e171]: to
+                  - textbox "End date" [ref=f10e172]
+                - generic [ref=f10e173]:
+                  - generic [ref=f10e174]:
+                    - generic: Keywords
+                    - combobox "Keywords" [ref=f10e176]
+                  - img "down" [ref=f10e178]
+                - generic [ref=f10e181]:
+                  - generic [ref=f10e182] [cursor=pointer]:
+                    - checkbox "Search full content (slower)" [ref=f10e184]
+                    - generic [ref=f10e186]: Search full content (slower)
+                  - generic [ref=f10e187]: Scans current page results.
+            - separator "Resize filter panel" [ref=f10e188]
+            - generic [ref=f10e191]:
+              - generic [ref=f10e192]:
+                - generic [ref=f10e195]: 1 / 30
+                - generic [ref=f10e196]: "Selection status: Safe"
+              - generic [ref=f10e197]:
+                - generic [ref=f10e198]: "Selected across pages: 1"
+                - button "View selected items" [ref=f10e199] [cursor=pointer]
+              - generic [ref=f10e201]:
+                - generic [ref=f10e202]:
+                  - heading "Results (1)" [level=2] [ref=f10e203]
+                  - generic [ref=f10e204]:
+                    - generic [ref=f10e205]: Click to stack, Shift+click for range
+                    - button "Deselect all" [ref=f10e206] [cursor=pointer]
+                - button "Cycle5 Bob private boundary source updated document 9/16/2026, 2:08:36 AM" [ref=f10e210] [cursor=pointer]:
+                  - generic [ref=f10e211]:
+                    - checkbox [checked] [ref=f10e215]
+                    - generic [ref=f10e217]:
+                      - generic [ref=f10e218]: Cycle5 Bob private boundary source updated
+                      - generic [ref=f10e219]:
+                        - generic [ref=f10e220]: document
+                        - generic [ref=f10e221]: 9/16/2026, 2:08:36 AM
+                - generic [ref=f10e222]:
+                  - generic [ref=f10e223]: Use pagination or open all visible items
+                  - list [ref=f10e224]:
+                    - listitem "Previous Page" [ref=f10e225]:
+                      - button [disabled] [ref=f10e226]:
+                        - img "left" [ref=f10e227]
+                    - listitem "1" [ref=f10e230] [cursor=pointer]
+                    - listitem "Next Page" [ref=f10e232]:
+                      - button [disabled] [ref=f10e233]:
+                        - img "right" [ref=f10e234]
+              - generic [ref=f10e237]:
+                - generic [ref=f10e238]: 1 selected
+                - textbox "Batch keywords" [ref=f10e239]:
+                  - /placeholder: Batch keywords (comma-separated)
+                - button "Add tags" [ref=f10e240] [cursor=pointer]
+                - generic [ref=f10e242] [cursor=pointer]:
+                  - generic [ref=f10e243]:
+                    - generic "JSON" [ref=f10e244]
+                    - combobox "Export format" [ref=f10e245]
+                  - img "down" [ref=f10e247]
+                - button "Export selected" [ref=f10e250] [cursor=pointer]
+                - button "Reprocess" [ref=f10e252] [cursor=pointer]
+                - button "Move to trash" [disabled] [ref=f10e254]
+            - separator "Resize results panel" [ref=f10e255]
+            - generic [ref=f10e258]:
+              - generic [ref=f10e259]:
+                - generic [ref=f10e261]:
+                  - generic [ref=f10e262]:
+                    - generic [ref=f10e263]: Viewer
+                    - generic [ref=f10e264]: Single item view
+                  - radiogroup [ref=f10e266]:
+                    - generic [ref=f10e267] [cursor=pointer]:
+                      - generic [ref=f10e268]:
+                        - radio "Compare(1)"
+                      - generic [ref=f10e269]:
+                        - text: Compare
+                        - generic [ref=f10e275]: (1)
+                    - generic [ref=f10e276] [cursor=pointer]:
+                      - generic [ref=f10e277]:
+                        - radio "Focus(1/1)" [checked]
+                      - generic [ref=f10e278]:
+                        - text: Focus
+                        - generic [ref=f10e285]: (1/1)
+                    - generic [ref=f10e286] [cursor=pointer]:
+                      - generic [ref=f10e287]:
+                        - radio "Stack(1)"
+                      - generic [ref=f10e288]:
+                        - text: Stack
+                        - generic [ref=f10e291]: (1)
+                  - generic [ref=f10e292] [cursor=pointer]:
+                    - generic [ref=f10e293]:
+                      - generic "1. Cycle5 Bob private boundary source updated" [ref=f10e294]
+                      - combobox [ref=f10e295]
+                    - img "down" [ref=f10e297]
+                  - radiogroup [ref=f10e301]:
+                    - generic [ref=f10e302] [cursor=pointer]:
+                      - generic [ref=f10e303]:
+                        - radio "Vertical" [checked]
+                      - text: Vertical
+                    - generic [ref=f10e304] [cursor=pointer]:
+                      - generic [ref=f10e305]:
+                        - radio "Horizontal"
+                      - text: Horizontal
+                  - button "Options" [ref=f10e306] [cursor=pointer]
+                - generic [ref=f10e314]:
+                  - generic [ref=f10e315]:
+                    - button "Prev" [disabled] [ref=f10e316]
+                    - generic [ref=f10e317]: Item 1 of 1
+                    - button "Next" [disabled] [ref=f10e318]
+                  - generic [ref=f10e319]:
+                    - button "Expand/Collapse" [ref=f10e320] [cursor=pointer]
+                    - button "Chat about selection (1)" [ref=f10e329] [cursor=pointer]
+                    - button "Multi-Item Review keyboard shortcuts" [ref=f10e334] [cursor=pointer]:
+                      - generic [ref=f10e335]: "?"
+                - button "Search in content..." [ref=f10e337] [cursor=pointer]
+                - generic [ref=f10e339]:
+                  - generic [ref=f10e340]: Open items
+                  - generic [ref=f10e341]: Search/filter in sidebar, inspect in viewer, jump using Open items.
+                  - button "1. Media 1" [ref=f10e343] [cursor=pointer]
+              - generic [ref=f10e349]:
+                - generic [ref=f10e350]:
+                  - generic [ref=f10e351]:
+                    - generic [ref=f10e352]: Media 1
+                    - generic [ref=f10e356]: cycle5-bob-private-boundary.txt
+                  - button "Copy" [ref=f10e359] [cursor=pointer]
+                - generic [ref=f10e367]:
+                  - generic [ref=f10e368]:
+                    - generic [ref=f10e369]: Media Content
+                    - button "Expand" [ref=f10e371] [cursor=pointer]
+                  - generic [ref=f10e376]: CYCLE5-BOB-PRIVATE-MEDIA. Bob fictional violet orchard stores 17 wooden bells.
+                - generic [ref=f10e378]:
+                  - generic [ref=f10e379]: Analysis not available
+                  - button "Show panel" [ref=f10e380] [cursor=pointer]
+          - generic [ref=f10e382]:
+            - generic [ref=f10e383]: 1 selected
+            - generic [ref=f10e385]: "? for shortcuts"
+  - button "Open Next.js Dev Tools" [ref=f10e391] [cursor=pointer]
+  - alert [ref=f10e395]
+```

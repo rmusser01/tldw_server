@@ -1,0 +1,6 @@
+### Result
+{"time":"2026-09-16T08:43:36.089Z","summary":["Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library...","Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library...","Project Cedar is a fictional community library. Jonah Patel coordinates the library. The library opens on 22 November 2026. The book return is beside the north entrance. The public reading room has seven oak tables. Volunteers meet each Thursday at 18:00.","Project Cedar, coordinated by Jonah Patel, is a community library opening on 22 November 2026, with a book return located beside the north entrance."]}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("dialog",{name:"Generate",exact:true}).waitFor({state:"hidden",timeout:30000}); return {time:new Date().toISOString(),summary:await page.getByText("Project Cedar",{exact:false}).allTextContents()}; })(page);
+```

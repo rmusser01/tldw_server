@@ -5,17 +5,17 @@ Frozen source ab527eb3b4. Fresh runtime/API18501/UI18581; existing dependencies 
 | Row | Workflow | Status |
 |---|---|---|
 |1|Fresh setup/provider/firstChat|Pass — operator adaptation|
-|2|Auth/reload/logout/offline/reconnect/naturalexpiry|In progress — expiry return after08:39:10Z|
-|3|Ordinary2turns/reload/failedRetry|Partial — two turns/reload passed; Retry pending|
-|4|Publicfile→QA/citations/sourceChat|Fail — completed job remains Processing; independent source QA continuing|
-|5|ExactWikipedia→search→Chat|Pending|
+|2|Auth/reload/logout/offline/reconnect/naturalexpiry|Partial — natural expiry PASS; offline/reconnect pending|
+|3|Ordinary2turns/reload/failedRetry|Pass|
+|4|Publicfile→QA/citations/sourceChat|Fail UAT127 — completed job stuck Processing; independent QA/citation/source Chat PASS|
+|5|ExactWikipedia→search→Chat|External access blocked — honest failed Results; dependents blocked|
 |6|BiologyNote→5cards→5distinctreviews|Pass|
-|7|PiratePrompt→actualChat|Partial — saved/reloaded Synced#1; collections401; generation pending|
-|8|Charactercontext/reply/canonicalreload|Pending|
-|9|ChatNote/backlink/CardStudy|Partial — Note/backlink pass; Card pending|
-|10|Mediaanalysis/reanalysis/Review|Pending|
-|11|Permissions/DeleteTrashRestore|Pending|
-|12|Reciprocalisolation/API/browser|Pending|
+|7|PiratePrompt→actualChat|Partial — Pirate actual output/system PASS; collections401 and duplicate greeting131|
+|8|Charactercontext/reply/canonicalreload|Partial — fresh entry/reply/reload PASS; saved selector replacement FAIL UAT068|
+|9|ChatNote/backlink/CardStudy|Pass — Note/backlink/CardStudy/mixed practice/scheduled manual End; re-rate known128 limit|
+|10|Mediaanalysis/reanalysis/Review|Pass — explicit failed analysis preserves prior, real reanalysis saved/reloaded; Review inspected|
+|11|Permissions/DeleteTrashRestore|Pass — ordinary deny; admin only item Trash/restore; API fixture adaptation|
+|12|Reciprocalisolation/API/browser|Pass for tested API/browser ownership — Alice return restored Notes/QA; search filter observation; draft switch not exercised|
 
 No inference yet. Tokenexpiry timer not yet started. All actual findings/artifacts appended as established.
 
@@ -63,3 +63,35 @@ No inference yet. Tokenexpiry timer not yet started. All actual findings/artifac
 - PromptcollectionsGET401twicewhileAliceNotes/Chatsucceeded; PromptsaveUIreportsAdded+Synced#1. Investigatingboundedcanonicalerror/reload, notassuminggeneralsavefailure.
 
 08:33UTC AuroraMediaactualinspectionandfulltextsearchPASS afterexplicitcontinuation: source148words/963chars/2chunks,Noanalysisyet. OrdinaryDelete disabled+permissionguidance. QAonequeryleased: Documents&Mediaonly/specificmedia1,GenerateAnswer+IncludeCitationson,Hybrid/800tokens/exactGemma. StaleingestprogresscardinterceptedQAsettingsDone; Escapeclosednormally. Noextra submission.
+
+##08:40UTC auth naturalexpiry PASS andRetryprepared
+- Naturalexpiry isolatedAlicecontext: login08:08:59.302Z/expires_in1800→soleaboutblank08:08:59.318→normalreturn08:39:30.249 (1830.947seconds)→actualrefresh200/expires_in1800→NotesGET200 with exactAliceclient2Notes. No token/clock/storage changes/export/import; no appdocument/earlyrefreshtimer whileparked. Safeissued/returnartifactsretained.
+- SourceQA200usefulanswerMayaChen/Thursday09:30with[1]; nativecitationSourceID1/late_chunk1:1 previewhascorrectexcerpt; OpeninMediaactualcanonicalid1. ActualChatwiththismedia transferredfull1020charcontext; appendedspecificsamplingquestion; realChat200 finalNorthPier/WillowCove/EastMarsh. Sourceconversationnow7canonicalturnrows afterprevious5rowproof; no contradictorycountclaim.
+- ColdCharacterNew→CancelEscape→reopen→Create201 ID4 Cycle5AliceTestBot; exactBEEPBOOPsysteminstruction. Noformwarning; onlyknowncollection401console. Realreplypending.
+- RealOllama/gemma3:1b502provider_unavailable innewordinaryconversation849ac2ca-e2ff-4c27-8c88-212839e8310b. Canonicalnormalreload200onlysystem+user8f9a3b78-6ac0-44b5-95c9-5014f2b186af, exactcorrelationpa_dff8-78fe-6e8-ad6f; UIoneuser+oneerror. Gemmaexplicitlyrestored; actualRetryawaitslease.
+
+08:42UTC ActualRetryPASS: requestonlyoriginalusertext, intenttrue/correlationunchanged, SSEACKsame8f9a3b78user; assistant64550040-d4de-4911-8f90-f7039de6da60 finalAfictionalcobaltcompasspointseast. Normalreloadexact3rows andonevisibleuser/answer. SoleleaseRELEASED.
+
+## 08:59 UTC — Character, Wikipedia, Chat card and Prompt preparation
+- Character4 TestBot realcomplete-v2 response BEEP BOOP, canonical chat edaa65df-dd08-4668-a4cd-affadd033995 and reload retained. Saved selector Default Assistant replacement fails: second bounded actual click08:55:05.145Z→08:55:07.293Z same characterId4/edaa route and TestBot mode, no dialog. UAT068 reopened by root. Numeric target ID pending canonical capture. No wrong-identity generation.
+- Exact Wikipedia URL analysisOFF/chunkingON submitted once through completed expiry context as explicitly approved adaptation; main failedjob2 untouched. Results report Access blocked/0succeeded1failed with honest guidance. Initial observer waitedwrongingestendpoint/timedout; submission not repeated. No accessible-source bypass or dependent search/Chat claimed.
+- Chat answer reviewed card POST /chat/knowledge/save201, question Which direction does the fictional cobalt compass point?, answer A fictional cobalt compass points east., card074806c4-29ec-4dc3-950f-40ad28e1c24f, supportingNote60410834-f2dc-4292-be85-ca2a618e0773, real conversation849ac2ca/message64550040 provenance.
+- Pirate UseinChat→SystemInstruction preservedexacttext. New saved chat retainedCharacterworkflowpreference; explicitContext rail→Clear assistant yieldedStandardchat. Documented visible adaptation, not separate defect. Exactweatherquestion prepared; root grantedsole9099 foroneactualsend.
+
+## 09:12UTC independent controls
+- Pirate canonical conversationbc7a816c-17d1-4da9-a6c0-b98080a4f997 reload200 contains exact savedsystem and finalpirateweatheranswer withliteralARRR. Native streambody unavailable; no repeat. Separate UAT131 duplicateidenticalcanonicalgreetings:68450214-62ad-48cc-9da8-f443eb5d916b08:56:28.974 and2988cf09-a990-4897-8f19-d7708777310308:57:06.483. System053a01b5; user76168f81; finaldef930d0. Rootdiagnosing.
+- Chatcard actualreview200 andcompletion1; mixedDuequeue1 while Biologytotal5/due0. Practiceagain correctlyAvailable6. ScheduleoffpracticeadvanceslocallywithoutPOST; observertimeoutnotproductfailure. ImmediateControl+z practiceattemptdidnotrestorecard; no repeatedreratecycle(knownrootUAT128). EarlyEndnotyetcovered.
+- MediaAnalyzeexplicitGemma/custom3factprompt generated usefulMayaChen/23/Thursday09:30, versionsPOST201version2, rawsource963charsunchanged. ActualReviewpreview+checkboxstackshowsformattedthreebullets/rawsource. ReviewReprocess actedimmediately(noform), rootconfirmedPOST200chunk/embedonly, no9099overlap. Explicitanalysisreanalysisstillpending.
+- APIisolation32stepspassedownership: reciprocalNoteGET+validPUT404afterown201/200; reciprocalChat404afterown200; Bobjob2 denied403/Alice200; QAhistoryAlice1/Bob0. Bobmediafileadd200ID1UUIDbfdc9d60-5ec8-43a7-96f6-03bfa6b72369; ownPUT200 doesnotalterAliceID1. Mediaforeignqueryreturnsownitemratherthan0; noleakbutfilterbehaviornotcleanpass. APIlogininitialJSON422correctedOAuthform; nofixturescreateduntilcorrected, notauthorizationevidence.
+- RealBobUIloginshowsownNotesonly; newbrowserNote201 ID7c2f4588-ee4b-42a3-93f9-a2cd6f7f6661/client3. ActualBacktwicetooldAlicereviewrouteonlyBobsource/noAurora. BobKnowledgecorrect/knowledge routeNo previous QA sessions. Initialguessed/knowledge-qa404harnesserrorcorrected, notproductissue.
+
+##09:18UTC permissions and identity
+- AdminonlyfixturecreatedrealAPIanalysisOFF(afteremptysearch); nativeDeleteconfirmation→DELETE200→empty0/0stillTrashvisible→RestorePOST200→reloadMedia1/1samefixture. Restoredadminsourcepreserved; nopermanentdelete.
+- AliceUIreturnednormallyafterBob/admin; fourAliceNotes(includingBiology/Chat/APIfixture), noBobAPI/browserNotes; KnowledgeownAurorahistoryrestored. BobbrowserBackalreadyexcludedAlice. Draftswitchcoverage notyetclaimed.
+- DefaultAssistantactualCharactersDOMrowdata-row-key1, visiblelabel/general-purpose description. SavedTestBot4→DefaultAssistant1replacementfailuretargetresolved. TwoAPIlistobserversnoeventtimeouts, noAPIIDclaim; DOMidentityretained.
+- SeparatenaturalexpirycontextremainedonNotes/WikipediaResultsafterearlierrefresh; secondexpiry~09:09:30nowauth/sessions401twiceover6.5s09:17:20–26,97consoleerrors. NativeobserveronlyURL/status, no token mutations; rootdiagnosesnewobservation. Earlieraway-returnrefreshPASSunchanged. No repeatedpollingafterthisboundedcapture.
+
+##09:26UTC analysis and scheduledEnd complete
+- ActualunavailableOllamaanalysis POST/chat/completions502provider_unavailable, visible Failed to generate analysis; prior3bulletanalysispreserved. ExactGemma restored, customemergencymaps/sitesprompt realChat200 +versions201v3(44d2cd1e-7be4-42eb-a91e-9d2883fea6fd); normalGET/media/1reload200 exactBluecourtyard/412maps/NorthPierWillowCoveEastMarsh, priorv2retained, raw963charsunchanged. Sole9099leaseRELEASED.
+- SingleboundedBiologyCram Update scheduleON ratingEasy of78bd6449→review200session3,4remaining1reviewed; actualEndSessionPOST/review-sessions/end200completed/cards_reviewed1/client2. No re-rate. RestoredscheduleOFF/Dueonly. ActualvisiblelabelneededbecauseAntDesigninputoverlaysinterceptedprogrammaticcheck; noforceedits.
+- MainAliceSettingsidle, rootnotifiedREADY forAPIoffline/reconnect. No activegeneration/writes.

@@ -1,0 +1,6 @@
+### Result
+{"at":"2026-09-16T09:17:57.078Z","rows":1,"attributes":[{"dataRowKey":"1","text":"Default AssistantA general-purpose assistant.System6h agoUpdated 6h ago"}]}
+### Ran Playwright code
+```js
+await (async(page)=>{const row=page.getByRole("row").filter({has:page.getByRole("button",{name:"Chat as Default Assistant",exact:true})});return {at:new Date().toISOString(),rows:await row.count(),attributes:await row.evaluateAll(es=>es.map(e=>({dataRowKey:e.getAttribute("data-row-key"),text:e.textContent})))}})(page);
+```

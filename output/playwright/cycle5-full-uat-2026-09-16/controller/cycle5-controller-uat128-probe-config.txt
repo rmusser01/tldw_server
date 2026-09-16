@@ -1,0 +1,25 @@
+import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
+const root = '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui'
+const testPath = root + '/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx'
+const probe = `
+  it.each([false, true])("UAT128 scheduled queue refresh reorder=%s keeps the next unreviewed card", async (reorder) => {
+    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const cards = ["Alpha", "Bravo", "Charlie"].map((name, index) => ({...template, uuid: "uat128-" + name, front: name + " question", back: name + " answer", due_at: "2026-09-16T00:00:0" + index + "Z"}))
+    vi.mocked(useCramQueueQuery).mockReturnValue({data: cards, isSuccess: true, isLoading: false, isFetching: false} as any)
+    reviewMutateAsync.mockResolvedValue({...cards[0], review_session_id: 77, due_at: "2026-09-17T00:00:00Z"})
+    const props = {onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(), reviewDeckId: 1, onReviewDeckChange: vi.fn(), isActive: true}
+    const view = render(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await waitFor(() => expect(screen.getByText("Bravo question")).toBeInTheDocument())
+    if (reorder) {
+      vi.mocked(useCramQueueQuery).mockReturnValue({data: [cards[1], cards[2], {...cards[0], due_at: "2026-09-17T00:00:00Z"}], isSuccess: true, isLoading: false, isFetching: false} as any)
+      view.rerender(<ReviewTab {...props} />)
+    }
+    console.info("UAT128 safe observation", JSON.stringify({reorder, active: screen.getByTestId("flashcards-review-active-card").textContent, progress: screen.getByTestId("flashcards-review-progress").textContent}))
+    expect(screen.getByText("Bravo question")).toBeInTheDocument()
+  })
+`
+export default {...base, plugins:[{name:'uat128-read-only-probe',enforce:'pre' as const,transform(code:string,id:string){if(id!==testPath)return null;const pos=code.lastIndexOf('\n})');if(pos<0)throw Error('test anchor missing');return {code:code.slice(0,pos)+probe+code.slice(pos),map:null}}}], test:{...base.test,setupFiles:[root+'/vitest.setup.ts'],include:[testPath],testNamePattern:'UAT128 scheduled queue',maxWorkers:1,fileParallelism:false}}

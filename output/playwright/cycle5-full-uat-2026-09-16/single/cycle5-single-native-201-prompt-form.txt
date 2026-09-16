@@ -1,0 +1,280 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [Prompts | tldw](http://127.0.0.1:18580/prompts?new=1)
+### Page
+- Page URL: http://127.0.0.1:18580/prompts?new=1
+- Page Title: Prompts | tldw
+### Snapshot
+```yaml
+- generic [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e6]:
+      - button "Expand sidebar" [ref=e7] [cursor=pointer]
+      - button "New Chat" [ref=e11] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Quick Ingest" [ref=e15] [cursor=pointer]
+        - button "Chat" [ref=e19] [cursor=pointer]
+        - button "Prompts" [ref=e22] [cursor=pointer]
+        - button "Characters" [ref=e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e31] [cursor=pointer]
+        - button "World Books" [ref=e35] [cursor=pointer]
+        - button "Notes" [ref=e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=e42] [cursor=pointer]
+        - button "Media" [ref=e50] [cursor=pointer]
+        - button "Document Workspace" [ref=e53] [cursor=pointer]
+        - button "Research Workspace" [ref=e59] [cursor=pointer]
+        - button "Kanban" [ref=e65] [cursor=pointer]
+        - button "Watchlists" [ref=e67] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "Open Notes Dock" [ref=e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e78] [cursor=pointer]
+        - button "Settings" [ref=e81] [cursor=pointer]
+    - main [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - button "Expand sidebar" [ref=e91] [cursor=pointer]
+            - generic [ref=e93]:
+              - img "tldw Assistant" [ref=e94]
+              - generic [ref=e95]: tldw Assistant
+              - button "Companion Home" [ref=e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=e100] [cursor=pointer]
+          - generic [ref=e107]:
+            - button "Search - Open command palette" [ref=e108] [cursor=pointer]:
+              - generic [ref=e112]: Search
+              - generic [ref=e113]: ⌘K
+            - button "Open settings" [ref=e127] [cursor=pointer]
+            - generic [ref=e139]:
+              - button "Notifications, 0 unread" [ref=e140] [cursor=pointer]
+              - status [ref=e144]: Notifications are active
+            - button "Switch to light theme" [ref=e145] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e152] [cursor=pointer]:
+              - generic [ref=e153]: "?"
+        - generic [ref=e1156]:
+          - generic [ref=e1157]:
+            - heading "Prompts" [level=1] [ref=e1158]
+            - paragraph [ref=e1159]: Create reusable prompts for recurring tasks, workflows, and team conventions.
+          - generic [ref=e1160]:
+            - status [ref=e1161]
+            - generic [ref=e1162]:
+              - generic [ref=e1163]:
+                - generic [ref=e1164]:
+                  - generic [ref=e1165]: Prompts
+                  - button "Collapse sidebar" [expanded] [ref=e1166] [cursor=pointer]
+                - generic [ref=e1170]:
+                  - generic [ref=e1171]:
+                    - heading "Workspaces" [level=4] [ref=e1172]
+                    - generic [ref=e1173]:
+                      - button "Custom" [ref=e1174] [cursor=pointer]
+                      - button "Copilot" [ref=e1179] [cursor=pointer]
+                      - button "Studio" [ref=e1184] [cursor=pointer]
+                      - button "Trash" [ref=e1188] [cursor=pointer]
+                  - generic [ref=e1193]:
+                    - heading "Collections" [level=4] [ref=e1194]
+                    - generic [ref=e1195]:
+                      - button "All Prompts 0" [ref=e1196] [cursor=pointer]:
+                        - generic [ref=e1201]: All Prompts
+                        - generic [ref=e1202]: "0"
+                      - button "Favorites 0" [ref=e1203] [cursor=pointer]:
+                        - generic [ref=e1206]: Favorites
+                        - generic [ref=e1207]: "0"
+                      - button "Recently Used 0" [ref=e1208] [cursor=pointer]:
+                        - generic [ref=e1212]: Recently Used
+                        - generic [ref=e1213]: "0"
+                      - button "Most Used 0" [ref=e1214] [cursor=pointer]:
+                        - generic [ref=e1218]: Most Used
+                        - generic [ref=e1219]: "0"
+                      - button "Untagged 0" [ref=e1220] [cursor=pointer]:
+                        - generic [ref=e1224]: Untagged
+                        - generic [ref=e1225]: "0"
+                  - generic [ref=e1226]:
+                    - generic [ref=e1227]:
+                      - heading "Type" [level=4] [ref=e1228]
+                      - generic [ref=e1229]:
+                        - button "All 0" [ref=e1230] [cursor=pointer]:
+                          - generic [ref=e1231]: All
+                          - generic [ref=e1232]: "0"
+                        - button "System" [ref=e1233] [cursor=pointer]
+                        - button "Quick" [ref=e1235] [cursor=pointer]
+                        - button "Mixed" [ref=e1237] [cursor=pointer]
+                        - button "Recipes" [ref=e1239] [cursor=pointer]
+                        - button "System recipes" [ref=e1241] [cursor=pointer]
+                        - button "User recipes" [ref=e1243] [cursor=pointer]
+                    - generic [ref=e1245]:
+                      - heading "Sync Status" [level=4] [ref=e1246]
+                      - generic [ref=e1247]:
+                        - button "All 0" [ref=e1248] [cursor=pointer]:
+                          - generic [ref=e1249]: All
+                          - generic [ref=e1250]: "0"
+                        - button "Local" [ref=e1251] [cursor=pointer]
+                        - button "Synced" [ref=e1253] [cursor=pointer]
+                        - button "Pending" [ref=e1255] [cursor=pointer]
+                        - button "Conflict" [ref=e1257] [cursor=pointer]
+                  - generic [ref=e1259]:
+                    - heading "Filter Presets" [level=4] [ref=e1260]
+                    - button "Save current filters" [ref=e1262] [cursor=pointer]
+              - generic [ref=e1267]:
+                - generic [ref=e1268]:
+                  - generic [ref=e1269]:
+                    - generic [ref=e1270] [cursor=pointer]:
+                      - generic [ref=e1271]:
+                        - generic "All collections" [ref=e1272]
+                        - combobox [ref=e1273]
+                      - img "down" [ref=e1275]
+                    - button "New collection" [ref=e1278] [cursor=pointer]
+                  - generic [ref=e1281]:
+                    - generic [ref=e1282]:
+                      - button "New prompt" [active] [ref=e1283] [cursor=pointer]
+                      - generic [ref=e1284]:
+                        - button "Export prompts" [ref=e1285] [cursor=pointer]: Export
+                        - generic [ref=e1289] [cursor=pointer]:
+                          - generic [ref=e1290]:
+                            - generic "JSON" [ref=e1291]
+                            - combobox [ref=e1292]
+                          - img "down" [ref=e1294]
+                      - generic [ref=e1297]:
+                        - button "Import" [ref=e1298] [cursor=pointer]
+                        - generic [ref=e1302] [cursor=pointer]:
+                          - generic [ref=e1303]:
+                            - generic "Merge" [ref=e1304]
+                            - combobox [ref=e1305]
+                          - img "down" [ref=e1307]
+                      - button "Open keyboard shortcuts" [ref=e1310] [cursor=pointer]: Shortcuts
+                    - generic [ref=e1313]:
+                      - generic [ref=e1315]:
+                        - textbox "Search titles and contents" [ref=e1316]:
+                          - /placeholder: Search name, content, keywords...
+                        - generic [ref=e1317]: /
+                      - generic [ref=e1320] [cursor=pointer]:
+                        - generic [ref=e1321]:
+                          - generic "All" [ref=e1322]
+                          - combobox "Filter by type" [ref=e1323]
+                        - img "down" [ref=e1325]
+                      - generic [ref=e1329] [cursor=pointer]:
+                        - generic [ref=e1330]:
+                          - generic "All usage" [ref=e1331]
+                          - combobox "Filter by usage" [ref=e1332]
+                        - img "down" [ref=e1334]
+                      - generic [ref=e1338]:
+                        - generic [ref=e1339]:
+                          - generic: Add tags
+                          - combobox "Filter by keywords" [ref=e1341]
+                        - img "down" [ref=e1343]
+                      - radiogroup "segmented control" [ref=e1347]:
+                        - generic [ref=e1348]:
+                          - generic [ref=e1349] [cursor=pointer]:
+                            - radio "Match any" [checked]
+                            - generic "Match any" [ref=e1350]
+                          - generic [ref=e1351] [cursor=pointer]:
+                            - radio "Match all"
+                            - generic "Match all" [ref=e1352]
+                      - radiogroup "View mode" [ref=e1354]:
+                        - generic [ref=e1355]:
+                          - generic [ref=e1356] [cursor=pointer]:
+                            - radio "Table" [checked]
+                            - generic [ref=e1357]: Table
+                          - generic [ref=e1360] [cursor=pointer]:
+                            - radio "Gallery"
+                            - generic [ref=e1361]: Gallery
+                      - radiogroup "Table density" [ref=e1369]:
+                        - generic [ref=e1370]:
+                          - generic [ref=e1371] [cursor=pointer]:
+                            - radio "Comfortable" [checked]
+                            - generic "Comfortable" [ref=e1372]
+                          - generic [ref=e1373] [cursor=pointer]:
+                            - radio "Compact"
+                            - generic "Compact" [ref=e1374]
+                          - generic [ref=e1375] [cursor=pointer]:
+                            - radio "Dense"
+                            - generic "Dense" [ref=e1376]
+                      - button "Save filters" [ref=e1378] [cursor=pointer]
+                - generic [ref=e1382]:
+                  - heading "No custom prompts yet" [level=2] [ref=e1383]
+                  - paragraph [ref=e1384]: Create reusable prompts for recurring tasks, workflows, and team conventions.
+                  - list [ref=e1386]:
+                    - listitem [ref=e1387]: Save your favorite system prompt for summaries, explanations, or translations.
+                    - listitem [ref=e1388]: Create quick prompts for common actions like drafting emails or refining notes.
+                  - button "Create prompt" [ref=e1390] [cursor=pointer]
+                - generic [ref=e1391]:
+                  - heading "Or start with a template" [level=3] [ref=e1392]
+                  - generic [ref=e1393]:
+                    - generic [ref=e1394]:
+                      - heading "Structured recipe" [level=4] [ref=e1400]
+                      - paragraph [ref=e1401]: Start with ordered blocks, labels, variables, and editable default instructions.
+                      - button "Build a recipe" [ref=e1402] [cursor=pointer]
+                    - generic [ref=e1403]:
+                      - heading "Code Review Assistant" [level=4] [ref=e1408]
+                      - paragraph [ref=e1409]: Reviews code for bugs, style, and best practices
+                      - button "Use this template" [ref=e1410] [cursor=pointer]
+                    - generic [ref=e1411]:
+                      - heading "Meeting Summary" [level=4] [ref=e1416]
+                      - paragraph [ref=e1417]: Extracts key points and action items from meeting notes
+                      - button "Use this template" [ref=e1418] [cursor=pointer]
+                    - generic [ref=e1419]:
+                      - heading "Research Analyst" [level=4] [ref=e1424]
+                      - paragraph [ref=e1425]: Analyzes topics with structured research methodology
+                      - button "Use this template" [ref=e1426] [cursor=pointer]
+            - generic [ref=e1429]:
+              - generic [ref=e1430]:
+                - generic [ref=e1431]:
+                  - button "Back to Prompts" [ref=e1432] [cursor=pointer]
+                  - generic [ref=e1435]: New Prompt
+                - generic [ref=e1436]:
+                  - button "Cancel" [ref=e1437] [cursor=pointer]
+                  - button "Save" [ref=e1438] [cursor=pointer]
+              - generic [ref=e1443]:
+                - group [ref=e1444]:
+                  - generic [ref=e1445]:
+                    - generic [ref=e1446]:
+                      - heading "Identity" [level=3] [ref=e1447]
+                      - generic [ref=e1448]:
+                        - generic [ref=e1450]:
+                          - generic "Title" [ref=e1452]: "* Title"
+                          - textbox "* Title" [ref=e1456]:
+                            - /placeholder: e.g. Code Review Assistant
+                        - generic [ref=e1458]:
+                          - generic "Author" [ref=e1460]
+                          - textbox "Author" [ref=e1464]:
+                            - /placeholder: Optional
+                    - generic [ref=e1465]:
+                      - heading "Prompt Content" [level=3] [ref=e1466]
+                      - button "Convert to structured" [ref=e1468] [cursor=pointer]
+                      - generic [ref=e1470]:
+                        - generic "AI Instructions (System Prompt)" [ref=e1472]
+                        - textbox "AI Instructions (System Prompt)" [ref=e1476]:
+                          - /placeholder: You are a helpful assistant that...
+                      - generic [ref=e1477]: 0 chars / ~0 tokens
+                      - generic [ref=e1480]:
+                        - generic "Message Template (User Prompt)" [ref=e1482]
+                        - textbox "Message Template (User Prompt)" [ref=e1486]:
+                          - /placeholder: "Analyze the following: {{input}}"
+                      - generic [ref=e1487]: 0 chars / ~0 tokens
+                    - generic [ref=e1489]:
+                      - heading "Organization" [level=3] [ref=e1490]
+                      - generic [ref=e1492]:
+                        - generic "Tags" [ref=e1494]
+                        - generic [ref=e1498]:
+                          - generic [ref=e1499]:
+                            - generic: Add tags...
+                            - combobox "Tags" [ref=e1501]
+                          - img "down" [ref=e1503]
+                      - generic [ref=e1507]:
+                        - generic "Notes" [ref=e1509]
+                        - textbox "Notes" [ref=e1513]:
+                          - /placeholder: Internal notes about this prompt...
+                    - button "collapsed Advanced" [ref=e1516] [cursor=pointer]:
+                      - img "collapsed" [ref=e1518]
+                      - generic [ref=e1521]: Advanced
+                - generic [ref=e1523]:
+                  - generic [ref=e1525]:
+                    - heading "System Prompt" [level=4] [ref=e1526]
+                    - generic [ref=e1527]: Empty
+                  - generic [ref=e1529]:
+                    - generic [ref=e1530]: "System: ~0 tokens"
+                    - generic [ref=e1531]: "User: ~0 tokens"
+                    - generic [ref=e1532]: "Total: ~0 tokens"
+  - button "Open Next.js Dev Tools" [ref=e495] [cursor=pointer]
+  - alert [ref=e499]: Prompts | tldw
+```

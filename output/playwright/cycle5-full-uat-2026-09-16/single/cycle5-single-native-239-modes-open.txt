@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Modes' }).click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
+- 1: (current) [E2E-TestBot Chat (20260916_090445) | tldw](http://127.0.0.1:18580/chat)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: E2E-TestBot Chat (20260916_090445) | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T09-09-22-075Z.yml)
