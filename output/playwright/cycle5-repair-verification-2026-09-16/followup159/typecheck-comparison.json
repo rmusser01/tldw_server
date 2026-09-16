@@ -1,0 +1,10 @@
+{
+  "baseline": ".tmp/fresh-uat-recovery-20260916/typecheck-current.log",
+  "current": ".tmp/uat159-first-run-auth-20260916/typecheck.log",
+  "baselineDiagnostics": 90,
+  "currentDiagnostics": 90,
+  "added": [],
+  "removed": [],
+  "compilerExitCode": 2,
+  "note": "Full compiler baseline comparison, not a clean typecheck."
+}

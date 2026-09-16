@@ -1,0 +1,60 @@
+{
+  "files": [
+    {
+      "path": "IMPLEMENTATION.md",
+      "sha256": "82579765e7d04659225c78e13749df220b2acf6a23f6f96c9c722fc89821dce8"
+    },
+    {
+      "path": "README.md",
+      "sha256": "24b3ccacba67bff3787377f90a6619ac7d5a8c2b6ba87352f769a65d733fe46a"
+    },
+    {
+      "path": "authenticated-persona-reads.json",
+      "sha256": "be01c039065a882be89ee28e5c81ed925bbcc2a8624320c6bf98a4046dddb42f"
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "77b43c598d22f239d2d57ecaa75ca7902c1ba6b47a9ab142f8a3435188e74aeb"
+    },
+    {
+      "path": "eslint-summary.json",
+      "sha256": "9a03e6c50937cda9a1a4ee8ded7730727ecba2f1acc3e652853dc205c4363852"
+    },
+    {
+      "path": "final-tests.log",
+      "sha256": "eab76d4307321a8f805f90240a342818a49856918cc0605af4ff28aabf61cecf"
+    },
+    {
+      "path": "fresh-preauth-requests.txt",
+      "sha256": "0f9de9d56af026b5892e1297ddfd76c6e06353c02f7d45139c170d6a2dba9848"
+    },
+    {
+      "path": "independent-review.md",
+      "sha256": "32c3cba214f00a4ecc895096145b63154a504cbbb0c017a0ba5c22ae79b59a90"
+    },
+    {
+      "path": "independent-tests.log",
+      "sha256": "22bb920b056ee9dfcdbebca613f6af3996d6eb73e4ea54af1dbf96fba34cf244"
+    },
+    {
+      "path": "owned-manifest.json",
+      "sha256": "ea324859e8e271efd49ef576a5bfad7c7a51f8cd2ed40b1eb98a833ff5337bdb"
+    },
+    {
+      "path": "pg-fresh-preauth.txt",
+      "sha256": "bbe112ed684ba12eaefd4b456a091a67dec3cfd94b6ff3914bd6c554e7ce6185"
+    },
+    {
+      "path": "red-coalescing.log",
+      "sha256": "cdb553346769bebd030b9687d869e866c3c9ec7b83320205ce9951bd7d0e3d76"
+    },
+    {
+      "path": "red.log",
+      "sha256": "a758c51b6762c38dbe1af405b8f947cc79cfd0f97d4b8fb17bd623b6772f98a0"
+    },
+    {
+      "path": "typecheck-comparison.json",
+      "sha256": "3ed002af4362b22fbd23629c0455abaf09881b3ba4c2dcb45ace6940846da9b4"
+    }
+  ]
+}

@@ -26,7 +26,7 @@ export const FirstRunGate: React.FC<FirstRunGateProps> = ({
   bypass = false,
   allowCompletedSetup = false
 }) => {
-  const { shouldShowSetup, loading } = useFirstRunCheck({ allowCompletedSetup })
+  const { shouldShowSetup, loading } = useFirstRunCheck({ allowCompletedSetup, enabled: !bypass })
   const [dismissed, setDismissed] = React.useState(false)
 
   // While loading or if the user dismissed the overlay, render children

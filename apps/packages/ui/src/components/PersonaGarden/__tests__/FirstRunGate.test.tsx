@@ -56,7 +56,7 @@ describe("FirstRunGate", () => {
     mockUseFirstRunCheck.mockReturnValue({ shouldShowSetup: false, loading: false })
     render(<FirstRunGate onStartSetup={onStartSetup} allowCompletedSetup><div>Source task</div></FirstRunGate>)
     expect(screen.getByText("Source task")).toBeInTheDocument()
-    expect(mockUseFirstRunCheck).toHaveBeenCalledWith({ allowCompletedSetup: true })
+    expect(mockUseFirstRunCheck).toHaveBeenCalledWith({ allowCompletedSetup: true, enabled: true })
   })
 
   it("renders the overlay when shouldShowSetup is true", () => {

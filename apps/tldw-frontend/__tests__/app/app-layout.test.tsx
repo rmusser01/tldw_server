@@ -68,6 +68,7 @@ const mockRouter = {
 const mockGetConfig = vi.fn()
 const mockGetCurrentUser = vi.fn()
 const mockLogout = vi.fn()
+const firstRun = vi.hoisted(() => ({ realGate: false, profiles: vi.fn() }))
 let mockLogoutAvailable = true
 let currentConfig: Record<string, unknown> | null = null
 let useCanonicalAuthStorage = false
@@ -169,7 +170,15 @@ vi.mock("@web/components/networking/ServerReadinessGate", () => ({
   )
 }))
 
-vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
+vi.mock("@/services/tldw/request-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/tldw/request-core")>()
+  return { ...actual, tldwRequest: (...args: Parameters<typeof actual.tldwRequest>) =>
+    firstRun.realGate ? firstRun.profiles(args[0]) : actual.tldwRequest(...args) }
+})
+
+vi.mock("@/components/PersonaGarden/FirstRunGate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/PersonaGarden/FirstRunGate")>()
+  return {
   FirstRunGate: ({
     children,
     bypass,
@@ -180,7 +189,11 @@ vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
     bypass?: boolean
     allowCompletedSetup?: boolean
     onStartSetup: () => void
-  }) => (
+  }) => firstRun.realGate ? (
+    <actual.FirstRunGate bypass={bypass} allowCompletedSetup={allowCompletedSetup} onStartSetup={onStartSetup}>
+      {children}
+    </actual.FirstRunGate>
+  ) : (
     <div data-testid="first-run-gate" data-bypass={String(Boolean(bypass))}
       data-allow-completed-setup={String(Boolean(allowCompletedSetup))}>
       <button
@@ -192,7 +205,8 @@ vi.mock("@/components/PersonaGarden/FirstRunGate", () => ({
       {children}
     </div>
   )
-}))
+  }
+})
 
 vi.mock("@web/lib/configured-auth-state", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@web/lib/configured-auth-state")>()),
@@ -230,6 +244,8 @@ const originalEnvBearer = process.env.NEXT_PUBLIC_API_BEARER
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 beforeEach(() => {
+  firstRun.realGate = false
+  firstRun.profiles.mockReset().mockResolvedValue({ ok: true, data: [{}] })
   buddyLifetime.mounted.mockClear()
   buddyLifetime.unmounted.mockClear()
   localStorage.clear()
@@ -260,6 +276,90 @@ afterAll(() => {
 })
 
 describe("App layout routing", () => {
+  describe("UAT159 actual first-run request boundary", () => {
+    beforeEach(() => { firstRun.realGate = true })
+
+    it.each(["/", "/media"])("does not request private profiles from blank-key %s", async route => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "  " }
+      renderApp(route)
+      expect(await screen.findByTestId("page-content")).toBeInTheDocument()
+      expect(firstRun.profiles).not.toHaveBeenCalled()
+    })
+
+    it("waits for auth bootstrap before requesting profiles", async () => {
+      resetRuntimeBootstrap(true)
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "valid-key" }
+      renderApp("/media")
+      await act(async () => { await Promise.resolve() })
+      expect(firstRun.profiles).not.toHaveBeenCalled()
+      await act(async () => { resolveRuntimeBootstrap?.(); await runtimeBootstrapReady })
+      await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTimes(1))
+    })
+
+    it.each(["manual key", "runtime key", "quickstart cookie", "hosted cookie"])("keeps the authenticated %s profile check", async mode => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }
+      if (mode === "manual key") currentConfig.apiKey = "valid-key"
+      if (mode === "runtime key") mockRuntimeApiKey = "runtime-key"
+      if (mode === "quickstart cookie") {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+        currentConfig = { serverUrl: window.location.origin, authMode: "single-user", authSource: "cookie-session" }
+      }
+      if (mode === "hosted cookie") {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+        currentConfig = { serverUrl: "", authMode: "multi-user" }
+      }
+      renderApp("/media")
+      await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTimes(1))
+      expect(firstRun.profiles).toHaveBeenCalledWith({ path: "/api/v1/persona/profiles", method: "GET" })
+      expect(mockGetCurrentUser).toHaveBeenCalledTimes(mode === "hosted cookie" ? 1 : 0)
+    })
+
+    it.each(["/", "/research-workspace", "/login", "/setup", "/settings/tldw"])("does not request unused profiles from bypassed %s", async route => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "valid-key" }
+      renderApp(route)
+      expect(await screen.findByTestId("page-content")).toBeInTheDocument()
+      expect(firstRun.profiles).not.toHaveBeenCalled()
+    })
+
+    it("does not request profiles after hosted cookie validation rejects the session", async () => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+      currentConfig = { serverUrl: "", authMode: "multi-user" }
+      mockGetCurrentUser.mockRejectedValue(makeStatusError("Unauthorized", 401))
+      renderApp("/media")
+      await screen.findByRole("heading", { name: "Signed out" })
+      expect(firstRun.profiles).not.toHaveBeenCalled()
+    })
+
+    it("keeps one profile check through stable authenticated rerenders and auth refreshes", async () => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "valid-key" }
+      const view = renderApp("/media")
+      await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTimes(1))
+      view.rerender(<App Component={DummyPage} pageProps={{ revision: 1 }} />)
+      view.rerender(<App Component={DummyPage} pageProps={{ revision: 2 }} />)
+      act(() => { window.dispatchEvent(new Event("tldw:config-updated")) })
+      await waitFor(() => expect(mockGetConfig).toHaveBeenCalledTimes(2))
+      expect(firstRun.profiles).toHaveBeenCalledTimes(1)
+    })
+
+    it("discards the old profile response after logout and checks again on authenticated re-entry", async () => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "first-key" }
+      let resolveOld!: (value: unknown) => void
+      const oldResponse = new Promise(resolve => { resolveOld = resolve })
+      firstRun.profiles.mockReturnValueOnce(oldResponse)
+      renderApp("/media")
+      await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTimes(1))
+      currentConfig = { ...currentConfig, apiKey: "" }
+      act(() => { window.dispatchEvent(new Event("tldw:config-updated")) })
+      await waitFor(() => expect(screen.getByTestId("option-layout")).toHaveAttribute("data-hide-header", "true"))
+      currentConfig = { ...currentConfig, apiKey: "second-key" }
+      act(() => { window.dispatchEvent(new Event("tldw:config-updated")) })
+      await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTimes(2))
+      await act(async () => { resolveOld({ ok: true, data: [] }); await oldResponse })
+      expect(screen.queryByTestId("first-run-gate-overlay")).toBeNull()
+      expect(screen.getByTestId("page-content")).toBeInTheDocument()
+    })
+  })
+
   describe("canonical browser authentication on the existing app owner", () => {
     const signedIn = {
       serverUrl: "https://shell.example.test",
@@ -514,6 +614,7 @@ describe("App layout routing", () => {
   })
 
   it("wraps non-login routes with OptionLayout", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
     renderApp("/media")
     expect(
       await screen.findByTestId("server-readiness-gate")
@@ -559,6 +660,7 @@ describe("App layout routing", () => {
   })
 
   it("routes first-time chat setup through the unified setup shell", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
     renderApp("/chat")
     await screen.findByTestId("server-readiness-gate")
 
@@ -577,6 +679,7 @@ describe("App layout routing", () => {
   })
 
   it("routes first-time media setup through the unified setup shell", async () => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
     renderApp("/media")
     await screen.findByTestId("first-run-gate")
 
@@ -601,6 +704,7 @@ describe("App layout routing", () => {
   })
 
   it.each(["/knowledge", "/chat"])("allows completed unified setup on source destination %s", async (path) => {
+    process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
     renderApp(path)
     const gate = await screen.findByTestId("first-run-gate")
     expect(gate).toHaveAttribute("data-allow-completed-setup", "true")

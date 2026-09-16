@@ -1,0 +1,23 @@
+[
+  {
+    "id": 253,
+    "owner": 6,
+    "event": "start",
+    "at": 1789591250496,
+    "url": "http://127.0.0.1:18580/api/v1/persona/profiles",
+    "method": "GET",
+    "events": [
+      {
+        "id": 253,
+        "event": "response",
+        "at": 1789591250527,
+        "status": 200
+      },
+      {
+        "id": 253,
+        "event": "finished",
+        "at": 1789591250528
+      }
+    ]
+  }
+]

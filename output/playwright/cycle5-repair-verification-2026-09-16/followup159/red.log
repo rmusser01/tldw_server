@@ -1,0 +1,259 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:42682) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:42681) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ❯ ../packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx (7 tests | 2 failed) 377ms
+     ✓ does not treat a failed profile request as an empty profile list 58ms
+     × waits without fetching or showing setup until enabled 2ms
+     × clears resume state when disabled and ignores an old response after re-enabling 2ms
+     ✓ allows an opted-in source destination after unified setup completes 53ms
+     ✓ keeps assistant setup available on other routes 53ms
+     ✓ does not let another server's incomplete cache block source destinations 53ms
+     ✓ keeps remote source navigation nonblocking without privileged setup probes 156ms
+ ❯ __tests__/app/app-layout.test.tsx (69 tests | 5 failed) 1888ms
+       × does not request private profiles from blank-key / 25ms
+       × does not request private profiles from blank-key /media 4ms
+       ✓ waits for auth bootstrap before requesting profiles 7ms
+       ✓ keeps the authenticated manual key profile check 4ms
+       ✓ keeps the authenticated runtime key profile check 4ms
+       ✓ keeps the authenticated quickstart cookie profile check 14ms
+       ✓ keeps the authenticated hosted cookie profile check 4ms
+       × does not request unused profiles from bypassed / 4ms
+       × does not request unused profiles from bypassed /research-workspace 4ms
+       ✓ does not request unused profiles from bypassed /login 5ms
+       ✓ does not request unused profiles from bypassed /setup 3ms
+       ✓ does not request unused profiles from bypassed /settings/tldw 3ms
+       ✓ does not request profiles after hosted cookie validation rejects the session 58ms
+       × discards the old profile response after logout and checks again on authenticated re-entry 1007ms
+       ✓ restores the Settings shell after same-tab login despite a stale client and preserves the draft 11ms
+       ✓ restores the Settings shell after cross-tab login despite a stale client and preserves the draft 7ms
+       ✓ hides private shell consumers for an invalidated rotated pair and restores only the new login 8ms
+       ✓ ignores a delayed success validation after canonical logout 58ms
+       ✓ ignores a delayed unauthorized validation after canonical logout 58ms
+       ✓ keeps the new A login after A → B → A despite the old A validation failing late 114ms
+       ✓ ignores a delayed canonical configuration read after another account signs out 56ms
+       ✓ follows real quickstart cookie activation and removal without a cached client 7ms
+     ✓ wraps non-login routes with OptionLayout 4ms
+     ✓ allows degraded server readiness on chat and research workspace routes 3ms
+     ✓ routes first-time chat setup through the unified setup shell 4ms
+     ✓ routes first-time media setup through the unified setup shell 3ms
+     ✓ lets the unified setup host route bypass the generic first-run overlay 2ms
+     ✓ allows completed unified setup on source destination /knowledge 2ms
+     ✓ allows completed unified setup on source destination /chat 2ms
+     ✓ bypasses the generic first-run splash for character-chat route intent 3ms
+     ✓ bypasses the generic first-run splash for Research Workspace direct entry 3ms
+     ✓ preserves explicit character-chat onboarding routes through first-run setup 3ms
+     ✓ skips OptionLayout for /login but keeps ServerReadinessGate mounted 2ms
+     ✓ hides header and sidebar while unauthenticated 4ms
+     ✓ waits for runtime bootstrap before reading configured auth state 2ms
+     ✓ does not mount config consumers until deferred bootstrap activates the real cookie client 9ms
+     ✓ leaves startup loading after a rejected bootstrap and resolves auth fail closed 8ms
+     ✓ exits startup loading within the bootstrap bound and mounts preserved manual configuration fail closed 14ms
+     ✓ treats a probed quickstart cookie session as authenticated without an api key 4ms
+     ✓ does not authenticate missing quickstart config with a stale public key 3ms
+     ✓ keeps sidebar hidden on settings routes even when authenticated 4ms
+     ✓ treats runtime single-user API key overrides as authenticated shell state 4ms
+     ✓ keeps setup in a setup-only shell even when authenticated 3ms
+     ✓ enables notification startup after auth resolves on app routes 2ms
+     ✓ refreshes nav visibility when auth config updates 6ms
+     ✓ counts runtime-override credentials as authenticated for shell chrome 5ms
+     ✓ redirects protected routes to login when multi-user token validation fails 9ms
+     ✓ replaces private content after an offline auth boundary via storage and preserves queued drafts 10ms
+     ✓ replaces private content after an offline auth boundary via tldw:config-updated and preserves queued drafts 9ms
+     ✓ replaces private content after an offline auth boundary via expired-session and preserves queued drafts 9ms
+     ✓ resumes the normal login redirect when a signed-out tab comes online 59ms
+     ✓ ignores a late success auth result after a newer offline logout 62ms
+     ✓ ignores a late network-error auth result after a newer offline logout 63ms
+     ✓ ignores a late unauthorized auth result after a newer offline logout 63ms
+     ✓ keeps the signed-out /settings/tldw route available offline 2ms
+     ✓ keeps the signed-out /login route available offline 2ms
+     ✓ keeps the signed-out /setup route available offline 2ms
+     ✓ keeps the signed-out /__debug__/sidepanel-chat route available offline 2ms
+     ✓ redirects stale sessions when the auth provider has no logout method 1ms
+     ✓ logs logout failures while still redirecting stale sessions 2ms
+     ✓ redirects when auth validation returns a plain unauthenticated error 2ms
+     ✓ keeps persisted multi-user auth when validation fails with a non-auth status 5ms
+     ✓ validates hosted multi-user sessions without a persisted access token 5ms
+     ✓ keeps hosted tokenless auth on non-auth validation failures 5ms
+     ✓ warms primary navigation routes after auth resolves 1ms
+     ✓ keeps one Buddy lifetime through page and gate changes and clears it on logout 7ms
+     ✓ does not mount the web Buddy on /login 2ms
+     ✓ does not mount the web Buddy on /setup 2ms
+     ✓ does not mount the web Buddy on /__debug__/sidepanel-chat 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/app/app-layout.test.tsx > App layout routing > UAT159 actual first-run request boundary > does not request private profiles from blank-key /
+ FAIL  __tests__/app/app-layout.test.tsx > App layout routing > UAT159 actual first-run request boundary > does not request private profiles from blank-key /media
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "method": "GET",
+        "path": "/api/v1/persona/profiles",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ __tests__/app/app-layout.test.tsx:282:37
+    280|       renderApp(route)
+    281|       expect(await screen.findByTestId("page-content")).toBeInTheDocum…
+    282|       expect(firstRun.profiles).not.toHaveBeenCalled()
+       |                                     ^
+    283|     })
+    284|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  __tests__/app/app-layout.test.tsx > App layout routing > UAT159 actual first-run request boundary > does not request unused profiles from bypassed /
+ FAIL  __tests__/app/app-layout.test.tsx > App layout routing > UAT159 actual first-run request boundary > does not request unused profiles from bypassed /research-workspace
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "method": "GET",
+        "path": "/api/v1/persona/profiles",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ __tests__/app/app-layout.test.tsx:317:37
+    315|       renderApp(route)
+    316|       expect(await screen.findByTestId("page-content")).toBeInTheDocum…
+    317|       expect(firstRun.profiles).not.toHaveBeenCalled()
+       |                                     ^
+    318|     })
+    319|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  __tests__/app/app-layout.test.tsx > App layout routing > UAT159 actual first-run request boundary > discards the old profile response after logout and checks again on authenticated re-entry
+AssertionError: expected "vi.fn()" to be called 2 times, but got 1 times
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mdata-enable-notifications[39m=[32m"true"[39m
+        [33mdata-testid[39m=[32m"app-providers"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mdata-testid[39m=[32m"persistent-buddy"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Buddy draft"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Read Buddy aloud"[39m
+            [33mtype[39m=[32m"checkbox"[39m
+          [36m/>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mdata-allow-degraded[39m=[32m"false"[39m
+          [33mdata-testid[39m=[32m"server-readiness-gate"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mdata-hide-header[39m=[32m"false"[39m
+            [33mdata-hide-sidebar[39m=[32m"false"[39m
+            [33mdata-testid[39m=[32m"option-layout"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mdata-testid[39m=[32m"page-content"[39m
+            [36m>[39m
+              [0mPage[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ __tests__/app/app-layout.test.tsx:341:53
+    339|       currentConfig = { ...currentConfig, apiKey: "second-key" }
+    340|       act(() => { window.dispatchEvent(new Event("tldw:config-updated"…
+    341|       await waitFor(() => expect(firstRun.profiles).toHaveBeenCalledTi…
+       |                                                     ^
+    342|       await act(async () => { resolveOld({ ok: true, data: [] }); awai…
+    343|       expect(screen.queryByTestId("first-run-gate-overlay")).toBeNull()
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  ../packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx > useFirstRunCheck > waits without fetching or showing setup until enabled
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "method": "GET",
+        "path": "/api/v1/persona/profiles",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx:35:32
+     33|       { initialProps: { enabled: false } }
+     34|     )
+     35|     expect(mocks.profiles).not.toHaveBeenCalled()
+       |                                ^
+     36|     expect(result.current).toEqual({ shouldShowSetup: false, resumeSte…
+     37|     rerender({ enabled: true })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  ../packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx > useFirstRunCheck > clears resume state when disabled and ignores an old response after re-enabling
+AssertionError: expected { shouldShowSetup: false, …(2) } to deeply equal { shouldShowSetup: false, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "loading": false,
++   "loading": true,
+    "resumeStep": null,
+    "shouldShowSetup": false,
+  }
+
+ ❯ ../packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx:51:28
+     49|     )
+     50|     rerender({ enabled: false })
+     51|     expect(result.current).toEqual({ shouldShowSetup: false, resumeSte…
+       |                            ^
+     52|     mocks.profiles.mockResolvedValueOnce({ ok: true, data: [{ setup: {…
+     53|     rerender({ enabled: true })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 69 passed (76)
+   Start at  13:31:30
+   Duration  3.19s (transform 602ms, setup 161ms, import 955ms, tests 2.27s, environment 444ms)

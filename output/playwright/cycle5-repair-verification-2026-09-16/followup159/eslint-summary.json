@@ -1,0 +1,12 @@
+{
+  "baseline": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "current": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "exact_rule_message_severity_lists_equal": true,
+  "eslint_exit_code": 0
+}

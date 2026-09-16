@@ -24,16 +24,24 @@ type UseFirstRunCheckResult = {
  * the user left off.
  */
 export function useFirstRunCheck({
-  allowCompletedSetup = false
-}: { allowCompletedSetup?: boolean } = {}): UseFirstRunCheckResult {
+  allowCompletedSetup = false,
+  enabled = true
+}: { allowCompletedSetup?: boolean; enabled?: boolean } = {}): UseFirstRunCheckResult {
   const [shouldShowSetup, setShouldShowSetup] = React.useState(false)
   const [resumeStep, setResumeStep] = React.useState<PersonaSetupStep | null>(
     null
   )
-  const [loading, setLoading] = React.useState(true)
+  const [loading, setLoading] = React.useState(enabled)
 
   React.useEffect(() => {
     let cancelled = false
+
+    if (!enabled) {
+      setShouldShowSetup(false)
+      setResumeStep(null)
+      setLoading(false)
+      return
+    }
 
     const check = async () => {
       setLoading(true)
@@ -46,6 +54,9 @@ export function useFirstRunCheck({
         >({
           path,
           method: "GET"
+        }, {
+          // A new authenticated owner must not join the prior owner's GET.
+          coalesce: false
         })
         if (cancelled) return
 
@@ -108,7 +119,7 @@ export function useFirstRunCheck({
     return () => {
       cancelled = true
     }
-  }, [allowCompletedSetup])
+  }, [allowCompletedSetup, enabled])
 
   return { shouldShowSetup, resumeStep, loading }
 }

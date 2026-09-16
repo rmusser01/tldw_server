@@ -1,0 +1,166 @@
+{
+  "status": "implementation frozen; independent review and native acceptance pending",
+  "task": "TASK-12918",
+  "head": "e717525400746ab790a38d4a2be2149124d00935",
+  "created_at": "2026-09-16T20:40:23.563973+00:00",
+  "production": [
+    {
+      "path": "apps/tldw-frontend/pages/_app.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/pages/_app.tsx",
+      "sha256": "ae5a722f00b16829495fc5ea0e5be2472f217b55d0a4bedd3d6965b41c2c33db"
+    },
+    {
+      "path": "apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx",
+      "sha256": "4302a207c689b8d7324c7327d12fd2795572e7751a656265f2ef89341c89e13f"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/useFirstRunCheck.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/useFirstRunCheck.ts",
+      "sha256": "21e1aae24a32def73a5ea649c8e8c90e05ef43c6af817c4fb7d9e07cd7af4bef"
+    }
+  ],
+  "tests": [
+    {
+      "path": "apps/tldw-frontend/__tests__/app/app-layout.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/app/app-layout.test.tsx",
+      "sha256": "67dec97c527524c68d5573049b8ac86669b2441a7df8457bd046e7776bf310de"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx",
+      "sha256": "e3c029e197375c043e7ac8ed71a52939ab00d9a44dce38d10b5c8e9afe2c185a"
+    },
+    {
+      "path": "apps/packages/ui/src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx",
+      "sha256": "bd4f4b512c3a567899608b8ead4ab6b907e12bea9b6ee68cb261efbcbe4fa150"
+    }
+  ],
+  "backlog": [
+    {
+      "path": "backlog/tasks/task-12918 - Fix-WebUI-chat-startup-request-burst-and-missing-visual-identity-replay.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-12918 - Fix-WebUI-chat-startup-request-burst-and-missing-visual-identity-replay.md",
+      "sha256": "b1ea16f122db0c7d3c863659046e1e3947848ec381c85a1f7c7c95dfdfb9292a"
+    }
+  ],
+  "evidence": [
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/IMPLEMENTATION.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/IMPLEMENTATION.md",
+      "sha256": "82579765e7d04659225c78e13749df220b2acf6a23f6f96c9c722fc89821dce8"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/IMPLEMENTATION_PLAN_uat159_first_run_auth.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/IMPLEMENTATION_PLAN_uat159_first_run_auth.md",
+      "sha256": "7e2c8797381e5cea942f94b132fdbd3bbdfb093ecee36c26e71a5d0945c8168e"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/owned-paths.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/owned-paths.json",
+      "sha256": "33991a7c1fc4c177841f1c3228f438a5db57729465d95798f356b2b7281d48df"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/owned.patch",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/owned.patch",
+      "sha256": "7a0217f4236fdb62d42f5d2049fffcda2ad1a51ddfc6bd2b395975ba990d107c"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/verify-static.py",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/verify-static.py",
+      "sha256": "65f70dc801e7c3d9028817bb5b928b9650f6be6eb265d79c8e876c8ab55c3056"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/red.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/red.log",
+      "sha256": "6afe86ffaa24352e73afacfa7983c3aba848af3eac2d48d7c018f3ec1b25a6c9"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/red-coalescing.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/red-coalescing.log",
+      "sha256": "f67a3eb16b33d220535e85ef0ab7132c03c83e29db67b568d3f7b7702f6ba1a0"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/green.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/green.log",
+      "sha256": "81795ab413ddc572d306c2ae7c26ff5d892b09985aef7adf2cd0844403557276"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/final-tests.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/final-tests.log",
+      "sha256": "07f1945de517563925508633f889060358eba0b3801c6bd005a5a47130b69565"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/final-eslint.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/final-eslint.log",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/eslint-summary.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/eslint-summary.json",
+      "sha256": "9a03e6c50937cda9a1a4ee8ded7730727ecba2f1acc3e652853dc205c4363852"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/eslint-baseline.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/eslint-baseline.json",
+      "sha256": "803450b5c559bfc830fbb424c4f8a635c12efdd3a986490c5a1dd3d9f7739beb"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/final-diff-check.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/final-diff-check.log",
+      "sha256": "bde294368bfed77c2cddf8cec271d398aee9cdbab3b26e1059281bd33adb0120"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/bandit.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/bandit.json",
+      "sha256": "0bf8f6121880bb884d65e6639be12a8e98f9807c9f44194163a306288d77659c"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/bandit.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/bandit.log",
+      "sha256": "adda9fd7d47bb957ddd4531e8e1eb121c55a440246342538f7c5fda698d10e01"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/typecheck.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/typecheck.log",
+      "sha256": "bec0173b45382b5301262b98b90ca544e246d78d086a01505df69b41cb05a898"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/typecheck-comparison.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/typecheck-comparison.json",
+      "sha256": "3ed002af4362b22fbd23629c0455abaf09881b3ba4c2dcb45ace6940846da9b4"
+    }
+  ],
+  "snapshots": [
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/tldw-frontend/pages/_app.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/tldw-frontend/pages/_app.tsx",
+      "sha256": "ae5a722f00b16829495fc5ea0e5be2472f217b55d0a4bedd3d6965b41c2c33db"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx",
+      "sha256": "4302a207c689b8d7324c7327d12fd2795572e7751a656265f2ef89341c89e13f"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/hooks/useFirstRunCheck.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/hooks/useFirstRunCheck.ts",
+      "sha256": "21e1aae24a32def73a5ea649c8e8c90e05ef43c6af817c4fb7d9e07cd7af4bef"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/tldw-frontend/__tests__/app/app-layout.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/tldw-frontend/__tests__/app/app-layout.test.tsx",
+      "sha256": "67dec97c527524c68d5573049b8ac86669b2441a7df8457bd046e7776bf310de"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/hooks/__tests__/useFirstRunCheck.test.tsx",
+      "sha256": "e3c029e197375c043e7ac8ed71a52939ab00d9a44dce38d10b5c8e9afe2c185a"
+    },
+    {
+      "path": ".tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat159-first-run-auth-20260916/review-snapshot/apps/packages/ui/src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx",
+      "sha256": "bd4f4b512c3a567899608b8ead4ab6b907e12bea9b6ee68cb261efbcbe4fa150"
+    }
+  ]
+}

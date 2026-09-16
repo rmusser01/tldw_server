@@ -1,0 +1,48 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/hooks/useFirstRunCheck.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/tldw-frontend/pages/_app.tsx",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-16T20:39:00Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/PersonaGarden/FirstRunGate.tsx": {
+      "loc": 79,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/hooks/useFirstRunCheck.ts": {
+      "loc": 112,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/tldw-frontend/pages/_app.tsx": {
+      "loc": 485,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 676,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}
