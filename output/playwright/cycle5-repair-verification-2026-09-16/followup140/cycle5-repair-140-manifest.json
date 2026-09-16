@@ -1,0 +1,28 @@
+{
+  "task": "TASK-13260.79",
+  "issue": "UAT140",
+  "frozenAt": "2026-09-16T15:25:05.577Z",
+  "base": "3c30685611a26d0495dafabd38f594fee93a1655",
+  "status": "review-test-stability-corrected-native-acceptance-pending",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/Settings/tabs/ConversationTab.tsx",
+      "sha256": "a40a206fab81a30a8bf92f67f30ed6c7e060762a12c0aa47e6f9e582bf7fa671",
+      "bytes": 56573
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/Settings/tabs/__tests__/ConversationTab.input-number.test.tsx",
+      "sha256": "3a8b8ed2f0e49b8bade17ae43ef60a6035be8aaaa60d89f2e0908e3431fc3475",
+      "bytes": 7333
+    },
+    {
+      "path": "backlog/tasks/task-13260.79 - Remove-deprecated-InputNumber-adornment-in-Chat-Settings.md",
+      "sha256": "1cc38e53884d8a022c803a893e40b6d6ab14d77d66b162c65ab865c93695e758",
+      "bytes": 4152
+    }
+  ],
+  "previousFreeze": "2026-09-16T15:19:41.349Z",
+  "workingHead": "010b864500a983740660834a7636b012ec982fe5",
+  "productionUnchanged": true,
+  "allOtherTestBytesUnchanged": true
+}

@@ -1,0 +1,63 @@
+{
+  "files": [
+    {
+      "file": "cycle5-repair-140-eslint-baseline.json",
+      "sha256": "c2e4b3cf4338dc6768e0c7f90f6da894f5b00b6b78d8de042548ff341ea52748"
+    },
+    {
+      "file": "cycle5-repair-140-eslint-comparison.json",
+      "sha256": "912cb2bf21bf79af1df432f81ec463b90bd2eb8f672a7597c7b980dbdfee6c4c"
+    },
+    {
+      "file": "cycle5-repair-140-eslint.json",
+      "sha256": "1c635705833343945513b4c7af9ebdaa50e3c98f1e9c55165cd05383f9826077"
+    },
+    {
+      "file": "cycle5-repair-140-first-freeze-manifest.json",
+      "sha256": "ab0f3e12760d3c7454619f7d04868172fb1ed9a6fe611537afd7a62f534f15b6"
+    },
+    {
+      "file": "cycle5-repair-140-green.log",
+      "sha256": "6b952e29bdc64e78c44b977808e8e9720a30b37ab7f3ae8e999676998c65a3e0"
+    },
+    {
+      "file": "cycle5-repair-140-label-accessibility-red.log",
+      "sha256": "5d8bafe52c98edb5e6ceea748765b38014ae8770e373a4ed69b6df4fd09d2d61"
+    },
+    {
+      "file": "cycle5-repair-140-manifest.json",
+      "sha256": "5b549faa69ff8d7c30e7876afab4dd6e460954930959c8c41fc815a959103717"
+    },
+    {
+      "file": "cycle5-repair-140-red.log",
+      "sha256": "5e71e160c4370edbde547881e4eb9276538c2c968a6687cc50812ddfcb5a56bb"
+    },
+    {
+      "file": "cycle5-repair-140-report.md",
+      "sha256": "6200639ae5806a393f0d8de1d18c8a58c28d1523e82c05d7d32fb0ad7c66e320"
+    },
+    {
+      "file": "cycle5-repair-140-timeout-eslint.json",
+      "sha256": "e23454073a79f83fd77b2fb79a2ce70ac84d953b714e15730fadfd0a31413994"
+    },
+    {
+      "file": "cycle5-repair-140-timeout-green.log",
+      "sha256": "299d94b75670d4ab47e36286233f1d2e24cc98e055b7572cbef2fc8d8cddab45"
+    },
+    {
+      "file": "cycle5-uat140-independent-focused-rerun.log",
+      "sha256": "d01246ea8f59c5f53041814741b5dc8439d9b05b5bd45409956677d0f107c688"
+    },
+    {
+      "file": "cycle5-uat140-independent-review.md",
+      "sha256": "cfbd27e1b6f37d9645e29d53c38272f2027054d56202a34a18d68e7f688e2dc0"
+    },
+    {
+      "file": "cycle5-uat140-independent-tests.log",
+      "sha256": "f2b082491d9090fc8b04122802e03cd4dcded9503d70f763d376e12bb72adbeb"
+    }
+  ],
+  "secretFindings": 0,
+  "independentTimeoutRecommendation": "Applied exactly; reverse-change hash matches independently reviewed test.",
+  "nativeAcceptance": "pending"
+}
