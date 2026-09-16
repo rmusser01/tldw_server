@@ -1,0 +1,116 @@
+{
+  "unit": "warning-ui105",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat105-warning-probe-green.log",
+      "bytes": 522,
+      "sha256": "5a558c62cab2e4b35f107c2fc421a21fc2fb792978dda6ed847bd21940218ed0"
+    },
+    {
+      "file": "cycle4-uat105-warning-probe.log",
+      "bytes": 1272,
+      "sha256": "e66c2558522406f45e1c014355b59853104e8b7fed4823e85cd2cb76df824978"
+    },
+    {
+      "file": "cycle4-uat105-warning-probe.test.ts",
+      "bytes": 920,
+      "sha256": "9b8d557ec6ea42b3a94c3a229078a3b24072730404e2e7e9d6076a1203a3b1e9"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-batch-red.log",
+      "bytes": 5217,
+      "sha256": "e06ad28efc2041ea60157c23438c7c50c6d978ada4fb291ca37c7dfe10b1fc91"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-code-freeze.json",
+      "bytes": 2008,
+      "sha256": "41da327037578f5e16a45893c0cca63ef25d2079f88f21e06294cacbd5bed69e"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-final-fixture-green.log",
+      "bytes": 527,
+      "sha256": "73ddaf8fa2c13ecffbc55f05c2a42a2d8281aae3e89793b62d46554a23af7bcb"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-final-green.log",
+      "bytes": 12031,
+      "sha256": "a9040685688b23c3e7a1c71510afa619ce8a6b102bbcd3a716634ee981700d20"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-green.log",
+      "bytes": 1769,
+      "sha256": "c717d51a4473a967911c791d0ade1d1884571984b931173186a9d50728b00046"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-implementation.md",
+      "bytes": 6764,
+      "sha256": "dc5b3e299f0cccf29df2616a72280b37ba06e708259e635c194cf30a2b2630ae"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-independent-final-tests.log",
+      "bytes": 1949,
+      "sha256": "fbf42ec3495fc122343c40a803ad83d07d4031fa275aacdffbc80aaca1f87077"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-independent-review.md",
+      "bytes": 4012,
+      "sha256": "4d7ce7177c2090dc615e31935221a8d4e282ee352028997dc4de5285c42f2392"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-independent-tests.log",
+      "bytes": 1948,
+      "sha256": "5c58abcef587387d77b8547d96219648bcdcfe974920a05e609ae7bfb3077a34"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-lint-baseline.json",
+      "bytes": 330919,
+      "sha256": "ddc631af1307a9b2a32148c627ff47a0a21a439aaa35b67f5b4409da446bb32c"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-lint-comparison.json",
+      "bytes": 130,
+      "sha256": "170d3b12ab126a58b849d342a347b4dd89078847910fb422dbed761e7c8445bb"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-lint-current.json",
+      "bytes": 338103,
+      "sha256": "8ff6f5ab54d65cfebcfbe03a778b685a5a777d88e9c03cdb6cb1b04a5f1c309b"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-mixed-red.log",
+      "bytes": 3543,
+      "sha256": "21b0d6db3924d7b433b811cef619bc6ccf27ac21bcc9e310b3537a139ea1b83e"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-nested-red.log",
+      "bytes": 8995,
+      "sha256": "71ffd4cbd844357e8663836a4d8c2e3c4d67fc8a28ec9610176165795f55c511"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-owned-manifest.json",
+      "bytes": 2282,
+      "sha256": "4c158c2ce9a103d8d8f89dccf819315fe7057dce3a3222b6f956941cb6c3d964"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-paths.json",
+      "bytes": 728,
+      "sha256": "47d359b4f14496f0b969b697e0e53aacd90a8bf33e40912459c7ad85894260d9"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-red.log",
+      "bytes": 101374,
+      "sha256": "8ad08f8631b3af3976fe4ac74d8cf05bd0cde216b8174a2344e8fe4501ba878a"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-typecheck-comparison.json",
+      "bytes": 316,
+      "sha256": "8b66fb5b5057ac578c2bca5da46851e6fe70fe3eed2d885b1c8190ae237f5da8"
+    },
+    {
+      "file": "cycle4-uat105-warning-ui-typecheck.log",
+      "bytes": 24428,
+      "sha256": "cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6"
+    }
+  ]
+}

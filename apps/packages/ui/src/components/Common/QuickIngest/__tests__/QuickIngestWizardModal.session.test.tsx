@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   modalProps: [] as any[],
   afterCancelProcessing: null as null | (() => void),
   useActualProcessingStep: false,
+  useActualResultsStep: false,
+  queueSourceFile: false,
+  bgRequest: vi.fn(),
+  bgUpload: vi.fn(),
   connectionState: {
     phase: "connected",
     isConnected: true,
@@ -40,6 +44,15 @@ vi.mock("react-i18next", () => ({
       return defaultValueOrOptions?.defaultValue || key
     },
   }),
+}))
+
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
+  bgUpload: (...args: unknown[]) => mocks.bgUpload(...args),
+}))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: {} }),
 }))
 
 vi.mock("antd", () => ({
@@ -203,7 +216,12 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
           <button
             onClick={() => {
               setQueueItems([
-                {
+                mocks.queueSourceFile ? {
+                  id: "queued-url-1", kind: "file", fileName: "source.txt",
+                  file: { name: "source.txt", size: 1, arrayBuffer: async () => new Uint8Array([65]).buffer },
+                  detectedType: "document", icon: "FileText", fileSize: 1,
+                  validation: { valid: true },
+                } : {
                   id: "queued-url-1",
                   url: "https://example.com/article",
                   detectedType: "web",
@@ -363,14 +381,17 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
+  const { WizardResultsStep: ActualResultsStep } = await vi.importActual<
+    typeof import("@/components/Common/QuickIngest/WizardResultsStep")
+  >("@/components/Common/QuickIngest/WizardResultsStep")
   return {
-    WizardResultsStep: ({
-      onOpenCollection,
-      onIngestMore,
-    }: {
-      onOpenCollection?: (collectionId: string) => void
-      onIngestMore?: () => void
-    }) => {
+    WizardResultsStep: (props: React.ComponentProps<typeof ActualResultsStep>) => {
+      if (mocks.useActualResultsStep) return <ActualResultsStep {...props} />
+      return <StubResultsStep {...props} />
+    },
+  }
+
+  function StubResultsStep({ onOpenCollection, onIngestMore }: React.ComponentProps<typeof ActualResultsStep>) {
       const { state, reset } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-results">
@@ -393,7 +414,6 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
           </button>
         </div>
       )
-    },
   }
 })
 
@@ -463,6 +483,10 @@ describe("QuickIngestWizardModal session runtime", () => {
 
   beforeEach(async () => {
     mocks.useActualProcessingStep = false
+    mocks.useActualResultsStep = false
+    mocks.queueSourceFile = false
+    mocks.bgRequest.mockReset()
+    mocks.bgUpload.mockReset()
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
@@ -499,6 +523,39 @@ describe("QuickIngestWizardModal session runtime", () => {
     releaseAuthority?.()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each(["direct upload", "reattach"])("keeps a saved-source Warning navigable through actual %s, session state, and results UI", async (mode) => {
+    mocks.useActualResultsStep = true
+    const result = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1", "Analysis failed for chunk 1"] }
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result, error_message: null } })
+    if (mode === "direct upload") {
+      mocks.queueSourceFile = true
+      const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+      mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+      mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+      mocks.bgUpload.mockResolvedValue({ batch_id: "warning-batch", jobs: [{ id: 77 }] })
+    } else {
+      const reattach = await vi.importActual<typeof import("@/services/tldw/quick-ingest-session-reattach")>("@/services/tldw/quick-ingest-session-reattach")
+      mocks.reattachQuickIngestSession.mockImplementation(reattach.reattachQuickIngestSession)
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(), lifecycle: "processing", currentStep: 4,
+        queueItems: [{ id: "queued-url-1", kind: "url", url: "https://source.test/source.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
+        processingState: { status: "running", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+        tracking: { mode: "webui-direct", batchId: "warning-batch", jobIds: [77], startedAt: Date.now() },
+      })
+    }
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    if (mode === "direct upload") fireEvent.click(screen.getByText("Queue And Process"))
+    expect(await screen.findByRole("region", { name: "Items saved with warnings" })).toBeVisible()
+    expect(screen.getByText("Analysis failed for chunk 1")).toBeVisible()
+    expect(screen.queryByText("Review failed items")).toBeNull()
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({ status: "ok", mediaId: 1, warning: "Analysis failed for chunk 1", data: result }),
+    ])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs/77", method: "GET" }))
+    fireEvent.click(screen.getByRole("button", { name: /open .* media/i }))
+    expect(mocks.navigate).toHaveBeenCalledWith(expect.stringContaining("media"))
   })
 
   it.each(["processing button", "close confirmation"])(

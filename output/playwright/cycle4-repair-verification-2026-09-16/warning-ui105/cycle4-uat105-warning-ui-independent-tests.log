@@ -1,0 +1,28 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:64372) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:64371) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/quick-ingest-batch.test.ts (44 tests) 1273ms
+     ✓ cancels direct-session tracked batches through backend cancel endpoint  1202ms
+(node:64405) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx (22 tests) 364ms
+(node:64411) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/quick-ingest-session-reattach.test.ts (19 tests) 9ms
+(node:64419) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/ingest-jobs-orchestrator.test.ts (7 tests) 6ms
+(node:64425) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/services/__tests__/ingest-job-results.test.ts (24 tests) 3ms
+ ✓ src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx (47 tests) 3931ms
+
+ Test Files  6 passed (6)
+      Tests  163 passed (163)
+   Start at  21:25:11
+   Duration  5.44s (transform 827ms, setup 571ms, import 1.11s, tests 5.59s, environment 2.02s)
+

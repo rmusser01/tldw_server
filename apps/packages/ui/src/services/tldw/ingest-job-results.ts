@@ -8,6 +8,9 @@ const FAILURE_STATUS_TOKENS = new Set([
   "failure",
   "quarantined",
   "timeout",
+  "cancelled",
+  "canceled",
+  "unknown",
 ])
 
 const SKIPPED_STATUS_TOKENS = new Set(["skipped", "duplicate"])
@@ -62,18 +65,22 @@ export const extractCompletedIngestJobError = (
 ): string | undefined => {
   const payload = extractCompletedIngestJobPayload(value)
   const record = asRecord(value)
-  return firstNonEmptyString(
+  const error = firstNonEmptyString(
     payload?.error,
     payload?.detail,
     firstStringFromArray(payload?.errors),
-    String(payload?.status || "").toLowerCase() === "warning"
-      ? firstStringFromArray(payload?.warnings)
-      : undefined,
     record?.error_message,
     record?.cancellation_reason,
     record?.error,
     firstStringFromArray(record?.errors)
   )
+  if (error) return error
+  // A processing warning is not a failed ingest when the source was saved.
+  // Without a usable media identity we cannot offer that successful outcome.
+  if (extractCompletedIngestJobStatusToken(value) === "warning" && !hasSavedMedia(value)) {
+    return firstStringFromArray(payload?.warnings) || "Ingest completed with a warning but no saved media."
+  }
+  return undefined
 }
 
 export const extractCompletedIngestJobMediaId = (
@@ -109,6 +116,32 @@ export const completedIngestJobIndicatesSkipped = (
   const payload = extractCompletedIngestJobPayload(value)
   if (isDbMessageDuplicate(payload)) return true
   return SKIPPED_STATUS_TOKENS.has(extractCompletedIngestJobStatusToken(value))
+}
+
+const hasSavedMedia = (value: unknown): boolean => {
+  // An aggregate can contain both saved and failed rows. Only the warning's
+  // own media identity confirms that this source was saved.
+  const payload = extractCompletedIngestJobPayload(value)
+  const id = payload?.media_id ?? payload?.mediaId ?? payload?.db_id
+  return typeof id === "number"
+    ? Number.isFinite(id) && id > 0
+    : typeof id === "string" && id.trim().length > 0
+}
+
+export const extractCompletedIngestJobWarning = (
+  value: unknown
+): string | undefined => {
+  if (
+    extractCompletedIngestJobStatusToken(value) !== "warning" ||
+    !hasSavedMedia(value) ||
+    extractCompletedIngestJobError(value)
+  ) return undefined
+
+  const warnings = extractCompletedIngestJobPayload(value)?.warnings
+  const details = Array.isArray(warnings)
+    ? [...new Set(warnings.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))]
+    : []
+  return details.join("\n") || "Source saved, but processing completed with warnings."
 }
 
 export const completedIngestJobIndicatesFailure = (

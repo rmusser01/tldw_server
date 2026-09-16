@@ -76,6 +76,7 @@ function formatElapsed(seconds: number): string {
 
 type ResultGroups = {
   successes: WizardResultItem[]
+  warnings: WizardResultItem[]
   skippedExisting: WizardResultItem[]
   submitFailed: WizardResultItem[]
   failedProcessing: WizardResultItem[]
@@ -85,6 +86,7 @@ type ResultGroups = {
 function groupResultItems(results: WizardResultItem[]): ResultGroups {
   const groups: ResultGroups = {
     successes: [],
+    warnings: [],
     skippedExisting: [],
     submitFailed: [],
     failedProcessing: [],
@@ -100,6 +102,8 @@ function groupResultItems(results: WizardResultItem[]): ResultGroups {
       groups.cancelled.push(item)
     } else if (item.status === "error" || item.outcome === "failed") {
       groups.failedProcessing.push(item)
+    } else if (item.warning) {
+      groups.warnings.push(item)
     } else {
       groups.successes.push(item)
     }
@@ -134,10 +138,13 @@ const SuccessRow: React.FC<SuccessRowProps> = React.memo(
 
     return (
       <div className="flex items-center gap-2 rounded-md px-3 py-2 hover:bg-surface2 transition-colors">
-        <Check className="h-4 w-4 flex-shrink-0 text-green-500" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm text-text" title={label}>
-          {label}
-        </span>
+        {item.warning
+          ? <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
+          : <Check className="h-4 w-4 flex-shrink-0 text-green-500" aria-hidden="true" />}
+        <div className="min-w-0 flex-1 text-sm text-text">
+          <div className="truncate" title={label}>{label}</div>
+          {item.warning && <p className="whitespace-pre-line break-words text-xs text-warn">{item.warning}</p>}
+        </div>
         {duration && (
           <span className="flex-shrink-0 text-xs tabular-nums text-text-muted">
             {duration}
@@ -344,11 +351,13 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
 
   const {
     successes,
+    warnings,
     skippedExisting,
     submitFailed,
     failedProcessing,
     cancelled,
   } = useMemo(() => groupResultItems(results), [results])
+  const savedItems = useMemo(() => [...successes, ...warnings], [successes, warnings])
 
   const failures = useMemo(
     () => [...submitFailed, ...failedProcessing, ...cancelled],
@@ -359,8 +368,8 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
   const hasDurableCollection =
     Boolean(collectionId) && tracking?.durableMode === "durable_collection"
   const readyCollectionItemCount = useMemo(
-    () => [...successes, ...skippedExisting].filter(hasReadyMedia).length,
-    [successes, skippedExisting]
+    () => [...savedItems, ...skippedExisting].filter(hasReadyMedia).length,
+    [savedItems, skippedExisting]
   )
   const canAskCollection =
     hasDurableCollection &&
@@ -368,10 +377,10 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
     Boolean(onSearchKnowledge) &&
     Boolean(capabilities?.hasKnowledgeQaMediaScope)
   const showGenericSearch =
-    successes.length > 0 && Boolean(onSearchKnowledge) && !hasDurableCollection
+    savedItems.length > 0 && Boolean(onSearchKnowledge) && !hasDurableCollection
   const hasWorkspaceOpenTarget =
     Boolean(onOpenWorkspace) &&
-    successes.some((item) => item.persisted && shouldKeepOriginalFile(item.type))
+    savedItems.some((item) => item.persisted && shouldKeepOriginalFile(item.type))
   const showCollectionOpen =
     hasDurableCollection && Boolean(onOpenCollection) && Boolean(collectionId)
   const showNextSteps =
@@ -531,6 +540,20 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
           </section>
         )}
 
+        {warnings.length > 0 && (
+          <section aria-label={qi("wizard.results.warningSection", "Items saved with warnings")} className={successes.length > 0 ? "mt-4" : ""}>
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-600">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+              {qi("wizard.results.warningHeading", "Saved with warnings ({{count}})", { count: warnings.length })}
+            </h3>
+            <div className="space-y-0.5">
+              {warnings.map((item) => (
+                <SuccessRow key={item.id} item={item} qi={qi} onOpenMedia={onOpenMedia} onDiscussInChat={onDiscussInChat} />
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Next steps CTAs */}
         {showNextSteps && (
           <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
@@ -579,7 +602,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const docItem = successes.find(s => s.persisted && shouldKeepOriginalFile(s.type))
+                    const docItem = savedItems.find(s => s.persisted && shouldKeepOriginalFile(s.type))
                     if (docItem) onOpenWorkspace(docItem)
                   }}
                   className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 transition-colors"
@@ -597,7 +620,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         {skippedExisting.length > 0 && (
           <section
             aria-label={qi("wizard.results.skippedSection", "Skipped items")}
-            className={successes.length > 0 ? "mt-4" : ""}
+            className={savedItems.length > 0 ? "mt-4" : ""}
           >
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-600">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
@@ -623,7 +646,7 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         {failures.length > 0 && (
           <div
             className={
-              successes.length > 0 || skippedExisting.length > 0
+              savedItems.length > 0 || skippedExisting.length > 0
                 ? "mt-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/15 bg-danger/5 px-3 py-2"
                 : "flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/15 bg-danger/5 px-3 py-2"
             }
@@ -761,7 +784,13 @@ export const WizardResultsStep: React.FC<WizardResultsStepProps> = ({
         <div className="border-t border-border px-4 py-3">
           {/* Summary line */}
           <p className="mb-3 text-center text-xs text-text-muted">
-            {skippedExisting.length > 0 ||
+            {warnings.length > 0
+              ? qi(
+                  "wizard.results.summaryWithWarnings",
+                  "Total: {{success}} succeeded, {{warnings}} saved with warnings, {{skipped}} skipped, {{notSubmitted}} not submitted, {{failed}} failed, {{cancelled}} cancelled",
+                  { success: successes.length, warnings: warnings.length, skipped: skippedExisting.length, notSubmitted: submitFailed.length, failed: failedProcessing.length, cancelled: cancelled.length }
+                )
+              : skippedExisting.length > 0 ||
             submitFailed.length > 0 ||
             cancelled.length > 0
               ? qi(

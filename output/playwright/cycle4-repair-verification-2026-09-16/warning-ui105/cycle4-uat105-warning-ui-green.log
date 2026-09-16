@@ -1,0 +1,25 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:54755) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54758) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54754) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54757) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54756) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/__tests__/ingest-job-results.test.ts (21 tests) 4ms
+ ✓ ../packages/ui/src/services/__tests__/quick-ingest-session-reattach.test.ts (19 tests) 10ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx (22 tests) 390ms
+ ✓ ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts (44 tests) 1272ms
+     ✓ cancels direct-session tracked batches through backend cancel endpoint  1201ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx (47 tests) 3856ms
+
+ Test Files  5 passed (5)
+      Tests  153 passed (153)
+   Start at  21:21:45
+   Duration  5.46s (transform 1.27s, setup 1.05s, import 1.44s, tests 5.53s, environment 2.79s)
+

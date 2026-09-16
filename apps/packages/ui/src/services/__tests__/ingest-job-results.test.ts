@@ -5,6 +5,7 @@ import {
   completedIngestJobIndicatesSkipped,
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
+  extractCompletedIngestJobWarning,
 } from "@/services/tldw/ingest-job-results"
 
 describe("ingest job result helpers", () => {
@@ -13,9 +14,49 @@ describe("ingest job result helpers", () => {
       status: "completed",
       result: { status: "Warning", db_id: 1, warnings: ["Analysis failed: model is required"] }
     }
-    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
-    expect(extractCompletedIngestJobError(payload)).toContain("Analysis failed: model is required")
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(false)
+    expect(extractCompletedIngestJobError(payload)).toBeUndefined()
+    expect(extractCompletedIngestJobWarning(payload)).toBe("Analysis failed: model is required")
     expect(extractCompletedIngestJobMediaId(payload)).toBe(1)
+  })
+
+  it.each([undefined, null, "", " ", 0, -1, Number.NaN])("does not promote an unsaved Warning with media ID %s", (mediaId) => {
+    const payload = { status: "Warning", media_id: mediaId, warnings: ["Analysis failed"] }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobWarning(payload)).toBeUndefined()
+  })
+
+  it.each([
+    { error: "Explicit failure" },
+    { detail: "Explicit failure" },
+    { errors: ["Explicit failure"] },
+  ])("keeps explicit failures ahead of saved-source warnings: %j", (failure) => {
+    const payload = { status: "Warning", media_id: 1, warnings: ["Analysis warning"], ...failure }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobWarning(payload)).toBeUndefined()
+  })
+
+  it.each(["Error", "cancelled", "canceled", "unknown"])("does not infer a saved warning or clean success from %s", (status) => {
+    const payload = { status, media_id: 1, warnings: ["Analysis warning"] }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobWarning(payload)).toBeUndefined()
+  })
+
+  it("deduplicates warning details and keeps an empty warning list distinct from clean success", () => {
+    expect(extractCompletedIngestJobWarning({ status: "Warning", media_id: 1, warnings: ["Analysis failed", "Analysis failed", "", "Chunk omitted"] })).toBe("Analysis failed\nChunk omitted")
+    expect(extractCompletedIngestJobWarning({ status: "Warning", media_id: 1 })).toBeTruthy()
+  })
+
+  it("does not borrow a media ID from a mixed aggregate result to promote a Warning", () => {
+    const payload = { status: "Warning", warnings: ["Some items failed"], results: [{ status: "Success", media_id: 1 }, { status: "Error", error: "Failed to save" }] }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobWarning(payload)).toBeUndefined()
+  })
+
+  it.each(["error_message", "cancellation_reason"])("retains terminal %s over a nested saved Warning", (field) => {
+    const payload = { status: "completed", [field]: "Terminal failure", result: { status: "Warning", media_id: 1, warnings: ["Analysis warning"] } }
+    expect(completedIngestJobIndicatesFailure(payload)).toBe(true)
+    expect(extractCompletedIngestJobWarning(payload)).toBeUndefined()
   })
   it("treats completed jobs with nested error payloads as failures", () => {
     const payload = {

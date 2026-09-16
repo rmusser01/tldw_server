@@ -31,6 +31,7 @@ import {
   completedIngestJobIndicatesSkipped,
   extractCompletedIngestJobError,
   extractCompletedIngestJobMediaId,
+  extractCompletedIngestJobWarning,
 } from "@/services/tldw/ingest-job-results"
 import {
   DOCUMENT_WORKSPACE_PATH,
@@ -236,6 +237,9 @@ const normalizeWizardResult = (
     type: String(item.type || "item"),
     data: item.data,
     error,
+    warning: derivedStatus === "ok"
+      ? extractCompletedIngestJobWarning(item.data) || item.warning
+      : undefined,
     title: item.title,
     durationMs: item.durationMs,
     mediaId:
@@ -762,6 +766,7 @@ const buildResultsFromReattachedJobs = (
             extractCompletedIngestJobError(job.result) ||
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
+      warning: resultStatus === "ok" ? extractCompletedIngestJobWarning(job.result) : undefined,
       collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
       retryAttempt: null,
       idempotencyKey: null,

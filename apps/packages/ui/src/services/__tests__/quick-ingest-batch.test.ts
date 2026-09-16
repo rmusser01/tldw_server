@@ -42,6 +42,18 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it("retains saved-source Warning data through the real direct upload and job poller", async () => {
+    const terminal = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1"] }
+    mocks.bgUpload.mockResolvedValue({ batch_id: "saved-warning", jobs: [{ id: 101 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: terminal, error_message: null } })
+    const result = await submitQuickIngestBatch({
+      entries: [], files: [{ id: "source", name: "source.txt", type: "text/plain", data: [65] }],
+      storeRemote: true, processOnly: false,
+    })
+    expect(result.results).toEqual([expect.objectContaining({ id: "source", status: "ok", data: terminal })])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs/101", method: "GET" }))
+  })
+
   beforeEach(() => {
     __resetQuickIngestRuntimeHealthForTests()
     vi.useRealTimers()

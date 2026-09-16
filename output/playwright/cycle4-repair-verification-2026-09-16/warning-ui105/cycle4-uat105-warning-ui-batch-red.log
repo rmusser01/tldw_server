@@ -1,0 +1,94 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:52201) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts (44 tests | 1 failed | 43 skipped) 20ms
+     × retains saved-source Warning data through the real direct upload and job poller 18ms
+     ↓ rejects an unowned legacy batch and cancellation before any dispatch
+     ↓ stops after an authority change during upload without polling or cancelling another owner's job
+     ↓ warns when analysis is enabled without an analysis provider
+     ↓ uses direct upload path when extension runtime id is unavailable
+     ↓ marks duplicate remote file uploads as skipped with guidance
+     ↓ surfaces backend ingest job submit errors when no jobs are created
+     ↓ surfaces completed ingest jobs with backend error payloads as failed results
+     ↓ marks duplicate direct HTML scrape responses as skipped
+     ↓ retains safe extraction categories through direct HTML batch results
+     ↓ defaults perform_chunking to true when common options are omitted
+     ↓ sends auto chunking fields and suppresses stale manual fields
+     ↓ sends manual chunking fields and templates in manual mode
+     ↓ omits auto and manual chunking controls when chunking is disabled
+     ↓ captures direct batch tracking metadata before polling completes
+     ↓ emits per-item direct tracking metadata for both url and file submissions
+     ↓ forces direct transport for direct-session submits and polls when runtime messaging exists
+     ↓ tracks only submitted direct items when later queue items fail before job creation
+     ↓ cancels direct-session tracked batches through backend cancel endpoint
+     ↓ stops submitting later direct items once the session is cancelled
+     ↓ uses extension message transport when extension runtime is available
+     ↓ falls back to direct mode when runtime ping preflight times out
+     ↓ routes html process-only entries through process-web-scraping
+     ↓ routes persisted ordinary web URLs through process-web-scraping
+     ↓ maps perform_analysis=true to summarize_checkbox without extraction-order fields
+     ↓ maps perform_analysis=false to summarize_checkbox without extraction-order fields
+     ↓ keeps direct Markdown URLs on the document ingest job route
+     ↓ passes auto chunking fields to process-web-scraping JSON requests
+     ↓ passes manual chunking templates to process-web-scraping JSON requests
+     ↓ routes local files through direct process endpoints in web runtime
+     ↓ falls back to persistent /media/add when ingest-job submission is rejected by the concurrent-job limit
+     ↓ creates planned conference collection items before direct job submission
+     ↓ patches a conference item to 'skipped_existing' for 'duplicate'
+     ↓ patches a conference item to 'failed' for 'result error'
+     ↓ patches a conference item to 'skipped_existing' for 'duplicate with result error'
+     ↓ patches a conference item to 'completed' for 'ordinary success'
+     ↓ skips direct ingest submission for existing conference items when policy includes existing
+     ↓ marks planned conference items as submit_failed when direct job submission fails
+     ↓ returns a direct session ack for mv3 extension pages
+     ↓ returns a direct session ack when runtime ping preflight times out
+     ↓ bypasses background batch orchestration for explicit direct sessions
+     ↓ cancels direct sessions without routing through background session runtime
+     ↓ sends explicit cancel message with session id
+     ↓ cancels persisted direct batches after refresh using tracking metadata
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts > submitQuickIngestBatch > retains saved-source Warning data through the real direct upload and job poller
+AssertionError: expected [ { id: 'source', …(4) } ] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "data": {
+-       "error": null,
+-       "media_id": 1,
+-       "status": "Warning",
+-       "warnings": [
+-         "Analysis failed for chunk 1",
+-       ],
+-     },
++     "error": "Analysis failed for chunk 1",
++     "fileName": "source.txt",
+      "id": "source",
+-     "status": "ok",
++     "status": "error",
++     "type": "file",
+    },
+  ]
+
+ ❯ ../packages/ui/src/services/__tests__/quick-ingest-batch.test.ts:53:28
+     51|       storeRemote: true, processOnly: false,
+     52|     })
+     53|     expect(result.results).toEqual([expect.objectContaining({ id: "sou…
+       |                            ^
+     54|     expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaini…
+     55|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 43 skipped (44)
+   Start at  21:20:25
+   Duration  1.78s (transform 304ms, setup 334ms, import 269ms, tests 20ms, environment 898ms)
+
