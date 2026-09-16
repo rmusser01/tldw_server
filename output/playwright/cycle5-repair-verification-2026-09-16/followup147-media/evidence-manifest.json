@@ -1,0 +1,244 @@
+{
+  "at": "2026-09-16T17:09:11.481Z",
+  "sourceHashesVerified": true,
+  "secretScan": {
+    "knownValues": 62,
+    "findings": 0,
+    "jwtPattern": true,
+    "credentialUrls": true
+  },
+  "normalization": "Trailing whitespace and terminal blank lines normalized; prior native failure and repaired restart segments retained separately.",
+  "files": [
+    {
+      "file": "cycle5-native-pg-r3-multi-147-media-1-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-147-media-1-start-checkpoint.json",
+      "original_sha256": "0815e75ccf0a79751c608881f3d215bb1aa191bfcd67cd541bfdc060831e981e",
+      "sha256": "0815e75ccf0a79751c608881f3d215bb1aa191bfcd67cd541bfdc060831e981e",
+      "bytes": 653
+    },
+    {
+      "file": "cycle5-native-pg-r3-multi-147-media-2-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-147-media-2-start-checkpoint.json",
+      "original_sha256": "168dacd19bb995a63b0b43dedecbd14e3cc1fc258b8e2463dc0eccd7f66956f8",
+      "sha256": "168dacd19bb995a63b0b43dedecbd14e3cc1fc258b8e2463dc0eccd7f66956f8",
+      "bytes": 654
+    },
+    {
+      "file": "cycle5-native-pg-r3-multi-147-media-3-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-147-media-3-start-checkpoint.json",
+      "original_sha256": "9da4a41eb8a539666d678b4b67dd8cff0b3bec30bc1991146a3a7128c785faf2",
+      "sha256": "9da4a41eb8a539666d678b4b67dd8cff0b3bec30bc1991146a3a7128c785faf2",
+      "bytes": 654
+    },
+    {
+      "file": "cycle5-native-pg-r3-multi-backend-147-media-1.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-backend-147-media-1.redacted.log",
+      "original_sha256": "bdea6fb337b2de07b8cdbd912c4ba30c40472afc7095dbe4705bece567e06605",
+      "sha256": "bdea6fb337b2de07b8cdbd912c4ba30c40472afc7095dbe4705bece567e06605",
+      "bytes": 153547
+    },
+    {
+      "file": "cycle5-native-pg-r3-multi-backend-147-media-2.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-backend-147-media-2.redacted.log",
+      "original_sha256": "a462cbd1ef3ad9d8d5d9eb99762c08e258cf3b3a497e1a396b66885c2eca2713",
+      "sha256": "a462cbd1ef3ad9d8d5d9eb99762c08e258cf3b3a497e1a396b66885c2eca2713",
+      "bytes": 152679
+    },
+    {
+      "file": "cycle5-native-pg-r3-multi-backend-147-media-3.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-multi-backend-147-media-3.redacted.log",
+      "original_sha256": "3bb1f157645fe56183cef8039894d71724b8bcbc48a1a3bd3d887f07b80620bd",
+      "sha256": "3bb1f157645fe56183cef8039894d71724b8bcbc48a1a3bd3d887f07b80620bd",
+      "bytes": 126348
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-147-media-1-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-147-media-1-start-checkpoint.json",
+      "original_sha256": "579d650c541db53d20892808faa1328d5194a9f12d2d155e0e1d52839fbf5bec",
+      "sha256": "579d650c541db53d20892808faa1328d5194a9f12d2d155e0e1d52839fbf5bec",
+      "bytes": 655
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-147-media-2-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-147-media-2-start-checkpoint.json",
+      "original_sha256": "6629b6b6ec380dcfdccfca62b6d8c4441325ffaecfd063c077e9ca9f1a8ce3b3",
+      "sha256": "6629b6b6ec380dcfdccfca62b6d8c4441325ffaecfd063c077e9ca9f1a8ce3b3",
+      "bytes": 655
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-147-media-3-start-checkpoint.json",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-147-media-3-start-checkpoint.json",
+      "original_sha256": "e11d03f24cf52115a9a6ffd082dee3a74ed70ed0ccc675f49e8e364af36edda3",
+      "sha256": "e11d03f24cf52115a9a6ffd082dee3a74ed70ed0ccc675f49e8e364af36edda3",
+      "bytes": 655
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-backend-147-media-1.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-backend-147-media-1.redacted.log",
+      "original_sha256": "2e03c0917f000a53b62ac0f93fadf64a612e97ddd76fba9b0395b2fa2b37d9de",
+      "sha256": "2e03c0917f000a53b62ac0f93fadf64a612e97ddd76fba9b0395b2fa2b37d9de",
+      "bytes": 147174
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-backend-147-media-2.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-backend-147-media-2.redacted.log",
+      "original_sha256": "8cf0cd467ce32eae695bb83c24a5d53d82707b60792e1da04414d51906c42ca0",
+      "sha256": "8cf0cd467ce32eae695bb83c24a5d53d82707b60792e1da04414d51906c42ca0",
+      "bytes": 146304
+    },
+    {
+      "file": "cycle5-native-pg-r3-single-backend-147-media-3.redacted.log",
+      "source": "/private/tmp/cycle5-native-pg-r3-single-backend-147-media-3.redacted.log",
+      "original_sha256": "572a74e73051a9ed6aee67601451a4f6ff0f2931598b3b8a98e1caab83feb3f8",
+      "sha256": "572a74e73051a9ed6aee67601451a4f6ff0f2931598b3b8a98e1caab83feb3f8",
+      "bytes": 122755
+    },
+    {
+      "file": "cycle5-pg-147-media-native-acceptance.json",
+      "source": "/private/tmp/cycle5-pg-147-media-native-acceptance.json",
+      "original_sha256": "6292ca01f666003abae54f4dcfcfd1df8eddbef1b4a61515dbe793291a205a22",
+      "sha256": "6292ca01f666003abae54f4dcfcfd1df8eddbef1b4a61515dbe793291a205a22",
+      "bytes": 3038
+    },
+    {
+      "file": "cycle5-pg-r3-api-probe-147-media-1.json",
+      "source": "/private/tmp/cycle5-pg-r3-api-probe-147-media-1.json",
+      "original_sha256": "ad60077d846d5e229f89b27b4d1380a3fd9cbe37fdd045865972b65b6eb2e39d",
+      "sha256": "ad60077d846d5e229f89b27b4d1380a3fd9cbe37fdd045865972b65b6eb2e39d",
+      "bytes": 31452
+    },
+    {
+      "file": "cycle5-pg-r3-api-probe-147-media-2.json",
+      "source": "/private/tmp/cycle5-pg-r3-api-probe-147-media-2.json",
+      "original_sha256": "a437937fdca8d5c5968fb273f1e23ef7a7d58b052d8ad891777bd5ea9165e55f",
+      "sha256": "a437937fdca8d5c5968fb273f1e23ef7a7d58b052d8ad891777bd5ea9165e55f",
+      "bytes": 31452
+    },
+    {
+      "file": "cycle5-pg-r3-api-probe-147-media-3.json",
+      "source": "/private/tmp/cycle5-pg-r3-api-probe-147-media-3.json",
+      "original_sha256": "5fc41663e2667fba2d97380f4af9c5ec3939f845ebc1156f503cd2f50872ea00",
+      "sha256": "5fc41663e2667fba2d97380f4af9c5ec3939f845ebc1156f503cd2f50872ea00",
+      "bytes": 31452
+    },
+    {
+      "file": "cycle5-postgres-147-media-final-focused.redacted.log",
+      "source": "/private/tmp/cycle5-postgres-147-media-final-focused.redacted.log",
+      "original_sha256": "4d27d2ca260e2703c551e54e50f47e71ce147c444bd8d05ccc64556ef26e0be1",
+      "sha256": "4d27d2ca260e2703c551e54e50f47e71ce147c444bd8d05ccc64556ef26e0be1",
+      "bytes": 9792
+    },
+    {
+      "file": "cycle5-postgres-147-media-green.redacted.log",
+      "source": "/private/tmp/cycle5-postgres-147-media-green.redacted.log",
+      "original_sha256": "d5451f9e715a8a237c77d98348ba3755263de70216c58fe4a1ed830eda338609",
+      "sha256": "d5451f9e715a8a237c77d98348ba3755263de70216c58fe4a1ed830eda338609",
+      "bytes": 11395
+    },
+    {
+      "file": "cycle5-postgres-147-media-independent.redacted.log",
+      "source": "/private/tmp/cycle5-postgres-147-media-independent.redacted.log",
+      "original_sha256": "f65c2b6164e1f91d344095c25f5ede4e86b588a8f15906bde389113d6918c376",
+      "sha256": "f65c2b6164e1f91d344095c25f5ede4e86b588a8f15906bde389113d6918c376",
+      "bytes": 11395
+    },
+    {
+      "file": "cycle5-postgres-147-media-probe.redacted.log",
+      "source": "/private/tmp/cycle5-postgres-147-media-probe.redacted.log",
+      "original_sha256": "b1e1cb9d4c5d74d8263e2fe2afd9ef6f54e9c320469f6be02d887e30056a9cb7",
+      "sha256": "b1e1cb9d4c5d74d8263e2fe2afd9ef6f54e9c320469f6be02d887e30056a9cb7",
+      "bytes": 92837
+    },
+    {
+      "file": "cycle5-postgres-147-media-red.redacted.log",
+      "source": "/private/tmp/cycle5-postgres-147-media-red.redacted.log",
+      "original_sha256": "63c87600c547b0cbdea24747a5baf7670549cdaf49491f9605b8c14532045d2d",
+      "sha256": "63d67b570fce54216c16c7a84848e2332e982dd4acd092ed5625c447fb908ca6",
+      "bytes": 126203
+    },
+    {
+      "file": "cycle5-uat147-media-bandit-baseline.json",
+      "source": "/private/tmp/cycle5-uat147-media-bandit-baseline.json",
+      "original_sha256": "2816d5f2675ac43c12aa13cc78ca1c65a93b8e257114862729ff2dd4dadfbbb4",
+      "sha256": "6604f8a2a63fd9f7f1954dba289f13669e7c6b6cb11229f82f4655f8adcf3157",
+      "bytes": 803
+    },
+    {
+      "file": "cycle5-uat147-media-bandit-final.json",
+      "source": "/private/tmp/cycle5-uat147-media-bandit-final.json",
+      "original_sha256": "8b7e8ba3a79711c87c6b27f9c4dc5d2ae8b4bcb3076df1e10cc42a5b5e678ed8",
+      "sha256": "826a82115864f176d5416dae8cbf9670482a45e7f2a1362e6e7b9046168870b1",
+      "bytes": 805
+    },
+    {
+      "file": "cycle5-uat147-media-code-freeze.json",
+      "source": "/private/tmp/cycle5-uat147-media-code-freeze.json",
+      "original_sha256": "f46e9734c8569c9c113a0f133afe822d3e4f8d2a1a278df1546f141256d80238",
+      "sha256": "f46e9734c8569c9c113a0f133afe822d3e4f8d2a1a278df1546f141256d80238",
+      "bytes": 516
+    },
+    {
+      "file": "cycle5-uat147-media-evidence-manifest.json",
+      "source": "/private/tmp/cycle5-uat147-media-evidence-manifest.json",
+      "original_sha256": "b8e6cebc4ad4a702a2027dfacf1ddf3f0b03472ade7626af77aa28d629dcbb5c",
+      "sha256": "b8e6cebc4ad4a702a2027dfacf1ddf3f0b03472ade7626af77aa28d629dcbb5c",
+      "bytes": 1598
+    },
+    {
+      "file": "cycle5-uat147-media-implementation.md",
+      "source": "/private/tmp/cycle5-uat147-media-implementation.md",
+      "original_sha256": "74283b8803c0a571d79ba83edd2628d79d07475c53e0ae094a1b52eb0e8d2793",
+      "sha256": "74283b8803c0a571d79ba83edd2628d79d07475c53e0ae094a1b52eb0e8d2793",
+      "bytes": 4917
+    },
+    {
+      "file": "cycle5-uat147-media-independent-ddl.json",
+      "source": "/private/tmp/cycle5-uat147-media-independent-ddl.json",
+      "original_sha256": "f54e653985bdfa9292a19f004d7bb6911e7a88cdb1c3f05e07ee43ab453d01c5",
+      "sha256": "f54e653985bdfa9292a19f004d7bb6911e7a88cdb1c3f05e07ee43ab453d01c5",
+      "bytes": 1414
+    },
+    {
+      "file": "cycle5-uat147-media-independent-hashes.json",
+      "source": "/private/tmp/cycle5-uat147-media-independent-hashes.json",
+      "original_sha256": "85a3eca18b3be2968cef0848d6b123af2c1c5fd7b9f4b0e1ca71302583fb9a47",
+      "sha256": "85a3eca18b3be2968cef0848d6b123af2c1c5fd7b9f4b0e1ca71302583fb9a47",
+      "bytes": 643
+    },
+    {
+      "file": "cycle5-uat147-media-independent-review.md",
+      "source": "/private/tmp/cycle5-uat147-media-independent-review.md",
+      "original_sha256": "9b94bc01a44fc81fe57cab97fcce19b5e6f9720dbc11fbeb43d4ccf476dd19ac",
+      "sha256": "9b94bc01a44fc81fe57cab97fcce19b5e6f9720dbc11fbeb43d4ccf476dd19ac",
+      "bytes": 4895
+    },
+    {
+      "file": "cycle5-uat147-media-owned-manifest.json",
+      "source": "/private/tmp/cycle5-uat147-media-owned-manifest.json",
+      "original_sha256": "10ad2d33b2d1acbed763a6caf4a9821317aaa2f50c02107ca186fe5721075b2a",
+      "sha256": "10ad2d33b2d1acbed763a6caf4a9821317aaa2f50c02107ca186fe5721075b2a",
+      "bytes": 728
+    },
+    {
+      "file": "cycle5-uat147-media-ruff-baseline.json",
+      "source": "/private/tmp/cycle5-uat147-media-ruff-baseline.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    {
+      "file": "cycle5-uat147-media-ruff-final.json",
+      "source": "/private/tmp/cycle5-uat147-media-ruff-final.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    },
+    {
+      "file": "cycle5-uat147-media-test-ruff.json",
+      "source": "/private/tmp/cycle5-uat147-media-test-ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3
+    }
+  ]
+}

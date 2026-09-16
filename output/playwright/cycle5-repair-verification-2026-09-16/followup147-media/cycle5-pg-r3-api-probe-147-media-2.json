@@ -1,0 +1,1068 @@
+{
+  "at": "2026-09-16T17:07:20.613Z",
+  "scope": "Authenticated actual API reads on normal fresh PostgreSQL profiles; not browser workflow acceptance.",
+  "results": [
+    {
+      "mode": "single",
+      "path": "/health",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/characters/",
+      "pass": 1,
+      "status": 200,
+      "body": [
+        {
+          "name": "Default Assistant",
+          "description": "A general-purpose assistant.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Hello! How can I help you today?",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": {},
+          "image_base64": null,
+          "id": 1,
+          "version": 1,
+          "created_at": "2026-09-16T16:41:14.874561Z",
+          "updated_at": "2026-09-16T16:41:14.874561Z",
+          "last_modified": "2026-09-16T16:41:14.874561Z",
+          "image_present": false
+        },
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 2,
+          "version": 1,
+          "created_at": "2026-09-16T16:41:17.008000Z",
+          "updated_at": "2026-09-16T16:41:17.008000Z",
+          "last_modified": "2026-09-16T16:41:17.008000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/chats/",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "chats": [],
+        "total": 0,
+        "limit": 50,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 50,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/notes/",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "notes": [],
+        "items": [],
+        "results": [],
+        "count": 0,
+        "limit": 100,
+        "offset": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/mcp/modules/health",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "health": {
+          "media": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "database_connection": true,
+              "database_writable": true,
+              "disk_space": true,
+              "service_available": true
+            },
+            "last_check": "2026-09-16T17:07:13.557373"
+          },
+          "template": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:13.560027"
+          },
+          "mcp_discovery": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.561128"
+          },
+          "governance": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "service_ready": true
+            },
+            "last_check": "2026-09-16T17:07:13.568808"
+          },
+          "notes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.571075"
+          },
+          "prompts": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.572706"
+          },
+          "skills": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "database_driver_available": true,
+              "skills_service_available": true
+            },
+            "last_check": "2026-09-16T17:07:13.574056"
+          },
+          "cooking": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:13.575137"
+          },
+          "knowledge": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.576799"
+          },
+          "docs": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.604527"
+          },
+          "rag": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.606603"
+          },
+          "kanban": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.609055"
+          },
+          "quizzes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.611598"
+          },
+          "flashcards": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.613740"
+          },
+          "slides": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.615811"
+          }
+        }
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/health",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/characters/",
+      "pass": 2,
+      "status": 200,
+      "body": [
+        {
+          "name": "Default Assistant",
+          "description": "A general-purpose assistant.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Hello! How can I help you today?",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": {},
+          "image_base64": null,
+          "id": 1,
+          "version": 1,
+          "created_at": "2026-09-16T16:41:14.874561Z",
+          "updated_at": "2026-09-16T16:41:14.874561Z",
+          "last_modified": "2026-09-16T16:41:14.874561Z",
+          "image_present": false
+        },
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 2,
+          "version": 1,
+          "created_at": "2026-09-16T16:41:17.008000Z",
+          "updated_at": "2026-09-16T16:41:17.008000Z",
+          "last_modified": "2026-09-16T16:41:17.008000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/chats/",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "chats": [],
+        "total": 0,
+        "limit": 50,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 50,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/notes/",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "notes": [],
+        "items": [],
+        "results": [],
+        "count": 0,
+        "limit": 100,
+        "offset": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "mode": "single",
+      "path": "/api/v1/mcp/modules/health",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "health": {
+          "media": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "database_connection": true,
+              "database_writable": true,
+              "disk_space": true,
+              "service_available": true
+            },
+            "last_check": "2026-09-16T17:07:13.557373"
+          },
+          "template": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:13.560027"
+          },
+          "mcp_discovery": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.561128"
+          },
+          "governance": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "service_ready": true
+            },
+            "last_check": "2026-09-16T17:07:13.568808"
+          },
+          "notes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.571075"
+          },
+          "prompts": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.572706"
+          },
+          "skills": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "database_driver_available": true,
+              "skills_service_available": true
+            },
+            "last_check": "2026-09-16T17:07:13.574056"
+          },
+          "cooking": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:13.575137"
+          },
+          "knowledge": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.576799"
+          },
+          "docs": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.604527"
+          },
+          "rag": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:13.606603"
+          },
+          "kanban": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.609055"
+          },
+          "quizzes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.611598"
+          },
+          "flashcards": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.613740"
+          },
+          "slides": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:13.615811"
+          }
+        }
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/auth/login",
+      "status": 200,
+      "tokenReturned": true
+    },
+    {
+      "mode": "multi",
+      "path": "/health",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/characters/",
+      "pass": 1,
+      "status": 200,
+      "body": [
+        {
+          "name": "Default Assistant",
+          "description": "A general-purpose assistant.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Hello! How can I help you today?",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": {},
+          "image_base64": null,
+          "id": 1,
+          "version": 1,
+          "created_at": "2026-09-16T16:42:44.502109Z",
+          "updated_at": "2026-09-16T16:42:44.502109Z",
+          "last_modified": "2026-09-16T16:42:44.502109Z",
+          "image_present": false
+        },
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 2,
+          "version": 1,
+          "created_at": "2026-09-16T16:42:46.027000Z",
+          "updated_at": "2026-09-16T16:42:46.027000Z",
+          "last_modified": "2026-09-16T16:42:46.027000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/chats/",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "chats": [],
+        "total": 0,
+        "limit": 50,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 50,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/notes/",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "notes": [],
+        "items": [],
+        "results": [],
+        "count": 0,
+        "limit": 100,
+        "offset": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/mcp/modules/health",
+      "pass": 1,
+      "status": 200,
+      "body": {
+        "health": {
+          "media": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "database_connection": true,
+              "database_writable": true,
+              "disk_space": true,
+              "service_available": true
+            },
+            "last_check": "2026-09-16T17:07:16.178608"
+          },
+          "template": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:16.179636"
+          },
+          "mcp_discovery": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.180195"
+          },
+          "governance": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "service_ready": true
+            },
+            "last_check": "2026-09-16T17:07:16.185686"
+          },
+          "notes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.187226"
+          },
+          "prompts": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.188051"
+          },
+          "skills": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "database_driver_available": true,
+              "skills_service_available": true
+            },
+            "last_check": "2026-09-16T17:07:16.188553"
+          },
+          "cooking": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:16.189017"
+          },
+          "knowledge": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.189603"
+          },
+          "docs": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.204440"
+          },
+          "rag": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.205807"
+          },
+          "kanban": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.206963"
+          },
+          "quizzes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.208628"
+          },
+          "flashcards": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.210509"
+          },
+          "slides": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.211744"
+          }
+        }
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/health",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/characters/",
+      "pass": 2,
+      "status": 200,
+      "body": [
+        {
+          "name": "Default Assistant",
+          "description": "A general-purpose assistant.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Hello! How can I help you today?",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": {},
+          "image_base64": null,
+          "id": 1,
+          "version": 1,
+          "created_at": "2026-09-16T16:42:44.502109Z",
+          "updated_at": "2026-09-16T16:42:44.502109Z",
+          "last_modified": "2026-09-16T16:42:44.502109Z",
+          "image_present": false
+        },
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 2,
+          "version": 1,
+          "created_at": "2026-09-16T16:42:46.027000Z",
+          "updated_at": "2026-09-16T16:42:46.027000Z",
+          "last_modified": "2026-09-16T16:42:46.027000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/chats/",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "chats": [],
+        "total": 0,
+        "limit": 50,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 50,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/notes/",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "notes": [],
+        "items": [],
+        "results": [],
+        "count": 0,
+        "limit": 100,
+        "offset": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "mode": "multi",
+      "path": "/api/v1/mcp/modules/health",
+      "pass": 2,
+      "status": 200,
+      "body": {
+        "health": {
+          "media": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "database_connection": true,
+              "database_writable": true,
+              "disk_space": true,
+              "service_available": true
+            },
+            "last_check": "2026-09-16T17:07:16.178608"
+          },
+          "template": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:16.179636"
+          },
+          "mcp_discovery": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.180195"
+          },
+          "governance": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "service_ready": true
+            },
+            "last_check": "2026-09-16T17:07:16.185686"
+          },
+          "notes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.187226"
+          },
+          "prompts": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.188051"
+          },
+          "skills": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "database_driver_available": true,
+              "skills_service_available": true
+            },
+            "last_check": "2026-09-16T17:07:16.188553"
+          },
+          "cooking": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "dependencies_ok": true
+            },
+            "last_check": "2026-09-16T17:07:16.189017"
+          },
+          "knowledge": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.189603"
+          },
+          "docs": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.204440"
+          },
+          "rag": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true
+            },
+            "last_check": "2026-09-16T17:07:16.205807"
+          },
+          "kanban": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.206963"
+          },
+          "quizzes": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.208628"
+          },
+          "flashcards": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.210509"
+          },
+          "slides": {
+            "status": "healthy",
+            "message": "All checks passed",
+            "checks": {
+              "initialized": true,
+              "driver_available": true,
+              "disk_space": true
+            },
+            "last_check": "2026-09-16T17:07:16.211744"
+          }
+        }
+      }
+    }
+  ]
+}

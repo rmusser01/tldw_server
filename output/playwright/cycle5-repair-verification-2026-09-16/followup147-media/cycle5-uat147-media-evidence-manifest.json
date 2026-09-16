@@ -1,0 +1,42 @@
+{
+  "createdAt": "2026-09-16T17:01:09.073Z",
+  "secretMatches": 0,
+  "artifacts": [
+    {
+      "path": "/private/tmp/cycle5-postgres-147-media-red.redacted.log",
+      "sha256": "63c87600c547b0cbdea24747a5baf7670549cdaf49491f9605b8c14532045d2d"
+    },
+    {
+      "path": "/private/tmp/cycle5-postgres-147-media-green.redacted.log",
+      "sha256": "d5451f9e715a8a237c77d98348ba3755263de70216c58fe4a1ed830eda338609"
+    },
+    {
+      "path": "/private/tmp/cycle5-postgres-147-media-final-focused.redacted.log",
+      "sha256": "4d27d2ca260e2703c551e54e50f47e71ce147c444bd8d05ccc64556ef26e0be1"
+    },
+    {
+      "path": "/private/tmp/cycle5-postgres-147-media-probe.redacted.log",
+      "sha256": "b1e1cb9d4c5d74d8263e2fe2afd9ef6f54e9c320469f6be02d887e30056a9cb7"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat147-media-implementation.md",
+      "sha256": "74283b8803c0a571d79ba83edd2628d79d07475c53e0ae094a1b52eb0e8d2793"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat147-media-code-freeze.json",
+      "sha256": "f46e9734c8569c9c113a0f133afe822d3e4f8d2a1a278df1546f141256d80238"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat147-media-owned-manifest.json",
+      "sha256": "10ad2d33b2d1acbed763a6caf4a9821317aaa2f50c02107ca186fe5721075b2a"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat147-media-ruff-final.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "/private/tmp/cycle5-uat147-media-bandit-final.json",
+      "sha256": "8b7e8ba3a79711c87c6b27f9c4dc5d2ae8b4bcb3076df1e10cc42a5b5e678ed8"
+    }
+  ]
+}
