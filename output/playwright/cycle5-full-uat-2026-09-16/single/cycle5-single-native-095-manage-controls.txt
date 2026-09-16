@@ -1,0 +1,11 @@
+### Result
+{"url":"http://127.0.0.1:18580/flashcards?tab=importExport","buttons":["Compact hints","","Move scope","More","","","Doc","","",""]}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("tab",{name:"Manage",exact:true}).click(); return {url:page.url(),buttons:await page.getByRole("tabpanel",{name:"Manage"}).getByRole("button").allTextContents()}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L44-L50

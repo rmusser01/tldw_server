@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Start processing' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-33-19-321Z.yml)

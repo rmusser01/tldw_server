@@ -1,6 +1,6 @@
 {
   "mode": "multi",
-  "retainedAt": "2026-09-16T08:23:41.818Z",
+  "retainedAt": "2026-09-16T08:38:53.543Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
@@ -80,6 +80,36 @@
       "sha256": "c43b05fc9b486c1735132189609a88ae544404cfc6d6d33b634bdd111c0a47c1"
     },
     {
+      "file": "cycle5-multi-native-character-cold.txt",
+      "bytes": 20977,
+      "sha256": "9c522f86b574cfc88f9075b39751ebc5230e7da5f0de21d3ba6db18e54fedf55"
+    },
+    {
+      "file": "cycle5-multi-native-character-create.txt",
+      "bytes": 1123,
+      "sha256": "d988c67b56a2a05b150bd459b7ddb354cb0f0f0c2354953fb5cd0c0f80447add"
+    },
+    {
+      "file": "cycle5-multi-native-character-created.txt",
+      "bytes": 14195,
+      "sha256": "0a10a9bb4548beb0574717813d4e6012ca0de7cdb15465e4a6eae5e3ae1d7bc0"
+    },
+    {
+      "file": "cycle5-multi-native-character-reopen.txt",
+      "bytes": 20986,
+      "sha256": "e7245cec307e869007744ba740dc771de34d9e2b14d4029251fde17ac2dd4ab0"
+    },
+    {
+      "file": "cycle5-multi-native-character-start.txt",
+      "bytes": 12733,
+      "sha256": "675502d521acae8914cf45a773ff2662e78438aa0c2f3adfae83821cb6abe6fd"
+    },
+    {
+      "file": "cycle5-multi-native-character-warnings.txt",
+      "bytes": 385,
+      "sha256": "505734b5742184defbc7c71f50c29cc0127a14ecdc40b860e11fba7ecb162702"
+    },
+    {
       "file": "cycle5-multi-native-chat-empty.txt",
       "bytes": 9314,
       "sha256": "6289609ce1e3829a4d1f3688e4548a3e2926bd5054bbdbc856e61c4022e9ab8e"
@@ -135,6 +165,11 @@
       "sha256": "3cc53d5e0c244c0c3523bea63c5bce95eac40d9d02f84510dd765d152717c7b6"
     },
     {
+      "file": "cycle5-multi-native-ingest-0826-status.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
       "file": "cycle5-multi-native-ingest-added.txt",
       "bytes": 12159,
       "sha256": "a62e11123c03a099380cddbd1dcc7327e8ae08f4e767949a70a14f463de1f2c9"
@@ -170,6 +205,16 @@
       "sha256": "cc1f260509ad9029d8da4a60608028629a818ba2a2ad5729e63a2dbea0ce62f7"
     },
     {
+      "file": "cycle5-multi-native-ingest-results.txt",
+      "bytes": 18323,
+      "sha256": "38cde092ae62c429f3e84503bddb5f41419aabedef4aa961865c1ed7410c5c9f"
+    },
+    {
+      "file": "cycle5-multi-native-ingest-resume-terminal.txt",
+      "bytes": 2158,
+      "sha256": "a3182844b6029d24b7b8312a6549bc234d528d026e1cb82a6f97ac5bae4c79f1"
+    },
+    {
       "file": "cycle5-multi-native-ingest-resume-wire.txt",
       "bytes": 1391,
       "sha256": "cc73f4cab30aadf556a26b271390a845dc4e81866a34e04d8aa9a6022d9a895a"
@@ -195,9 +240,24 @@
       "sha256": "01bc3026dc9e0d44744dc5cdf4316ae5b0643f30d37ccf7130f2b65a0a1a3e76"
     },
     {
+      "file": "cycle5-multi-native-ingest-settled.png",
+      "bytes": 143482,
+      "sha256": "04cfb69ff1b6b4df51e8102cc2c67554c3457a43f75296529019d9b33158cd02"
+    },
+    {
+      "file": "cycle5-multi-native-ingest-settled.txt",
+      "bytes": 18323,
+      "sha256": "d60152e0914eb4937f264015fb6bc36518260e6d83bc849d7741c11800a6a2a2"
+    },
+    {
       "file": "cycle5-multi-native-ingest-start.txt",
       "bytes": 11177,
       "sha256": "c0cf17eb57de0284e3f60fbe90eb13b3903654c6aa659434c1326f72f8f28820"
+    },
+    {
+      "file": "cycle5-multi-native-ingest-status.txt",
+      "bytes": 16301,
+      "sha256": "70ad626f9f245433a00a7ae1bb60a288257dbc360b8cd75040306f7b99b1f82f"
     },
     {
       "file": "cycle5-multi-native-ingest-submit.txt",
@@ -213,6 +273,31 @@
       "file": "cycle5-multi-native-main-login.txt",
       "bytes": 11577,
       "sha256": "15c3fb7da262a3bf3b538a0918579f9e16463ab93bd09c60b36c5e9efcbcb26f"
+    },
+    {
+      "file": "cycle5-multi-native-media-open-wire.txt",
+      "bytes": 969,
+      "sha256": "de6f7a8a562a2b3836e77def81eba2fe43c708d8380b4a3fc8210c0eecd0e791"
+    },
+    {
+      "file": "cycle5-multi-native-media-open.txt",
+      "bytes": 9788,
+      "sha256": "34719598b6e217507766e5afbe7513b138adc5b5166847e0a83f2429265801f8"
+    },
+    {
+      "file": "cycle5-multi-native-media-search-ui.txt",
+      "bytes": 16478,
+      "sha256": "aafeb142699f638fc09bb1715ee821dc120d3d7f815e45925f7bce2317f64131"
+    },
+    {
+      "file": "cycle5-multi-native-media-search.txt",
+      "bytes": 1013,
+      "sha256": "7400061a5c6b10f994e966d8dd93ae7c38dbb70c3f916b9f52356922efdd25fb"
+    },
+    {
+      "file": "cycle5-multi-native-media-selected.txt",
+      "bytes": 16311,
+      "sha256": "8e1ae4f2a2b34634ebe2232389cc6bf874a44c7033d3e5b41bf506a1f3f98a08"
     },
     {
       "file": "cycle5-multi-native-note-backlink.txt",
@@ -275,14 +360,144 @@
       "sha256": "c1acefd98874fa2f88369e5e41a40a3e3f480d00cc03efa60da07cb34434f82b"
     },
     {
+      "file": "cycle5-multi-native-prompt-after-save.txt",
+      "bytes": 19818,
+      "sha256": "1822508c2c90cf0f2f043736bf2e64ade186aae6c6f5996d4234374e61ff15ec"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-collections-error.txt",
+      "bytes": 621,
+      "sha256": "18937df8913d31e22823ebc864a3321def6d84de1ade1e1103111de284c6b88f"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-collections-reload.txt",
+      "bytes": 672,
+      "sha256": "76a8711a0d05f564243a5f9d108fa1f4bb21943d0ab72365c9d5a910905e4ccf"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-editor.png",
+      "bytes": 81988,
+      "sha256": "6eecb92daff931710fa1214d47847473207f792c037f43b0127a61fb8de09c14"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-editor.txt",
+      "bytes": 16717,
+      "sha256": "152d3c1573207d9f025ecd26ab9f490ca6c13d9fef287b4d9496683700f37d60"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-errors.txt",
+      "bytes": 383,
+      "sha256": "cf34a0867bb2da5dee835e8b071d95621ea7cfea7f2a0dfd40897527819ebd40"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-reloaded.txt",
+      "bytes": 14915,
+      "sha256": "3a056598494babe53f90a28d6e1dc27bbdd64f0d3750b7d7825f382ff385b07e"
+    },
+    {
+      "file": "cycle5-multi-native-prompt-save.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle5-multi-native-prompts-start.txt",
+      "bytes": 13947,
+      "sha256": "84afb57f1561c8d114225d10a232aeabe6e861f8ef58780949b7c9fec077ede4"
+    },
+    {
+      "file": "cycle5-multi-native-qa-model.txt",
+      "bytes": 8852,
+      "sha256": "e85cbdc1e78790f36c09c64f433d8f39c63aaeb0005363f0a288f657609a01c7"
+    },
+    {
+      "file": "cycle5-multi-native-qa-model2.txt",
+      "bytes": 9041,
+      "sha256": "2fe03577f3811c685681bab07dd2dd2bcb0b5dfe6b87b4cb14c4d1e042b49d5f"
+    },
+    {
+      "file": "cycle5-multi-native-qa-ready.txt",
+      "bytes": 7310,
+      "sha256": "1942540e3dc27cda8027e658bb82a3136f8f28738dd597d23472bf488b6504a8"
+    },
+    {
+      "file": "cycle5-multi-native-qa-result.txt",
+      "bytes": 15609,
+      "sha256": "a203f991c295ef15f120bea06cb227381536817daf094cf11db3bcb82ed5565a"
+    },
+    {
+      "file": "cycle5-multi-native-qa-scope.txt",
+      "bytes": 9409,
+      "sha256": "6d17618a4ac0f14c81da5a1d03c867d60f03fe2209a7fe74f266f04ab81ea52d"
+    },
+    {
+      "file": "cycle5-multi-native-qa-settings.txt",
+      "bytes": 14089,
+      "sha256": "e031951251aafd762e665537287abf1ee07a06d8181a20e3999aa3d57e97cae3"
+    },
+    {
+      "file": "cycle5-multi-native-qa-source.txt",
+      "bytes": 16603,
+      "sha256": "409c3bf1f990c69b2c5a402f71f7ae1de195ea6c32e1616706d082881448fbc1"
+    },
+    {
+      "file": "cycle5-multi-native-qa-specific.txt",
+      "bytes": 12201,
+      "sha256": "b777094c1f1bab76933b8cf2a655c948ae28daa149d805c143d47936b80aae14"
+    },
+    {
+      "file": "cycle5-multi-native-qa-start.txt",
+      "bytes": 7228,
+      "sha256": "ebad178a0c2c9e1e65bbd1767437787c024f6f6d1f809b74f20fcd71754b0102"
+    },
+    {
+      "file": "cycle5-multi-native-qa-wire.txt",
+      "bytes": 9397,
+      "sha256": "e9dddbe695c19bbc1bcf44eb820b9183e75fbd5930357246d50b29d5bbfb30ec"
+    },
+    {
+      "file": "cycle5-multi-native-retry-models.txt",
+      "bytes": 10867,
+      "sha256": "07930b58b1a4d80a18fed0ad7946cf727bfdf01b445b6d078948e5b983719ba3"
+    },
+    {
+      "file": "cycle5-multi-native-retry-new.txt",
+      "bytes": 9317,
+      "sha256": "1b4b910008fad5a39a959e36b378dd0b435b5e1a16a1eb0310f8cf4f399df2e1"
+    },
+    {
+      "file": "cycle5-multi-native-retry-unavailable-selected.txt",
+      "bytes": 9071,
+      "sha256": "6bc71a26b399378ca14c3d9b28ea12d0c6e367f38f2fd5890b33977819510fb3"
+    },
+    {
       "file": "cycle5-multi-native-running-tracker.md",
-      "bytes": 5529,
-      "sha256": "7b6514c462869254a0e6161d34ca61d5dcc68ed919161308c4a12154779eb73f"
+      "bytes": 7363,
+      "sha256": "f45eec50966b6348114af96ad529a340925bb073a6511ac920b36f3335e6641f"
     },
     {
       "file": "cycle5-multi-native-setup.txt",
       "bytes": 1692,
       "sha256": "85b5733e53a6ac617f15b5e2422a4f23deb1f60c97385673f3300fb4424b8a2e"
+    },
+    {
+      "file": "cycle5-multi-native-source-chat-ready.txt",
+      "bytes": 14773,
+      "sha256": "eb3791623c65b59aaf58824677d361116cb815dc8366d0ec7d192dfe07c08ebc"
+    },
+    {
+      "file": "cycle5-multi-native-source-chat-result.txt",
+      "bytes": 14821,
+      "sha256": "da6f0ec81e8349c3025013dddb2ccdb51c6ffb3ff0fa74b0498dbe380cc3c5c8"
+    },
+    {
+      "file": "cycle5-multi-native-source-chat-wire.txt",
+      "bytes": 3039,
+      "sha256": "a82b085f734be87136752b8ed4ac2a2b3b52f651824688b6fbbe4d60792ae793"
+    },
+    {
+      "file": "cycle5-multi-native-source-media.txt",
+      "bytes": 15333,
+      "sha256": "efcf86eeee897de14b7decb373a15d1d1225ffb347e6d6b5c6107adb83bad31d"
     },
     {
       "file": "cycle5-multi-native-study-card1-answer.txt",

@@ -1,0 +1,6 @@
+### Result
+{"path":"http://127.0.0.1:18501/api/v1/characters/","status":201,"request":{"name":"Cycle5 Alice TestBot","system_prompt":"You are E2E-TestBot. Always respond with exactly: BEEP BOOP."},"body":{"name":"Cycle5 Alice TestBot","description":null,"personality":null,"scenario":null,"system_prompt":"You are E2E-TestBot. Always respond with exactly: BEEP BOOP.","post_history_instructions":null,"first_message":null,"message_example":null,"creator_notes":null,"alternate_greetings":[],"tags":[],"creator":null,"character_version":null,"extensions":{},"image_base64":null,"id":4,"version":1,"created_at":"2026-09-16T08:37:05.965000Z","updated_at":"2026-09-16T08:37:05.965000Z","last_modified":"2026-09-16T08:37:05.965000Z","image_present":false}}
+### Ran Playwright code
+```js
+await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/api/v1/characters")&&r.request().method()==="POST",{timeout:20000});await page.getByRole("button",{name:"Create character",exact:true}).click();const r=await p;return {path:r.url(),status:r.status(),request:r.request().postDataJSON(),body:await r.json()};})(page);
+```

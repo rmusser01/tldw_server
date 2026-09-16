@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18580/media?id=1","dialogs":["Please confirmPlease confirmMove this item to Trash? You can restore it from Trash.CancelDelete"]}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Delete item",exact:true}).click(); return {url:page.url(),dialogs:await page.getByRole("dialog").allTextContents()}; })(page);
+```

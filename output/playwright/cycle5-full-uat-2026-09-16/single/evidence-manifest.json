@@ -1,6 +1,6 @@
 {
   "mode": "single",
-  "retainedAt": "2026-09-16T08:23:41.763Z",
+  "retainedAt": "2026-09-16T08:38:53.458Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
@@ -455,9 +455,294 @@
       "sha256": "91bcd058e52028dbc8ec5c86cfb708077d7eed0657a64372b4647f8d8e92bb73"
     },
     {
+      "file": "cycle5-single-native-090-scheduled-rerate-open.txt",
+      "bytes": 2214,
+      "sha256": "2283a0d4c994e99ae630a23abec978a5169ee3d29db78afcfa43b999dedaf281"
+    },
+    {
+      "file": "cycle5-single-native-091-scheduled-rerate-state.txt",
+      "bytes": 13411,
+      "sha256": "3f5515ef2187e34fd25053daddfef4a5508390bff82d567ca16d3ac27fe1d180"
+    },
+    {
+      "file": "cycle5-single-native-092-study-extra-requests.txt",
+      "bytes": 104720,
+      "sha256": "1d9225f38868dbe035058ee2b4d861b7935eb36b91fd516a3ba72fe06b933e72"
+    },
+    {
+      "file": "cycle5-single-native-093-rerated-early-end.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle5-single-native-094-early-end-state.txt",
+      "bytes": 16129,
+      "sha256": "962f8a6cccf80889a539196474b4dc90051a623b2c636db8274c7a6232a81a5c"
+    },
+    {
+      "file": "cycle5-single-native-095-manage-controls.txt",
+      "bytes": 596,
+      "sha256": "b95b4149a1a7770e8905e83bac4a49732dae9ab8bc1a484dcf53c490ff2792a4"
+    },
+    {
+      "file": "cycle5-single-native-096-manage-state.txt",
+      "bytes": 16220,
+      "sha256": "39ef9f25a9273dfdaef6945af8fa5425c572289053253c482935af3523d93d51"
+    },
+    {
+      "file": "cycle5-single-native-097-actual-early-end.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle5-single-native-098-study-return-state.txt",
+      "bytes": 12263,
+      "sha256": "e20d987ff0643dd64caec5671f21612cdc99315accab389d3cfaa9eed0221d8f"
+    },
+    {
+      "file": "cycle5-single-native-099-manage-keyboard-create.txt",
+      "bytes": 6486,
+      "sha256": "308da48c587d6b37ff822a4cb6770389eff6375ecc6bfc7c526858f92125418a"
+    },
+    {
+      "file": "cycle5-single-native-100-create-dialog.txt",
+      "bytes": 19961,
+      "sha256": "4dde90568e5d694dd9e601a0a793aecbe8728163a2eaa4d000cef941367be67e"
+    },
+    {
+      "file": "cycle5-single-native-101-keyboard-create-cancel.txt",
+      "bytes": 370,
+      "sha256": "befdbaf1cfcfbb0a1715bb72e33e5c76a10802a6f4cc821406c12aeb6404c23a"
+    },
+    {
+      "file": "cycle5-single-native-102-card-note-source.txt",
+      "bytes": 1163,
+      "sha256": "9a348294b9910e64ba514adf3c2b77dbd6f0a68b8fe0a78c4995004dbff93b57"
+    },
+    {
+      "file": "cycle5-single-native-103-study-requests-final.txt",
+      "bytes": 128615,
+      "sha256": "c4dae05beae0acaec914a28539a1e462ae4b38455b6ed8e45ebb385d201d5cdb"
+    },
+    {
+      "file": "cycle5-single-native-104-cram-first-request.json",
+      "bytes": 157,
+      "sha256": "40e276f88408ebdd34f78e4e0109ca3889e8475b543c7fe7d29bf204682e874c"
+    },
+    {
+      "file": "cycle5-single-native-105-cram-first-response.json",
+      "bytes": 439,
+      "sha256": "43384ed84f209c80b93f6485432b2638f5293bb666b894c1d1833ecdcf020974"
+    },
+    {
+      "file": "cycle5-single-native-106-rerate-request.json",
+      "bytes": 182,
+      "sha256": "dc99a6f178b106c569155b88401718fc180686e667f7f7df1510f29d45592350"
+    },
+    {
+      "file": "cycle5-single-native-107-rerate-response.json",
+      "bytes": 440,
+      "sha256": "f689c8fb2c8b5b12e3f3d4a22386edde32e7d8ea04b0cad0a5e8a9ad3e7fdef7"
+    },
+    {
+      "file": "cycle5-single-native-108-auto-end-request.json",
+      "bytes": 24,
+      "sha256": "ec8104283755dc2160bb873f90b45ac4a13c9e41cf6135274c0794dd9db95060"
+    },
+    {
+      "file": "cycle5-single-native-109-auto-end-response.json",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "file": "cycle5-single-native-110-ingest-open.txt",
+      "bytes": 365,
+      "sha256": "d5b058a0246d2c816fa0bbd5aca0ae1b5bc2a3f9532a36707d2b3f6121312c2b"
+    },
+    {
+      "file": "cycle5-single-native-111-ingest-dialog.txt",
+      "bytes": 16724,
+      "sha256": "1e226f52980b57f38c4992d475172fd7f6afdea106d7c15037c1202ad09b5aed"
+    },
+    {
+      "file": "cycle5-single-native-112-ingest-browse.txt",
+      "bytes": 337,
+      "sha256": "6ccd2f4c363d31fb4723310d18cabde21375b75f5f37edfb7cbdd3fb9732bf0f"
+    },
+    {
+      "file": "cycle5-single-native-113-ingest-upload.txt",
+      "bytes": 323,
+      "sha256": "1168fd8ad047cd9dc58bfee5a9b3b67f65cc5b37c46474b31183595c7eb9a970"
+    },
+    {
+      "file": "cycle5-single-native-114-ingest-queued.txt",
+      "bytes": 17707,
+      "sha256": "290291de84d5ae950950e92e998cba73af97463f2b2516b396f7ea741e9b3f57"
+    },
+    {
+      "file": "cycle5-single-native-115-ingest-configure.txt",
+      "bytes": 310,
+      "sha256": "401050116afdd52819e2b5cd8f0bf1cc9bb8b3287b9c70f6550bc80f7fceb87e"
+    },
+    {
+      "file": "cycle5-single-native-116-ingest-config-state.txt",
+      "bytes": 19945,
+      "sha256": "dd5026ca5861c33ec47e3fd5e15152815fee2a48ecd9a7497e83441d8e26bc72"
+    },
+    {
+      "file": "cycle5-single-native-117-ingest-review.txt",
+      "bytes": 620,
+      "sha256": "187a8cddefe96728d880b38b93d41c1418c8b7e0613f8d17b1381955b2d74485"
+    },
+    {
+      "file": "cycle5-single-native-118-ingest-start.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle5-single-native-119-ingest-start-settled.txt",
+      "bytes": 16520,
+      "sha256": "914b778c777e356bc3e7084200f71904fbe7c18a99d02a04c67a03387238da59"
+    },
+    {
+      "file": "cycle5-single-native-120-ingest-start-click.txt",
+      "bytes": 309,
+      "sha256": "590c897be0eed39b2deb57620fd74c4ce1f78b77327e3b81b8959c3fa8ad9100"
+    },
+    {
+      "file": "cycle5-single-native-121-ingest-processing.txt",
+      "bytes": 16910,
+      "sha256": "2d45f258ded0f16ef6293224ddbfb3171a4a26254e4ff8a65da0e727199f3182"
+    },
+    {
+      "file": "cycle5-single-native-122-ingest-open-media.txt",
+      "bytes": 368,
+      "sha256": "341e3ff52f4c216e97aebea96e0247a3eacd49b9c9cdd59448ea625e14980a8c"
+    },
+    {
+      "file": "cycle5-single-native-123-media-source.txt",
+      "bytes": 14374,
+      "sha256": "e8210f4973e87d657bf8208fbe218974844d8fd5a10a47193c81e86717ff6fb5"
+    },
+    {
+      "file": "cycle5-single-native-124-media-delete-dialog.txt",
+      "bytes": 386,
+      "sha256": "91eaed3dab9e33df4fbf1468360187463316148aff45e010e13a7bbb59f5f1bc"
+    },
+    {
+      "file": "cycle5-single-native-125-media-deleted.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle5-single-native-126-media-empty.txt",
+      "bytes": 4161,
+      "sha256": "db254905035d1ed89df541cf9adfad29ba3eaa28b7533a4f0422f8281152c103"
+    },
+    {
+      "file": "cycle5-single-native-127-open-trash.txt",
+      "bytes": 348,
+      "sha256": "06236342b051d80db25cda1a599d5f45ffb45b23fd38a8d68e59c13864976578"
+    },
+    {
+      "file": "cycle5-single-native-128-trash-state.txt",
+      "bytes": 4343,
+      "sha256": "67a38a55e2838685012e544bcece56dc445d1f61de855cbba8732f95aafe6678"
+    },
+    {
+      "file": "cycle5-single-native-129-restored.txt",
+      "bytes": 2841,
+      "sha256": "e2dcf71d1471cb60e874b3d4d7552d9d9c11be46236fd1a04dd51bb32a108bd8"
+    },
+    {
+      "file": "cycle5-single-native-130-restored-content.txt",
+      "bytes": 875,
+      "sha256": "1c8b7a1c9581bee9e9982b62214e7238a9b3db4abc14b628309ec990abaa3b27"
+    },
+    {
+      "file": "cycle5-single-native-131-analysis-dialog.txt",
+      "bytes": 647,
+      "sha256": "b31849c20f63991b0ed7e1c7d826ead9d358cae5feaa7ae4ad08f629ef4e9c88"
+    },
+    {
+      "file": "cycle5-single-native-132-analysis-settings.txt",
+      "bytes": 17906,
+      "sha256": "6019707611826199e646b69c755af861ee2053927311af8943b4315752f3f343"
+    },
+    {
+      "file": "cycle5-single-native-133-analysis-model-options.txt",
+      "bytes": 254,
+      "sha256": "58c3858f41318d16e949e244a8a082437e55ab6ab9ad339163bed6a7fb854dd9"
+    },
+    {
+      "file": "cycle5-single-native-134-analysis-model-list.txt",
+      "bytes": 18599,
+      "sha256": "80c1edcdacf5db0cafb51e9b63ae8b0a8d5b6d1235f2bc17475299bf5e704967"
+    },
+    {
+      "file": "cycle5-single-native-135-analysis-model-chosen.txt",
+      "bytes": 245,
+      "sha256": "1bc9a23c66e444b87ea608fd2d06ae1e098f3add3430e4032ebb39ac22f23d7c"
+    },
+    {
+      "file": "cycle5-single-native-136-analysis-start.txt",
+      "bytes": 931,
+      "sha256": "745e5215988452859ae41170337a6306babb9b0eb0467a7e1c5936a533817132"
+    },
+    {
+      "file": "cycle5-single-native-137-analysis-terminal.txt",
+      "bytes": 15773,
+      "sha256": "ac0d1d02b57108f6b40a9788294d75a2817a4918daa1203e323d8e684a9cfbc6"
+    },
+    {
+      "file": "cycle5-single-native-138-media-requests.txt",
+      "bytes": 158489,
+      "sha256": "7d62534a7c2a3ebbebe9dc30500a6434ee5e1d34c2460b14496f72f1cc16497d"
+    },
+    {
+      "file": "cycle5-single-native-139-analysis-request.json",
+      "bytes": 607,
+      "sha256": "3501d607632ccedcd6b342b5e9ea95a1c7c187c61411edd5f783c4f637537c0b"
+    },
+    {
+      "file": "cycle5-single-native-140-analysis-version-request.json",
+      "bytes": 534,
+      "sha256": "8807918b79c40ac1352d89d3097568cbd7e319fabbecac3c7a5ce86bb2b70505"
+    },
+    {
+      "file": "cycle5-single-native-141-analysis-saved-media.json",
+      "bytes": 2182,
+      "sha256": "6084530384cafad0c286d269231c8ca2eee074c032e62092ceb8c802b612b30f"
+    },
+    {
+      "file": "cycle5-single-native-142-media-actions.txt",
+      "bytes": 254,
+      "sha256": "8e4b11ad431c5f252bc7b2b232a9550150d785c983ef8d109690ab1c3fd902bd"
+    },
+    {
+      "file": "cycle5-single-native-143-media-actions-state.txt",
+      "bytes": 17344,
+      "sha256": "3dd08844c361325225cbcf3a6527881f3ebd9d87915580dd20e3cf72569661c7"
+    },
+    {
+      "file": "cycle5-single-native-144-media-open-review.txt",
+      "bytes": 379,
+      "sha256": "1305793728dee79eca142f9051f6e5eb1a4547666affc3bbb960ea84229cec06"
+    },
+    {
+      "file": "cycle5-single-native-145-review-state.txt",
+      "bytes": 9349,
+      "sha256": "8ba06122ed7994b919b52ceb0557f2dfa26df85aacddfc09b87f53f7566ec506"
+    },
+    {
+      "file": "cycle5-single-native-146-review-select.txt",
+      "bytes": 262,
+      "sha256": "1d9b11dea7a088ea869f2c61850138cf3cee6a0b5f11bf2e1c0b9392d9f6b8c0"
+    },
+    {
       "file": "cycle5-single-native-RUNNING_TRACKER.md",
-      "bytes": 4568,
-      "sha256": "339ebbecbe8fba559aee193d976f1a80ceba283578ea8b9765fa456b4003df77"
+      "bytes": 5745,
+      "sha256": "9654dd3a3aca4ebd43a66fa16c589c3d8f0484a3b2df1e4f59b89f74bc11f9d4"
     },
     {
       "file": "cycle5-single-native-first-chat-request.json",

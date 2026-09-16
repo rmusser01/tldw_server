@@ -1,0 +1,337 @@
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - generic [ref=f3e4]:
+      - link "Skip to main content" [ref=f3e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f3e6]:
+        - button "Expand sidebar" [ref=f3e7] [cursor=pointer]
+        - button "New Chat" [ref=f3e11] [cursor=pointer]
+        - generic [ref=f3e14]:
+          - button "Quick Ingest" [ref=f3e15] [cursor=pointer]
+          - button "Chat" [ref=f3e19] [cursor=pointer]
+          - button "Prompts" [ref=f3e22] [cursor=pointer]
+          - button "Characters" [ref=f3e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f3e31] [cursor=pointer]
+          - button "World Books" [ref=f3e35] [cursor=pointer]
+          - button "Notes" [ref=f3e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f3e42] [cursor=pointer]
+          - button "Media" [ref=f3e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f3e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f3e59] [cursor=pointer]
+          - button "Kanban" [ref=f3e65] [cursor=pointer]
+          - button "Watchlists" [ref=f3e67] [cursor=pointer]
+        - generic [ref=f3e72]:
+          - button "Open Notes Dock" [ref=f3e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f3e78] [cursor=pointer]
+          - button "Settings" [ref=f3e81] [cursor=pointer]
+      - main [ref=f3e85]:
+        - generic [ref=f3e86]:
+          - generic [ref=f3e89]:
+            - generic [ref=f3e90]:
+              - button "Expand sidebar" [ref=f3e91] [cursor=pointer]
+              - generic [ref=f3e93]:
+                - img "tldw Assistant" [ref=f3e94]
+                - generic [ref=f3e95]: tldw Assistant
+                - button "Companion Home" [ref=f3e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f3e100] [cursor=pointer]
+            - generic [ref=f3e103]:
+              - button "Search - Open command palette" [ref=f3e104] [cursor=pointer]:
+                - generic [ref=f3e108]: Search
+                - generic [ref=f3e109]: ⌘K
+              - button "Open settings" [ref=f3e110] [cursor=pointer]
+              - generic [ref=f3e122]:
+                - button "Notifications, 0 unread" [ref=f3e123] [cursor=pointer]
+                - status [ref=f3e127]: Notifications are active
+              - button "Switch to light theme" [ref=f3e128] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f3e135] [cursor=pointer]:
+                - generic [ref=f3e136]: "?"
+          - generic [ref=f3e138]:
+            - generic [ref=f3e140]:
+              - generic [ref=f3e142]:
+                - generic [ref=f3e143]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f3e144]
+              - navigation "Flashcards modes" [ref=f3e145]:
+                - generic [ref=f3e146]: Study
+                - generic [ref=f3e147]: Manage
+                - generic [ref=f3e148]: Import / Export
+                - generic [ref=f3e149]: Templates
+                - generic [ref=f3e150]: Scheduler
+            - generic [ref=f3e153]:
+              - tablist [ref=f3e154]:
+                - generic [ref=f3e156]:
+                  - tab "Study" [ref=f3e158] [cursor=pointer]
+                  - tab "Manage" [selected] [ref=f3e160] [cursor=pointer]
+                  - tab "Import / Export" [ref=f3e162] [cursor=pointer]
+                  - tab "Templates" [ref=f3e164] [cursor=pointer]
+                  - tab "Scheduler" [ref=f3e166] [cursor=pointer]
+                - generic [ref=f3e168]:
+                  - button "Test with Quiz" [disabled] [ref=f3e170]
+                  - button "Keyboard Shortcuts" [ref=f3e171] [cursor=pointer]
+              - generic [ref=f3e177]:
+                - tabpanel "Manage" [ref=f3e900]:
+                  - generic [ref=f3e901]:
+                    - generic [ref=f3e903]:
+                      - radiogroup "segmented control" [ref=f3e904]:
+                        - generic [ref=f3e905]:
+                          - generic [ref=f3e906] [cursor=pointer]:
+                            - radio "Cards" [checked]
+                            - generic "Cards" [ref=f3e907]
+                          - generic [ref=f3e908] [cursor=pointer]:
+                            - radio "Trash"
+                            - generic [ref=f3e909]: Trash
+                      - generic [ref=f3e911]:
+                        - generic [ref=f3e912]: "?"
+                        - generic [ref=f3e916]: J/K Navigate
+                        - generic [ref=f3e917]: Enter Edit
+                        - generic [ref=f3e918]: Space Select
+                        - generic [ref=f3e919]: Delete Remove
+                        - button "Compact hints" [ref=f3e920] [cursor=pointer]
+                    - generic [ref=f3e922]:
+                      - generic [ref=f3e923]:
+                        - generic [ref=f3e924]:
+                          - searchbox "Search" [ref=f3e926]
+                          - button [ref=f3e928] [cursor=pointer]:
+                            - img "search" [ref=f3e930]
+                        - generic [ref=f3e933] [cursor=pointer]:
+                          - generic [ref=f3e934]:
+                            - generic: Deck
+                            - combobox [ref=f3e935]
+                          - img "down" [ref=f3e937]
+                        - button "Move scope" [ref=f3e940] [cursor=pointer]
+                        - generic [ref=f3e942] [cursor=pointer]:
+                          - checkbox "Show workspace decks" [ref=f3e944]
+                          - generic [ref=f3e946]: Show workspace decks
+                        - generic [ref=f3e947]:
+                          - generic [ref=f3e948]:
+                            - generic: Filter workspace
+                            - combobox [disabled] [ref=f3e949]
+                          - img "down" [ref=f3e951]
+                        - button "More" [ref=f3e955] [cursor=pointer]
+                      - generic [ref=f3e960]:
+                        - radiogroup "segmented control" [ref=f3e961]:
+                          - generic [ref=f3e962]:
+                            - generic [ref=f3e963] [cursor=pointer]:
+                              - radio "All" [checked]
+                              - generic "All" [ref=f3e964]
+                            - generic [ref=f3e965] [cursor=pointer]:
+                              - radio "Due"
+                              - generic "Due" [ref=f3e966]
+                            - generic [ref=f3e967] [cursor=pointer]:
+                              - radio "New"
+                              - generic "New" [ref=f3e968]
+                            - generic [ref=f3e969] [cursor=pointer]:
+                              - radio "Learning"
+                              - generic "Learning" [ref=f3e970]
+                        - generic [ref=f3e971]:
+                          - generic [ref=f3e973] [cursor=pointer]:
+                            - generic [ref=f3e974]:
+                              - 'generic "Sort: Due date" [ref=f3e975]'
+                              - combobox [ref=f3e976]
+                            - img "down" [ref=f3e978]
+                          - generic "Presentation mode" [ref=f3e981]:
+                            - button [ref=f3e982] [cursor=pointer]
+                            - button [ref=f3e985] [cursor=pointer]
+                            - button "Doc" [ref=f3e990] [cursor=pointer]
+                    - generic [ref=f3e992]:
+                      - checkbox "Select all on page" [ref=f3e996] [cursor=pointer]
+                      - generic [ref=f3e998]: 6 Cards
+                    - list "Flashcards" [ref=f3e1003]:
+                      - listitem [ref=f3e1004] [cursor=pointer]:
+                        - generic [ref=f3e1006]:
+                          - paragraph [ref=f3e1012]: What is the powerhouse of the cell?
+                          - generic [ref=f3e1014]:
+                            - generic [ref=f3e1015]:
+                              - generic [ref=f3e1016]: Cycle5 Single Biology Cards
+                              - generic [ref=f3e1017]: in 2 minutes
+                              - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e1018]':
+                                - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                            - generic [ref=f3e1019]:
+                              - generic [ref=f3e1020]: Memory 2.50
+                              - generic [ref=f3e1021]: Next gap 0d
+                              - generic [ref=f3e1022]: Recall runs 1
+                              - generic [ref=f3e1023]: Relearns 0
+                        - generic [ref=f3e1024]:
+                          - 'checkbox "Select card: What is the powerhouse of the cell?" [ref=f3e1028]'
+                          - generic [ref=f3e1030]:
+                            - button "Edit" [ref=f3e1031]
+                            - button "More actions" [ref=f3e1035]
+                      - listitem [ref=f3e1041] [cursor=pointer]:
+                        - generic [ref=f3e1043]:
+                          - paragraph [ref=f3e1049]: What does photosynthesis convert light energy into?
+                          - generic [ref=f3e1051]:
+                            - generic [ref=f3e1052]:
+                              - generic [ref=f3e1053]: Cycle5 Single Biology Cards
+                              - generic [ref=f3e1054]: in 3 minutes
+                              - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e1055]':
+                                - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                            - generic [ref=f3e1056]:
+                              - generic [ref=f3e1057]: Memory 2.50
+                              - generic [ref=f3e1058]: Next gap 0d
+                              - generic [ref=f3e1059]: Recall runs 1
+                              - generic [ref=f3e1060]: Relearns 0
+                        - generic [ref=f3e1061]:
+                          - 'checkbox "Select card: What does photosynthesis convert light energy into?" [ref=f3e1065]'
+                          - generic [ref=f3e1067]:
+                            - button "Edit" [ref=f3e1068]
+                            - button "More actions" [ref=f3e1072]
+                      - listitem [ref=f3e1078] [cursor=pointer]:
+                        - generic [ref=f3e1080]:
+                          - paragraph [ref=f3e1086]: At what temperature does water boil at sea level?
+                          - generic [ref=f3e1088]:
+                            - generic [ref=f3e1089]:
+                              - generic [ref=f3e1090]: Cycle5 Single Biology Cards
+                              - generic [ref=f3e1091]: in 3 minutes
+                              - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e1092]':
+                                - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                            - generic [ref=f3e1093]:
+                              - generic [ref=f3e1094]: Memory 2.50
+                              - generic [ref=f3e1095]: Next gap 0d
+                              - generic [ref=f3e1096]: Recall runs 1
+                              - generic [ref=f3e1097]: Relearns 0
+                        - generic [ref=f3e1098]:
+                          - 'checkbox "Select card: At what temperature does water boil at sea level?" [ref=f3e1102]'
+                          - generic [ref=f3e1104]:
+                            - button "Edit" [ref=f3e1105]
+                            - button "More actions" [ref=f3e1109]
+                      - listitem [ref=f3e1115] [cursor=pointer]:
+                        - generic [ref=f3e1117]:
+                          - paragraph [ref=f3e1123]: What exact readiness message confirms the launch code?
+                          - generic [ref=f3e1125]:
+                            - generic [ref=f3e1126]:
+                              - generic [ref=f3e1127]: in 5 minutes
+                              - 'link "Note #fedc0a60-e31a-458b-ad8e-6a31328d00b7" [ref=f3e1128]':
+                                - /url: /notes?source_ref_id=fedc0a60-e31a-458b-ad8e-6a31328d00b7
+                            - generic [ref=f3e1129]:
+                              - generic [ref=f3e1130]: Memory 2.50
+                              - generic [ref=f3e1131]: Next gap 0d
+                              - generic [ref=f3e1132]: Recall runs 1
+                              - generic [ref=f3e1133]: Relearns 0
+                        - generic [ref=f3e1134]:
+                          - 'checkbox "Select card: What exact readiness message confirms the launch code?" [ref=f3e1138]'
+                          - generic [ref=f3e1140]:
+                            - button "Edit" [ref=f3e1141]
+                            - button "More actions" [ref=f3e1145]
+                      - listitem [ref=f3e1151] [cursor=pointer]:
+                        - generic [ref=f3e1153]:
+                          - paragraph [ref=f3e1159]: What does DNA stand for?
+                          - generic [ref=f3e1161]:
+                            - generic [ref=f3e1162]:
+                              - generic [ref=f3e1163]: Cycle5 Single Biology Cards
+                              - generic [ref=f3e1164]: in a day
+                              - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e1165]':
+                                - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                            - generic [ref=f3e1166]:
+                              - generic [ref=f3e1167]: Memory 2.50
+                              - generic [ref=f3e1168]: Next gap 1d
+                              - generic [ref=f3e1169]: Recall runs 1
+                              - generic [ref=f3e1170]: Relearns 0
+                        - generic [ref=f3e1171]:
+                          - 'checkbox "Select card: What does DNA stand for?" [ref=f3e1175]'
+                          - generic [ref=f3e1177]:
+                            - button "Edit" [ref=f3e1178]
+                            - button "More actions" [ref=f3e1182]
+                      - listitem [ref=f3e1188] [cursor=pointer]:
+                        - generic [ref=f3e1190]:
+                          - paragraph [ref=f3e1196]: How many bones does the human body have?
+                          - generic [ref=f3e1198]:
+                            - generic [ref=f3e1199]:
+                              - generic [ref=f3e1200]: Cycle5 Single Biology Cards
+                              - generic [ref=f3e1201]: in 2 days
+                              - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e1202]':
+                                - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                            - generic [ref=f3e1203]:
+                              - generic [ref=f3e1204]: Memory 2.35
+                              - generic [ref=f3e1205]: Next gap 2d
+                              - generic [ref=f3e1206]: Recall runs 2
+                              - generic [ref=f3e1207]: Relearns 0
+                        - generic [ref=f3e1208]:
+                          - 'checkbox "Select card: How many bones does the human body have?" [ref=f3e1212]'
+                          - generic [ref=f3e1214]:
+                            - button "Edit" [ref=f3e1215]
+                            - button "More actions" [ref=f3e1219]
+                    - list [ref=f3e1226]:
+                      - listitem "Previous Page" [ref=f3e1227]:
+                        - button [disabled] [ref=f3e1228]:
+                          - img "left" [ref=f3e1229]
+                      - listitem "1" [ref=f3e1232] [cursor=pointer]
+                      - listitem "Next Page" [ref=f3e1234]:
+                        - button [disabled] [ref=f3e1235]:
+                          - img "right" [ref=f3e1236]
+                      - listitem [ref=f3e1239]:
+                        - generic [ref=f3e1240]:
+                          - generic [ref=f3e1241]:
+                            - generic "20 / page" [ref=f3e1242]
+                            - combobox "Page Size" [ref=f3e1243]
+                          - img "down" [ref=f3e1245]
+                  - button "Create Flashcard" [ref=f3e1248] [cursor=pointer]
+                - text: ": : : : : : : : : : : : : : :"
+    - dialog "Create Flashcard" [ref=f3e1369]:
+      - generic [ref=f3e1371]:
+        - button "Close" [ref=f3e1372] [cursor=pointer]:
+          - img "close" [ref=f3e1373]
+        - generic [ref=f3e1376]: Create Flashcard
+      - generic [ref=f3e1378]:
+        - generic [ref=f3e1379]:
+          - heading "Organization" [level=3] [ref=f3e1380]
+          - generic [ref=f3e1382]:
+            - generic "Deck" [ref=f3e1384]
+            - generic [ref=f3e1388] [cursor=pointer]:
+              - generic [ref=f3e1389]:
+                - generic: Select deck
+                - combobox "Deck" [ref=f3e1390]
+              - img "down" [ref=f3e1392]
+          - button "or create a new deck" [ref=f3e1395] [cursor=pointer]
+          - generic [ref=f3e1396]:
+            - button "Apply template" [ref=f3e1397] [cursor=pointer]
+            - button "Save as template" [ref=f3e1399] [cursor=pointer]
+          - generic [ref=f3e1402]:
+            - generic "Card template" [ref=f3e1404]
+            - generic [ref=f3e1408] [cursor=pointer]:
+              - generic [ref=f3e1409]:
+                - generic "Basic (Question - Answer)" [ref=f3e1410]
+                - combobox "Card template" [ref=f3e1411]
+              - img "down" [ref=f3e1413]
+          - generic [ref=f3e1416]: Choose Basic for direct question and answer cards (facts, definitions, short prompts).
+        - generic [ref=f3e1417]:
+          - heading "Content" [level=3] [ref=f3e1418]
+          - button "collapsed Tips for effective flashcards" [ref=f3e1421] [cursor=pointer]:
+            - img "collapsed" [ref=f3e1423]
+            - generic [ref=f3e1426]: Tips for effective flashcards
+          - generic [ref=f3e1428]:
+            - generic [ref=f3e1430]:
+              - text: "*"
+              - generic [ref=f3e1431]:
+                - generic [ref=f3e1432]: Front
+                - button "Upload image for Front" [ref=f3e1433]
+                - button "Insert image" [ref=f3e1434] [cursor=pointer]
+            - textbox "* Front Upload image for Front Insert image" [ref=f3e1439]:
+              - /placeholder: Question or prompt...
+          - generic [ref=f3e1440]: "Front: 0 / 8192 bytes"
+          - generic [ref=f3e1442]:
+            - generic [ref=f3e1444]:
+              - text: "*"
+              - generic [ref=f3e1445]:
+                - generic [ref=f3e1446]: Back
+                - button "Upload image for Back" [ref=f3e1447]
+                - button "Insert image" [ref=f3e1448] [cursor=pointer]
+            - textbox "* Back Upload image for Back Insert image" [ref=f3e1453]:
+              - /placeholder: Answer...
+          - generic [ref=f3e1454]: "Back: 0 / 8192 bytes"
+          - generic [ref=f3e1455]:
+            - button "Show preview" [ref=f3e1456] [cursor=pointer]
+            - generic [ref=f3e1457]: "Supports Markdown and LaTeX ($x^2$, $$\\sum_{i=1}^n$$)"
+        - button "collapsed Advanced options (tags, extra, notes)" [ref=f3e1460] [cursor=pointer]:
+          - img "collapsed" [ref=f3e1462]
+          - generic [ref=f3e1465]: Advanced options (tags, extra, notes)
+      - generic [ref=f3e1470]:
+        - button "Cancel" [ref=f3e1472] [cursor=pointer]
+        - button "Create & Add Another" [ref=f3e1475] [cursor=pointer]
+        - button "Create" [ref=f3e1478] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f3e461] [cursor=pointer]
+  - alert [ref=f3e465]
+```

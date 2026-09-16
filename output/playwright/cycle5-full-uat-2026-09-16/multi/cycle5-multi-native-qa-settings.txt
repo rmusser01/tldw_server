@@ -1,0 +1,231 @@
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge
+- Page Title: Knowledge | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f6e1]:
+  - generic [ref=f6e4]:
+    - link "Skip to main content" [ref=f6e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f6e6]:
+      - button "Expand sidebar" [ref=f6e7] [cursor=pointer]
+      - button "New Chat" [ref=f6e11] [cursor=pointer]
+      - generic [ref=f6e14]:
+        - button "Quick Ingest" [ref=f6e15] [cursor=pointer]
+        - button "Chat" [ref=f6e19] [cursor=pointer]
+        - button "Prompts" [ref=f6e22] [cursor=pointer]
+        - button "Characters" [ref=f6e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f6e31] [cursor=pointer]
+        - button "World Books" [ref=f6e35] [cursor=pointer]
+        - button "Notes" [ref=f6e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f6e42] [cursor=pointer]
+        - button "Media" [ref=f6e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f6e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f6e59] [cursor=pointer]
+        - button "Kanban" [ref=f6e65] [cursor=pointer]
+        - button "Watchlists" [ref=f6e67] [cursor=pointer]
+      - generic [ref=f6e72]:
+        - button "Open Notes Dock" [ref=f6e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f6e78] [cursor=pointer]
+        - button "Settings" [ref=f6e81] [cursor=pointer]
+    - main [ref=f6e85]:
+      - generic [ref=f6e86]:
+        - generic [ref=f6e89]:
+          - generic [ref=f6e90]:
+            - button "Expand sidebar" [ref=f6e91] [cursor=pointer]
+            - generic [ref=f6e93]:
+              - img "tldw Assistant" [ref=f6e94]
+              - generic [ref=f6e95]: tldw Assistant
+              - button "Companion Home" [ref=f6e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f6e100] [cursor=pointer]
+          - generic [ref=f6e103]:
+            - button "Search - Open command palette" [ref=f6e104] [cursor=pointer]:
+              - generic [ref=f6e108]: Search
+              - generic [ref=f6e109]: ⌘K
+            - button "Open settings" [ref=f6e110] [cursor=pointer]
+            - generic [ref=f6e122]:
+              - button "Notifications, 0 unread" [ref=f6e123] [cursor=pointer]
+              - status [ref=f6e127]: Notifications are active
+            - button "Switch to light theme" [ref=f6e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f6e135] [cursor=pointer]:
+              - generic [ref=f6e136]: "?"
+        - generic [ref=f6e897]:
+          - generic [ref=f6e898]:
+            - link "Skip to search" [ref=f6e899] [cursor=pointer]:
+              - /url: "#knowledge-search-input"
+            - main [ref=f6e900]:
+              - generic [ref=f6e903]:
+                - generic [ref=f6e904]:
+                  - 'button "Open source scope and saved profiles. Sources: 4 selected. Specific: 1 doc" [ref=f6e1108] [cursor=pointer]':
+                    - text: "Sources: 4 selected"
+                    - generic [ref=f6e1109]: "• Specific: 1 doc"
+                  - button "Custom" [ref=f6e1110] [cursor=pointer]
+                  - button "Web fallback is currently disabled. Click to toggle." [ref=f6e915] [cursor=pointer]: Web
+                  - button "Choose answer model" [ref=f6e920] [cursor=pointer]:
+                    - generic [ref=f6e924]: "AI: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+                  - button "Refresh source health" [ref=f6e927] [cursor=pointer]: "Sources ready: 6 of 8"
+                  - button "Open Knowledge QA settings" [ref=f6e928] [cursor=pointer]
+                - generic [ref=f6e932]:
+                  - generic [ref=f6e933]:
+                    - heading "Ask Your Library" [level=1] [ref=f6e936]
+                    - paragraph [ref=f6e937]: Search selected personal-library sources and get cited answers
+                    - paragraph [ref=f6e938]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                    - paragraph [ref=f6e939]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                  - generic [ref=f6e940]:
+                    - button "How it works" [expanded] [ref=f6e941] [cursor=pointer]
+                    - list [ref=f6e943]:
+                      - listitem [ref=f6e944]:
+                        - generic [ref=f6e945]: "1"
+                        - generic [ref=f6e946]: Select sources
+                      - listitem [ref=f6e948]:
+                        - generic [ref=f6e949]: "2"
+                        - generic [ref=f6e950]: Ask a question
+                      - listitem [ref=f6e953]:
+                        - generic [ref=f6e954]: "3"
+                        - generic [ref=f6e955]: Review cited answer
+                  - generic [ref=f6e959]:
+                    - button "Explain the methodology used in this study" [ref=f6e960] [cursor=pointer]
+                    - button "Summarize the key findings in my latest sources" [ref=f6e961] [cursor=pointer]
+                    - button "What claims have direct citations?" [ref=f6e962] [cursor=pointer]
+                    - button "Compare conclusions across my documents" [ref=f6e963] [cursor=pointer]
+                  - generic [ref=f6e964]:
+                    - paragraph [ref=f6e965]: No previous QA sessions yet.
+                    - button "Continue recent session" [disabled] [ref=f6e966]
+                    - button "Select sources" [ref=f6e970] [cursor=pointer]
+                  - paragraph [ref=f6e972]:
+                    - text: Need a full workspace?
+                    - link "Try Research Workspace →" [ref=f6e973] [cursor=pointer]:
+                      - /url: /research-workspace
+                - generic [ref=f6e974]:
+                  - paragraph [ref=f6e975]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                  - generic [ref=f6e976]:
+                    - textbox "Search your knowledge base" [ref=f6e977]:
+                      - /placeholder: What are the citations for claim Y?
+                    - button "Ask" [disabled] [ref=f6e979]
+                  - generic [ref=f6e980]: Press / to focus, Cmd+K for new search
+            - generic [ref=f6e982]:
+              - button "Switch to detailed view" [ref=f6e983] [cursor=pointer]
+              - link "Help & Documentation" [ref=f6e987] [cursor=pointer]:
+                - /url: https://github.com/rmusser01/tldw_server2#readme
+          - dialog "RAG Settings" [ref=f6e1122]:
+            - generic [ref=f6e1123]:
+              - generic [ref=f6e1124]: RAG Settings
+              - button "Close settings panel" [active] [ref=f6e1129] [cursor=pointer]
+            - generic [ref=f6e1133]:
+              - generic [ref=f6e1135]:
+                - text: Search Preset
+                - radiogroup "Search Preset" [ref=f6e1136]:
+                  - radio "Fast Fastest - text matching only" [ref=f6e1137] [cursor=pointer]:
+                    - generic [ref=f6e1138]: Fast
+                    - paragraph [ref=f6e1142]: Fastest - text matching only
+                  - radio "Balanced Recommended - combines text and meaning" [ref=f6e1143] [cursor=pointer]:
+                    - generic [ref=f6e1144]: Balanced
+                    - paragraph [ref=f6e1150]: Recommended - combines text and meaning
+                  - radio "Deep Deep search - more sources and verification" [ref=f6e1151] [cursor=pointer]:
+                    - generic [ref=f6e1152]: Deep
+                    - paragraph [ref=f6e1162]: Deep search - more sources and verification
+                  - radio "Custom Your custom settings" [checked] [ref=f6e1163] [cursor=pointer]:
+                    - generic [ref=f6e1164]: Custom
+                    - paragraph [ref=f6e1169]: Your custom settings
+                - generic [ref=f6e1170]:
+                  - heading "Custom Settings" [level=4] [ref=f6e1171]
+                  - list [ref=f6e1172]:
+                    - listitem [ref=f6e1173]:
+                      - generic [ref=f6e1174]: •
+                      - text: Using your custom settings
+                    - listitem [ref=f6e1175]:
+                      - generic [ref=f6e1176]: •
+                      - text: Modify below to customize
+              - generic [ref=f6e1177]:
+                - generic [ref=f6e1178]:
+                  - generic [ref=f6e1179]: Basic Mode
+                  - switch "Basic Mode" [ref=f6e1183] [cursor=pointer]
+                - paragraph [ref=f6e1185]: Common options for quick configuration
+              - generic [ref=f6e1186]:
+                - generic [ref=f6e1187]:
+                  - generic [ref=f6e1188]:
+                    - text: Search Mode
+                    - combobox [ref=f6e1189]:
+                      - option "Hybrid (Recommended)" [selected]
+                      - option "Vector Only"
+                      - option "Full-Text Only"
+                    - paragraph [ref=f6e1190]: Hybrid combines full-text and semantic search for best results
+                  - generic [ref=f6e1191]:
+                    - generic [ref=f6e1192]:
+                      - generic [ref=f6e1193]: Number of Sources
+                      - generic [ref=f6e1194]: "8"
+                    - slider [ref=f6e1195]: "8"
+                    - paragraph [ref=f6e1196]: How many documents to retrieve (5-10 for quick, 20+ for deep searches)
+                  - generic [ref=f6e1197]:
+                    - text: Search Sources
+                    - generic [ref=f6e1198]:
+                      - generic [ref=f6e1199]:
+                        - checkbox "Documents & Media" [checked] [ref=f6e1200]
+                        - generic [ref=f6e1201]: Documents & Media
+                      - generic [ref=f6e1202]:
+                        - checkbox "Notes" [checked] [ref=f6e1203]
+                        - generic [ref=f6e1204]: Notes
+                      - generic [ref=f6e1205]:
+                        - checkbox "Chats" [checked] [ref=f6e1206]
+                        - generic [ref=f6e1207]: Chats
+                      - generic [ref=f6e1208]:
+                        - checkbox "Characters" [checked] [ref=f6e1209]
+                        - generic [ref=f6e1210]: Characters
+                      - generic [ref=f6e1211]:
+                        - checkbox "Task Boards" [ref=f6e1212]
+                        - generic [ref=f6e1213]: Task Boards
+                      - generic [ref=f6e1214]:
+                        - checkbox "Prompts" [ref=f6e1215]
+                        - generic [ref=f6e1216]: Prompts
+                      - generic [ref=f6e1217]:
+                        - checkbox "World Books" [ref=f6e1218]
+                        - generic [ref=f6e1219]: World Books
+                      - generic [ref=f6e1220]:
+                        - checkbox "Dictionaries" [ref=f6e1221]
+                        - generic [ref=f6e1222]: Dictionaries
+                  - generic [ref=f6e1223]:
+                    - generic [ref=f6e1224]:
+                      - generic [ref=f6e1225]:
+                        - generic [ref=f6e1226]: Web Search Fallback
+                        - button "Web search fallback requirements" [ref=f6e1227] [cursor=pointer]
+                        - generic [ref=f6e1231]: Uses your configured server default web provider when enabled. Queries stay on your tldw server unless fallback is enabled.
+                      - switch "Web Search Fallback" [ref=f6e1232] [cursor=pointer]
+                    - paragraph [ref=f6e1234]: When local sources are weak, Knowledge QA can pull web results using your server default provider.
+                  - generic [ref=f6e1235]:
+                    - generic [ref=f6e1236]:
+                      - generic [ref=f6e1237]: Generate Answer
+                      - switch "Generate Answer" [checked] [ref=f6e1238] [cursor=pointer]
+                    - paragraph [ref=f6e1240]: Use AI to synthesize an answer from retrieved documents
+                  - generic [ref=f6e1241]:
+                    - generic [ref=f6e1242]:
+                      - generic [ref=f6e1243]: Include Citations
+                      - switch "Include Citations" [checked] [ref=f6e1244] [cursor=pointer]
+                    - paragraph [ref=f6e1246]: Add inline citations [1], [2] to reference sources
+                  - generic [ref=f6e1247]:
+                    - generic [ref=f6e1248]:
+                      - generic [ref=f6e1249]: Enable Reranking
+                      - switch "Enable Reranking" [checked] [ref=f6e1250] [cursor=pointer]
+                    - paragraph [ref=f6e1252]: Improve relevance by reranking results (slightly slower)
+                  - generic [ref=f6e1253]:
+                    - generic [ref=f6e1254]:
+                      - generic [ref=f6e1255]: Answer Length
+                      - generic [ref=f6e1256]: 800 tokens
+                    - slider [ref=f6e1257]: "800"
+                    - generic [ref=f6e1258]:
+                      - generic [ref=f6e1259]: Brief
+                      - generic [ref=f6e1260]: Detailed
+                - paragraph [ref=f6e1261]: Changes apply to your next search. Previous answers are not affected.
+            - generic [ref=f6e1262]:
+              - button "Reset to Balanced Defaults" [ref=f6e1263] [cursor=pointer]
+              - button "Done" [ref=f6e1267] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f6e489] [cursor=pointer]
+  - alert [ref=f6e493]: Knowledge | tldw
+  - status "Ingest progress" [ref=f6e494]:
+    - generic [ref=f6e495]:
+      - generic [ref=f6e496]: Ingesting 0/1
+      - paragraph [ref=f6e501]: Waiting for server results. Open the wizard to see elapsed time.
+      - generic [ref=f6e502]:
+        - progressbar "Finished items" [ref=f6e503]
+        - button "Open ingest wizard" [ref=f6e504] [cursor=pointer]: Open
+```

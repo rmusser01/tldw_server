@@ -18,24 +18,26 @@
 
 ## Cycle 5 fresh workflow run — in progress
 
-Frozen product`ab527eb3b4`, with documentation-only checkpoints`a325e01010`/`9909c4e19f`. [Controller evidence](../../output/playwright/cycle5-full-uat-2026-09-16/controller/README.md). Single-user uses visible setup; multi-user uses documented operator provider configuration and one API restart. Neither mode certifies installing dependencies on a clean machine. One new P3 navigation finding126 is confirmed at08:23UTC; remaining workflows continue without source changes.
+Frozen product`ab527eb3b4`, with subsequent documentation-only checkpoints. [Controller evidence](../../output/playwright/cycle5-full-uat-2026-09-16/controller/README.md). Single-user uses visible setup; multi-user uses documented operator provider configuration and one API restart. Neither mode certifies installing dependencies on a clean machine. Four findings126–129 are confirmed by08:37UTC (one P3/three P2); remaining workflows continue without source changes. Prompt collections fails authentication129 while Prompt sync itself succeeds.
 
 | Workflow | Single-user | Multi-user |
 |---|---|---|
 |Fresh setup/provider/first ordinary Chat|PASS: real setup and first ordinary Chat without API restart|PASS with operator setup adaptation; admin CLI, Alice/Bob created through UI|
 |Auth/reload/offline/reconnect/expiry|Pending remaining controls|Natural expiry underway in separate Alice context; return after08:39:10UTC|
 |Two-turn saved Chat/reload and failed Retry|Two-turn/canonical reload PASS; failed Retry pending|Two-turn/canonical reload PASS; failed Retry pending|
-|Public file/chunks/search/cited QA/source Chat|Pending|Pending|
+|Public file/chunks/search/cited QA/source Chat|Chunk-only ingestion terminal PASS; saved source/chunk inspected; QA/source Chat pending|FAIL at terminal ingest UI127; explicit continuation through Media confirms source/search/chunks and useful cited QA with actual source preview/Open in Media; source Chat pending|
 |Exact Wikipedia journey|Pending|Pending|
 |Biology Note/five generated cards/study|Functional PASS: five grounded cards, five distinct reviews, completed session1/count5 independently confirmed; reload opens wrong tab126, reselection retains completion|PASS: five grounded cards, five distinct reviews, completed session1/count5 and reload|
 |Saved pirate Prompt applied to Chat|Pending|Pending|
 |Character creation/replacement/complete-v2/reload|Pending|Pending|
-|Chat→Note/backlink; Chat→card/Study/mixed counts|Note/backlink PASS; reviewed Chat card saved; Study pending|In progress|
-|Media analysis/Review/reanalysis/reload/failure|Pending|Pending|
-|Permission-aware soft delete/Trash/restore|Pending|Pending|
+|Chat→Note/backlink; Chat→card/Study/mixed counts|Note/backlink and separate Chat card Study PASS; practice-only schedule unchanged PASS; scheduled Cram/re-rate completion FAIL128; manual End not verified|Note/backlink PASS; remaining Study controls pending|
+|Media analysis/Review/reanalysis/reload/failure|First explicit real analysis PASS, correct three facts; remaining controls pending|Pending|
+|Permission-aware soft delete/Trash/restore|Sole-item Delete→empty list→dated Trash→Restore exact source PASS|Ordinary-user Delete disabled with guidance; admin controls pending|
 |Reciprocal account isolation|Single identity only; multi controls cover reciprocal behavior|Pending|
 
 Known limits remain explicit: real vision inference unavailable; native hidden-tab notification verification unavailable after prior tool attempts; no optional subsystem certification. Existing pre-key setup warnings, delayed first-use Notes tour and hover-replaced action controls are documented as context/harness observations. No product repairs occur during this frozen run.
+
+Cycle5 keyboard acceptance closes UAT112: actual Tab traversal focused the named Create Flashcard button; Enter opened its form and Cancel closed it without a new card. Captures099–101 supplement prior busy/completed accessibility-tree checks. This is bounded keyboard/AX evidence, not an audible screen-reader or complete keyboard-only journey certification.
 
 ### UAT-126 — P3: Flashcards tab selection leaves a stale route on reload
 
@@ -43,6 +45,27 @@ Known limits remain explicit: real vision inference unavailable; native hidden-t
 - Expected: the route reflects the selected workspace, so ordinary reload returns to Study. Saved cards and review events remain intact; this is navigation UX, not data loss.
 - Read-only source confirmation: `FlashcardsManager` reads the tab query on mount, but `handleTabChange` updates only local state. Preserve private generation handoffs, owned deck/quiz context and Scheduler dirty-state confirmation in the later repair.
 - Status: open, TASK13260.66. Native captures074/075/078/079 under the cycle5 single evidence prefix; independent controller API reads confirm session1 completed/cards_reviewed5 and all five cards at repetitions1/version2. No repair during the frozen matrix.
+
+### UAT-127 — P2: completed ingestion remains stuck on Processing after resume
+
+- Multi-user Alice submitted one public Aurora file. Actual Minimize closed the dialog, Notes navigation worked, and reopening resumed the same job2/owner2 without another POST. These modal-dismissal behaviors now pass.
+- Canonical job GET200 at08:28:00 reports completion at08:23:07, progress100, resultWarning and persisted Media1/UUID`bf70d305-27ae-42f9-9c85-1b733c3ab0e9`. The warning truthfully reports truncated analysis. More than26seconds after that response, the UI still shows Processing0/1, Results disabled and elapsed6:18; ordinary reload retains the stale state.
+- Expected: project the completed result and analysis warning, allow opening the saved source, and free the wizard for another ingestion. Continuing via the actual Media listing is an explicit adaptation; it does not pass this failed journey boundary.
+- Evidence: multi`ingest-resume-terminal.txt`, `ingest-settled.txt/png`; root independently inspected the payload and screenshot. Source/search/chunk inspection and a separate useful cited QA succeed. Status: open, TASK13260.67; read-only diagnosis during freeze. TASK13260.45 remains open for its terminal-resume acceptance.
+
+### UAT-128 — P2: scheduled Cram completes while its own progress says cards remain
+
+- After the successful five-card Biology and separate one-card Chat sessions, six saved cards were available in Cram. One practice-only rating left scheduling unchanged. The user then enabled Update schedule, rated DNA Good and bones Good, selected Re-rate, and rated bones Hard. The API accepted all three scheduled reviews and automatically completed session3.
+- Settled Study shows both “3 cards remaining, 3 reviewed” and “Cram session complete! You reached the end of your cram queue.” Expected: all intended cards remain reachable, and progress/completion agree.
+- Actual Re-rate is another scheduling event, not server Undo. The later End observer was interrupted by harness navigation, and the control was absent on return; no manual-End pass is claimed. The original Biology/Chat completion evidence remains intact.
+- Evidence: single086–098 and104–107 preserve chronology, ratings and final contradiction. Read-only source hypothesis: scheduled ratings refetch a queue sorted by changing due dates while progression uses an index into that order; a re-rated card can move to the end. A focused regression must confirm the cause after freeze. Status: open, TASK13260.68.
+
+### UAT-129 — P2: valid multi-user sessions cannot load Prompt collections
+
+- Alice repeatedly receives GET`/api/v1/prompts/collections`401 with `Invalid authentication token`, including normal Prompts reload at08:29:03. Ordinary authenticated Notes, Chat and QA succeed; a saved Prompt remains Synced#1 across reload. This finding concerns collections access, not proven Prompt save loss.
+- Read-only source identifies conflicting mode precedence: `prompts._is_single_user_auth_mode` returns true for legacy `settings.SINGLE_USER_MODE` before consulting AuthNZ. The legacy flag derives from `APP_MODE`, whose default is single. The actual fresh profile sets canonical `AUTH_MODE=multi_user` with `APP_MODE` unset. No environment workaround was applied.
+- Expected: configured AuthNZ mode consistently governs valid JWT and single-user API-key authentication, with existing invalid-token and admin controls retained. Confirm this diagnosis with a focused authentication regression after freeze.
+- Evidence: multi`prompt-collections-reload.txt` and controller`multi-auth-mode-observation.json` (only nonsecret mode fields). Status: open, TASK13260.69.
 
 ## Cycle 4 running findings — 2026-09-16 UTC
 

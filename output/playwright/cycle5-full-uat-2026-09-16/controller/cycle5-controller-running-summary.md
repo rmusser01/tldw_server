@@ -16,3 +16,11 @@ Harness observations: hover replaces Chat actionchip with actiontoolbar, requiri
 Native114 hidden-tab notification check remains unavailable after prior documented tool attempts; automated regression evidence retained. Optional speech/MCP/evaluations/watchlists are not certified. Exact Wikipedia must be attempted without substitution or denial bypass.
 
 Prior-cycle resource cleanup: after PID/command/port verification, root sent SIGTERM only to completed cycle4 API18301 PID76485, API18402 PID81392 and Next18482 CLI12027/listener12030. Data/config/browser evidence retained. Freshcycle5 APIs18500/18501 and all unrelated runtimes remain unchanged.
+
+##08:38UTC checkpoint
+
+Both Biology five-card generation/save/distinct-review journeys completed and ordinary Chat/Note backlinks pass. Single Chat card review completed separately; practice-only rating left schedule unchanged. Single public-file chunk-only ingestion completed in3seconds, and sole-item Delete/emptylist/Trash/Restore retained exactsource; first explicit Media analysis returned allthreefacts. Multi original ingestion persisted its source with a truthful truncated-analysis Warning but terminal UI remains stuck: UAT127. Explicit continuation through Media confirms source/search/chunks, cited QA and useful sourceChat, without claiming the failed wizard boundary passes.
+
+New open findings/tasks:126 stale Flashcards tabURL/13260.66;127 completed ingest Processing/67;128 scheduled Cram prematurecompletion andcontradictorycounts/68;129 Prompt collections401 under canonicalmulti-user/69. Read-only cause/design work proceeds while source remainsab527. Ingest StrictMode cleanup/signature race is an independently identified hypothesis awaiting a temporary probe. Prompt legacyAPP_MODE precedence conflicts with AUTH_MODEmulti_user; actualmodefields safely captured. Cram ratings refresh due-sortedqueue while index-basedprogression remains, pendingregressionproof.
+
+UAT112 nativekeyboard acceptance now passes actualTab→namedCreateFlashcard→Enter→form→Cancel (single099-101); task52Done, with boundedAX/keyboard scope explicitly stated. Minimize104 modal/navigation/samejob/noPOST passes bothmodes, but task45 remainsopen for terminalresume criterion due127. Root visuallyinspected127 screenshot and canonicaljobpayload. gitdiff ab527 -- apps tldw_Server_API remains empty.

@@ -1,0 +1,232 @@
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - generic [ref=f3e4]:
+      - link "Skip to main content" [ref=f3e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f3e6]:
+        - button "Expand sidebar" [ref=f3e7] [cursor=pointer]
+        - button "New Chat" [ref=f3e11] [cursor=pointer]
+        - generic [ref=f3e14]:
+          - button "Quick Ingest" [ref=f3e15] [cursor=pointer]
+          - button "Chat" [ref=f3e19] [cursor=pointer]
+          - button "Prompts" [ref=f3e22] [cursor=pointer]
+          - button "Characters" [ref=f3e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f3e31] [cursor=pointer]
+          - button "World Books" [ref=f3e35] [cursor=pointer]
+          - button "Notes" [ref=f3e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f3e42] [cursor=pointer]
+          - button "Media" [ref=f3e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f3e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f3e59] [cursor=pointer]
+          - button "Kanban" [ref=f3e65] [cursor=pointer]
+          - button "Watchlists" [ref=f3e67] [cursor=pointer]
+        - generic [ref=f3e72]:
+          - button "Open Notes Dock" [ref=f3e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f3e78] [cursor=pointer]
+          - button "Settings" [ref=f3e81] [cursor=pointer]
+      - main [ref=f3e85]:
+        - generic [ref=f3e86]:
+          - generic [ref=f3e89]:
+            - generic [ref=f3e90]:
+              - button "Expand sidebar" [ref=f3e91] [cursor=pointer]
+              - generic [ref=f3e93]:
+                - img "tldw Assistant" [ref=f3e94]
+                - generic [ref=f3e95]: tldw Assistant
+                - button "Companion Home" [ref=f3e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f3e100] [cursor=pointer]
+            - generic [ref=f3e103]:
+              - button "Search - Open command palette" [ref=f3e104] [cursor=pointer]:
+                - generic [ref=f3e108]: Search
+                - generic [ref=f3e109]: ⌘K
+              - button "Open settings" [ref=f3e110] [cursor=pointer]
+              - generic [ref=f3e122]:
+                - button "Notifications, 0 unread" [ref=f3e123] [cursor=pointer]
+                - status [ref=f3e127]: Notifications are active
+              - button "Switch to light theme" [ref=f3e128] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f3e135] [cursor=pointer]:
+                - generic [ref=f3e136]: "?"
+          - generic [ref=f3e138]:
+            - generic [ref=f3e140]:
+              - generic [ref=f3e142]:
+                - generic [ref=f3e143]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f3e144]
+              - navigation "Flashcards modes" [ref=f3e145]:
+                - generic [ref=f3e146]: Study
+                - generic [ref=f3e147]: Manage
+                - generic [ref=f3e148]: Import / Export
+                - generic [ref=f3e149]: Templates
+                - generic [ref=f3e150]: Scheduler
+            - generic [ref=f3e153]:
+              - tablist [ref=f3e154]:
+                - generic [ref=f3e156]:
+                  - tab "Study" [selected] [ref=f3e158] [cursor=pointer]
+                  - tab "Manage" [ref=f3e160] [cursor=pointer]
+                  - tab "Import / Export" [ref=f3e162] [cursor=pointer]
+                  - tab "Templates" [ref=f3e164] [cursor=pointer]
+                  - tab "Scheduler" [ref=f3e166] [cursor=pointer]
+                - generic [ref=f3e168]:
+                  - button "Test with Quiz" [disabled] [ref=f3e170]
+                  - button "Keyboard Shortcuts" [ref=f3e171] [cursor=pointer]
+              - generic [ref=f3e177]:
+                - tabpanel "Study" [ref=f3e466]:
+                  - generic [ref=f3e467]:
+                    - generic [ref=f3e468]:
+                      - generic [ref=f3e469] [cursor=pointer]:
+                        - generic [ref=f3e470]:
+                          - generic: Select deck
+                          - combobox [ref=f3e471]
+                        - img "down" [ref=f3e473]
+                      - radiogroup "segmented control" [ref=f3e476]:
+                        - generic [ref=f3e477]:
+                          - generic [ref=f3e478] [cursor=pointer]:
+                            - radio "Due only"
+                            - generic "Due only" [ref=f3e479]
+                          - generic [ref=f3e480] [cursor=pointer]:
+                            - radio "Cram" [checked]
+                            - generic "Cram" [ref=f3e481]
+                      - radiogroup "segmented control" [ref=f3e482]:
+                        - generic [ref=f3e483]:
+                          - generic [ref=f3e484] [cursor=pointer]:
+                            - radio "Front first" [checked]
+                            - generic "Front first" [ref=f3e485]
+                          - generic [ref=f3e486] [cursor=pointer]:
+                            - radio "Back first"
+                            - generic "Back first" [ref=f3e487]
+                      - textbox "Filter cram by tag (optional)" [ref=f3e752]
+                      - generic [ref=f3e754]:
+                        - generic [ref=f3e755]: Update schedule
+                        - switch [checked] [ref=f3e757] [cursor=pointer]
+                    - region [ref=f3e488]:
+                      - generic [ref=f3e489]:
+                        - generic [ref=f3e495]:
+                          - strong [ref=f3e497]: Source reviews
+                          - generic [ref=f3e498]: No source reviews due
+                        - button "Schedule" [ref=f3e499] [cursor=pointer]
+                    - generic [ref=f3e556]:
+                      - generic [ref=f3e557]:
+                        - generic [ref=f3e558]:
+                          - generic [ref=f3e559]: Reviewed today
+                          - strong [ref=f3e561]: "8"
+                        - generic [ref=f3e562]:
+                          - generic [ref=f3e563]: Retention rate
+                          - strong [ref=f3e565]: 100.0%
+                        - generic [ref=f3e566]:
+                          - generic [ref=f3e567]: Lapse rate
+                          - strong [ref=f3e569]: 0.0%
+                        - generic [ref=f3e570]:
+                          - generic [ref=f3e571]: Avg answer time
+                          - strong [ref=f3e573]: 0.0s
+                        - generic [ref=f3e574]:
+                          - generic [ref=f3e575]: Study streak
+                          - strong [ref=f3e577]: 1 days
+                      - generic [ref=f3e578]:
+                        - strong [ref=f3e580]: Deck progress
+                        - generic [ref=f3e581]:
+                          - generic [ref=f3e582]:
+                            - strong [ref=f3e584]: Cycle5 Single Biology Cards
+                            - generic [ref=f3e585]:
+                              - generic [ref=f3e586]: "Total: 5"
+                              - generic [ref=f3e587]: "New: 0"
+                              - generic [ref=f3e588]: "Learning: 3"
+                              - generic [ref=f3e589]: "Due: 0"
+                              - generic [ref=f3e590]: "Mature: 0"
+                          - progressbar [ref=f3e591]
+                    - status [ref=f3e760]:
+                      - generic [ref=f3e761]: "4 cards remaining, 2 reviewed, Available now: 6"
+                      - generic [ref=f3e762]:
+                        - generic [aria-hidden] [ref=f3e763]: Study queue
+                        - generic [aria-hidden] [ref=f3e764]: "4"
+                        - generic [aria-hidden] [ref=f3e765]: cards remaining
+                      - generic [aria-hidden] [ref=f3e767]: 2 reviewed
+                      - generic [aria-hidden] [ref=f3e769]: "Available now: 6"
+                      - generic [aria-hidden] [ref=f3e771]: ~1 min left
+                    - generic [ref=f3e774]:
+                      - generic [ref=f3e776]:
+                        - generic [ref=f3e777]: Standard
+                        - generic [ref=f3e778]: Learning
+                        - 'link "Note #5923db59-da1d-4977-a2db-876884cd91f5" [ref=f3e781] [cursor=pointer]':
+                          - /url: /notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+                        - button "Edit card (E)" [ref=f3e782] [cursor=pointer]:
+                          - generic [ref=f3e783]: Edit
+                      - generic [ref=f3e784]:
+                        - heading "Front" [level=5] [ref=f3e785]
+                        - paragraph [ref=f3e842]: How many bones does the human body have?
+                      - generic [ref=f3e843]:
+                        - heading "Back" [level=5] [ref=f3e844]
+                        - paragraph [ref=f3e847]: The human body has 206 bones.
+                      - button "Need help?" [ref=f3e791] [cursor=pointer]
+                      - button "End Session" [ref=f3e824] [cursor=pointer]
+                      - generic [ref=f3e848]:
+                        - generic [ref=f3e849]: Rate
+                        - group "Rating options" [ref=f3e850]:
+                          - 'button "Again: I didn’t remember this card. Press 1" [ref=f3e851] [cursor=pointer]':
+                            - generic [ref=f3e852]:
+                              - generic [ref=f3e856]:
+                                - text: Again
+                                - generic [ref=f3e857]: "1"
+                              - generic [ref=f3e858]: < 1 min
+                          - 'button "Hard: I barely remembered; it felt difficult. Press 2" [ref=f3e859] [cursor=pointer]':
+                            - generic [ref=f3e860]:
+                              - generic [ref=f3e862]:
+                                - text: Hard
+                                - generic [ref=f3e863]: "2"
+                              - generic [ref=f3e864]: 1 day
+                          - 'button "Good: I remembered with a bit of effort. Press 3" [ref=f3e865] [cursor=pointer]':
+                            - generic [ref=f3e866]:
+                              - generic [ref=f3e869]:
+                                - text: Good
+                                - generic [ref=f3e870]: "3"
+                              - generic [ref=f3e871]: 6 days
+                          - 'button "Easy: I recalled it quickly and confidently. Press 4" [ref=f3e872] [cursor=pointer]':
+                            - generic [ref=f3e873]:
+                              - generic [ref=f3e876]:
+                                - text: Easy
+                                - generic [ref=f3e877]: "4"
+                              - generic [ref=f3e878]: 8 days
+                        - generic [ref=f3e879]: Again = shortest gap, Hard = short gap, Good = medium gap, Easy = longest gap.
+                        - button "Why these ratings?" [ref=f3e880] [cursor=pointer]
+                        - generic [ref=f3e882]:
+                          - generic [ref=f3e883]: 1-4 Rate
+                          - generic [ref=f3e884]: E Edit
+                          - generic [ref=f3e885]: Ctrl+Z Re-rate
+                          - button "Compact hints" [ref=f3e886] [cursor=pointer]
+                    - generic [ref=f3e614]:
+                      - generic [ref=f3e615]: Recent study sessions
+                      - list "Recent study sessions" [ref=f3e619]:
+                        - listitem [ref=f3e727]:
+                          - generic [ref=f3e728]:
+                            - generic [ref=f3e729]:
+                              - strong [ref=f3e731]: All decks
+                              - button "View completed session" [ref=f3e806] [cursor=pointer]
+                            - generic [ref=f3e734]:
+                              - generic [ref=f3e735]: Completed
+                              - generic [ref=f3e736]: Due review
+                              - generic [ref=f3e737]: 1 card reviewed
+                            - generic [ref=f3e738]: Completed 2026-09-16 01:21
+                        - listitem [ref=f3e620]:
+                          - generic [ref=f3e621]:
+                            - generic [ref=f3e622]:
+                              - strong [ref=f3e624]: Cycle5 Single Biology Cards
+                              - button "View completed session" [ref=f3e625] [cursor=pointer]
+                            - generic [ref=f3e627]:
+                              - generic [ref=f3e628]: Completed
+                              - generic [ref=f3e629]: Due review
+                              - generic [ref=f3e630]: 5 cards reviewed
+                            - generic [ref=f3e631]: Completed 2026-09-16 01:19
+                - text: ": : : : : : : : : : : : : : :"
+    - generic:
+      - generic:
+        - generic [ref=f3e889]:
+          - img "check-circle" [ref=f3e890]
+          - generic [ref=f3e893]: "Saved. Next review in a day (next review gap: 1 day)."
+        - generic [ref=f3e895]:
+          - img "info-circle" [ref=f3e896]
+          - generic [ref=f3e899]: Rate this card again to update your response
+  - button "Open Next.js Dev Tools" [ref=f3e461] [cursor=pointer]
+  - alert [ref=f3e465]
+```

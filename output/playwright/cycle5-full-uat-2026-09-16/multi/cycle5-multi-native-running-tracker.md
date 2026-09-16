@@ -7,10 +7,10 @@ Frozen source ab527eb3b4. Fresh runtime/API18501/UI18581; existing dependencies 
 |1|Fresh setup/provider/firstChat|Pass — operator adaptation|
 |2|Auth/reload/logout/offline/reconnect/naturalexpiry|In progress — expiry return after08:39:10Z|
 |3|Ordinary2turns/reload/failedRetry|Partial — two turns/reload passed; Retry pending|
-|4|Publicfile→QA/citations/sourceChat|Pending|
+|4|Publicfile→QA/citations/sourceChat|Fail — completed job remains Processing; independent source QA continuing|
 |5|ExactWikipedia→search→Chat|Pending|
 |6|BiologyNote→5cards→5distinctreviews|Pass|
-|7|PiratePrompt→actualChat|Pending|
+|7|PiratePrompt→actualChat|Partial — saved/reloaded Synced#1; collections401; generation pending|
 |8|Charactercontext/reply/canonicalreload|Pending|
 |9|ChatNote/backlink/CardStudy|Partial — Note/backlink pass; Card pending|
 |10|Mediaanalysis/reanalysis/Review|Pending|
@@ -51,3 +51,15 @@ No inference yet. Tokenexpiry timer not yet started. All actual findings/artifac
 - Root9099lease released aftergenerationterminal beforestudy. Artifactsbiology-generate-wire,biology-save-wire,study-review1,study-reviews2-5,study-complete.
 
 08:21UTC BiologyreloadPASS: Reviewedtoday5,New0,nextreview4days,session1Completed5. Publicingestconfigured; awaitinglease.
+
+##08:23UTC real multi Minimize
+- IngestPOST200 createdjob2(uuid8bc86fde-d73f-42ce-b03b-6505670466e2),batchcf5e70fb-6325-4340-92ef-f6f0258c3740. Public964Bfixture,Analyze+Chunk,llama.cpp.
+- Processing→Minimize08:22:29 closesdialog(count0)→actualNotesnavigation→Openingestwizard restoresjob2processing/owner2. ResumeobservernewIngestSubmissions[]; no duplicatePOST. Samefile/source/elapsed0:49 shown. Retainedsnapshots/wire/screenshots. Terminalpending,9099leaseheld.
+
+##08:28UTC new native ingest terminal reconciliation failure
+- Canonicaljob2GET200at08:28:00.480 reportscompleted08:23:07,progress100,resultWarning,ownmediaID1/UUIDbf70d305-27ae-42f9-9c85-1b733c3ab0e9. Analysiswarningtruncated; rawsourcepersisted/chunkedsemantic900/120.
+- ResumedUIafter26+s remainsProcessing0/1,Resultsdisabled,elapsed6:18; no savedWarninggroup orOpenMedia. Rootnotifiedimmediately; no resubmit/cancel/productedits. Row4failsatUIterminalboundary; sourcecanbeexaminedviaMediaasexplicitcontinuation, notfulljourneypass.
+- Exactsafeartifactcycle5-multi-native-ingest-resume-terminal.txt;settled.txt/.png. Sole9099leasereleasedaftercanonicalterminalverified.
+- PromptcollectionsGET401twicewhileAliceNotes/Chatsucceeded; PromptsaveUIreportsAdded+Synced#1. Investigatingboundedcanonicalerror/reload, notassuminggeneralsavefailure.
+
+08:33UTC AuroraMediaactualinspectionandfulltextsearchPASS afterexplicitcontinuation: source148words/963chars/2chunks,Noanalysisyet. OrdinaryDelete disabled+permissionguidance. QAonequeryleased: Documents&Mediaonly/specificmedia1,GenerateAnswer+IncludeCitationson,Hybrid/800tokens/exactGemma. StaleingestprogresscardinterceptedQAsettingsDone; Escapeclosednormally. Noextra submission.

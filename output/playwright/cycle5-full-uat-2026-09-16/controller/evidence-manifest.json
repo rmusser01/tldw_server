@@ -1,6 +1,6 @@
 {
   "mode": "controller",
-  "retainedAt": "2026-09-16T08:23:41.859Z",
+  "retainedAt": "2026-09-16T08:38:53.596Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
@@ -8,6 +8,11 @@
       "file": "cycle5-controller-api-read.mjs",
       "bytes": 1106,
       "sha256": "033ff094f24663d916b186b9b788bd81b2f4d09aae9a127bf6c51e69bc2e358a"
+    },
+    {
+      "file": "cycle5-controller-inference-slot-observation.json",
+      "bytes": 189,
+      "sha256": "161c72625b927c0c822b40c2bdf0b34352a5c6bf2828776fcf1966b4d4e85c6d"
     },
     {
       "file": "cycle5-controller-initial-independent-audit.md",
@@ -20,9 +25,24 @@
       "sha256": "9bc19811ab8de3b85c4197189989003f755cac93537fc418acbaf6c3f174db43"
     },
     {
+      "file": "cycle5-controller-multi-auth-mode-observation.json",
+      "bytes": 161,
+      "sha256": "4ea1bdacdc5ee2ec885a577346b1e6f6dbd089f5db263c9a5243bfc53d3f7618"
+    },
+    {
+      "file": "cycle5-controller-multi-job2-processing-log.txt",
+      "bytes": 10511,
+      "sha256": "c7433c32801883ffa983cc0bb2e7c144be21594ca41e2db961e42dff8d36c61d"
+    },
+    {
+      "file": "cycle5-controller-multi-job2-scoped-log.txt",
+      "bytes": 9251,
+      "sha256": "e12086b86a0fc0a43f3603a9d19adae04f7a58320389aa267df6e8a289b3cfe1"
+    },
+    {
       "file": "cycle5-controller-running-summary.md",
-      "bytes": 3021,
-      "sha256": "b3d67ce8aff728c972bbe1d66b4e82645aa1e9144e26a752d6610fd946550852"
+      "bytes": 4724,
+      "sha256": "d1418560eb59881673f76f9e45893315215e732b5f25f16fb5fa6ca4b612596e"
     },
     {
       "file": "cycle5-controller-single-biology-cards-post-review.json",
@@ -53,6 +73,11 @@
       "file": "cycle5-controller-task-closure-audit.md",
       "bytes": 13204,
       "sha256": "f5607da919c3a692921993acbc3eee6ff9daadd0f8b5efc85a18ff7cd25042bb"
+    },
+    {
+      "file": "cycle5-controller-uat126-design-notes.md",
+      "bytes": 11681,
+      "sha256": "03068fbc3bff2961390c9af4bb3ee5d9b053ce79ac697dd36a8d5a388fd92021"
     }
   ]
 }

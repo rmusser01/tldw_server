@@ -1,0 +1,11 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Open cycle5-single-native-' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-33-42-475Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L78-L80

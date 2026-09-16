@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-16T08:25:31.771Z",
+  "status": 200,
+  "slots": [
+    {
+      "id": 0,
+      "is_processing": false,
+      "n_ctx": 64000,
+      "n_prompt_tokens": 268
+    }
+  ]
+}

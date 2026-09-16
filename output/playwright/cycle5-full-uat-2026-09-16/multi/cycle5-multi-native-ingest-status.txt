@@ -1,0 +1,278 @@
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [ref=f5e1]:
+  - generic [ref=f5e4]:
+    - link "Skip to main content" [ref=f5e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f5e6]:
+      - button "Expand sidebar" [ref=f5e7] [cursor=pointer]
+      - button "New Chat" [ref=f5e11] [cursor=pointer]
+      - generic [ref=f5e14]:
+        - button "Quick Ingest" [ref=f5e15] [cursor=pointer]
+        - button "Chat" [ref=f5e19] [cursor=pointer]
+        - button "Prompts" [ref=f5e22] [cursor=pointer]
+        - button "Characters" [ref=f5e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f5e31] [cursor=pointer]
+        - button "World Books" [ref=f5e35] [cursor=pointer]
+        - button "Notes" [ref=f5e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f5e42] [cursor=pointer]
+        - button "Media" [ref=f5e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f5e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f5e59] [cursor=pointer]
+        - button "Kanban" [ref=f5e65] [cursor=pointer]
+        - button "Watchlists" [ref=f5e67] [cursor=pointer]
+      - generic [ref=f5e72]:
+        - button "Open Notes Dock" [ref=f5e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f5e78] [cursor=pointer]
+        - button "Settings" [ref=f5e81] [cursor=pointer]
+    - main [ref=f5e85]:
+      - generic [ref=f5e86]:
+        - generic [ref=f5e89]:
+          - generic [ref=f5e90]:
+            - button "Expand sidebar" [ref=f5e91] [cursor=pointer]
+            - generic [ref=f5e93]:
+              - img "tldw Assistant" [ref=f5e94]
+              - generic [ref=f5e95]: tldw Assistant
+              - button "Companion Home" [ref=f5e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f5e100] [cursor=pointer]
+          - generic [ref=f5e103]:
+            - button "Search - Open command palette" [ref=f5e104] [cursor=pointer]:
+              - generic [ref=f5e108]: Search
+              - generic [ref=f5e109]: ⌘K
+            - button "Open settings" [ref=f5e110] [cursor=pointer]
+            - generic [ref=f5e122]:
+              - button "Notifications, 0 unread" [ref=f5e123] [cursor=pointer]
+              - status [ref=f5e127]: Notifications are active
+            - button "Switch to light theme" [ref=f5e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f5e135] [cursor=pointer]:
+              - generic [ref=f5e136]: "?"
+        - generic [ref=f5e672]:
+          - link "Skip to notes list" [ref=f5e673] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f5e674] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f5e675]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f5e676]:
+            - generic [ref=f5e677]:
+              - generic [ref=f5e678]:
+                - generic [ref=f5e679]:
+                  - generic [ref=f5e680]:
+                    - generic [ref=f5e681]: Notes
+                    - generic [ref=f5e682]: 2 total
+                  - button "New note" [ref=f5e683] [cursor=pointer]
+                - generic [ref=f5e686]:
+                  - generic [ref=f5e687]:
+                    - button "Views" [expanded] [ref=f5e689] [cursor=pointer]
+                    - generic [ref=f5e694]:
+                      - generic [ref=f5e695]:
+                        - button "Notes" [ref=f5e696] [cursor=pointer]
+                        - button "Trash" [ref=f5e698] [cursor=pointer]
+                      - generic [ref=f5e700]:
+                        - button "List" [ref=f5e701] [cursor=pointer]
+                        - button "Timeline" [ref=f5e703] [cursor=pointer]
+                        - button "Inbox" [ref=f5e705] [cursor=pointer]
+                        - button "Collection" [ref=f5e707] [cursor=pointer]
+                        - button "Graph" [ref=f5e709] [cursor=pointer]
+                      - generic [ref=f5e718]:
+                        - button "Organize" [ref=f5e719] [cursor=pointer]
+                        - button "Organize help" [ref=f5e725] [cursor=pointer]:
+                          - img "question-circle" [ref=f5e726]
+                  - generic [ref=f5e730]:
+                    - textbox "Search notes" [ref=f5e737]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f5e739] [cursor=pointer]:
+                      - generic [ref=f5e740]:
+                        - generic "Date modified (newest first)" [ref=f5e741]
+                        - combobox "Sort notes" [ref=f5e742]
+                      - img "down" [ref=f5e744]
+                  - generic [ref=f5e747]:
+                    - button "Filters" [expanded] [ref=f5e749] [cursor=pointer]
+                    - generic [ref=f5e754]:
+                      - generic [ref=f5e755]:
+                        - button "Captured" [ref=f5e756] [cursor=pointer]
+                        - button "Search tips" [ref=f5e758] [cursor=pointer]
+                      - generic [ref=f5e760]:
+                        - generic [ref=f5e761]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f5e763]
+                        - img "down" [ref=f5e765]
+                      - generic [ref=f5e768]:
+                        - generic [ref=f5e769]:
+                          - button "Browse tags" [ref=f5e770] [cursor=pointer]
+                          - button "Tags help" [ref=f5e772] [cursor=pointer]:
+                            - img "question-circle" [ref=f5e773]
+                        - generic [ref=f5e777]: 3 available
+                      - generic [ref=f5e778]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f5e779]:
+                    - generic [ref=f5e780]: Recent notes
+                    - generic [ref=f5e781]:
+                      - button "Cycle5 Alice Biology five facts" [ref=f5e782] [cursor=pointer]
+                      - 'button "Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=f5e783] [cursor=pointer]'
+              - generic [ref=f5e785]:
+                - generic [ref=f5e787]:
+                  - generic [ref=f5e788]: Results
+                  - generic [ref=f5e789]:
+                    - button "Import" [ref=f5e790] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f5e792]
+                    - button "Export" [ref=f5e794] [cursor=pointer]
+                - list "Notes" [ref=f5e797]:
+                  - listitem [ref=f5e798]:
+                    - generic [ref=f5e799]:
+                      - checkbox "Select note Cycle5 Alice Biology five facts for bulk actions" [ref=f5e800]
+                      - button "Pin note Cycle5 Alice Biology five facts" [ref=f5e801] [cursor=pointer]
+                      - button "Open note Cycle5 Alice Biology five facts" [ref=f5e804] [cursor=pointer]:
+                        - generic [ref=f5e805]:
+                          - generic [ref=f5e806]: Cycle5 Alice Biology five facts
+                          - generic [ref=f5e812]: The mitochondria is the powerhouse of the cell.
+                          - generic [ref=f5e813]: 9/16/2026, 1:15:17 AM
+                  - listitem [ref=f5e814]:
+                    - generic [ref=f5e815]:
+                      - 'checkbox "Select note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns for bulk actions" [ref=f5e816]'
+                      - 'button "Pin note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=f5e817] [cursor=pointer]'
+                      - 'button "Open note Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=f5e820] [cursor=pointer]':
+                        - generic [ref=f5e821]:
+                          - generic [ref=f5e822]: "Snippet: Cycle5 multi memory check: the fictional Aurora station stores 23 amber..."
+                          - generic [ref=f5e831]: Aurora station stores 23 amber lanterns.
+                          - generic [ref=f5e832]: "Linked to conversation: 5f8b18e3-fb4e-481c-b32d-1fbf9aaf4b85 · msg c127e13a-3638-4bf3-b61d-2527516a091b"
+                          - generic [ref=f5e833]: 9/16/2026, 1:13:08 AM
+                - generic [ref=f5e835]:
+                  - generic [ref=f5e836]: Showing 1-2 of 2
+                  - list [ref=f5e837]:
+                    - listitem "Previous Page" [ref=f5e838]:
+                      - button [disabled] [ref=f5e839]:
+                        - img "left" [ref=f5e840]
+                    - listitem "1" [ref=f5e843] [cursor=pointer]
+                    - listitem "Next Page" [ref=f5e845]:
+                      - button [disabled] [ref=f5e846]:
+                        - img "right" [ref=f5e847]
+                    - listitem [ref=f5e850]:
+                      - generic [ref=f5e851]:
+                        - generic [ref=f5e852]:
+                          - generic "20 / page" [ref=f5e853]
+                          - combobox "Page Size" [ref=f5e854]
+                        - img "down" [ref=f5e856]
+          - button "Collapse sidebar" [ref=f5e859] [cursor=pointer]
+          - region "Note editor" [ref=f5e863]:
+            - generic [ref=f5e864]:
+              - generic [ref=f5e866]:
+                - heading "New note" [level=5] [ref=f5e867]
+                - status [ref=f5e868]: No server save status yet
+              - generic [ref=f5e869]:
+                - button "Save note" [disabled] [ref=f5e870]:
+                  - generic: Save
+                - button "Save and start another note" [disabled] [ref=f5e871]:
+                  - generic: Save & new
+                - group "Editor mode" [ref=f5e872]:
+                  - button "Edit" [pressed] [ref=f5e873] [cursor=pointer]
+                  - button "Split" [ref=f5e878] [cursor=pointer]
+                  - button "Preview" [ref=f5e883] [cursor=pointer]
+                - button "Create study pack" [disabled] [ref=f5e889]
+                - button "More actions" [ref=f5e890] [cursor=pointer]
+            - generic [ref=f5e896]:
+              - generic [ref=f5e897]:
+                - generic [ref=f5e898]: Select or create a note
+                - generic [ref=f5e899]: Choose a note from the list to start editing, or create a new one.
+                - button "Create note" [ref=f5e900] [cursor=pointer]
+                - generic [ref=f5e902]: "Tip: Type [[ in a note to link to another note."
+              - generic [ref=f5e903]:
+                - textbox "Note title" [ref=f5e904]:
+                  - /placeholder: Title
+                - button "Generate title from content" [disabled] [ref=f5e905]:
+                  - generic: Generate title
+                - button "Keyboard shortcuts" [ref=f5e906] [cursor=pointer]
+              - generic [ref=f5e909]:
+                - generic [ref=f5e910]:
+                  - generic: Tags
+                  - combobox "Note tags" [ref=f5e912]
+                - img "down" [ref=f5e914]
+              - generic [ref=f5e917]:
+                - group "Input mode" [ref=f5e918]:
+                  - button "Markdown" [ref=f5e919] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f5e921] [cursor=pointer]
+                - generic [ref=f5e923]: Formatting
+                - button "Bold" [ref=f5e924] [cursor=pointer]
+                - button "Italic" [ref=f5e928] [cursor=pointer]
+                - button "Heading" [ref=f5e932] [cursor=pointer]
+                - button "List" [ref=f5e936] [cursor=pointer]
+                - button "Link" [ref=f5e939] [cursor=pointer]
+                - button "Attachment" [ref=f5e944] [cursor=pointer]
+                - button "Code" [ref=f5e948] [cursor=pointer]
+                - generic [ref=f5e955]: Assist
+                - button "Summarize" [disabled] [ref=f5e956]
+                - button "Expand outline" [disabled] [ref=f5e957]
+                - button "Suggest tags" [disabled] [ref=f5e958]
+              - generic [ref=f5e960]:
+                - textbox "Note content" [ref=f5e961]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                - generic [ref=f5e962]: Markdown + LaTeX supported
+              - generic [ref=f5e963]:
+                - text: 0 words · 0 chars · 0 mins read
+                - generic [ref=f5e964]: Version pending · Not saved yet
+                - generic [ref=f5e965]: "Origin: Typed manually"
+      - generic [ref=f5e968]:
+        - dialog "Quick Ingest":
+          - generic [ref=f5e969]:
+            - button "Close" [active] [ref=f5e970] [cursor=pointer]:
+              - generic "Close" [ref=f5e971]:
+                - img "close" [ref=f5e972]
+            - generic [ref=f5e975]: Quick Ingest
+            - generic [ref=f5e977]:
+              - navigation "Ingest wizard progress" [ref=f5e978]:
+                - list [ref=f5e979]:
+                  - listitem [ref=f5e980]:
+                    - 'button "Step 1: Add (completed)" [ref=f5e981] [cursor=pointer]':
+                      - generic [ref=f5e985]: Add
+                      - generic [ref=f5e986]: 1 items
+                  - listitem [ref=f5e987]:
+                    - 'button "Step 2: Configure (completed)" [ref=f5e988] [cursor=pointer]':
+                      - generic [ref=f5e992]: Configure
+                      - generic [ref=f5e993]: Custom
+                  - listitem [ref=f5e994]:
+                    - 'button "Step 3: Review (completed)" [ref=f5e995] [cursor=pointer]':
+                      - generic [ref=f5e999]: Review
+                      - generic [ref=f5e1000]: Reviewed
+                  - listitem [ref=f5e1001]:
+                    - 'button "Step 4: Processing (current)" [disabled] [ref=f5e1002]':
+                      - generic [ref=f5e1006]: Processing
+                      - generic [ref=f5e1007]: 0/1 finished
+                  - listitem [ref=f5e1008]:
+                    - 'button "Step 5: Results" [disabled] [ref=f5e1009]':
+                      - generic [ref=f5e1013]: Results
+              - generic [ref=f5e1015]:
+                - generic [ref=f5e1016]:
+                  - heading "Processing" [level=3] [ref=f5e1017]
+                  - generic [ref=f5e1018]: 0/1 finished
+                - progressbar "Finished items" [ref=f5e1021]
+                - status [ref=f5e1022]:
+                  - generic [ref=f5e1023]: Job tracking
+                  - generic [ref=f5e1024]: 1 job
+                - status [ref=f5e1026]:
+                  - generic [ref=f5e1029]:
+                    - paragraph [ref=f5e1030]: Waiting for server results
+                    - paragraph [ref=f5e1031]: Elapsed time is shown below. Completion time depends on the content and server.
+                - list [ref=f5e1032]:
+                  - listitem [ref=f5e1033]:
+                    - generic [ref=f5e1034]:
+                      - generic [ref=f5e1039]:
+                        - generic [ref=f5e1040]:
+                          - generic "cycle5-multi-native-aurora-public.txt" [ref=f5e1041]
+                          - generic [ref=f5e1042]: Processing
+                        - progressbar "Processing cycle5-multi-native-aurora-public.txt" [ref=f5e1044]
+                      - button "Cancel cycle5-multi-native-aurora-public.txt" [ref=f5e1046] [cursor=pointer]: Cancel
+                - generic [ref=f5e1047]:
+                  - generic [ref=f5e1048]:
+                    - generic [ref=f5e1049]: "Completed: 0"
+                    - generic [ref=f5e1050]: "|"
+                    - generic [ref=f5e1051]: "Processing: 1"
+                    - generic [ref=f5e1052]: "|"
+                    - generic [ref=f5e1053]: "Queued: 0"
+                  - generic [ref=f5e1054]: "Elapsed: 2:27"
+                - generic [ref=f5e1056]:
+                  - button "Cancel All" [ref=f5e1057] [cursor=pointer]
+                  - button "Minimize to Background" [ref=f5e1058] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f5e315] [cursor=pointer]
+  - alert [ref=f5e319]: Notes | tldw
+```

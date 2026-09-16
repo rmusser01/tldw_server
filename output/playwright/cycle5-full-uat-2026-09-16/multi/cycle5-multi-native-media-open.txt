@@ -1,0 +1,178 @@
+### Page
+- Page URL: http://127.0.0.1:18581/media
+- Page Title: Media | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - generic [ref=f6e4]:
+      - link "Skip to main content" [ref=f6e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f6e6]:
+        - button "Expand sidebar" [ref=f6e7] [cursor=pointer]
+        - button "New Chat" [ref=f6e11] [cursor=pointer]
+        - generic [ref=f6e14]:
+          - button "Quick Ingest" [ref=f6e15] [cursor=pointer]
+          - button "Chat" [ref=f6e19] [cursor=pointer]
+          - button "Prompts" [ref=f6e22] [cursor=pointer]
+          - button "Characters" [ref=f6e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f6e31] [cursor=pointer]
+          - button "World Books" [ref=f6e35] [cursor=pointer]
+          - button "Notes" [ref=f6e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f6e42] [cursor=pointer]
+          - button "Media" [active] [ref=f6e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f6e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f6e59] [cursor=pointer]
+          - button "Kanban" [ref=f6e65] [cursor=pointer]
+          - button "Watchlists" [ref=f6e67] [cursor=pointer]
+        - generic [ref=f6e72]:
+          - button "Open Notes Dock" [ref=f6e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f6e78] [cursor=pointer]
+          - button "Settings" [ref=f6e81] [cursor=pointer]
+      - main [ref=f6e85]:
+        - generic [ref=f6e86]:
+          - generic [ref=f6e89]:
+            - generic [ref=f6e90]:
+              - button "Expand sidebar" [ref=f6e91] [cursor=pointer]
+              - generic [ref=f6e93]:
+                - img "tldw Assistant" [ref=f6e94]
+                - generic [ref=f6e95]: tldw Assistant
+                - button "Companion Home" [ref=f6e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f6e100] [cursor=pointer]
+            - generic [ref=f6e103]:
+              - button "Search - Open command palette" [ref=f6e104] [cursor=pointer]:
+                - generic [ref=f6e108]: Search
+                - generic [ref=f6e109]: ⌘K
+              - button "Open settings" [ref=f6e110] [cursor=pointer]
+              - generic [ref=f6e122]:
+                - button "Notifications, 0 unread" [ref=f6e123] [cursor=pointer]
+                - status [ref=f6e127]: Notifications are active
+              - button "Switch to light theme" [ref=f6e128] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f6e135] [cursor=pointer]:
+                - generic [ref=f6e136]: "?"
+          - generic [ref=f6e509]:
+            - generic [ref=f6e511]:
+              - generic [ref=f6e512]:
+                - generic [ref=f6e513]:
+                  - heading "Media Inspector" [level=1] [ref=f6e514]
+                  - generic [ref=f6e515]:
+                    - generic [ref=f6e516]: 1 / 1
+                    - button "Trash" [ref=f6e517] [cursor=pointer]
+                    - button "Bulk" [ref=f6e521] [cursor=pointer]
+                - generic [ref=f6e524]:
+                  - button "Show media only" [pressed] [ref=f6e525] [cursor=pointer]:
+                    - generic [ref=f6e526]: Media
+                    - generic [ref=f6e527]: "1"
+                  - button "Show notes only" [ref=f6e528] [cursor=pointer]:
+                    - generic [ref=f6e529]: Notes
+                    - generic [ref=f6e530]: "0"
+              - generic [ref=f6e532]:
+                - generic [ref=f6e533]:
+                  - generic [ref=f6e534]: Find media
+                  - button "Collapse find media panel" [expanded] [ref=f6e536] [cursor=pointer]
+                - generic [ref=f6e539]:
+                  - generic [ref=f6e540]:
+                    - textbox "Search media (title/content)" [ref=f6e545]
+                    - button "Search syntax help" [ref=f6e547] [cursor=pointer]: "?"
+                  - button "Search" [ref=f6e548] [cursor=pointer]
+                  - generic [ref=f6e549]:
+                    - generic [ref=f6e550]:
+                      - generic [ref=f6e551]: Filters
+                      - button "Clear all" [ref=f6e555] [cursor=pointer]
+                    - generic [ref=f6e556]:
+                      - generic [ref=f6e557]: Search mode
+                      - generic [ref=f6e558]:
+                        - button "Full-text search" [pressed] [ref=f6e559] [cursor=pointer]: Full-text
+                        - button "Metadata search" [ref=f6e560] [cursor=pointer]: Metadata
+                    - generic [ref=f6e561]:
+                      - generic [ref=f6e562]: Sort by
+                      - generic [ref=f6e563] [cursor=pointer]:
+                        - generic [ref=f6e564]:
+                          - generic "Relevance" [ref=f6e565]
+                          - combobox [ref=f6e566]
+                        - img "down" [ref=f6e568]
+                    - generic [ref=f6e571]:
+                      - generic [ref=f6e572]: Date range
+                      - generic [ref=f6e573]:
+                        - generic [ref=f6e574]:
+                          - text: Start date
+                          - textbox "Start date" [ref=f6e575]
+                        - generic [ref=f6e576]:
+                          - text: End date
+                          - textbox "End date" [ref=f6e577]
+                    - button "Advanced search" [ref=f6e579] [cursor=pointer]
+                    - generic [ref=f6e583] [cursor=pointer]:
+                      - checkbox "Favorites only" [ref=f6e584]
+                      - generic [ref=f6e587]: Favorites only
+                    - generic [ref=f6e588]:
+                      - button "Media types" [ref=f6e589] [cursor=pointer]
+                      - generic [ref=f6e595] [cursor=pointer]:
+                        - checkbox "Filter by Document" [ref=f6e596]
+                        - generic [ref=f6e597]: Document
+                    - button "Keywords" [ref=f6e599] [cursor=pointer]
+                    - generic [ref=f6e604]:
+                      - generic [ref=f6e605]: Exclude keywords
+                      - generic [ref=f6e607]:
+                        - generic [ref=f6e608]:
+                          - generic: Exclude keyword
+                          - combobox "Exclude keyword" [ref=f6e610]
+                        - img "down" [ref=f6e612]
+                      - generic [ref=f6e615]: Use excluded keywords to remove items containing those terms.
+                      - generic [ref=f6e616]: 0 exclude keyword suggestions available
+                  - generic [ref=f6e617]:
+                    - generic [ref=f6e618]:
+                      - generic [ref=f6e619]: Collection
+                      - combobox "Collection" [ref=f6e620]:
+                        - option "All items" [selected]
+                    - paragraph [ref=f6e621]: Create collections from bulk selection to organize related items.
+              - generic [ref=f6e622]:
+                - generic [ref=f6e624]:
+                  - generic [ref=f6e625]:
+                    - generic [ref=f6e626]:
+                      - generic [ref=f6e627]: Results
+                      - generic [ref=f6e628]: 1 / 1
+                    - generic [ref=f6e629]:
+                      - button "Standard view" [pressed] [ref=f6e630] [cursor=pointer]
+                      - button "Compact view" [ref=f6e636] [cursor=pointer]
+                  - 'button "Select media: cycle5-multi-native-aurora-public" [ref=f6e639] [cursor=pointer]':
+                    - generic [ref=f6e640]:
+                      - button "Add to favorites" [ref=f6e645]
+                      - generic [ref=f6e648]:
+                        - generic [ref=f6e649]:
+                          - generic [ref=f6e650]: MEDIA
+                          - generic [ref=f6e651]: document
+                          - generic [ref=f6e652]: 6m ago
+                        - generic [ref=f6e653]: cycle5-multi-native-aurora-public
+                - generic [ref=f6e654]:
+                  - generic [ref=f6e655]:
+                    - generic [ref=f6e656]: 1 of 1 results
+                    - generic [ref=f6e657]:
+                      - generic [ref=f6e658]: "Per page:"
+                      - combobox "Per page:" [ref=f6e659]:
+                        - option "20" [selected]
+                        - option "50"
+                        - option "100"
+                  - button "? for shortcuts" [ref=f6e661] [cursor=pointer]:
+                    - generic [ref=f6e662]: "?"
+                    - generic [ref=f6e663]: for shortcuts
+              - button "Library tools" [ref=f6e665] [cursor=pointer]
+            - button "Collapse sidebar" [ref=f6e670] [cursor=pointer]
+            - generic [ref=f6e676]:
+              - button "Create study pack" [disabled] [ref=f6e678]
+              - generic [ref=f6e680]:
+                - heading "No media item selected" [level=2] [ref=f6e688]
+                - paragraph [ref=f6e689]: Select a media item from the left sidebar to view its content and analyses here.
+                - button "Keyboard Shortcuts" [ref=f6e690] [cursor=pointer]
+                - button "Open Quick Ingest" [ref=f6e692] [cursor=pointer]
+    - tooltip "Media" [ref=f6e697]
+  - button "Open Next.js Dev Tools" [ref=f6e489] [cursor=pointer]
+  - alert [ref=f6e493]: Media | tldw
+  - status "Ingest progress" [ref=f6e494]:
+    - generic [ref=f6e495]:
+      - generic [ref=f6e496]: Ingesting 0/1
+      - paragraph [ref=f6e501]: Waiting for server results. Open the wizard to see elapsed time.
+      - generic [ref=f6e502]:
+        - progressbar "Finished items" [ref=f6e503]
+        - button "Open ingest wizard" [ref=f6e504] [cursor=pointer]: Open
+```

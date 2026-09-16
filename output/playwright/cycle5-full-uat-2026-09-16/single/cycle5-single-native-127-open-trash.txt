@@ -1,0 +1,11 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Trash' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/media-trash
+- Page Title: Trash | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-34-45-787Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L82-L85

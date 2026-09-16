@@ -1,0 +1,6 @@
+### Result
+"Quick Ingest (1)\nAdd\n1 items\nConfigure\nCustom\nReview\nProcessing\nResults\nReady to Process\n\n1 items | Custom preset\n\nProcessing time depends on the content, selected options, and server.\n\ncycle5-single-native-public-source.txt\nCustom · OCR + Extract + Chunk\n\nStorage: Server\n\nBack to Settings\nStart Processing"
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("switch", {name:"Ingestion options – analysis", exact:true}).click(); await page.getByRole("button", {name:"Next", exact:true}).click(); return await page.getByRole("dialog").innerText(); })(page);
+```

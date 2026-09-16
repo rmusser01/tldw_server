@@ -1,0 +1,272 @@
+### Page
+- Page URL: http://127.0.0.1:18580/notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [ref=f4e1]:
+  - generic [ref=f4e4]:
+    - link "Skip to main content" [ref=f4e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e6]:
+      - button "Expand sidebar" [ref=f4e7] [cursor=pointer]
+      - button "New Chat" [ref=f4e11] [cursor=pointer]
+      - generic [ref=f4e14]:
+        - button "Quick Ingest" [ref=f4e15] [cursor=pointer]
+        - button "Chat" [ref=f4e19] [cursor=pointer]
+        - button "Prompts" [ref=f4e22] [cursor=pointer]
+        - button "Characters" [ref=f4e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e31] [cursor=pointer]
+        - button "World Books" [ref=f4e35] [cursor=pointer]
+        - button "Notes" [ref=f4e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e42] [cursor=pointer]
+        - button "Media" [ref=f4e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e59] [cursor=pointer]
+        - button "Kanban" [ref=f4e65] [cursor=pointer]
+        - button "Watchlists" [ref=f4e67] [cursor=pointer]
+      - generic [ref=f4e72]:
+        - button "Open Notes Dock" [ref=f4e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e78] [cursor=pointer]
+        - button "Settings" [ref=f4e81] [cursor=pointer]
+    - main [ref=f4e85]:
+      - generic [ref=f4e86]:
+        - generic [ref=f4e89]:
+          - generic [ref=f4e90]:
+            - button "Expand sidebar" [ref=f4e91] [cursor=pointer]
+            - generic [ref=f4e93]:
+              - img "tldw Assistant" [ref=f4e94]
+              - generic [ref=f4e95]: tldw Assistant
+              - button "Companion Home" [ref=f4e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e100] [cursor=pointer]
+          - generic [ref=f4e103]:
+            - button "Search - Open command palette" [ref=f4e104] [cursor=pointer]:
+              - generic [ref=f4e108]: Search
+              - generic [ref=f4e109]: ⌘K
+            - button "Open settings" [ref=f4e110] [cursor=pointer]
+            - generic [ref=f4e122]:
+              - button "Notifications, 0 unread" [ref=f4e123] [cursor=pointer]
+              - status [ref=f4e127]: Notifications are active
+            - button "Switch to light theme" [ref=f4e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e135] [cursor=pointer]:
+              - generic [ref=f4e136]: "?"
+        - generic [ref=f4e138]:
+          - link "Skip to notes list" [ref=f4e139] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f4e140] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f4e141]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f4e142]:
+            - generic [ref=f4e143]:
+              - generic [ref=f4e144]:
+                - generic [ref=f4e145]:
+                  - generic [ref=f4e146]:
+                    - generic [ref=f4e147]: Notes
+                    - generic [ref=f4e148]: 3 total
+                  - button "New note" [ref=f4e149] [cursor=pointer]
+                - generic [ref=f4e152]:
+                  - generic [ref=f4e153]:
+                    - button "Views" [expanded] [ref=f4e155] [cursor=pointer]
+                    - generic [ref=f4e160]:
+                      - generic [ref=f4e161]:
+                        - button "Notes" [ref=f4e162] [cursor=pointer]
+                        - button "Trash" [ref=f4e164] [cursor=pointer]
+                      - generic [ref=f4e166]:
+                        - button "List" [ref=f4e167] [cursor=pointer]
+                        - button "Timeline" [ref=f4e169] [cursor=pointer]
+                        - button "Inbox" [ref=f4e171] [cursor=pointer]
+                        - button "Collection" [ref=f4e173] [cursor=pointer]
+                        - button "Graph" [ref=f4e175] [cursor=pointer]
+                      - generic [ref=f4e184]:
+                        - button "Organize" [ref=f4e185] [cursor=pointer]
+                        - button "Organize help" [ref=f4e191] [cursor=pointer]:
+                          - img "question-circle" [ref=f4e192]
+                  - generic [ref=f4e196]:
+                    - textbox "Search notes" [ref=f4e203]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f4e205] [cursor=pointer]:
+                      - generic [ref=f4e206]:
+                        - generic "Date modified (newest first)" [ref=f4e207]
+                        - combobox "Sort notes" [ref=f4e208]
+                      - img "down" [ref=f4e210]
+                  - generic [ref=f4e213]:
+                    - button "Filters" [expanded] [ref=f4e215] [cursor=pointer]
+                    - generic [ref=f4e220]:
+                      - generic [ref=f4e221]:
+                        - button "Captured" [ref=f4e222] [cursor=pointer]
+                        - button "Search tips" [ref=f4e224] [cursor=pointer]
+                      - generic [ref=f4e226]:
+                        - generic [ref=f4e227]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f4e229]
+                        - img "down" [ref=f4e231]
+                      - generic [ref=f4e235]:
+                        - button "Browse tags" [ref=f4e236] [cursor=pointer]
+                        - button "Tags help" [ref=f4e238] [cursor=pointer]:
+                          - img "question-circle" [ref=f4e239]
+                      - generic [ref=f4e243]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f4e244]:
+                    - generic [ref=f4e245]: Recent notes
+                    - generic [ref=f4e246]:
+                      - button "Cycle5 Single Biology" [ref=f4e247] [cursor=pointer]
+                      - 'button "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f4e248] [cursor=pointer]'
+              - generic [ref=f4e250]:
+                - generic [ref=f4e252]:
+                  - generic [ref=f4e253]: Results
+                  - generic [ref=f4e254]:
+                    - button "Import" [ref=f4e255] [cursor=pointer]
+                    - button "Sync folder" [ref=f4e257] [cursor=pointer]
+                    - button "Export" [ref=f4e260] [cursor=pointer]
+                - list "Notes" [ref=f4e263]:
+                  - listitem [ref=f4e264]:
+                    - generic [ref=f4e265]:
+                      - checkbox "Select note Cycle5 Single Biology for bulk actions" [ref=f4e266]
+                      - button "Pin note Cycle5 Single Biology" [ref=f4e267] [cursor=pointer]
+                      - button "Open note Cycle5 Single Biology" [ref=f4e270] [cursor=pointer]:
+                        - generic [ref=f4e271]:
+                          - generic [ref=f4e272]: Cycle5 Single Biology
+                          - generic [ref=f4e278]: The mitochondria is the powerhouse of the cell.
+                          - generic [ref=f4e279]: 9/16/2026, 1:11:50 AM
+                  - listitem [ref=f4e280]:
+                    - generic [ref=f4e281]:
+                      - 'checkbox "Select note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. for bulk actions" [ref=f4e282]'
+                      - 'button "Pin note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f4e283] [cursor=pointer]'
+                      - 'button "Open note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f4e286] [cursor=pointer]':
+                        - generic [ref=f4e287]:
+                          - generic [ref=f4e288]: "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-..."
+                          - generic [ref=f4e297]: WILLOW-85 READY.
+                          - generic [ref=f4e298]: "Linked to conversation: 5b22027f-193b-4166-9662-bd62ae0032ac · msg e9bb18a6-574e-43ef-af74-b6573adbdf68"
+                          - generic [ref=f4e299]: 9/16/2026, 1:11:24 AM
+                  - listitem [ref=f4e300]:
+                    - generic [ref=f4e301]:
+                      - 'checkbox "Select note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. for bulk actions" [ref=f4e302]'
+                      - 'button "Pin note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f4e303] [cursor=pointer]'
+                      - 'button "Open note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f4e306] [cursor=pointer]':
+                        - generic [ref=f4e307]:
+                          - generic [ref=f4e308]: "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-..."
+                          - generic [ref=f4e317]: WILLOW-85
+                          - generic [ref=f4e318]: "Linked to conversation: 5b22027f-193b-4166-9662-bd62ae0032ac · msg dec0c263-6b38-4a71-bc95-809b2df3c4ab"
+                          - generic [ref=f4e319]: 9/16/2026, 1:07:13 AM
+                - generic [ref=f4e321]:
+                  - generic [ref=f4e322]: Showing 1-3 of 3
+                  - list [ref=f4e323]:
+                    - listitem "Previous Page" [ref=f4e324]:
+                      - button [disabled] [ref=f4e325]:
+                        - img "left" [ref=f4e326]
+                    - listitem "1" [ref=f4e329] [cursor=pointer]
+                    - listitem "Next Page" [ref=f4e331]:
+                      - button [disabled] [ref=f4e332]:
+                        - img "right" [ref=f4e333]
+                    - listitem [ref=f4e336]:
+                      - generic [ref=f4e337]:
+                        - generic [ref=f4e338]:
+                          - generic "20 / page" [ref=f4e339]
+                          - combobox "Page Size" [ref=f4e340]
+                        - img "down" [ref=f4e342]
+          - button "Collapse sidebar" [ref=f4e345] [cursor=pointer]
+          - region "Note editor" [ref=f4e349]:
+            - generic [ref=f4e350]:
+              - generic [ref=f4e352]:
+                - heading "Cycle5 Single Biology" [level=5] [ref=f4e353]
+                - status [ref=f4e354]:
+                  - generic [ref=f4e356]: Saved 14m ago
+              - generic [ref=f4e357]:
+                - button "Save note" [ref=f4e358] [cursor=pointer]:
+                  - generic [ref=f4e364]: Save
+                - button "Save and start another note" [ref=f4e365] [cursor=pointer]:
+                  - generic [ref=f4e370]: Save & new
+                - group "Editor mode" [ref=f4e371]:
+                  - button "Edit" [pressed] [ref=f4e372] [cursor=pointer]
+                  - button "Split" [ref=f4e377] [cursor=pointer]
+                  - button "Preview" [ref=f4e382] [cursor=pointer]
+                - button "Create study pack" [ref=f4e388] [cursor=pointer]
+                - button "More actions" [ref=f4e390] [cursor=pointer]
+            - generic [ref=f4e396]:
+              - generic [ref=f4e397]:
+                - textbox "Note title" [ref=f4e398]:
+                  - /placeholder: Title
+                  - text: Cycle5 Single Biology
+                - button "Generate title from content" [ref=f4e399] [cursor=pointer]:
+                  - generic [ref=f4e404]: Generate title
+                - button "Keyboard shortcuts" [ref=f4e405] [cursor=pointer]
+              - generic [ref=f4e407]:
+                - generic [ref=f4e408]:
+                  - generic [ref=f4e409]:
+                    - generic: Tags
+                    - combobox "Note tags" [ref=f4e411]
+                  - img "down" [ref=f4e413]
+                - status "Note save status" [ref=f4e416]: All changes saved
+              - generic [ref=f4e418]:
+                - button "Connections" [ref=f4e419] [cursor=pointer]
+                - button "Connections help" [ref=f4e425] [cursor=pointer]:
+                  - img "question-circle" [ref=f4e426]
+              - generic [ref=f4e430]:
+                - group "Input mode" [ref=f4e431]:
+                  - button "Markdown" [ref=f4e432] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f4e434] [cursor=pointer]
+                - generic [ref=f4e436]: Formatting
+                - button "Bold" [ref=f4e437] [cursor=pointer]
+                - button "Italic" [ref=f4e441] [cursor=pointer]
+                - button "Heading" [ref=f4e445] [cursor=pointer]
+                - button "List" [ref=f4e449] [cursor=pointer]
+                - button "Link" [ref=f4e452] [cursor=pointer]
+                - button "Attachment" [ref=f4e457] [cursor=pointer]
+                - button "Code" [ref=f4e461] [cursor=pointer]
+                - generic [ref=f4e468]: Assist
+                - button "Summarize" [ref=f4e469] [cursor=pointer]
+                - button "Expand outline" [ref=f4e475] [cursor=pointer]
+                - button "Suggest tags" [ref=f4e481] [cursor=pointer]
+              - generic [ref=f4e488]:
+                - textbox "Note content" [ref=f4e489]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: The mitochondria is the powerhouse of the cell. DNA stands for deoxyribonucleic acid. Photosynthesis converts light energy into chemical energy. The human body has 206 bones. Water boils at 100 degrees Celsius at sea level.
+                - generic [ref=f4e490]: Markdown + LaTeX supported
+              - generic [ref=f4e491]:
+                - text: 35 words · 227 chars · 1 min read
+                - generic [ref=f4e492]: Version 1 · Last saved 9/16/2026, 1:11:50 AM
+                - generic [ref=f4e493]: "Origin: Typed manually"
+      - generic [ref=f4e494]:
+        - dialog "Quick Ingest":
+          - generic [ref=f4e495]:
+            - button "Close" [active] [ref=f4e496] [cursor=pointer]:
+              - generic "Close" [ref=f4e497]:
+                - img "close" [ref=f4e498]
+            - generic [ref=f4e501]: Quick Ingest
+            - generic [ref=f4e503]:
+              - navigation "Ingest wizard progress" [ref=f4e504]:
+                - list [ref=f4e505]:
+                  - listitem [ref=f4e506]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=f4e507]':
+                      - generic [ref=f4e511]: Add
+                  - listitem [ref=f4e513]:
+                    - 'button "Step 2: Configure" [disabled] [ref=f4e514]':
+                      - generic [ref=f4e518]: Configure
+                  - listitem [ref=f4e520]:
+                    - 'button "Step 3: Review" [disabled] [ref=f4e521]':
+                      - generic [ref=f4e525]: Review
+                  - listitem [ref=f4e527]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f4e528]':
+                      - generic [ref=f4e532]: Processing
+                  - listitem [ref=f4e534]:
+                    - 'button "Step 5: Results" [disabled] [ref=f4e535]':
+                      - generic [ref=f4e539]: Results
+              - generic [ref=f4e541]:
+                - generic [ref=f4e542]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=f4e543] [cursor=pointer]:
+                    - generic [ref=f4e544]:
+                      - paragraph [ref=f4e548]: Drag and drop files
+                      - paragraph [ref=f4e549]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [ref=f4e550]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=f4e553]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=f4e554]:
+                    - text: Paste URLs
+                    - generic [ref=f4e555]:
+                      - textbox "Paste URLs input" [ref=f4e556]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=f4e557]:
+                        - generic: Add URLs
+                - button "Configure 0 items" [disabled] [ref=f4e559]:
+                  - generic: Configure 0 items >
+  - button "Open Next.js Dev Tools" [ref=f4e565] [cursor=pointer]
+  - alert [ref=f4e569]
+```

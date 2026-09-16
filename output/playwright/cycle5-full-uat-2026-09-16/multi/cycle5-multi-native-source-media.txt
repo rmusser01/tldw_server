@@ -1,0 +1,260 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18581/knowledge)
+- 1: (current) [Media | tldw](http://127.0.0.1:18581/media?id=1)
+### Page
+- Page URL: http://127.0.0.1:18581/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e4]:
+    - link "Skip to main content" [ref=e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e6]:
+      - button "Expand sidebar" [ref=e7] [cursor=pointer]
+      - button "New Chat" [ref=e11] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "Quick Ingest" [ref=e15] [cursor=pointer]
+        - button "Chat" [ref=e19] [cursor=pointer]
+        - button "Prompts" [ref=e22] [cursor=pointer]
+        - button "Characters" [ref=e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e31] [cursor=pointer]
+        - button "World Books" [ref=e35] [cursor=pointer]
+        - button "Notes" [ref=e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=e42] [cursor=pointer]
+        - button "Media" [ref=e50] [cursor=pointer]
+        - button "Document Workspace" [ref=e53] [cursor=pointer]
+        - button "Research Workspace" [ref=e59] [cursor=pointer]
+        - button "Kanban" [ref=e65] [cursor=pointer]
+        - button "Watchlists" [ref=e67] [cursor=pointer]
+      - generic [ref=e72]:
+        - button "Open Notes Dock" [ref=e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e78] [cursor=pointer]
+        - button "Settings" [ref=e81] [cursor=pointer]
+    - main [ref=e85]:
+      - generic [ref=e86]:
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - button "Expand sidebar" [ref=e91] [cursor=pointer]
+            - generic [ref=e93]:
+              - img "tldw Assistant" [ref=e94]
+              - generic [ref=e95]: tldw Assistant
+              - button "Companion Home" [ref=e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=e100] [cursor=pointer]
+          - generic [ref=e103]:
+            - button "Search - Open command palette" [ref=e104] [cursor=pointer]:
+              - generic [ref=e108]: Search
+              - generic [ref=e109]: ⌘K
+            - button "Open settings" [ref=e110] [cursor=pointer]
+            - generic [ref=e122]:
+              - button "Notifications, 0 unread" [ref=e123] [cursor=pointer]
+              - status [ref=e127]: Notifications are active
+            - button "Switch to light theme" [ref=e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e135] [cursor=pointer]:
+              - generic [ref=e136]: "?"
+        - generic [ref=e138]:
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - heading "Media Inspector" [level=1] [ref=e143]
+                - generic [ref=e144]:
+                  - generic [ref=e145]: 1 / 1
+                  - button "Trash" [ref=e146] [cursor=pointer]
+                  - button "Bulk" [ref=e150] [cursor=pointer]
+              - generic [ref=e153]:
+                - button "Show media only" [pressed] [ref=e154] [cursor=pointer]:
+                  - generic [ref=e155]: Media
+                  - generic [ref=e156]: "1"
+                - button "Show notes only" [ref=e157] [cursor=pointer]:
+                  - generic [ref=e158]: Notes
+                  - generic [ref=e159]: "0"
+            - generic [ref=e161]:
+              - generic [ref=e162]:
+                - generic [ref=e163]: Find media
+                - button "Collapse find media panel" [expanded] [ref=e165] [cursor=pointer]
+              - generic [ref=e168]:
+                - generic [ref=e169]:
+                  - textbox "Search media (title/content)" [ref=e174]
+                  - button "Search syntax help" [ref=e176] [cursor=pointer]: "?"
+                - button "Search" [ref=e177] [cursor=pointer]
+                - generic [ref=e178]:
+                  - generic [ref=e179]:
+                    - generic [ref=e180]: Filters
+                    - button "Clear all" [ref=e184] [cursor=pointer]
+                  - generic [ref=e185]:
+                    - generic [ref=e186]: Search mode
+                    - generic [ref=e187]:
+                      - button "Full-text search" [pressed] [ref=e188] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=e189] [cursor=pointer]: Metadata
+                  - generic [ref=e190]:
+                    - generic [ref=e191]: Sort by
+                    - generic [ref=e192] [cursor=pointer]:
+                      - generic [ref=e193]:
+                        - generic "Relevance" [ref=e194]
+                        - combobox [ref=e195]
+                      - img "down" [ref=e197]
+                  - generic [ref=e200]:
+                    - generic [ref=e201]: Date range
+                    - generic [ref=e202]:
+                      - generic [ref=e203]:
+                        - text: Start date
+                        - textbox "Start date" [ref=e204]
+                      - generic [ref=e205]:
+                        - text: End date
+                        - textbox "End date" [ref=e206]
+                  - button "Advanced search" [ref=e208] [cursor=pointer]
+                  - generic [ref=e212] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=e213]
+                    - generic [ref=e216]: Favorites only
+                  - generic [ref=e217]:
+                    - button "Media types" [ref=e218] [cursor=pointer]
+                    - generic [ref=e224] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=e225]
+                      - generic [ref=e226]: Document
+                  - button "Keywords" [ref=e228] [cursor=pointer]
+                  - generic [ref=e233]:
+                    - generic [ref=e234]: Exclude keywords
+                    - generic [ref=e236]:
+                      - generic [ref=e237]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=e239]
+                      - img "down" [ref=e241]
+                    - generic [ref=e244]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=e245]: 0 exclude keyword suggestions available
+                - generic [ref=e246]:
+                  - generic [ref=e247]:
+                    - generic [ref=e248]: Collection
+                    - combobox "Collection" [ref=e249]:
+                      - option "All items" [selected]
+                  - paragraph [ref=e250]: Create collections from bulk selection to organize related items.
+            - generic [ref=e251]:
+              - generic [ref=e253]:
+                - generic [ref=e254]:
+                  - generic [ref=e255]:
+                    - generic [ref=e256]: Results
+                    - generic [ref=e257]: 1 / 1
+                  - generic [ref=e258]:
+                    - button "Standard view" [pressed] [ref=e259] [cursor=pointer]
+                    - button "Compact view" [ref=e265] [cursor=pointer]
+                - 'button "Select media: cycle5-multi-native-aurora-public" [ref=e268] [cursor=pointer]':
+                  - generic [ref=e269]:
+                    - button "Add to favorites" [ref=e274]
+                    - generic [ref=e277]:
+                      - generic [ref=e278]:
+                        - generic [ref=e279]: MEDIA
+                        - generic [ref=e280]: document
+                        - generic [ref=e281]: 11m ago
+                      - generic [ref=e282]: cycle5-multi-native-aurora-public
+              - generic [ref=e283]:
+                - generic [ref=e284]:
+                  - generic [ref=e285]: 1 of 1 results
+                  - generic [ref=e286]:
+                    - generic [ref=e287]: "Per page:"
+                    - combobox "Per page:" [ref=e288]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=e290] [cursor=pointer]:
+                  - generic [ref=e291]: "?"
+                  - generic [ref=e292]: for shortcuts
+            - button "Library tools" [ref=e294] [cursor=pointer]
+          - button "Collapse sidebar" [ref=e299] [cursor=pointer]
+          - generic [ref=e303]:
+            - generic [ref=e305]:
+              - generic [ref=e306] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=e307]
+                - generic [ref=e308]: Show chapters/sections panel
+              - generic [ref=e309] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=e310]
+                - generic [ref=e311]: Allow generated fallback structure
+              - generic [ref=e312]: "Generated sections: 2"
+            - generic [ref=e313]:
+              - complementary "Chapters and sections" [ref=e314]:
+                - generic [ref=e315]:
+                  - generic [ref=e316]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=e321]
+                  - generic [ref=e322]: Cycle5 Aurora Public Station Brief This is a public synthetic fixture for the cycle5 multi-user...
+                - tree [ref=e323]:
+                  - generic [ref=e324]:
+                    - button "1 Cycle5 Aurora Public Station Brief This is a public synthetic fixture for the cycle5 multi-user..." [ref=e327] [cursor=pointer]:
+                      - generic [ref=e328]: "1"
+                      - generic [ref=e329]: Cycle5 Aurora Public Station Brief This is a public synthetic fixture for the cycle5 multi-user...
+                    - button "2 The station uses the phrase \"AURORA-CYCLE5-MULTI-23\" as its public fixture search marker. All pe..." [ref=e332] [cursor=pointer]:
+                      - generic [ref=e333]: "2"
+                      - generic [ref=e334]: The station uses the phrase "AURORA-CYCLE5-MULTI-23" as its public fixture search marker. All pe...
+              - generic [ref=e335]:
+                - button "Create study pack" [ref=e337] [cursor=pointer]
+                - generic [ref=e338]:
+                  - generic [ref=e339]: Showing cycle5-multi-native-aurora-public
+                  - generic [ref=e341]:
+                    - generic [ref=e342]:
+                      - button "Previous" [disabled] [ref=e343]
+                      - generic [ref=e346]: 1/1
+                      - button "Next" [disabled] [ref=e347]
+                    - heading "cycle5-multi-native-aurora-public" [level=3] [ref=e350]
+                    - generic [ref=e351]:
+                      - button "Chat with this media" [ref=e352] [cursor=pointer]
+                      - button "Analyze" [ref=e355] [cursor=pointer]
+                      - button "Actions" [ref=e359] [cursor=pointer]
+                  - generic [ref=e365]:
+                    - generic [ref=e366]:
+                      - generic [ref=e367]: 148 Words
+                      - generic [ref=e371]: 1 min read
+                      - generic "Reading progress" [ref=e372]: 0% read
+                      - generic [ref=e373]: "Chunking: Completed"
+                      - generic [ref=e374]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=e376] [cursor=pointer]:
+                      - generic [ref=e377]: Metadata details
+                      - generic [ref=e378]: Show
+                    - generic [ref=e380]:
+                      - generic [ref=e381]:
+                        - generic: Add keywords...
+                        - combobox [ref=e383]
+                      - img "down" [ref=e385]
+                    - generic [ref=e388]:
+                      - generic [ref=e389]:
+                        - button "Content" [ref=e390] [cursor=pointer]
+                        - generic [ref=e394]:
+                          - generic [ref=e395] [cursor=pointer]:
+                            - generic [ref=e396]:
+                              - generic "Auto" [ref=e397]
+                              - combobox "Display mode" [ref=e398]
+                            - img "down" [ref=e400]
+                          - group "Text size" [ref=e403]:
+                            - button "Text size S" [ref=e404] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=e405] [cursor=pointer]: M
+                            - button "Text size L" [ref=e406] [cursor=pointer]: L
+                          - button "Edit content" [ref=e407] [cursor=pointer]
+                          - button "Find in content" [ref=e410] [cursor=pointer]
+                      - region "Media content" [ref=e417]:
+                        - generic [ref=e418]:
+                          - paragraph [ref=e419]: Cycle5 Aurora Public Station Brief
+                          - paragraph [ref=e420]: This is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps.
+                          - paragraph [ref=e421]: "Aurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report."
+                          - paragraph [ref=e422]: The station uses the phrase "AURORA-CYCLE5-MULTI-23" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials.
+                    - generic [ref=e423]:
+                      - generic [ref=e424]:
+                        - button "Analysis" [ref=e425] [cursor=pointer]
+                        - button "Generate" [ref=e430] [cursor=pointer]
+                      - generic [ref=e434]: No analysis yet
+                    - generic [ref=e436]:
+                      - button "Statistics" [ref=e437] [cursor=pointer]
+                      - generic [ref=e442]:
+                        - generic [ref=e443]:
+                          - generic [ref=e444]: Words
+                          - generic [ref=e445]: "148"
+                        - generic [ref=e446]:
+                          - generic [ref=e447]: Characters
+                          - generic [ref=e448]: "963"
+                        - generic [ref=e449]:
+                          - generic [ref=e450]: Paragraphs
+                          - generic [ref=e451]: "4"
+                    - button "Metadata" [ref=e453] [cursor=pointer]
+                    - button "Document Intelligence" [ref=e458] [cursor=pointer]
+                    - button "Version History" [ref=e464] [cursor=pointer]
+                    - generic [ref=e473]:
+                      - button "Delete item" [disabled] [ref=e474]
+                      - paragraph [ref=e478]: Your account does not have permission to delete media.
+  - button "Open Next.js Dev Tools" [ref=e484] [cursor=pointer]
+  - alert [ref=e488]: Media | tldw
+```

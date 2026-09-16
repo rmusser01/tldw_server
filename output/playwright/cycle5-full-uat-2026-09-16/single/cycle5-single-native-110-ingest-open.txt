@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("button",{name:"Quick Ingest",exact:true}).click(); })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18580/notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L76-L77
