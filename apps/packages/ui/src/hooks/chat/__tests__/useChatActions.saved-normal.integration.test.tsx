@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   getModel: vi.fn(),
   ocr: vi.fn(),
   realFormatter: false,
+  realPersistence: false,
+  ragSearch: vi.fn(),
   streamMessage: vi.fn(),
   saveHistory: vi.fn(),
   saveMessage: vi.fn(),
@@ -83,7 +85,12 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: mocks.createChat,
     getChat: mocks.getChat,
     addChatMessage: mocks.addChatMessage,
-    listChatMessages: mocks.listChatMessages
+    listChatMessages: mocks.listChatMessages,
+    ragSearch: mocks.ragSearch,
+    listServicePrompts: async () => {
+      const { ServicePromptApiError } = await import("@/services/tldw/domains/service-prompts")
+      throw new ServicePromptApiError("Legacy server", { status: 404 })
+    }
   }
 }))
 vi.mock("@/services/tldw", async () => {
@@ -95,6 +102,11 @@ vi.mock("@/services/title", () => ({
   generateTitle: async () => "First question"
 }))
 vi.mock("@/services/tldw-server", () => ({
+  LEGACY_SERVICE_PROMPT_DEFAULTS: {
+    "chat.rag.answer": { template: "Context: {context}\nQuestion: {question}" },
+    "chat.rag.question_rewrite": { template: "History: {chat_history}\nQuestion: {question}" }
+  },
+  promptForRag: async () => ({ ragPrompt: "Context: {context}\nQuestion: {question}", ragQuestionPrompt: "History: {chat_history}\nQuestion: {question}" }),
   systemPromptForNonRagOption: async () => "",
   getDefaultApiProvider: async () => "openai"
 }))
@@ -126,7 +138,13 @@ vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: mocks.getActorSettings
 }))
 vi.mock("@/db/dexie/schema", () => ({ db: {
-  chatHistories: { get: async (id: string) => mocks.mirrorHistories.get(id) },
+  chatHistories: {
+    get: async (id: string) => mocks.mirrorHistories.get(id),
+    update: async (id: string, patch: Record<string, unknown>) => {
+      const row = mocks.mirrorHistories.get(id)
+      if (row) mocks.mirrorHistories.set(id, { ...row, ...patch })
+    }
+  },
   messages: {
     get: async (id: string) => mocks.rows.find(row => row.id === id),
     where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => mocks.rows.filter(row => row[field] === value) }) }),
@@ -145,7 +163,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 function setLoaderSelection() { mocks.selectionRevision++ }
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async () => {
+  const actual = await vi.importActual<typeof import("@/db/dexie/helpers")>("@/db/dexie/helpers")
+  return {
+  ...actual,
   acknowledgeSavedUserMessage: async (historyId: string, id: string, serverMessageId: string) => {
     const row = mocks.rows.find(row => row.history_id === historyId && row.id === id && row.role === "user")
     if (row) {
@@ -155,14 +176,14 @@ vi.mock("@/db/dexie/helpers", () => ({
   },
   generateID: () => crypto.randomUUID(),
   saveHistory: mocks.saveHistory,
-  saveMessage: mocks.saveMessage,
+  saveMessage: (...args: Parameters<typeof actual.saveMessage>) => mocks.realPersistence ? actual.saveMessage(...args) : mocks.saveMessage(...args),
   updateHistory: vi.fn(),
   updateMessage: vi.fn(),
   updateMessageMedia: vi.fn(),
   removeMessageByIndex: vi.fn(),
   removeMessageById: mocks.removeMessageById,
-  formatToChatHistory: (items: unknown) => items,
-  formatToMessage: (items: Array<Record<string, unknown>>) => mocks.withLoader ? items.map(row => ({
+  formatToChatHistory: (items: Parameters<typeof actual.formatToChatHistory>[0]) => mocks.realPersistence ? actual.formatToChatHistory(items) : items,
+  formatToMessage: (items: Array<Record<string, unknown>>) => mocks.realPersistence ? actual.formatToMessage(items as Parameters<typeof actual.formatToMessage>[0]) : mocks.withLoader ? items.map(row => ({
     ...row, id: row.id, serverMessageId: row.serverMessageId, message: row.content,
     isBot: row.role !== "user", name: row.name || "You", sources: row.sources || [],
     parentMessageId: row.parent_message_id
@@ -173,7 +194,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   updateLastUsedPrompt: vi.fn(),
   updateChatHistoryCreatedAt: vi.fn(),
   addFileToSession: vi.fn()
-}))
+} })
 vi.mock("@/db/dexie/chat-persistence-transaction", () => ({
   runChatPersistenceTransaction: async (
     signal: AbortSignal | undefined,
@@ -723,6 +744,8 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.mirrorHistories.clear()
     mocks.withLoader = false
     mocks.realFormatter = false
+    mocks.realPersistence = false
+    mocks.ragSearch.mockReset()
     mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
     mocks.ocr.mockResolvedValue("Explicit OCR text")
     mocks.selectionRevision = 0
@@ -798,6 +821,273 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it("UAT103 deleting a local diagnostic does not remove equal genuine prompt text", async () => {
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const messages = [
+      { id: "diagnostic-user", isBot: false, name: "You", message: "Repeated question", sources: [], generationInfo },
+      { id: "diagnostic-answer", isBot: true, name: "Assistant", message: "Repeated answer", sources: [], generationInfo, parentMessageId: "diagnostic-user" },
+      { id: "real-user", isBot: false, name: "You", message: "Repeated question", sources: [] },
+      { id: "real-answer", isBot: true, name: "Assistant", message: "Repeated answer", sources: [], parentMessageId: "real-user" }
+    ]
+    useStoreMessageOption.setState({ temporaryChat: true, messages,
+      history: [{ role: "user", content: "Repeated question" }, { role: "assistant", content: "Repeated answer" }] })
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.deleteMessage(0) })
+    expect(view.result.current.state.history).toEqual([{ role: "user", content: "Repeated question" }, { role: "assistant", content: "Repeated answer" }])
+    expect(view.result.current.state.messages.map(row => row.id)).toEqual(["diagnostic-answer", "real-user", "real-answer"])
+    view.unmount()
+  })
+
+  it("UAT103 diagnostic deletion preserves a canonical system row's prompt role", async () => {
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const view = renderWorkspace()
+    act(() => useStoreMessageOption.setState({ messages: [
+      { id: "system", serverMessageId: "server-system", role: "system", isBot: false, name: "System", message: "Speak like a pirate.", sources: [] },
+      { id: "diagnostic-user", role: "user", isBot: false, name: "You", message: "Local question", sources: [], generationInfo },
+      { id: "diagnostic-answer", role: "assistant", isBot: true, name: "Assistant", message: "Local diagnostic", sources: [], generationInfo, parentMessageId: "diagnostic-user" }
+    ], history: [{ role: "system", content: "Speak like a pirate." }] }))
+    await act(async () => { await view.result.current.actions.deleteMessage(1) })
+    expect(view.result.current.state.messages.find(row => row.id === "system")).toMatchObject({ serverMessageId: "server-system", role: "system" })
+    expect(view.result.current.state.history).toEqual([{ role: "system", content: "Speak like a pirate." }])
+    view.unmount()
+  })
+
+  it("UAT103 deleting only the diagnostic assistant keeps its exact draft eligible immediately and after reload", async () => {
+    mocks.realPersistence = true
+    const { formatToMessage, formatToChatHistory } = await import("@/db/dexie/helpers")
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const rows = [
+      { id: "diagnostic-user", role: "user", content: "Repeated question", history_id: "local", images: [], generationInfo, createdAt: 1 },
+      { id: "diagnostic-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], generationInfo, parent_message_id: "diagnostic-user", createdAt: 2 },
+      { id: "real-user", role: "user", content: "Repeated question", history_id: "local", images: [], createdAt: 3 },
+      { id: "real-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], parent_message_id: "real-user", createdAt: 4 }
+    ]
+    mocks.rows.push(...rows)
+    mocks.removeMessageById.mockImplementationOnce(async (historyId, id) => {
+      mocks.rows = mocks.rows.filter(row => row.history_id !== historyId || row.id !== id)
+    })
+    useStoreMessageOption.setState({ temporaryChat: true, historyId: "local", messages: formatToMessage(rows), history: formatToChatHistory(rows) })
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.deleteMessage(1) })
+    const reloadMessages = formatToMessage(mocks.rows)
+    const reloadHistory = formatToChatHistory(mocks.rows)
+    expect(mocks.removeMessageById).toHaveBeenCalledWith("local", "diagnostic-answer")
+    expect(view.result.current.state.messages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
+    expect(reloadMessages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
+    const promptRows = (history: typeof reloadHistory) => history.map(({ role, content }) => ({ role, content }))
+    expect(promptRows(view.result.current.state.history)).toEqual(promptRows(reloadHistory))
+    expect(reloadHistory.map(row => row.content)).toEqual(["Repeated question", "Repeated question", "Repeated answer"])
+    view.unmount()
+  })
+
+  it("UAT103 excludes the local diagnostic from a later global RAG question rewrite", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true,
+      messages: [
+        { id: "prior-user", isBot: false, name: "You", message: "Earlier question", sources: [] },
+        { id: "prior-answer", isBot: true, name: "Assistant", message: "Earlier answer", sources: [] }
+      ], history: [{ role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" }] })
+    mocks.ragSearch.mockResolvedValue({ documents: [] })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Local failed source question", image: "" }) })
+    const invoke = vi.fn(async () => ({ content: "Rewritten real question" }))
+    mocks.pageAssistModel.mockImplementation(async () => ({ invoke, saveToDb: false, stream: async function* () { yield "Real global answer" } }))
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Real evidence", metadata: {} }] })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Follow-up question", image: "",
+      requestOverrides: { ragMediaIds: [], selectedKnowledge: { id: "knowledge", title: "All sources" } } }) })
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(invoke.mock.calls[0])).toContain("Earlier answer")
+    expect(JSON.stringify(invoke.mock.calls[0])).not.toContain("Local failed source question")
+    expect(JSON.stringify(invoke.mock.calls[0])).not.toContain("did not send this as general chat")
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Real global answer")
+    view.unmount()
+  })
+
+  it("UAT103 Continue retries an exact pending source diagnostic instead of extending its prose", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true,
+      messages: [{ id: "prior-user", isBot: false, name: "You", message: "Earlier question", sources: [] }, { id: "prior-answer", isBot: true, name: "Assistant", message: "Earlier answer", sources: [] }],
+      history: [{ role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" }] })
+    mocks.ragSearch.mockResolvedValue({ documents: [] })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Retry source question", image: "" }) })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "", image: "", isContinue: true }) })
+    expect(mocks.ragSearch.mock.calls.map(call => call[0])).toEqual(["Retry source question", "Retry source question"])
+    expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+    expect(view.result.current.state.history.map(row => row.content)).toEqual(["Earlier question", "Earlier answer"])
+    expect(view.result.current.state.messages.filter(row => !row.isBot && row.message === "Retry source question")).toHaveLength(1)
+    view.unmount()
+  })
+
+  it.each(["validation skipped", "provider failed"])("UAT103 Continue reports the exact diagnostic Retry outcome: %s", async outcome => {
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const messages = [
+      { id: "diagnostic-user", isBot: false, name: "You", message: "Source question", sources: [], generationInfo },
+      { id: "diagnostic-answer", isBot: true, name: "Assistant", message: "Diagnostic", sources: [], generationInfo, parentMessageId: "diagnostic-user" }
+    ]
+    useStoreMessageOption.setState({ temporaryChat: true, messages, history: [],
+      ...(outcome === "validation skipped" ? { selectedModel: "" } : {}) })
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Actual evidence", metadata: {} }] })
+    mocks.pageAssistModel.mockRejectedValue(new Error("Provider unavailable"))
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true,
+      ...(outcome === "validation skipped" ? { selectedModel: "" } : {}) })
+    let result: Awaited<ReturnType<typeof view.result.current.actions.onSubmit>> | undefined
+    await act(async () => { result = await view.result.current.actions.onSubmit({ message: "", image: "", isContinue: true }) })
+    expect(result).toMatchObject({ status: outcome === "validation skipped" ? "skipped" : "failed" })
+    if (outcome === "validation skipped") {
+      expect(mocks.ragSearch).not.toHaveBeenCalled()
+      expect(view.result.current.state.messages).toEqual(messages)
+    } else {
+      expect(mocks.pageAssistModel).toHaveBeenCalledTimes(1)
+    }
+    view.unmount()
+  })
+
+  it.each(["Complete answer", "Partial answer"])("UAT103 preserves ordinary Continue of %s", async answer => {
+    useStoreMessageOption.setState({ temporaryChat: true,
+      messages: [{ id: "user", isBot: false, name: "You", message: "Question", sources: [] }, { id: "answer", isBot: true, name: "Assistant", message: answer, sources: [], generationInfo: { interrupted: answer.startsWith("Partial") } }],
+      history: [{ role: "user", content: "Question" }, { role: "assistant", content: answer }] })
+    mocks.pageAssistModel.mockResolvedValue({ saveToDb: false, stream: async function* () { yield " continued" } })
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "", image: "", isContinue: true }) })
+    expect(mocks.ragSearch).not.toHaveBeenCalled()
+    expect(view.result.current.state.messages.at(-1)?.message).toBe(answer + " continued")
+    expect(view.result.current.state.history.at(-1)?.content).toBe(answer + " continued")
+    view.unmount()
+  })
+
+  it.each(["retrieval failure", "no evidence"])("UAT103 keeps a %s local through actual action, reload and next completion", async failure => {
+    mocks.realPersistence = true
+    mocks.withLoader = true
+    const { formatToMessage, formatToChatHistory } = await import("@/db/dexie/helpers")
+    const initial = [
+      { id: "earlier-user", serverMessageId: "earlier-user", role: "user", content: "Earlier real question", history_id: "local-1", name: "You", images: [], createdAt: 1 },
+      { id: "earlier-answer", serverMessageId: "earlier-answer", role: "assistant", content: "Earlier real answer", history_id: "local-1", name: "Assistant", images: [], createdAt: 2 }
+    ]
+    mocks.rows.push(...initial)
+    mocks.serverRows.set("source-chat", initial)
+    useStoreMessageOption.setState({ historyId: "local-1", serverChatId: "source-chat", serverChatMetaLoaded: true,
+      messages: formatToMessage(initial), history: formatToChatHistory(initial) })
+    mocks.ragSearch.mockImplementation(async () => {
+      if (failure === "retrieval failure") throw new Error("Retrieval unavailable")
+      return { documents: [] }
+    })
+    let view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Local failed source question", image: "" }) })
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+    const diagnosticIds = view.result.current.state.messages.slice(2).map(row => row.id)
+    expect(diagnosticIds).toHaveLength(2)
+    expect(mocks.rows.slice(2)).toMatchObject([
+      { role: "user", generationInfo: { mode: "rag", grounded: false } },
+      { role: "assistant", generationInfo: { mode: "rag", grounded: false } }
+    ])
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ messages: [], history: [], serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+    view = renderWorkspace(false, true, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages.filter(row => diagnosticIds.includes(row.id))).toHaveLength(2)
+    const projected: unknown[][] = []
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Rowan opens east on Friday.", metadata: { title: "Rowan" } }] })
+    mocks.pageAssistModel.mockImplementation(async ({ conversationId, clientMessageId, retryFailedTurn }) =>
+      new ChatTldw({ model: "test", saveToDb: true, conversationId: conversationId ?? useStoreMessageOption.getState().serverChatId, clientMessageId, retryFailedTurn }))
+    mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+      projected.push(messages)
+      mocks.serverRows.get(options.conversationId)!.push(
+        { id: "source-user", role: "user", content: "Real source question" },
+        { id: "source-answer", role: "assistant", content: "Rowan opens east on Friday." })
+      onChunk({ tldw_user_message_id: "source-user", tldw_message_id: "source-answer" })
+      yield "Rowan opens east on Friday."
+    })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Real source question", image: "" }) })
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Rowan opens east on Friday.")
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(2)
+    expect(projected).toHaveLength(1)
+    expect(JSON.stringify(projected[0])).toContain("Earlier real answer")
+    expect(JSON.stringify(projected[0])).not.toContain("Local failed source question")
+    expect(JSON.stringify(projected[0])).not.toContain("did not send this as general chat")
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+    view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    expect(view.result.current.state.messages).toHaveLength(6)
+    expect(mocks.serverRows.get("source-chat")).toHaveLength(4)
+    expect(view.result.current.state.messages.filter(row => diagnosticIds.includes(row.id))).toHaveLength(2)
+    view.unmount()
+  })
+
+  it.each([false, true])("UAT103 retries the exact local source question and restores real context (temporary %s)", async temporary => {
+    mocks.realPersistence = true
+    mocks.serverRows.set("source-chat", [])
+    useStoreMessageOption.setState({ temporaryChat: temporary, historyId: temporary ? "temp" : "local-1",
+      serverChatId: temporary ? null : "source-chat", serverChatMetaLoaded: true,
+      history: [{ role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier answer" }],
+      messages: [
+        { id: "older-user", isBot: false, name: "You", message: "Earlier question", sources: [] },
+        { id: "older-answer", isBot: true, name: "Assistant", message: "Earlier answer", sources: [] }
+      ] })
+    mocks.ragSearch.mockResolvedValue({ documents: [] })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Retry this exact question", image: "" }) })
+    const userId = view.result.current.state.messages.find(row => row.message === "Retry this exact question")!.id
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+      expect(mocks.ragSearch.mock.calls.at(-1)?.[0]).toBe("Retry this exact question")
+      expect(view.result.current.state.history.map(row => row.content)).toEqual(["Earlier question", "Earlier answer"])
+    }
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
+    const projected: unknown[][] = []
+    mocks.pageAssistModel.mockImplementation(async options => ({
+      saveToDb: !temporary, conversationId: options.conversationId,
+      userServerMessageId: temporary ? undefined : "retried-user",
+      serverMessageId: temporary ? undefined : "retried-answer",
+      stream: async function* (messages: unknown[]) { projected.push(messages); yield "Real answer" }
+    }))
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(mocks.pageAssistModel.mock.calls.at(-1)?.[0]).toMatchObject({ clientMessageId: userId, retryFailedTurn: false })
+    expect(JSON.stringify(projected[0])).toContain("Earlier answer")
+    expect(view.result.current.state.messages.filter(row => row.id === userId)).toHaveLength(1)
+    expect(view.result.current.state.history.map(row => row.content)).toEqual(["Earlier question", "Earlier answer", "Retry this exact question", "Real answer"])
+    view.unmount()
+  })
+
+  it.each([undefined, { mode: "rag", grounded: true, reason: "selected_source_retrieval_failed" }, { mode: "normal", grounded: false, reason: "selected_source_retrieval_failed" }])("UAT103 preserves ordinary handled text fallback: %j", async generationInfo => {
+    const { __testing__ } = await import("@/hooks/chat-modes/ragMode")
+    const preflight = vi.spyOn(__testing__.ragModeDefinition, "preflight").mockResolvedValue({ handled: true, fullText: "Same plain response", saveToDb: false, generationInfo })
+    mocks.serverRows.set("source-chat", [])
+    useStoreMessageOption.setState({ historyId: "local-1", serverChatId: "source-chat", serverChatMetaLoaded: true })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    try {
+      for (let turn = 0; turn < 2; turn++) {
+        await act(async () => { await view.result.current.actions.onSubmit({ message: "Same plain question", image: "" }) })
+      }
+      expect(mocks.serverRows.get("source-chat")?.map(row => row.content)).toEqual(["Same plain question", "Same plain response", "Same plain question", "Same plain response"])
+      expect(view.result.current.state.history.map(row => row.content)).toEqual(["Same plain question", "Same plain response", "Same plain question", "Same plain response"])
+      expect(view.result.current.state.messages).toHaveLength(4)
+    } finally {
+      preflight.mockRestore()
+      view.unmount()
+    }
+  })
+
+  it("UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic", async () => {
+    mocks.ragSearch.mockResolvedValue({ documents: [] })
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Unanswered source question", image: "" }) })
+    const diagnosticIds = view.result.current.state.messages.map(row => row.id)
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Genuine answered question", image: "" }) })
+    const realIds = view.result.current.state.messages.filter(row => !diagnosticIds.includes(row.id)).map(row => row.id)
+    await act(async () => { useStoreMessageOption.setState({ temporaryChat: false }) })
+    await waitFor(() => expect(view.result.current.state.serverChatId).toBe("chat-1"))
+    expect(mocks.serverRows.get("chat-1")?.map(row => row.role)).toEqual(["user", "assistant"])
+    expect(mocks.serverRows.get("chat-1")?.some(row => row.content.includes("Unanswered source question"))).toBe(false)
+    expect(view.result.current.state.messages.filter(row => diagnosticIds.includes(row.id))).toHaveLength(2)
+    expect(view.result.current.state.messages.filter(row => realIds.includes(row.id)).every(row => Boolean(row.serverMessageId))).toBe(true)
+    view.unmount()
   })
 
   it.each([false, true].flatMap(prior => ["", "  Keep this image  "].map(text => ({ prior, text }))))("keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: $text / prior $prior", async ({ text, prior }) => {

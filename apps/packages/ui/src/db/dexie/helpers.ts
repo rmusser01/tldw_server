@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -282,7 +283,8 @@ export const formatToChatHistory = (
   messages: MessageHistory
 ): ChatHistoryType => {
   const { collapsed } = collapseVariantMessages(messages)
-  return collapsed.map((message) => {
+  const eligibleIds = new Set(excludeLocalRagDiagnostics(formatToMessage(messages)).map(message => message.id))
+  return collapsed.filter(message => eligibleIds.has(message.id)).map((message) => {
     return {
       content: message.content,
       role: normalizeChatRole(message.role),

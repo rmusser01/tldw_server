@@ -28,6 +28,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { formatToMessage, formatToChatHistory } from "@/db/dexie/helpers"
+import { generateHistory } from "@/utils/generate-history"
 const t = ((_key: string, options?: { defaultValue?: string }) => options?.defaultValue || "Cedar") as TFunction
 const notification = { error: vi.fn() }
 const mountLoader = () => renderHook(() => {
@@ -55,6 +56,30 @@ describe("real adapter → loader → mirror → formatter reload", () => {
     state.histories.set("legacy", { id: "legacy", title: "Cedar", server_chat_id: "cedar", is_rag: false, createdAt: 1 })
   })
   afterEach(() => vi.restoreAllMocks())
+  it.each(["selected_source_retrieval_failed", "selected_source_evidence_not_found"])("UAT103 restores local %s rows without promoting them into prompt history", async reason => {
+    const generationInfo = { mode: "rag", grounded: false, reason }
+    const local: Message[] = [
+      { id: "diagnostic-user", history_id: "legacy", role: "user", name: "You", content: "Repeated question", images: [], createdAt: 3, generationInfo },
+      { id: "diagnostic-answer", history_id: "legacy", role: "assistant", name: "Assistant", content: "Plain diagnostic wording", images: [], createdAt: 4, parent_message_id: "diagnostic-user", generationInfo },
+      { id: "real-user", history_id: "legacy", role: "user", name: "You", content: "Repeated question", images: [], createdAt: 5 },
+      { id: "real-answer", history_id: "legacy", role: "assistant", name: "Assistant", content: "Plain diagnostic wording", images: [], createdAt: 6, parent_message_id: "real-user" },
+      { id: "draft", history_id: "legacy", role: "user", name: "You", content: "Keep draft", images: [], createdAt: 7 }
+    ]
+    local.forEach(row => state.messages.set(row.id, row))
+    useStoreMessageOption.setState({ messages: formatToMessage(local), history: formatToChatHistory(local) })
+    const view = mountLoader()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+    const current = useStoreMessageOption.getState()
+    expect(current.messages.filter(row => row.id?.startsWith("diagnostic"))).toHaveLength(2)
+    expect([...state.messages.values()].filter(row => row.id.startsWith("diagnostic"))).toHaveLength(2)
+    const prompt = JSON.stringify(generateHistory(current.history, "test-model"))
+    expect(prompt.match(/Repeated question/g)).toHaveLength(1)
+    expect(prompt.match(/Plain diagnostic wording/g)).toHaveLength(1)
+    expect(prompt).toContain("Keep draft")
+    expect(formatToChatHistory(mirrorRows()).map(row => row.content).filter(content => content === "Repeated question")).toHaveLength(1)
+    view.unmount()
+  })
+
   it.each([true, false])("recovers an old partial mirror and survives repeated reload (greeting %s)", async greeting => {
     const old = [ ...(greeting ? [{ id: "greeting", history_id: "legacy", name: "Cedar", role: "assistant", content: "Welcome", messageType: "character:greeting", images: [], createdAt: 1 }] : []),
       { id: "question", history_id: "legacy", name: "You", role: "user", content: remote[0].content, images: [], createdAt: Date.parse(remote[0].timestamp) } ]

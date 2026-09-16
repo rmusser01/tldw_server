@@ -67,9 +67,13 @@ const messageStoreState = vi.hoisted(() => ({
 vi.mock("@/services/background-proxy", () => ({ bgStream: bgStreamMock, bgRequest: vi.fn(), bgUpload: vi.fn() }))
 
 vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+  loadServicePromptSnapshot: async (ids: string[], { signal }: { signal: AbortSignal }) => ({
     scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
-    scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal, definitions: {}, capability: "unchecked", release: vi.fn()
+    scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal,
+    definitions: Object.fromEntries(ids.map(id => [id, {
+      definition: { id, parts: [{ key: "template", mode: "literal", required_variables: [] }] },
+      parts: { template: "Fixture prompt" }
+    }])), capability: "unchecked", release: vi.fn()
   })
 }))
 
@@ -404,6 +408,25 @@ describe("useChatActions character integration", () => {
     expect(result.current.messages[0].serverMessageId).toBe("conversation-1-message-1")
     expect(result.current.messages[1].serverMessageId).toBe("conversation-1-message-2")
     expect(result.current.history.map(row => row.role)).toEqual(["assistant", "user", "assistant"])
+  })
+
+  it("UAT103 keeps a local source diagnostic Retry in the original character conversation", async () => {
+    const { ragMode } = await import("@/hooks/chat-modes/ragMode")
+    vi.mocked(ragMode).mockResolvedValue({ status: "submitted" })
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const options = { ...createHookOptions(), ragMediaIds: [42], fileRetrievalEnabled: true,
+      messages: [
+        { id: "greeting", isBot: true, message: "Welcome", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] },
+        { id: "local-user", isBot: false, message: "Source question", generationInfo, sources: [] },
+        { id: "local-diagnostic", isBot: true, message: "Plain diagnostic", parentMessageId: "local-user", generationInfo, sources: [] }
+      ],
+      history: [{ role: "assistant", content: "Welcome", messageType: "character:greeting" }]
+    }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.regenerateLastMessage() })
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(ragMode).toHaveBeenCalledWith("Source question", "", true, expect.any(Array), options.history, expect.any(AbortSignal), expect.objectContaining({ regenerateFromMessage: options.messages[2] }))
   })
 
   it.each(["Complete reply", "Partial reply after interruption", "__tldw_error__:malformed"])(

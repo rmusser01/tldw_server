@@ -1,0 +1,316 @@
+{
+  "status": "review corrections frozen and files released; compiler baseline unchanged; independent review closure and native acceptance pending",
+  "task": "TASK-13260.44",
+  "head": "6dead5240165ee44851a596a75b9d459c6799e23",
+  "created_at": "2026-09-16T20:27:50.502426+00:00",
+  "production": [
+    {
+      "path": "apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "sha256": "053d955f8509b59ed67907d056a9e8014180e20712b6d1d4b51741309f08f784"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "sha256": "ab5eeac50d18230a57fb9118aa6cef7e304911de06a19f2ee05279d289fd2feb"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "2e3f8fa95d584f7ae559beaf553af0b808f555a753273541307ee1e1c607ebd2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "sha256": "3879c8912a5a143534cd33e360090033d900195a10a46f2fcbd3b7395ef27636"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/helpers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/helpers.ts",
+      "sha256": "99faf920c407d14ec233cc8c07218bef078494656c2bb86a826f359e7ffc7406"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "d26631e153a53823022abc8dc1ed21afdbb08c34e456521b02c7f15c9a8a2558"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "47ffe105f418a2a458ebb58bd92ddae89369bc2289feeecfa21bea94232a5113"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "sha256": "ea345ce9f754730d81429f2c17b84eeec76291dfa35f782f2acb35298b66373a"
+    }
+  ],
+  "tests": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "d1dbba6d620874e139c32d956ec2c0c614cb497890f062087ff03b97df781679"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "sha256": "2e10481149240ae43fa3a9eb696949be16486c394f95321653295416257f79ec"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "sha256": "7b0c3f418404385d7a293fc079c23c11de7f4a4f58a15bcc34610db0f02062ac"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "sha256": "8d5c256eaf808943587ec84660ff6d1d42d973b6f87682bb825f49386fceee2d"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "sha256": "5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "ab0cf6826f409aa5caa26074f32e8606eeb5ef840123d7c3edd3d2dd4f1248ea"
+    }
+  ],
+  "backlog": [
+    {
+      "path": "backlog/tasks/task-13260.44 - Prevent-duplicate-visible-user-messages-after-saved-Chat-reload.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.44 - Prevent-duplicate-visible-user-messages-after-saved-Chat-reload.md",
+      "sha256": "2f8f4f2237858d179c21fe3b2d587bffa549b0323332dd15479d1a3a3e5ee216"
+    }
+  ],
+  "evidence": [
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/IMPLEMENTATION.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/IMPLEMENTATION.md",
+      "sha256": "8c97102e5d6b800554b487b00f8112b14f36cba50b86aee461b65b0aaa708668"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/design.md",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/design.md",
+      "sha256": "47ea1cc77fefb4932582f39f82c6874f62ba99dc2f0b7bfea09325a6fd15047d"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/owned-paths.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/owned-paths.json",
+      "sha256": "9475e96c2d02cadbc21e445f4abf9390202630baaa58e59630fe3aecc63c7b7f"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/owned.patch",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/owned.patch",
+      "sha256": "4376d64ceb4bf0e331dc0be8999acc58360a7d7b7bd2bf5be57dd5bc7fce8838"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/vitest.config.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/vitest.config.ts",
+      "sha256": "05acff8c4e9d575beb960080d2c8f2d52b7c27cb98d23effc17dff8507fd7923"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/vitest-original-continue-result.config.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/vitest-original-continue-result.config.ts",
+      "sha256": "3e0e365d185acbefc5d79b4355461d23a49daf71bac10419b55e924b0e57fe8c"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/verify-static.py",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/verify-static.py",
+      "sha256": "46a94544de34a44ab0ed58c86e2317e0230dbaa0890dad1da06557706a334f46"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-action.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-action.log",
+      "sha256": "2337911b883000347ed8de6c0e23502553254a75d5c8a2c85849a59cf71a5a79"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-boundaries.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-boundaries.log",
+      "sha256": "bee34b16c4812837b02cbeda86e4a8ec32573fa7e9c14c70171629d20b0cd3a2"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-retry-image.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-retry-image.log",
+      "sha256": "e451b304fdabb05cfbe1f1263c0cffaa2ba5fc3572cc7111985d40e87b190052"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-review-boundaries.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-review-boundaries.log",
+      "sha256": "cb60f65d19fc228bf088dfac38f3b991c63c2ba3d82d8ea4ae2caff579d08790"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-delete-boundary.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-delete-boundary.log",
+      "sha256": "5279daa94b98d8d4c297df82fe225cc9b83e19cbcbdbeaed298e4aa337ef1172"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-rewrite-boundary.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-rewrite-boundary.log",
+      "sha256": "3e21a395a90841a85b42c54c0cdf480cad4b578e1adf04ee8bf70aee24f6cb2e"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-continue-boundary.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-continue-boundary.log",
+      "sha256": "4d0abd5b52b4b4c66c5643dd52ff0b127a55fb3919c9c8e8a2bbd5a8125c9cf2"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-final-review-boundaries.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-final-review-boundaries.log",
+      "sha256": "c6feb6a01678ee1307f2e7e30fd7512c7579ce13371c76beab2f68ab257de9b2"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-continue-result-replay.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-continue-result-replay.log",
+      "sha256": "179bf01bd8a682aa9c6d82ec7eb62a486dd5997aa86186cc6cdbcb0ad6e9ea58"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/green-final-review-boundaries.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/green-final-review-boundaries.log",
+      "sha256": "09b4077dfe235fea3f1c2a86e2f9cb991ebb25526693c5d481daa6b7ebf1a3a9"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-tests.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-tests.log",
+      "sha256": "48c38f1d854c2daf8ba98836c84503b9e7fb038e3a0c835c7425c677f5663e12"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-eslint.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-eslint.log",
+      "sha256": "b518813ac621a95fd736c7d34a2d09b36e6e5a40b2c09694497755a5f3a45651"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/eslint-summary.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/eslint-summary.json",
+      "sha256": "60c6eb9ec290f5d5b1c70ce4d245779fcaadcdef5d3725be5f62a5a1595a5306"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/eslint-baseline.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/eslint-baseline.json",
+      "sha256": "86c24866d909a294bdf3c018745cf20347eea27e4138889403b56fda1a1913e8"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-diff-check.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-diff-check.log",
+      "sha256": "bde294368bfed77c2cddf8cec271d398aee9cdbab3b26e1059281bd33adb0120"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/bandit.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/bandit.json",
+      "sha256": "1601a924438435dee25375e50be3e7d42d387868fee13a22b92cdd01d5ae29ff"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/bandit.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/bandit.log",
+      "sha256": "c84534844536ab395bd6921473fbd40cc47a89a42133f5c3d195afcc1a05f92a"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/red-system-role.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/red-system-role.log",
+      "sha256": "7ffa2198d2c3424e3260a4c1cb3446faed32b004210653ec46ae3f9804a216fa"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/reviewer-system-delete-test.txt",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/reviewer-system-delete-test.txt",
+      "sha256": "145e84cf5124e5b1a4b52d8cfd75e1dade24d786023c0ead4947f46dfa4e89b4"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/reviewer-system-delete-current.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/reviewer-system-delete-current.log",
+      "sha256": "d8e643eb0947143de51e00760111d820d3ed0db3a8e7da8035785bc8161cdc79"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/reviewer-system-delete-baseline.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/reviewer-system-delete-baseline.log",
+      "sha256": "544126c9a890a4a86497a9f0ef7cec53d5455596be926119ba911f6e9da1fa8e"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-narrowing-controls.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-narrowing-controls.log",
+      "sha256": "68c75c42ef0924c6ab9099753f23243b6284226795c21c6c74c6b23e2aa6c339"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-typecheck.log",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-typecheck.log",
+      "sha256": "bec0173b45382b5301262b98b90ca544e246d78d086a01505df69b41cb05a898"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/final-typecheck-comparison.json",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/final-typecheck-comparison.json",
+      "sha256": "4bc2163ea6aae9219bc5b113c02250c90c1568460551729bdb60486b30551420"
+    }
+  ],
+  "snapshots": [
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "sha256": "053d955f8509b59ed67907d056a9e8014180e20712b6d1d4b51741309f08f784"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "sha256": "ab5eeac50d18230a57fb9118aa6cef7e304911de06a19f2ee05279d289fd2feb"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "2e3f8fa95d584f7ae559beaf553af0b808f555a753273541307ee1e1c607ebd2"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "sha256": "3879c8912a5a143534cd33e360090033d900195a10a46f2fcbd3b7395ef27636"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/db/dexie/helpers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/db/dexie/helpers.ts",
+      "sha256": "99faf920c407d14ec233cc8c07218bef078494656c2bb86a826f359e7ffc7406"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "d26631e153a53823022abc8dc1ed21afdbb08c34e456521b02c7f15c9a8a2558"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "47ffe105f418a2a458ebb58bd92ddae89369bc2289feeecfa21bea94232a5113"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "sha256": "ea345ce9f754730d81429f2c17b84eeec76291dfa35f782f2acb35298b66373a"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "d1dbba6d620874e139c32d956ec2c0c614cb497890f062087ff03b97df781679"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "sha256": "2e10481149240ae43fa3a9eb696949be16486c394f95321653295416257f79ec"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "sha256": "7b0c3f418404385d7a293fc079c23c11de7f4a4f58a15bcc34610db0f02062ac"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "sha256": "8d5c256eaf808943587ec84660ff6d1d42d973b6f87682bb825f49386fceee2d"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "sha256": "5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60"
+    },
+    {
+      "path": ".tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat103-local-preflight-20260916/review-snapshot/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "ab0cf6826f409aa5caa26074f32e8606eeb5ef840123d7c3edd3d2dd4f1248ea"
+    }
+  ]
+}

@@ -79,6 +79,17 @@ describe("createRegenerateLastMessage", () => {
     else expect(onSubmit).not.toHaveBeenCalled()
   })
 
+  it("retries a text-only local diagnostic without borrowing an older turn's image or type", async () => {
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const history: ChatHistory = [{ role: "user", content: "Older image question", image: "data:image/png;base64,older", messageType: "older-type" }, { role: "assistant", content: "Older answer" }]
+    const user: Message = { id: "local-user", isBot: false, name: "You", message: "New source question", sources: [], images: [], generationInfo }
+    const assistant: Message = { id: "local-diagnostic", isBot: true, name: "Assistant", message: "Retrieval failed", sources: [], parentMessageId: user.id, generationInfo }
+    const onSubmit = vi.fn()
+    await createRegenerateLastMessage({ validateBeforeSubmitFn: () => true, history,
+      messages: [...buildMessages(), user, assistant], setHistory: vi.fn(), setMessages: vi.fn(), onSubmit })()
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ message: user.message, image: "", messageType: undefined, memory: history }))
+  })
+
   it("bails safely when setHistory is not callable", async () => {
     const consoleErrorSpy = vi
       .spyOn(console, "error")

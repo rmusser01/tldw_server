@@ -1,0 +1,104 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (8 tests | 1 failed | 7 skipped) 5ms
+     ↓ removes the latest assistant turn and resubmits the previous user turn
+     ↓ retains exact Retry input and admits only nonempty text or an image: '  Preserve spaces  ' / ''
+     ↓ retains exact Retry input and admits only nonempty text or an image: '' / 'data:image/png;base64,aW1hZ2U='
+     ↓ retains exact Retry input and admits only nonempty text or an image: '   ' / ''
+     ↓ retains exact Retry input and admits only nonempty text or an image: '' / ''
+     × retries a text-only local diagnostic without borrowing an older turn's image or type 4ms
+     ↓ bails safely when setHistory is not callable
+     ↓ allows pre-submit hooks to override regenerate payload
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts > createRegenerateLastMessage > retries a text-only local diagnostic without borrowing an older turn's image or type
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -1,8 +1,10 @@
+  [
+-   ObjectContaining {
+-     "image": "",
++   {
++     "controller": AbortController {},
++     "image": "data:image/png;base64,older",
++     "isRegenerate": true,
+      "memory": [
+        {
+          "content": "Older image question",
+          "image": "data:image/png;base64,older",
+          "messageType": "older-type",
+@@ -12,8 +14,48 @@
+          "content": "Older answer",
+          "role": "assistant",
+        },
+      ],
+      "message": "New source question",
+-     "messageType": undefined,
++     "messageType": "older-type",
++     "messages": [
++       {
++         "isBot": false,
++         "message": "Hello",
++         "name": "You",
++         "sources": [],
++       },
++       {
++         "isBot": true,
++         "message": "Hi there",
++         "name": "Assistant",
++         "sources": [],
++       },
++       {
++         "generationInfo": {
++           "grounded": false,
++           "mode": "rag",
++           "reason": "selected_source_retrieval_failed",
++         },
++         "id": "local-user",
++         "images": [],
++         "isBot": false,
++         "message": "New source question",
++         "name": "You",
++         "sources": [],
++       },
++     ],
++     "regenerateFromMessage": {
++       "generationInfo": {
++         "grounded": false,
++         "mode": "rag",
++         "reason": "selected_source_retrieval_failed",
++       },
++       "id": "local-diagnostic",
++       "isBot": true,
++       "message": "Retrieval failed",
++       "name": "Assistant",
++       "parentMessageId": "local-user",
++       "sources": [],
++     },
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts:90:22
+     88|     await createRegenerateLastMessage({ validateBeforeSubmitFn: () => …
+     89|       messages: [...buildMessages(), user, assistant], setHistory: vi.…
+     90|     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ me…
+       |                      ^
+     91|   })
+     92|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  12:53:14
+   Duration  871ms (transform 440ms, setup 93ms, import 513ms, tests 5ms, environment 203ms)

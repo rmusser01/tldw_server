@@ -1,0 +1,219 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts (3 tests | 3 failed) 6ms
+     × resends a genuine edited question without retaining its old answer in prompt memory 4ms
+     × updates the genuine prompt row at its eligible index 1ms
+     × keeps a local diagnostic edit out of the genuine prompt row 0ms
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (28 tests | 1 failed | 27 skipped) 10ms
+     ↓ retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+     × UAT103 keeps a local source diagnostic Retry in the original character conversation 10ms
+     ↓ retains server branching when regenerating actual assistant content: Complete reply
+     ↓ retains server branching when regenerating actual assistant content: Partial reply after interruption
+     ↓ retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0)
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+     ↓ omits unset controls from the real Character request after switching to an unconfigured model scope
+     ↓ retains captured model controls while a pending Character user save outlives a settings-scope change
+     ↓ does not publish recovered IDs or save an old owner's partial after the lease invalidates
+     ↓ preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ forwards the confirmed assistant ID from fallback success to local persistence
+     ↓ forwards the confirmed assistant ID from degraded success to local persistence
+     ↓ keeps tracked character routing anchored to current chat metadata when global character state is stale
+     ↓ rebinds a greeting to the newly created conversation after a failed session
+     ↓ handles emote commands without sending chat
+     ↓ uses manual visual identity override when resolving assistant message metadata
+     ↓ does not let stale overlay assistant state override the active character chat
+     ↓ honors an explicit tracked character switch over the current chat metadata
+     ↓ reuses the latest store character chat when greeting persistence updates before the send closure
+     ↓ uses the latest store character id when the hook prop still points at another character
+     ↓ passes workspace scope through when creating a character-backed chat
+     ↓ strips explicit streaming emote directives and persists emote events
+     ↓ preserves explicit emote metadata when recovering a failed stream
+     ↓ does not duplicate recovery persistence when saved-degraded includes emote metadata
+     ↓ sends emote metadata when normal persist falls back to addChatMessage
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > UAT103 keeps a local source diagnostic Retry in the original character conversation
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "character_id": "char-tracked",
+        "cluster_id": undefined,
+        "external_ref": undefined,
+        "parent_conversation_id": "tracked-chat-1",
+        "source": undefined,
+        "state": "in-progress",
+        "title": "Tracked character chat [tracked-] · msg #2",
+        "topic_label": undefined,
+      },
+      undefined,
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:423:32
+    421|     const { result } = renderHook(() => useChatActions(options as unkn…
+    422|     await act(async () => { await result.current.regenerateLastMessage…
+    423|     expect(createChatMock).not.toHaveBeenCalled()
+       |                                ^
+    424|     expect(ragMode).toHaveBeenCalledWith("Source question", "", true, …
+    425|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts > editing visible rows after a local-only diagnostic > resends a genuine edited question without retaining its old answer in prompt memory
+AssertionError: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
+-     "memory": [],
++   {
++     "controller": AbortController {},
++     "image": "",
++     "isRegenerate": true,
++     "memory": [
++       {
++         "content": "Real question",
++         "role": "user",
++       },
++       {
++         "content": "Real answer",
++         "role": "assistant",
++       },
++     ],
++     "message": "Edited question",
++     "messages": [
++       {
++         "generationInfo": {
++           "grounded": false,
++           "mode": "rag",
++           "reason": "selected_source_retrieval_failed",
++         },
++         "id": "diagnostic-user",
++         "images": [],
++         "isBot": false,
++         "message": "Source question",
++         "name": "You",
++         "sources": [],
++       },
++       {
++         "generationInfo": {
++           "grounded": false,
++           "mode": "rag",
++           "reason": "selected_source_retrieval_failed",
++         },
++         "id": "diagnostic-answer",
++         "isBot": true,
++         "message": "Diagnostic",
++         "name": "Assistant",
++         "parentMessageId": "diagnostic-user",
++         "sources": [],
++       },
++       {
++         "id": "real-user",
++         "images": [],
++         "isBot": false,
+          "message": "Edited question",
++         "name": "You",
++         "sources": [],
++       },
++     ],
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts:24:22
+     22|     const { edit, onSubmit } = fixture()
+     23|     await edit(2, "Edited question", true, true)
+     24|     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ me…
+       |                      ^
+     25|   })
+     26|   it("updates the genuine prompt row at its eligible index", async () …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts > editing visible rows after a local-only diagnostic > updates the genuine prompt row at its eligible index
+AssertionError: expected "vi.fn()" to be called with arguments: [ [ { role: 'user', …(1) }, …(1) ] ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -1,9 +1,9 @@
+  [
+    [
+      {
+-       "content": "Edited question",
++       "content": "Real question",
+        "role": "user",
+      },
+      {
+        "content": "Real answer",
+        "role": "assistant",
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts:29:24
+     27|     const { edit, setHistory } = fixture()
+     28|     await edit(2, "Edited question", true, false)
+     29|     expect(setHistory).toHaveBeenCalledWith([{ role: "user", content: …
+       |                        ^
+     30|   })
+     31|   it("keeps a local diagnostic edit out of the genuine prompt row", as…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts > editing visible rows after a local-only diagnostic > keeps a local diagnostic edit out of the genuine prompt row
+AssertionError: expected "vi.fn()" to be called with arguments: [ [ { role: 'user', …(1) }, …(1) ] ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -1,9 +1,9 @@
+  [
+    [
+      {
+-       "content": "Real question",
++       "content": "Edited diagnostic question",
+        "role": "user",
+      },
+      {
+        "content": "Real answer",
+        "role": "assistant",
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts:34:24
+     32|     const { edit, setHistory, history } = fixture()
+     33|     await edit(0, "Edited diagnostic question", true, false)
+     34|     expect(setHistory).toHaveBeenCalledWith(history)
+       |                        ^
+     35|   })
+     36| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  4 failed | 27 skipped (31)
+   Start at  12:57:39
+   Duration  1.64s (transform 1.03s, setup 238ms, import 1.75s, tests 16ms, environment 501ms)

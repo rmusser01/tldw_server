@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { waitForChatPromotion } from "@/services/pending-chat-promotion"
 import React from "react"
 import { formatToMessage } from "@/db/dexie/helpers"
@@ -1036,7 +1037,7 @@ export const useServerChatLoader = ({
           const active = streamingRef.current || processingRef.current
           if (!active) {
             const merged = reconcileServerChatMessages(useStoreMessageOption.getState().messages, mappedMessages)
-            setHistory(merged.map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
+            setHistory(excludeLocalRagDiagnostics(merged).map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
             setMessages(merged)
           }
           const shouldApplyDeferredAssistantPresentation =
@@ -1107,7 +1108,7 @@ export const useServerChatLoader = ({
                   const id = message.serverMessageId ? mirror.localIds.get(message.serverMessageId) : undefined
                   return id && message.id !== id ? { ...message, id } : message
                 })
-                setHistory(merged.map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
+                setHistory(excludeLocalRagDiagnostics(merged).map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
                 setMessages(merged)
               }
             } catch {

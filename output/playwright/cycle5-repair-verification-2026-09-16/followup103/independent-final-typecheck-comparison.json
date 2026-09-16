@@ -1,0 +1,9 @@
+{
+  "baseline": ".tmp/fresh-uat-recovery-20260916/typecheck-current.log",
+  "current": ".tmp/uat103-local-preflight-20260916/independent-final-typecheck.log",
+  "baselineDiagnostics": 90,
+  "currentDiagnostics": 90,
+  "added": [],
+  "removed": [],
+  "compilerExitCode": 2
+}

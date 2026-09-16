@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import { startTransition } from "react"
 import { generateID } from "@/db/dexie/helpers"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
@@ -226,16 +227,18 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     : undefined
 
   const failedTurnError = decodeChatErrorPayload(regenerateFromMessage?.message || "")
-  const retryFailedTurn = Boolean(isRegenerate && failedTurnError)
+  const diagnosticUser = isRegenerate && regenerateFromMessage
+    ? getLocalRagDiagnosticUser(messages, regenerateFromMessage) : undefined
+  const retryFailedTurn = Boolean(isRegenerate && (failedTurnError || diagnosticUser))
   // A local capability refusal can prove no request was dispatched. Keep the
   // local failed-user identity while avoiding server reuse of an older turn.
-  const serverRetryRequired = retryFailedTurn && failedTurnError?.serverRetryRequired !== false
+  const serverRetryRequired = retryFailedTurn && !diagnosticUser && failedTurnError?.serverRetryRequired !== false
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
     !isRegenerate
       ? userMessageId ?? generateID()
       : retryFailedTurn
-        ? userMessageId ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
+        ? userMessageId ?? diagnosticUser?.id ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
         : undefined
   const createdAt = Date.now()
   let generateMessageId = resolvedAssistantMessageId
@@ -598,7 +601,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   reasoning_time_taken: timetaken
                 })
               )
-            : msg
+            : msg.id === resolvedUserMessageId && isLocalRagDiagnosticInfo(preflightGenerationInfoForSave)
+              ? { ...msg, generationInfo: preflightGenerationInfoForSave }
+              : msg
         )
       )
       setHistorySafely(nextHistory)
@@ -649,6 +654,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       return chatSubmitSubmitted()
     }
 
+    // Rewrite builders also read visible messages. Keep the context identity
+    // used by preflight retrieval caches, while projecting only prompt rows.
+    context.messages = excludeLocalRagDiagnostics(context.messages)
     const promptData = await mode.preparePrompt(context)
     if (params.dynamicUIRequest?.renderer === "openui") {
       promptData.chatHistory = [

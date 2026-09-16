@@ -1,0 +1,447 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:41496) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41489) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41495) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41490) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41497) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41492) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41499) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41491) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41493) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41501) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41500) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41494) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41498) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:41502) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts (13 tests) 2ms
+ ✓ ../packages/ui/src/hooks/chat-helper/__tests__/saveMessageOnError.test.ts (9 tests) 6ms
+ ✓ ../packages/ui/src/utils/__tests__/generate-history.image-generation.test.ts (3 tests) 3ms
+ ✓ ../packages/ui/src/hooks/chat-modes/__tests__/ragMode.sanitization.test.ts (13 tests) 7ms
+ ✓ ../packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.error-variants.persistence.test.ts (3 tests) 6ms
+ ✓ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts (3 tests) 3ms
+ ✓ ../packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts (8 tests) 4ms
+ ✓ ../packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.abort-lifecycle.test.ts (12 tests) 113ms
+ ✓ ../packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.provider-recovery.test.ts (2 tests) 5ms
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx > useChatActions character stream throttling integration > coalesces rapid tiny character chunks into bounded setMessages updates
+Failed to fetch server chat settings TypeError: __vite_ssr_import_1__.tldwClient.getChatSettings is not a function
+    at syncChatSettingsForServerChat (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/chat-settings.ts:692:34)
+    at saveMessageOnSuccess (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts:1059:9)
+    at characterChatMode (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts:2719:7)
+    at Object.onSubmit (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts:3788:37)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx:647:7
+
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx > useChatActions character stream throttling integration > does not fall back to addChatMessage when persistCharacterCompletion reports saved degraded state
+Failed to persist assistant message via completions/persist: Error: degraded
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx:666:21
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 503,
+  details: {
+    detail: {
+      code: 'persist_validation_degraded',
+      saved: true,
+      assistant_message_id: 'assistant-server-99'
+    }
+  }
+}
+
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx > useChatActions character stream throttling integration > does not fall back when a saved degraded error only exposes top-level detail
+Failed to persist assistant message via completions/persist: Error: degraded
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx:727:21
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 503,
+  detail: { code: 'persist_validation_degraded', saved: true }
+}
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.image-event-sync.integration.test.tsx (9 tests) 31ms
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:544:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:545:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ✓ ../packages/ui/src/components/Option/Playground/hooks/__tests__/usePlaygroundPersistence.test.tsx (9 tests) 333ms
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (28 tests) 55ms
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: immediate
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK
+Using normalChatMode
+
+ ✓ ../packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx (12 tests) 3289ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting true)  613ms
+     ✓ recovers an old partial mirror and survives repeated reload (greeting false)  612ms
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue reports the exact diagnostic Retry outcome: provider failed
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Complete answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Partial answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (91 tests) 13636ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: immediate  421ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK  569ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK  568ms
+     ✓ UAT131 preserves captured source identity across late edit  360ms
+     ✓ UAT131 preserves captured source identity across equal rows  361ms
+     ✓ UAT131 preserves captured source identity across authority  359ms
+     ✓ UAT131 preserves captured source identity across new history  359ms
+     ✓ UAT131 preserves captured source identity across route roundtrip  360ms
+     ✓ UAT103 keeps a retrieval failure local through actual action, reload and next completion  417ms
+     ✓ UAT103 keeps a no evidence local through actual action, reload and next completion  422ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false  629ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false  629ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true  635ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true  638ms
+     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  426ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false  430ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false  432ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true  636ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true  648ms
+
+ Test Files  14 passed (14)
+      Tests  215 passed (215)
+   Start at  13:28:51
+   Duration  15.24s (transform 5.93s, setup 2.31s, import 9.00s, tests 17.50s, environment 5.44s)

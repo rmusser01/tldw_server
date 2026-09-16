@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import { isChatPromotionIncompleteError, waitForChatPromotion } from "@/services/pending-chat-promotion"
 import type { NotificationInstance } from "antd/es/notification/interface"
@@ -1256,6 +1257,7 @@ export const useChatActions = ({
         }
       } else if (
         !isImageGenerationNoOp &&
+        !(payload?.saveToDb === false && isLocalRagDiagnosticInfo(payload?.generationInfo)) &&
         !payload?.isRegenerate &&
         !payload?.isContinue &&
         typeof payload?.message === "string" &&
@@ -3044,13 +3046,13 @@ export const useChatActions = ({
 
   const buildHistoryFromMessages = React.useCallback(
     (items: Message[]): ChatHistory =>
-      items
+      excludeLocalRagDiagnostics(items)
         .filter((message) =>
           !isImageGenerationMessageType(message.messageType) &&
           (greetingEnabled ? true : !isGreetingMessageType(message.messageType))
         )
         .map((message) => ({
-          role: message.isBot ? "assistant" : "user",
+          role: message.role ?? (message.isBot ? "assistant" : "user"),
           content: message.message,
           image: message.images?.[0],
           messageType: message.messageType
@@ -3234,6 +3236,13 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    const lastVisibleMessage = messages.at(-1)
+    if (isContinue && lastVisibleMessage && getLocalRagDiagnosticUser(messages, lastVisibleMessage)) {
+      // A local grounding diagnostic has no generated answer to continue.
+      const retryResult = await regenerateLastMessage()
+      if (retryResult) return retryResult
+      return chatSubmitSkipped("Retry was not submitted")
+    }
     const hasVisualIdentityTarget = Boolean(
       selectedCharacter?.id != null ||
         selectedAssistant?.kind === "character" ||
@@ -4511,7 +4520,7 @@ export const useChatActions = ({
       if (selectedCharacter?.id == null && serverChatCharacterId == null) return
       // A failed completion retries its already saved user turn. Branching here
       // would copy the greeting and user but leave their visible receipts stale.
-      if (decodeChatErrorPayload(lastAssistant.message)) return
+      if (decodeChatErrorPayload(lastAssistant.message) || getLocalRagDiagnosticUser(messages, lastAssistant)) return
 
       const branchIndex = nextMessages.length - 1
       if (branchIndex < 0) return
@@ -4572,6 +4581,7 @@ export const useChatActions = ({
       const serverMessageVersion = target.serverMessageVersion
       const historyRole = target.role ?? (target.isBot ? "assistant" : "user")
       const historyContent = target.message ?? ""
+      const targetIsInPrompt = excludeLocalRagDiagnostics(messages).includes(target)
 
       if (replyTarget?.id && (replyTarget.id === targetId || replyTarget.id === serverMessageId)) {
         clearReplyTarget()
@@ -4607,6 +4617,10 @@ export const useChatActions = ({
 
       setMessages((prev) => prev.filter((m) => m.id !== targetId))
       setHistory((prev) => {
+        if (!targetIsInPrompt) {
+          // Removing the diagnostic answer can leave an eligible local draft.
+          return buildHistoryFromMessages(messagesRef.current.filter(message => message.id !== targetId))
+        }
         let removed = false
         return prev.filter((h) => {
           if (!removed && h.role === historyRole && h.content === historyContent) {
@@ -4618,6 +4632,7 @@ export const useChatActions = ({
       })
     },
     [
+      buildHistoryFromMessages,
       clearReplyTarget,
       historyId,
       invalidateServerChatHistory,

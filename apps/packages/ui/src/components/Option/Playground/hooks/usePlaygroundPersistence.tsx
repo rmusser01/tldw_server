@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import React from "react"
 import type { Message } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -290,7 +291,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         .filter((msg) => msg.content)
       // Pair the immutable, ordered transcript once. Never search equal text in
       // a changing array or assign one receipt to several identical messages.
-      const visible = capturedMessages.filter(message => (message.role || (message.isBot ? "assistant" : "user")) !== "system" && message.message.trim())
+      const visible = excludeLocalRagDiagnostics(capturedMessages).filter(message => (message.role || (message.isBot ? "assistant" : "user")) !== "system" && message.message.trim())
       const transcript = snapshot.filter(message => message.role !== "system")
       const aligned = new Set(visible.map(message => message.id)).size === visible.length &&
         visible.length === transcript.length && visible.every((message, index) =>

@@ -1,0 +1,77 @@
+{
+  "manifest": "2d972e7ac51ef8b715264e3fdbff150d2f236f29511afaa5d727a067bf647c87",
+  "production": [
+    {
+      "path": "apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/utils/local-rag-diagnostic.ts",
+      "sha256": "053d955f8509b59ed67907d056a9e8014180e20712b6d1d4b51741309f08f784"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "sha256": "ab5eeac50d18230a57fb9118aa6cef7e304911de06a19f2ee05279d289fd2feb"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "2e3f8fa95d584f7ae559beaf553af0b808f555a753273541307ee1e1c607ebd2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "sha256": "3879c8912a5a143534cd33e360090033d900195a10a46f2fcbd3b7395ef27636"
+    },
+    {
+      "path": "apps/packages/ui/src/db/dexie/helpers.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/helpers.ts",
+      "sha256": "99faf920c407d14ec233cc8c07218bef078494656c2bb86a826f359e7ffc7406"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "d26631e153a53823022abc8dc1ed21afdbb08c34e456521b02c7f15c9a8a2558"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "47ffe105f418a2a458ebb58bd92ddae89369bc2289feeecfa21bea94232a5113"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx",
+      "sha256": "ea345ce9f754730d81429f2c17b84eeec76291dfa35f782f2acb35298b66373a"
+    }
+  ],
+  "tests": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "d1dbba6d620874e139c32d956ec2c0c614cb497890f062087ff03b97df781679"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx",
+      "sha256": "2e10481149240ae43fa3a9eb696949be16486c394f95321653295416257f79ec"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts",
+      "sha256": "7b0c3f418404385d7a293fc079c23c11de7f4a4f58a15bcc34610db0f02062ac"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.edit.test.ts",
+      "sha256": "8d5c256eaf808943587ec84660ff6d1d42d973b6f87682bb825f49386fceee2d"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/utils/__tests__/local-rag-diagnostic.test.ts",
+      "sha256": "5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "absolute_path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sha256": "ab0cf6826f409aa5caa26074f32e8606eeb5ef840123d7c3edd3d2dd4f1248ea"
+    }
+  ]
+}

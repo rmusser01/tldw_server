@@ -1,0 +1,106 @@
+{
+  "files": [
+    {
+      "path": "IMPLEMENTATION.md",
+      "sha256": "8c97102e5d6b800554b487b00f8112b14f36cba50b86aee461b65b0aaa708668"
+    },
+    {
+      "path": "README.md",
+      "sha256": "99ae068d3970bb24cc2ad2fc37036e6c7513bf0fef20aac36de15509b5c0095b"
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "1601a924438435dee25375e50be3e7d42d387868fee13a22b92cdd01d5ae29ff"
+    },
+    {
+      "path": "eslint-summary.json",
+      "sha256": "60c6eb9ec290f5d5b1c70ce4d245779fcaadcdef5d3725be5f62a5a1595a5306"
+    },
+    {
+      "path": "final-diff-check.log",
+      "sha256": "bde294368bfed77c2cddf8cec271d398aee9cdbab3b26e1059281bd33adb0120"
+    },
+    {
+      "path": "final-tests.log",
+      "sha256": "270c31be3449c78fba7751fefbebdff99a9a8fdf01b5b46dd479c965a398d76f"
+    },
+    {
+      "path": "green-final-review-boundaries.log",
+      "sha256": "9c9556b7879e020fe0fa581456ae2af1c3d72cd8156771765fca92401a3de1b6"
+    },
+    {
+      "path": "independent-final-tests.log",
+      "sha256": "c1e8a60b203d7fa9a6f0000de57b94c18b227787e0b452d8de70732c6fa8af83"
+    },
+    {
+      "path": "independent-final-typecheck-comparison.json",
+      "sha256": "90129425fd646df25ef8fc4004a711f96bf8168ce8a8eea8e8df5c9b3ac760a2"
+    },
+    {
+      "path": "independent-final-typecheck.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "path": "owned-manifest.json",
+      "sha256": "2d972e7ac51ef8b715264e3fdbff150d2f236f29511afaa5d727a067bf647c87"
+    },
+    {
+      "path": "red-action.log",
+      "sha256": "49092a0f0a4b980ae744b15f34059124f0607854fd0590fddad11283ecb0b86a"
+    },
+    {
+      "path": "red-boundaries.log",
+      "sha256": "edfe471cf5ec52b2096357917f3e9b52aca4b2f6f275a05f8af6d4523b3dfa14"
+    },
+    {
+      "path": "red-continue-boundary.log",
+      "sha256": "acbf0d9747f0865284a87c79f35bce063821cf6f5b21352ed05019d50c60cea6"
+    },
+    {
+      "path": "red-continue-result-replay.log",
+      "sha256": "cc12a66228ef62e85a0cb67a4962cf2c10e5cf0808ce595f93d2c0dbede017e6"
+    },
+    {
+      "path": "red-delete-boundary.log",
+      "sha256": "7007b3fd005214812cb4829bba784923ab4fa3c3dfdf1fd6bcad2600d77534ce"
+    },
+    {
+      "path": "red-final-review-boundaries.log",
+      "sha256": "349f1972b64198ed20a86784841b3d92c8d596ff53c2bbd828b96b262706d118"
+    },
+    {
+      "path": "red-retry-image.log",
+      "sha256": "1998195192b507ca35cde87415cc39d6a76d2fb85c8cf8416d12fba683106648"
+    },
+    {
+      "path": "red-review-boundaries.log",
+      "sha256": "698b15a0a48caecb55187682027fcaeea8970aed0d62b0949118e523aa34763c"
+    },
+    {
+      "path": "red-rewrite-boundary.log",
+      "sha256": "d30fb8797eeeefd4a70c1fb154a786d1715a55d9c719a1d369ab0a5bebb82702"
+    },
+    {
+      "path": "red-system-role.log",
+      "sha256": "143cbdc76d2d1c59aa01c70cad75a565282e11fb1a5a1bab08b0359112a6fbd0"
+    },
+    {
+      "path": "uat103-independent-final-hashes.json",
+      "sha256": "080f5c45f34749abbc244cf4a2ef0f4c5eee73ac414a492d05573d8b6628a061"
+    },
+    {
+      "path": "uat103-independent-review.md",
+      "sha256": "b70d64d018a416eb57ad476f76d6b4f22989c4140eb2e82c9858f15bfa1c119f"
+    },
+    {
+      "path": "uat103-review-system-delete-baseline.log",
+      "sha256": "5b8d77453f181727210454b703efaea97e9efa5742127c178b3782d016fe627f"
+    },
+    {
+      "path": "uat103-review-system-delete-current.log",
+      "sha256": "79b0f78b105d02e8f8019e74f16e8e7b94753b836686b7c91b22bb47d5326240"
+    }
+  ],
+  "exactCredentialScan": "pass",
+  "normalization": "Trailing whitespace in copied logs only"
+}
