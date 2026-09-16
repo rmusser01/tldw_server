@@ -2,6 +2,10 @@
 
 ## Run status
 
+- **23:45 UTC reviewed-repair checkpoint:180 findings —163 verified,17 awaiting native acceptance,0 unresolved implementation defects.**179 passes independent28 required PostgreSQL/SQLite HTTP/schema tests;180 passes independent22 lifecycle/transaction tests, both zero skips. All known repairs are reviewed; the next work is targeted native acceptance, not full UAT. A separately labeled local provider fixture will exercise024's actual backend verification rejection, then the exact original profile config must be restored before normal model checks.
+
+- **23:41 UTC checkpoint:180 findings —163 verified,15 awaiting native acceptance,2 unresolved (179/180).** Analytics177 and Cram recovery178 are independently reviewed and committed `f817f4aa96` (15 required PostgreSQL/SQLite and65 UI tests, separate runs, zero skips).179 timestamp-contract tests reproduce both session and populated assistant failures;180 deletion/reset regression is in progress. Native acceptance resumes after these repairs are frozen.
+
 - **23:37 UTC discovery:180 unique findings.** Required PostgreSQL analytics regressions expose180's separate positional-row failure in Flashcards soft delete. It is tracked under TASK13260.117; adjacent reset is a candidate requiring reproduction.177/179 backend repairs and178 Cram error-state verification remain in progress.175 is committed `c000d45187`; native acceptance has not resumed.
 
 - **23:34 UTC checkpoint:179 unique findings —163 verified,13 awaiting native acceptance,3 unresolved (177/178/179).**173/174/176 are committed in `50a86e81eb`.175 passes independent66 shared-UI and11 actual Next/panel checks in separate runs; its native overlay/retry acceptance remains pending.177's first analytics error is PostgreSQL UndefinedFunction from substr(timestamp); aborted-transaction controls reproduce later read failures. Fresh-connection HTTP tests additionally identify179 timestamp response validation, which requires a separate repair.
@@ -105,12 +109,12 @@
 ## UAT-180 — P1: PostgreSQL Flashcard soft delete reads named results positionally
 
 - Real PostgreSQL regression setup calls soft_delete_flashcard and raises KeyError0 while reading id/version/deleted. This occurs before analytics and is distinct from177. The adjacent reset path contains the same positional-access pattern but needs its own failing test before repair.
-- Status: unresolved, TASK13260.117. Retain optimistic-lock conflicts, missing-row behavior, repeat-delete semantics and transaction rollback while using the returned named columns. Required PostgreSQL/SQLite regression, independent review and native Manage acceptance remain pending.
+- Status: implemented, TASK13260.117; native acceptance pending. Real PostgreSQL RED confirms both delete and scheduling reset. Exactly two named-column reads preserve optimistic-lock conflicts, missing rows, repeated-delete semantics and caller rollback. Independent22 tests across2 files pass with zero skips; author33/3 and8existing endpoint checks pass separately. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup180/README.md).
 
 ## UAT-179 — P1: PostgreSQL Study session and assistant timestamps fail response validation
 
 - Actual HTTP tests on fresh PostgreSQL connections fail serialization of completed-session started_at/last_activity_at/completed_at and assistant-thread created_at/last_modified datetime values against string response fields. SQLite controls pass. This is independent of177's analytics error/transaction cascade and167's deck/card response fix.
-- Status: unresolved, TASK13260.116. Preserve existing wire timestamps through the canonical conversion helper and retain actual-router PostgreSQL/SQLite coverage; native Study acceptance remains pending.
+- Status: implemented, TASK13260.116; native acceptance pending. Three localized response validators reuse existing datetime-only conversion and retain optional string/null contracts and timezone values. Independent28 required PostgreSQL/SQLite HTTP/schema cases pass with zero skips; existing32-test subset passes separately. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup179/README.md).
 
 ## UAT-178 — P1: Failed Cram queue load is displayed as successful completion
 

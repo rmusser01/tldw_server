@@ -460,6 +460,12 @@ class FlashcardReviewSessionSummary(BaseModel):
     cards_reviewed: int = 0
     client_id: str
 
+    @field_validator("started_at", "last_activity_at", "completed_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
     @field_validator("cards_reviewed", mode="before")
     @classmethod
     def _default_null_cards_reviewed(cls, value: Any) -> Any:
@@ -628,6 +634,12 @@ class StudyAssistantThreadSummary(BaseModel):
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
 
+    @field_validator("last_message_at", "created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class StudyAssistantMessage(BaseModel):
     id: int
@@ -642,6 +654,12 @@ class StudyAssistantMessage(BaseModel):
     model: Optional[str] = None
     created_at: Optional[str] = None
     client_id: str
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
     @model_validator(mode="before")
     def _populate_json_fields(cls, data):

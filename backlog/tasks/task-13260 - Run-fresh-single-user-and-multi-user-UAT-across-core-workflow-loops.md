@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 21:53'
+updated_date: '2026-09-16 23:45'
 labels:
   - uat
   - testing
@@ -180,6 +180,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 21:17UTC reconciliation162findings:150verified/10awaiting/2unresolved013and162. Final118/157 realPNG Send/failure/reload/Retry/canonicalacceptance independentlypasses; mandatoryPG32pass0skip refreshed.114genuinehidden six-tab and142actualDisconnect/route delayed200 controls accepted;155/159/160/161/153accepted.161 committed413be51cc8;162semanticlabels underrepair. Tracker/ledger are current; nofullUATrestart, nativePGmatrix stillrequired. Evidence cycle5-repair-verification/native-image118-157-final,followup114-native,followup142-native,followup152-153-native.
 
 21:52UTC checkpoint164 findings:155verified,7awaiting acceptance(024/031/137/138/139/141/151),2unresolved(163/164),0toolblocked. Independent retained final-source013/103/152/156 native acceptance passes; exact report and164-row ledger under cycle5-repair-verification. Full matrix remains gated. PostgreSQL targeted initial admin creation and real frontend login pass; local provider configuration uses documented isolated operator path.
+
+2026-09-16T23:45Z: tracker180findings,163verified/17native-pending/0unresolved implementation defects. Reviewed commits50a86e81eb,c000d45187,f817f4aa96;179/180readycommit with independent28and22 requiredPG/SQLite passes0skip. Retained failure/repair evidence through180 and current180ledger. Next targeted browser acceptance on fixed source;024uses explicit local provider-fault fixture followed by exactconfig restoration. Full fresh SQLite/PostgreSQL single/multi A/B/C remains pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

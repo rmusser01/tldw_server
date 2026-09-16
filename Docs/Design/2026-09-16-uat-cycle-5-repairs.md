@@ -1,6 +1,6 @@
 # Cycle 5 UAT repairs
 
-## Latest bounded follow-ups173–179
+## Latest bounded follow-ups173–180
 
 173/TASK13260.110 reads the existing conversation count alias by name; filtering and fail-closed quota logic stay unchanged.176/TASK13260.112 uses CharactersRAGDB.transaction for world-book schema initialization and removes the explicit commit so nested caller rollback remains valid.174/TASK13260.111 carries only a payload-free uniqueness category out of the trusted PostgreSQL driver catch; no SQL, values, constraint identity or raw cause/context is exposed. Existing duplicate409 handling consumes that category.
 
@@ -9,6 +9,8 @@
 177/TASK13260.114 diagnoses real PostgreSQL Study analytics/history/queue failures and distinguishes primary errors from transaction cascades before choosing a repair.178/TASK13260.115 is a separate ReviewTab presentation failure: a failed query must not become successful Cram completion. Use actual query loading/error/success state, show an actionable Retry through its scoped refetch, preserve cached card/progress/selection, and verify successful completion and no unintended session/rating mutations. Detailed test-first designs and original native evidence are retained with the corresponding review packages.
 
 177's confirmed analytics fix selects UTC review dates using the backend's supported date expression and closes only its explicitly owned pure-read transactions. Preserve caller transaction ownership.179/TASK13260.116 separately normalizes PostgreSQL completed-session and assistant-thread timestamps through existing response conversion, preserving SQLite strings, nulls, timezone meaning and public response contracts. Actual HTTP regressions distinguish these serialization failures from a poisoned connection.
+
+180/TASK13260.117 corrects only the two positional result reads in Flashcard soft-delete and scheduling reset. Preserve version checks, required HTTP version, optional DB reset version, idempotent deletion, mutation fields and caller rollback. Actual PostgreSQL/SQLite HTTP tests reproduce each before the named-column repair; no row-adapter or exception-contract refactor is needed.
 
 Parent: TASK13260. This design continues the user's authorization to repair every identified issue before another full fresh UAT. Current product is frozen at `ab527eb3b4`; subsequent commits contain documentation and evidence only. Both current native matrices must finish and their evidence must be preserved before product edits.
 

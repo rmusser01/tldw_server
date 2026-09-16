@@ -1,0 +1,40 @@
+{
+  "task": "TASK-13260.117",
+  "uat": "UAT180",
+  "createdAt": "2026-09-16T23:44:07.584Z",
+  "baselineCommit": "f817f4aa968d9d5ec5c01c5b4db53c924867c4fe",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "53d1977a0a4baa47d7f7624bdecd8ab1736545258f1d0b447522a752f330b357",
+      "bytes": 2188070,
+      "snapshotPath": ".tmp/uat180-repair-20260916/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "baselinePath": ".tmp/uat180-repair-20260916/baseline-ChaChaNotes_DB.py",
+      "baselineSha256": "39fe562a1bf819b0d225d35a9a962c03582a1ce5c0667b1e277991f46d6e44f4"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_flashcard_lifecycle_backends.py",
+      "sha256": "ee130ece4d55452d41fa27524802f8481095c5c7a868b32fe5c65abc4d933cb6",
+      "bytes": 6602,
+      "snapshotPath": ".tmp/uat180-repair-20260916/review-snapshot/tldw_Server_API/tests/DB_Management/test_flashcard_lifecycle_backends.py",
+      "newFile": true
+    }
+  ],
+  "patchSha256": "231464cc530e6b3987968ce45f5d781c405fc716379b18bbd3c5eb3208f11f85",
+  "unownedObserved": [
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/flashcards.py",
+      "sha256": "802232415b9b8314e85e2a26f59300692f151921f7b6bc40fceadb5872394315",
+      "note": "Concurrent179 edits affect other schemas; reset Flashcard validator already in baseline"
+    }
+  ],
+  "verification": {
+    "red": "7 failed /13 passed /0 skips",
+    "green": "33 passed /3 files /0 skips",
+    "existingEndpointControls": "8 passed /173 deselected",
+    "ruff": "0 baseline /0 final",
+    "bandit": "0 findings /0 errors, test B101 excluded",
+    "compile": "py_compile passed"
+  },
+  "native": "Parent-owned, not run by author"
+}

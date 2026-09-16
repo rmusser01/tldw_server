@@ -37434,7 +37434,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 row = conn.execute("SELECT id, version, deleted FROM flashcards WHERE uuid = ?", (card_uuid,)).fetchone()
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id, cur_ver, deleted = int(row[0]), int(row[1]), int(row[2])
+                card_id, cur_ver, deleted = int(row["id"]), int(row["version"]), int(row["deleted"])
                 if deleted:
                     return True
                 if cur_ver != expected_version:
@@ -37458,7 +37458,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ).fetchone()
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id, current_version = int(row[0]), int(row[1])
+                card_id, current_version = int(row["id"]), int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError(
                         "Version mismatch resetting flashcard scheduling",

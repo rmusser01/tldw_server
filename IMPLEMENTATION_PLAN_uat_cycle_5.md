@@ -97,6 +97,8 @@ Latest Stage3 checkpoint,23:30UTC:173 quota access,174 safe uniqueness classific
 
 ## Stage 4: Run another full fresh workflow matrix
 
+Stage3 remains active at23:45UTC: all180 identified defects have reviewed implementations;17 original-scenario native acceptances remain.179 independent28/0skip and180 independent22/0skip pass. Resume only targeted acceptance on committed source, first024's explicitly labeled provider negative control, restore the exact private profile configuration, then normal Study/Chat/account-switch/restart checks. Full fresh single/multi SQLite/PostgreSQL A/B/C remains gated.
+
 **Goal:** Recheck the authoritative journeys on new configuration/data/browser state after all confirmed repairs.
 **Success Criteria:** Both mode matrices account for every required row on one frozen source, with any newly observed issue tracked immediately. No blanket sign-off while confirmed product failures remain.
 **Tests:** The twelve-row named-journey protocol, real model generation, canonical persistence, user/permission isolation, connection recovery and natural expiry controls.
