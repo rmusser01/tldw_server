@@ -67,10 +67,6 @@ export const acknowledgePromotedChatMessage = async ({
 
 const canonicalId = (message: ChatMessage) => message.serverMessageId?.trim() || null
 
-/** Content edits do not change the creation time of an acknowledged message. */
-const canonicalCreatedAt = (createdAt: unknown): number | undefined =>
-  typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : undefined
-
 /** A request's local user ID is an identity anchor even when the provider failed before any ACK. */
 const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   const claims = new Map<string, ChatMessage[]>()
@@ -147,7 +143,6 @@ export const reconcileServerChatMessages = (
     const changedDuringAwait = beforeAwait !== undefined && beforeById.get(id)?.message !== local.message
     const preserveContent = (changedDuringAwait || local.serverMessageVersion == null || localVersion >= remoteVersion) && local.message !== remote.message
     return { ...local, ...remote, ...(preserveContent ? local : {}),
-      createdAt: canonicalCreatedAt(remote.createdAt) ?? local.createdAt,
       parentMessageId: remote.parentMessageId ?? local.parentMessageId,
       id: local.id || remote.id, serverMessageId: canonicalId(remote) || canonicalId(local) || undefined,
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined }
@@ -203,12 +198,11 @@ export const reconcileServerChatMirror = async ({
     const next: Message = {
       ...local, id, history_id: historyId, name: remote.name || "Assistant",
       role: remote.role || (remote.isBot ? "assistant" : "user"), content: remote.message,
-      images: remote.images || [], sources: remote.sources || [],
+      images: remote.images || [], sources: remote.sources || [], createdAt: remote.createdAt ?? local?.createdAt ?? Date.now(),
       messageType: remote.messageType, generationInfo: remote.generationInfo,
       metadataExtra: remote.metadataExtra, clusterId: remote.clusterId, modelId: remote.modelId,
       modelName: remote.modelName, modelImage: remote.modelImage, parent_message_id: remote.parentMessageId ?? local?.parent_message_id ?? null,
       ...(preserveContent ? local : {}), serverMessageId,
-      createdAt: canonicalCreatedAt(remote.createdAt) ?? local?.createdAt ?? Date.now(),
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined
     }
     if (existing) await db.messages.put(next)

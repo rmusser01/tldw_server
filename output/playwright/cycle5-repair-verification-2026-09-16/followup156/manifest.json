@@ -1,0 +1,49 @@
+{
+  "head": "05e0c5593ef79e1b9cacc4e741f7a4ee559a6f87",
+  "files": [
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/REPORT.md",
+      "sha256": "23ea0514c952650ba9cbdfb3168f7a6a89d984f207c3fae304fc19122f9c6ef0"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/server-chat-mirror.before.ts",
+      "sha256": "9474ea785c871a25954979efc07d34b344f3fbf09b53aec5348de63cbfbbc7c7"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/red.txt",
+      "sha256": "7b34190ee6fe10579294cceba7faa17239a72b291c68a1b9f0195f15db25b822"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/red-behavior.txt",
+      "sha256": "911e6c329fded1b18e47c36dcfec4566f517966b4d88cdf8a53441c01207c972"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/green-focused.txt",
+      "sha256": "546870441af10d493318e2d087ea29b6491be4dfad1774ae5e29fb5d32507993"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/green-adjacent.txt",
+      "sha256": "05f8d2f7ee45f0409ea8420303f644e879bbe33251c74b2948e1f50c42207810"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/green-final.txt",
+      "sha256": "ba5f5cbbb73b7a8dc68d5abc6196050fabe95592f9af723e0771991ded8b954c"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/eslint-before.json",
+      "sha256": "7eb9da04a6e99a6b08e97c65b9bc196767e38b31ddeb4e488430cbe50a84b831"
+    },
+    {
+      "path": "/private/tmp/source013-chronology-repair-20260916/eslint-final.json",
+      "sha256": "7eb9da04a6e99a6b08e97c65b9bc196767e38b31ddeb4e488430cbe50a84b831"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "sha256": "655099dfa7452eb8105408bfd62cfdd8b2f84da05d5e421c0d5d63fff79dc0c2"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/__tests__/server-chat-chronology.test.ts",
+      "sha256": "f0b0d19fb6027bf0ba70367c009c3e49a847193008c180ed076497d23d239a38"
+    }
+  ]
+}

@@ -1,0 +1,150 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:17812) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17811) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > keeps canonical raw reads limited to normal presentation 7ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > keeps canonical raw reads limited to persona presentation 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > keeps canonical raw reads limited to character presentation 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > preserves an unacknowledged attachment when the actual mapper lacks image bytes:  0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > preserves an unacknowledged attachment when the actual mapper lacks image bytes: Question with an image 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > reconciles a nonempty local mirror using acknowledged server identity 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > revalidates canonical invalidated while an owned response is held 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > revalidates canonical different-owner while an owned response is held 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > revalidates canonical valid-rotation while an owned response is held 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > keeps an active streamed row and skips completed snapshot writes 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > does not apply a late Cedar profile after the current selection changes to Robot 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.scope.test.tsx > useServerChatLoader scoped local history > does not publish a superseded load after history linking is aborted 1ms
+(node:17822) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > acknowledges the exact promotion source and preserves unchanged content 1ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > acknowledges the exact promotion source and preserves edited content 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed owner 1ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed history 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed role 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed ack 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed cancelled 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a promotion acknowledgement with changed target 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > persists an exact acknowledged synthetic source ID while preserving a distinct equal row 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > links an unanswered user by exact client correlation while retaining equal-text drafts 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > links an image-only unanswered user without treating another image as identity 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: missing 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: other-id 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: edited-content 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: changed-image 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: wrong-role 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: duplicate-claim 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: foreign-history 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unmatched correlation work: already-acknowledged 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > recovers an anchored legacy user with images [] and keeps equal-text drafts 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > recovers an anchored legacy user with images [ '' ] and keeps equal-text drafts 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves anchored work when substantive images differ ([ 'data:image/png;base64,local' ] / []) 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves anchored work when substantive images differ ([ '' ] / [ 'data:image/png;base64,remote' ]) 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves anchored work when substantive images differ ([ 'data:image/png;base64,local' ] / [ 'data:image/png;base64,remote' ]) 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps ambiguous legacy work: missing-parent 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps ambiguous legacy work: edited-user 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps ambiguous legacy work: already-mirrored 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps ambiguous legacy work: wrong-reply 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps ambiguous legacy work: conflicting-parent 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > keeps identical conversation IDs in different owners' histories 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > adopts only the explicitly validated current legacy history 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > leaves an unvalidated legacy history untouched 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > does not repurpose an owned history from another conversation 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > fills a nonempty old mirror, retaining canonical IDs across repeated reads 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > retains normalized metadata through mirror storage 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > adds missing replies without replacing an unsynced visible draft or a newer edit 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > preserves unsynced drafts and newer acknowledged rows 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > retains an unknown-version local edit when acknowledging an old visible row 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > retains an unknown-version local edit in the old persistent mirror 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > never moves another history's global message ID 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > refuses a qualified-ID collision with another history 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a wrong-owner mirror write 0ms
+ ✓ src/db/dexie/__tests__/server-chat-mirror.test.ts > owned server Chat mirror > rejects a aborted mirror write 0ms
+(node:17823) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > recognizes confirmed old mirror IDs after real formatting (greeting: true) 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > recognizes confirmed old mirror IDs after real formatting (greeting: false) 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > preserves local messages while streaming 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > preserves local messages when unsynced content exists 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > preserves local messages when persisted IDs are missing in server snapshot 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > does not preserve when local messages are fully reflected in server snapshot 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldPreserveLocalMessagesForServerLoad > does not preserve when the only unsynced local content is a synthetic character greeting 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldSkipLoadedServerChatReload > returns false when current messages are empty even if same chat is marked loaded 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldSkipLoadedServerChatReload > returns true when same chat is loaded and local messages exist 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldCommitServerChatLoadResult > returns true when the same chat is still active and the same controller owns the load 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldCommitServerChatLoadResult > returns false when a newer chat selection has replaced the active chat 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldCommitServerChatLoadResult > returns false when the active controller no longer matches the request controller 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > shouldCommitServerChatLoadResult > returns false when the owned request controller has already been aborted 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > preserves persona-backed assistant identity from chat metadata 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > preserves read-write persona restore identity without legacy character fallback 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > ignores legacy character_id when persona assistant metadata is present 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > keeps persona identity even when memory mode metadata is invalid 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > keeps persona identity without synthesizing memory mode when metadata is missing 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > treats chats with only character_id and no tracked source as plain 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > resolveServerChatAssistantIdentity > backfills character identity from legacy tracked chat sources 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > fetchAllServerChatMessages > fetches all pages so later-page greeting messages are included 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > fetchAllServerChatMessages > deduplicates repeated message ids across paginated responses 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > mapServerChatMessagesToPlaygroundMessages > preserves valid dynamic UI metadata from server messages 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > mapServerChatMessagesToPlaygroundMessages > omits invalid dynamic UI metadata while preserving unrelated metadata 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > mapServerChatMessagesToPlaygroundMessages > restores explicit character emote metadata from server messages 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > mapServerChatMessagesToPlaygroundMessages > maps mirrored image event messages into assistant image event cards 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > applyAssistantPresentationToMessages > updates placeholder assistant labels after deferred enrichment 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > applyAssistantPresentationToMessages > applies generic Persona fallback presentation without rewriting explicit speaker labels 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > reportDeferredAssistantPresentationError > logs deferred assistant hydration failures with contextual metadata 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.test.ts > reportDeferredAssistantPresentationError > logs persona profile fallback failures while preserving assistant metadata 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > recovers an old partial mirror and survives repeated reload (greeting true) 624ms
+(node:17824) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > keeps an acknowledged raw RAG question before its answer across repeated mirror reloads 2ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > keeps the unchanged ordinary turn in canonical order 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version undefined without preserving its late timestamp 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version 1 without preserving its late timestamp 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version 3 without preserving its late timestamp 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves content edited during the snapshot await with canonical chronology 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is undefined 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is null 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is NaN 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is Infinity 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is -Infinity 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is invalid 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > accepts epoch zero as a valid canonical timestamp 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains distinct repeated drafts and an older local retrieval failure without claiming promotion receipts 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed owner 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed conversation 0ms
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed history 0ms
+(node:17825) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > recovers an old partial mirror and survives repeated reload (greeting false) 614ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > maps complete canonical attachments before correlation: Question 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > maps complete canonical attachments before correlation:  0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > keeps edited/unknown-version attachment-placeholder text at version 2 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > keeps edited/unknown-version attachment-placeholder text at version 3 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > keeps edited/unknown-version attachment-placeholder text at version undefined 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > keeps literal placeholder text without trusted provenance 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > bounded complete image history > aborts after an awaited page without returning a partial image history 1ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > bounded complete image history > rejects cumulative attachment expansion across pages 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.images.test.ts > bounded complete image history > keeps exact offsets and complete images across normal pages 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > retains a real unsynced local draft while adding the missing server reply 205ms
+(node:17827) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > includes the nickname read used by continue saves in the transaction 2ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > aborts the transaction and rejects when the scope changes mid-write 1ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > does not open a transaction for an already-aborted scope 0ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > keeps the abort guard active until the transaction commit resolves 0ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > ignores a caller abort when the scope-only guard rejects it 0ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > deletes a rejected Compare cluster without deleting an existing history 0ms
+ ✓ src/db/dexie/__tests__/chat-persistence-transaction.test.ts > runChatPersistenceTransaction > deletes all messages and the newly-created history for a rejected Compare turn 0ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > publishes the owned persistent newer-answer on a fresh server selection 205ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > publishes the owned persistent unsynced-draft on a fresh server selection 206ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > keeps typing made during owned mirror reconciliation in both visible and inference history 209ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > does not publish owned persistent rows after history changes during storage 211ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > does not publish owned persistent rows after stream changes during storage 210ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > does not publish owned persistent rows after account changes during storage 207ms
+ ✓ src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx > real adapter → loader → mirror → formatter reload > preserves typing during settings sync before mirror reconciliation begins 209ms
+
+ Test Files  7 passed (7)
+      Tests  128 passed (128)
+   Start at  12:24:18
+   Duration  3.75s (transform 653ms, setup 388ms, import 1.04s, tests 2.94s, environment 1.38s)

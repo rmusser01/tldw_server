@@ -1,0 +1,65 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:19311) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+UAT156_EXTRA_BASELINE_LOADED sha256=9474ea785c871a25954979efc07d34b344f3fbf09b53aec5348de63cbfbbc7c7
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > keeps an acknowledged raw RAG question before its answer across repeated mirror reloads
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > keeps the unchanged ordinary turn in canonical order
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version undefined without preserving its late timestamp
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version 1 without preserving its late timestamp
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves protected content and images with local version 3 without preserving its late timestamp
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > preserves content edited during the snapshot await with canonical chronology
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is undefined
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is null
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is NaN
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is Infinity
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is -Infinity
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains local chronology when canonical createdAt is invalid
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > accepts epoch zero as a valid canonical timestamp
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > retains distinct repeated drafts and an older local retrieval failure without claiming promotion receipts
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed owner
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed conversation
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > saved Chat canonical chronology > does not adopt chronology across a changed history
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: 1000
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero:
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: true
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: false
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: {}
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero:
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: Wed Dec 31 1969 16:00:01 GMT-0800 (Pacific Standard Time)
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: 1000
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > rejects a nonnumeric timestamp without coercing local epoch zero: 1000n
+ × src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > gives new invalid-dated rows a stable persisted fallback that reaches memory 3ms
+   → expected NaN to be 9000 // Object.is equality
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > uses the captured local fallback when no durable row exists
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > accepts canonical time 500 even for a newer protected edit
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > accepts canonical time 6000 even for a newer protected edit
+ ↓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > keeps a timestamp-only local mutation from replacing canonical chronology
+ ✓ src/db/dexie/__tests__/server-chat-chronology.test.ts > independent real loader fallback shape > assigns a stable new-row fallback after invalid Date.parse maps to undefined 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/db/dexie/__tests__/server-chat-chronology.test.ts > independent timestamp boundary probes > gives new invalid-dated rows a stable persisted fallback that reaches memory
+AssertionError: expected NaN to be 9000 // Object.is equality
+
+- Expected
++ Received
+
+- 9000
++ NaN
+
+ ❯ src/db/dexie/__tests__/server-chat-chronology.test.ts:192:38
+    167|     expect(state.messages.get("local-user")).toMatchObject({ createdAt…
+    168|   })
+    169| })
+       |   ^
+    170|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 30 skipped (32)
+   Start at  12:29:03
+   Duration  379ms (transform 74ms, setup 57ms, import 70ms, tests 4ms, environment 174ms)
