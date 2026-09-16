@@ -1,0 +1,36 @@
+{
+  "at": "2026-09-16T21:22:07.663Z",
+  "note": "Root removed only trailing line whitespace and extra blank EOF lines before commit. Earlier audit/retention hashes describe the exact original captures; this mapping links them to current retained bytes. Originals remain in private source folders. No evidence semantics or binary bytes changed.",
+  "files": [
+    {
+      "file": "failed-events.txt",
+      "beforeSha256": "54a733dee5449d5261c2129eaf8020699fd3913a36f5649a8b7f93cc2cf1e2b5",
+      "retainedSha256": "696bec92e29ea9badf55939e0fac1dd03a6f6f506f93f2878935c3306614247c"
+    },
+    {
+      "file": "failed-reloaded.txt",
+      "beforeSha256": "530284a60d265427a39174a58bc83962ff9a2184a0d42d468adea7eb4e043d05",
+      "retainedSha256": "5c586be0acd0b7ca9be2f70dc09510715d260d14879da841f22c4d50f8cffdfc"
+    },
+    {
+      "file": "final-events.txt",
+      "beforeSha256": "f570ed037aefc0a3d2f8262ad089c0b9cb19c4e377684d6e2bcac6460742e5e3",
+      "retainedSha256": "7c6215195abc5f40f04f334a48b2f15c4b63c11386480b9f6167643eb7e4fbb9"
+    },
+    {
+      "file": "final-reloaded.txt",
+      "beforeSha256": "814644b38e09626ac92e7d8c8f97e4db635f9d1e0867a49d992b3813f99a987a",
+      "retainedSha256": "38dcbcb54d316cee2bc5848fad7277001e11c6e5088a3342ac92200d4a3a454e"
+    },
+    {
+      "file": "first-reloaded-events.txt",
+      "beforeSha256": "bf7fc782c08ab4d7c79ea0cd6ba9dd7a30373fff773d94b33f6009bdc1364f22",
+      "retainedSha256": "4ce2815672446115988fa71ba0878b8593e306be7ffd28fde2d28d0a1e7ddc0b"
+    },
+    {
+      "file": "first-reloaded.txt",
+      "beforeSha256": "a11e739dd81b77fdc7c075e3dfcc36a15f01fbfe713cfb32ed8ff55479bd8bfa",
+      "retainedSha256": "2ea9f895787564c0fd6d3d856c0270f5469c3080bd1afb1f3eda38d32f090c91"
+    }
+  ]
+}

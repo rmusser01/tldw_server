@@ -1,0 +1,21 @@
+{
+  "at": "2026-09-16T21:22:07.665Z",
+  "note": "Root removed only trailing line whitespace and extra blank EOF lines before commit. Earlier audit/retention hashes describe the exact original captures; this mapping links them to current retained bytes. Originals remain in private source folders. No evidence semantics or binary bytes changed.",
+  "files": [
+    {
+      "file": "catchup-final-receipt.txt",
+      "beforeSha256": "b8d1f1a5fd178857b1c88d4f41c4c83667a7176b149d833c3ebe124848d79b54",
+      "retainedSha256": "826b984e9f0da85391fc306cd81afd2a9222adcef000bbb991cad4542656c4fc"
+    },
+    {
+      "file": "six-tabs-receipt.txt",
+      "beforeSha256": "ad12c6653138ba60b5759aa2288d1050e49bd7d6485ef4eec8abd9b4f6318e2b",
+      "retainedSha256": "5158691532f8c6cf6d1e6efc0dc1689f269170b14c4c58920c1277ee13647fa7"
+    },
+    {
+      "file": "visibility-control.txt",
+      "beforeSha256": "1ed9b571f5dd8f0621e3ab004a45ddebcb407812c686fd043eb615ff7dd6966d",
+      "retainedSha256": "83eb27a109dd057c21d94770487bd7441a8bf6334f7def24a96e7e703aa5447b"
+    }
+  ]
+}

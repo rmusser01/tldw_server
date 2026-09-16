@@ -1,0 +1,210 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [Describe the attached image in one short sentence. | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Describe the attached image in one short sentence. | tldw
+### Snapshot
+```yaml
+- generic [ref=f13e2]:
+  - generic [ref=f13e5]:
+    - link "Skip to main content" [ref=f13e6] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f13e7]:
+      - button "Expand sidebar" [ref=f13e8] [cursor=pointer]
+      - button "New Chat" [ref=f13e12] [cursor=pointer]
+      - generic [ref=f13e15]:
+        - button "Quick Ingest" [ref=f13e16] [cursor=pointer]
+        - button "Chat" [ref=f13e20] [cursor=pointer]
+        - button "Prompts" [ref=f13e23] [cursor=pointer]
+        - button "Characters" [ref=f13e27] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f13e32] [cursor=pointer]
+        - button "World Books" [ref=f13e36] [cursor=pointer]
+        - button "Notes" [ref=f13e39] [cursor=pointer]
+        - button "Knowledge QA" [ref=f13e43] [cursor=pointer]
+        - button "Media" [ref=f13e51] [cursor=pointer]
+        - button "Document Workspace" [ref=f13e54] [cursor=pointer]
+        - button "Research Workspace" [ref=f13e60] [cursor=pointer]
+        - button "Kanban" [ref=f13e66] [cursor=pointer]
+        - button "Watchlists" [ref=f13e68] [cursor=pointer]
+      - generic [ref=f13e73]:
+        - button "Open Notes Dock" [ref=f13e74] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f13e79] [cursor=pointer]
+        - button "Settings" [ref=f13e82] [cursor=pointer]
+    - main [ref=f13e86]:
+      - generic [ref=f13e87]:
+        - generic [ref=f13e90]:
+          - generic [ref=f13e91]:
+            - button "Expand sidebar" [ref=f13e92] [cursor=pointer]
+            - generic [ref=f13e94]:
+              - img "tldw Assistant" [ref=f13e95]
+              - generic [ref=f13e96]: tldw Assistant
+              - button "Companion Home" [ref=f13e97] [cursor=pointer]
+              - button "Show shortcuts" [ref=f13e101] [cursor=pointer]
+            - button "Describe the attached image in one short sentence." [ref=f13e105] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f13e107]: Saved
+          - generic [ref=f13e108]:
+            - button "Search - Open command palette" [ref=f13e109] [cursor=pointer]:
+              - generic [ref=f13e113]: Search
+              - generic [ref=f13e114]: ⌘K
+            - button "New saved chat" [ref=f13e115] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f13e119] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f13e120] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f13e121] [cursor=pointer]
+            - button "Open settings" [ref=f13e128] [cursor=pointer]
+            - generic [ref=f13e140]:
+              - button "Notifications, 0 unread" [ref=f13e141] [cursor=pointer]
+              - status [ref=f13e145]: Notifications are active
+            - button "Switch to light theme" [ref=f13e146] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f13e153] [cursor=pointer]:
+              - generic [ref=f13e154]: "?"
+        - generic [ref=f13e155]:
+          - heading "Chat" [level=1] [ref=f13e156]
+          - generic [ref=f13e159]:
+            - paragraph [ref=f13e160]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f13e161]:
+              - main [ref=f13e162]:
+                - generic [ref=f13e163]:
+                  - generic [ref=f13e165]:
+                    - generic [ref=f13e166]:
+                      - generic [ref=f13e167]: Standard chat
+                      - generic [ref=f13e168]: Conversation timeline
+                    - generic [ref=f13e169]:
+                      - button "Switch to light theme" [ref=f13e170] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f13e177] [cursor=pointer]:
+                        - generic [ref=f13e183]: Focus
+                      - button "Shortcuts" [ref=f13e184] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f13e188]
+                  - log "Chat messages" [ref=f13e190]:
+                    - generic [ref=f13e192]:
+                      - article "System message 1 of 5" [ref=f13e193]:
+                        - generic [ref=f13e199]:
+                          - generic [ref=f13e201]:
+                            - generic [ref=f13e202]: System prompt
+                            - generic [ref=f13e203]: • 1:56 PM
+                          - paragraph [ref=f13e205]: You are a helpful AI assistant.
+                          - generic [ref=f13e206]:
+                            - generic [ref=f13e207]:
+                              - generic [ref=f13e208]: Was this helpful?
+                              - generic [ref=f13e209]:
+                                - button "Helpful" [ref=f13e210] [cursor=pointer]
+                                - button "Not helpful" [ref=f13e213] [cursor=pointer]
+                                - button "More feedback" [ref=f13e216] [cursor=pointer]
+                            - button "More actions" [ref=f13e222] [cursor=pointer]: •••
+                      - article "User message 2 of 5" [ref=f13e223]:
+                        - generic [ref=f13e226]:
+                          - generic [ref=f13e228]:
+                            - generic [ref=f13e229]: You
+                            - generic [ref=f13e230]: • 1:56 PM
+                          - paragraph [ref=f13e232]: Describe the attached image in one short sentence.
+                          - generic [ref=f13e234]:
+                            - generic [ref=f13e235]:
+                              - img "Uploaded Image" [ref=f13e236]
+                              - generic [ref=f13e237] [cursor=pointer]
+                            - button "Delete image" [ref=f13e238] [cursor=pointer]
+                          - button "More actions" [ref=f13e244] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 5" [ref=f13e248]:
+                        - generic [ref=f13e254]:
+                          - generic [ref=f13e256]:
+                            - generic [ref=f13e257]: Assistant
+                            - generic [ref=f13e258]: • 1:57 PM
+                          - paragraph [ref=f13e261]: A white speech bubble icon containing three black dots.
+                          - generic [ref=f13e262]:
+                            - generic [ref=f13e263]:
+                              - generic [ref=f13e264]: Was this helpful?
+                              - generic [ref=f13e265]:
+                                - button "Helpful" [ref=f13e266] [cursor=pointer]
+                                - button "Not helpful" [ref=f13e269] [cursor=pointer]
+                                - button "More feedback" [ref=f13e272] [cursor=pointer]
+                            - button "More actions" [ref=f13e278] [cursor=pointer]: •••
+                      - article "User message 4 of 5" [ref=f13e279]:
+                        - generic [ref=f13e282]:
+                          - generic [ref=f13e284]:
+                            - generic [ref=f13e285]: You
+                            - generic [ref=f13e286]: • 1:58 PM
+                          - paragraph [ref=f13e288]: Count the black dots in this image. Answer with the number only.
+                          - generic [ref=f13e290]:
+                            - generic [ref=f13e291]:
+                              - img "Uploaded Image" [ref=f13e292]
+                              - generic [ref=f13e293] [cursor=pointer]
+                            - button "Delete image" [ref=f13e294] [cursor=pointer]
+                          - button "More actions" [ref=f13e300] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 5" [ref=f13e304]:
+                        - generic [ref=f13e310]:
+                          - generic [ref=f13e312]:
+                            - generic [ref=f13e313]: Assistant
+                            - generic [ref=f13e314]: • 1:59 PM
+                          - paragraph [ref=f13e317]: "3"
+                          - generic [ref=f13e318]:
+                            - generic [ref=f13e319]:
+                              - generic [ref=f13e320]: Was this helpful?
+                              - generic [ref=f13e321]:
+                                - button "Helpful" [ref=f13e322] [cursor=pointer]
+                                - button "Not helpful" [ref=f13e325] [cursor=pointer]
+                                - button "More feedback" [ref=f13e328] [cursor=pointer]
+                            - generic [ref=f13e333]:
+                              - generic [ref=f13e334]:
+                                - button "Previous response" [ref=f13e335] [cursor=pointer]
+                                - generic [ref=f13e338]: 2 of 2
+                                - button "Next response" [disabled] [ref=f13e339]
+                              - button "More actions" [ref=f13e342] [cursor=pointer]: •••
+                  - generic [ref=f13e343]:
+                    - generic [ref=f13e344]: Composer
+                    - generic [ref=f13e352]:
+                      - button [aria-hidden] [ref=f13e353]
+                      - button [aria-hidden] [ref=f13e354]
+                      - generic [ref=f13e355]:
+                        - generic [ref=f13e357]:
+                          - button "Hide composer options" [expanded] [ref=f13e358] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f13e363]
+                          - generic [ref=f13e364]:
+                            - button "Improve prompt" [ref=f13e367] [cursor=pointer]
+                            - generic [ref=f13e372]:
+                              - button "Send message" [ref=f13e373] [cursor=pointer]:
+                                - generic [ref=f13e374]: Send
+                              - button "Open message delivery options" [ref=f13e379] [cursor=pointer]
+                        - generic [ref=f13e384]:
+                          - generic [ref=f13e386]:
+                            - group "Mode and context controls" [ref=f13e387]:
+                              - button "Modes" [ref=f13e388] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f13e395] [cursor=pointer]':
+                                - generic [ref=f13e396]:
+                                  - generic [ref=f13e397]: MCP
+                                  - generic [ref=f13e398]: None
+                              - button "Search & Context" [ref=f13e401] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f13e406] [cursor=pointer]:
+                                - generic [ref=f13e409]: Prompt
+                              - button "Select character or persona" [ref=f13e410] [cursor=pointer]
+                              - button "Role-play setup" [ref=f13e415] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f13e422] [cursor=pointer]
+                            - group "Run input controls" [ref=f13e428]:
+                              - button "OpenUI" [ref=f13e429] [cursor=pointer]
+                              - button "Start dictation" [ref=f13e435] [cursor=pointer]
+                              - generic [ref=f13e439]:
+                                - button "Attach image" [ref=f13e441] [cursor=pointer]
+                                - button "More attachments" [ref=f13e445] [cursor=pointer]
+                              - button "More tools" [ref=f13e448] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f13e451] [cursor=pointer]:
+                                - generic [ref=f13e455]: Chat Settings
+                          - generic "Active context" [ref=f13e456]:
+                            - button "LLaMa.cpp / Gemma 4 26B vision on 19099 (llama.cpp/gemma-4-26B-A4B-it)" [ref=f13e458] [cursor=pointer]:
+                              - generic "Provider status" [ref=f13e462]: Healthy
+                            - button "Chat 5 messages" [ref=f13e463] [cursor=pointer]:
+                              - generic [ref=f13e464]: Chat
+                              - generic [ref=f13e465]: 5 messages
+                            - button "Configure context window size" [ref=f13e467] [cursor=pointer]:
+                              - generic [ref=f13e468]: 51 + ~0 = 51 tokens
+                            - button "Saved" [ref=f13e470] [cursor=pointer]
+                            - button "Advanced controls" [ref=f13e472] [cursor=pointer]
+              - generic [ref=f13e476]:
+                - button "Restore context sidechannel" [ref=f13e477] [cursor=pointer]:
+                  - generic [ref=f13e481]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f13e482]:
+                - button "Restore runtime sidechannel" [ref=f13e483] [cursor=pointer]:
+                  - generic [ref=f13e484]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f13e493] [cursor=pointer]
+  - alert [ref=f13e1]
+```

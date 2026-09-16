@@ -1,0 +1,222 @@
+{
+  "at": "2026-09-16T21:01:42.898Z",
+  "head": "d76746ac9a69d2ead927e0f2b15434d6740556ce",
+  "scope": "Targeted SQLite single-user; reused dependencies; no full UAT or native PostgreSQL image claim.",
+  "trackedSourceDiff": "",
+  "sourceHashes": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "sha256": "b80564988c79cbac35dcc167409fc2307463699112ac1d77e5c587e35089b309"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "b7d882669470b8c1243b11b8d96beeed1acf5fec8fb4aa732b029e5c9dda7394"
+    }
+  ],
+  "png": {
+    "path": "apps/tldw-frontend/public/icon.png",
+    "bytes": 2962,
+    "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+  },
+  "completions": [
+    {
+      "id": 5,
+      "at": 1789592217551,
+      "status": 200,
+      "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+      "metadata": {
+        "tldw_client_message_id": "pa_5527-3d40-178-8273"
+      },
+      "currentTurn": [
+        {
+          "type": "text",
+          "text": "Describe the attached image in one short sentence."
+        },
+        {
+          "type": "image_url",
+          "mime": "image/png",
+          "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "at": 1789592306911,
+      "status": 502,
+      "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+      "metadata": {
+        "tldw_client_message_id": "pa_16b0-4c73-953-348b"
+      },
+      "currentTurn": [
+        {
+          "type": "text",
+          "text": "Count the black dots in this image. Answer with the number only."
+        },
+        {
+          "type": "image_url",
+          "mime": "image/png",
+          "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+        }
+      ]
+    },
+    {
+      "id": 52,
+      "at": 1789592363691,
+      "status": 200,
+      "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+      "metadata": {
+        "tldw_retry_failed_turn": true,
+        "tldw_client_message_id": "pa_16b0-4c73-953-348b"
+      },
+      "currentTurn": [
+        {
+          "type": "text",
+          "text": "Count the black dots in this image. Answer with the number only."
+        },
+        {
+          "type": "image_url",
+          "mime": "image/png",
+          "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+        }
+      ]
+    }
+  ],
+  "mutations": [
+    {
+      "id": 1,
+      "url": "http://127.0.0.1:18580/api/v1/chats/",
+      "method": "POST",
+      "status": 201
+    },
+    {
+      "id": 5,
+      "url": "http://127.0.0.1:18580/api/v1/chat/completions",
+      "method": "POST",
+      "status": 200
+    },
+    {
+      "id": 32,
+      "url": "http://127.0.0.1:18580/api/v1/chat/completions",
+      "method": "POST",
+      "status": 502
+    },
+    {
+      "id": 52,
+      "url": "http://127.0.0.1:18580/api/v1/chat/completions",
+      "method": "POST",
+      "status": 200
+    }
+  ],
+  "finalCanonical": {
+    "total": 5,
+    "messages": [
+      {
+        "id": "fe14f58c-5344-470b-9f9d-a055bbb23cde",
+        "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+        "parent_message_id": null,
+        "sender": "system",
+        "content": "You are a helpful AI assistant.",
+        "timestamp": "2026-09-16T20:56:57.372000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "sender_role": "system"
+        },
+        "images": []
+      },
+      {
+        "id": "fcbab1d5-a597-47a2-b3d3-ce45d31ae0ac",
+        "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Describe the attached image in one short sentence.",
+        "timestamp": "2026-09-16T20:56:57.618000Z",
+        "ranking": null,
+        "has_image": true,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "client_message_id": "pa_5527-3d40-178-8273",
+          "sender_role": "user"
+        },
+        "images": [
+          {
+            "mime": "image/png",
+            "bytes": 2962,
+            "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+          }
+        ]
+      },
+      {
+        "id": "183d67f9-69b2-40e2-a890-a3e637890c00",
+        "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "A white speech bubble icon containing three black dots.",
+        "timestamp": "2026-09-16T20:57:00.570000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "sender_role": "assistant",
+          "sender_name": "Helpful_AI_Assistant"
+        },
+        "images": []
+      },
+      {
+        "id": "1966fdf9-511d-4a16-8b10-89fd6f13f47f",
+        "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+        "parent_message_id": null,
+        "sender": "user",
+        "content": "Count the black dots in this image. Answer with the number only.",
+        "timestamp": "2026-09-16T20:58:26.974000Z",
+        "ranking": null,
+        "has_image": true,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "client_message_id": "pa_16b0-4c73-953-348b",
+          "sender_role": "user"
+        },
+        "images": [
+          {
+            "mime": "image/png",
+            "bytes": 2962,
+            "sha256": "1792198785947731fc31e4c6184adeb00b988e703fc548893e3c1049a9b45453"
+          }
+        ]
+      },
+      {
+        "id": "eb731564-7685-4567-8a25-1b16d030fae8",
+        "conversation_id": "525e225e-8557-40f9-a489-133ec0f9bbd2",
+        "parent_message_id": null,
+        "sender": "assistant",
+        "content": "3",
+        "timestamp": "2026-09-16T20:59:25.514000Z",
+        "ranking": null,
+        "has_image": false,
+        "version": 1,
+        "tool_calls": null,
+        "metadata_extra": {
+          "sender_role": "assistant",
+          "sender_name": "Helpful_AI_Assistant"
+        },
+        "images": []
+      }
+    ]
+  },
+  "postgres": {
+    "passed": 32,
+    "deselected": 17,
+    "skipped": 0,
+    "log": ".tmp/fresh-uat-recovery-20260916/pg-final-image-acceptance.redacted.log"
+  },
+  "limits": [
+    "First successful completion SSE body unavailable through Playwright; Retry SSE body was captured and is independently audited for canonical acknowledgement identities.",
+    "Controlled outage affected only owned19099; original9099 untouched.",
+    "Image-only/account preservation remains automated boundary coverage."
+  ]
+}

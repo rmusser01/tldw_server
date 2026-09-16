@@ -1,0 +1,41 @@
+### Result
+{"started":1789591775080,"startUrl":"http://127.0.0.1:18580/notifications","backendStatus":200,"backendBody":"{\"updated\":1}","requestBody":"{\"ids\":[3]}","heldAt":1789591775109,"navigatedUrl":"http://127.0.0.1:18580/notes","navigatedAt":1789591777119,"delivery":"fulfilled","releasedAt":1789591777121,"finalUrl":"http://127.0.0.1:18580/notes","finished":1789591777623}
+### Ran Playwright code
+```js
+await (async page => {
+  let release, resolveHeld, resolveFinished;
+  const held=new Promise(resolve=>{resolveHeld=resolve;});
+  const finished=new Promise(resolve=>{resolveFinished=resolve;});
+  const result={started:Date.now(),startUrl:page.url()};
+  await page.route('**/api/v1/notifications/mark-read',async route=>{
+    const response=await route.fetch();
+    result.backendStatus=response.status();result.backendBody=await response.text();result.requestBody=route.request().postData();result.heldAt=Date.now();
+    resolveHeld(); await new Promise(resolve=>{release=resolve;});
+    try{await route.fulfill({response});result.delivery='fulfilled';}catch(error){result.delivery='browser-request-already-settled';result.deliveryError=String(error.message);}
+    result.releasedAt=Date.now();resolveFinished();
+  });
+  const row=page.getByRole('listitem').filter({has:page.getByRole('heading',{name:'UAT142 final delayed View',exact:true})});
+  await row.getByRole('button',{name:'View',exact:true}).click();
+  await held;
+  await page.getByRole('button',{name:'Notes',exact:true}).click();
+  await page.waitForURL('**/notes');result.navigatedUrl=page.url();result.navigatedAt=Date.now();
+  release();await finished;await page.waitForTimeout(500);result.finalUrl=page.url();result.finished=Date.now();
+  await page.unroute('**/api/v1/notifications/mark-read');
+  await page.screenshot({path:'.tmp/uat142-native-20260916/after-late-response.png'});
+  return result;
+}
+)(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [Home | tldw](http://127.0.0.1:18580/)
+- 2: [Home | tldw](http://127.0.0.1:18580/)
+- 3: [Home | tldw](http://127.0.0.1:18580/)
+- 4: [Home | tldw](http://127.0.0.1:18580/)
+- 5: [Prompts | tldw](http://127.0.0.1:18580/prompts?edit=pa_8716-c067-557-e6c9)
+- 6: (current) [Notes | tldw](http://127.0.0.1:18580/notes)
+### Page
+- Page URL: http://127.0.0.1:18580/notes
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T20-49-22-078Z.log#L3-L6

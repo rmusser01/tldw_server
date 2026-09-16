@@ -1,0 +1,60 @@
+{
+  "task": "TASK-13260.93",
+  "createdAt": "2026-09-16T20:57:35.412Z",
+  "scope": "Exact allowlist only; no credentials, profiles, private logs or unrelated browser evidence copied",
+  "sourceAllowlist": [
+    "settings-disabled.txt",
+    "closed.txt",
+    "settings-disabled.png"
+  ],
+  "generatedAllowlist": [
+    "independent-audit.md"
+  ],
+  "normalization": "Text only: remove trailing spaces and tabs on each line; no other content rewriting. Binary screenshots copied byte-for-byte.",
+  "secretScan": {
+    "knownCredentialSourcesRead": 6,
+    "distinctKnownValuesChecked": 26,
+    "valuesPrinted": false,
+    "knownValueHits": 0,
+    "credentialPatternHits": 0,
+    "images": "Binary strings checked; screenshots visually inspected with credentials masked or absent; no OCR claim"
+  },
+  "files": [
+    {
+      "path": "settings-disabled.txt",
+      "source": ".tmp/uat155-native-20260916/settings-disabled.txt",
+      "sourceSha256": "61dd758cc11006d7e971aed78a558a0d3fea6d02882aa294877212455c5894c9",
+      "retainedSha256": "61dd758cc11006d7e971aed78a558a0d3fea6d02882aa294877212455c5894c9",
+      "sourceBytes": 10205,
+      "retainedBytes": 10205,
+      "normalized": false
+    },
+    {
+      "path": "closed.txt",
+      "source": ".tmp/uat155-native-20260916/closed.txt",
+      "sourceSha256": "77fb3c216cc65b4d1e84c2aa0c35f1fc71747a191555a5458d7d32ea011a46ed",
+      "retainedSha256": "77fb3c216cc65b4d1e84c2aa0c35f1fc71747a191555a5458d7d32ea011a46ed",
+      "sourceBytes": 24299,
+      "retainedBytes": 24299,
+      "normalized": false
+    },
+    {
+      "path": "settings-disabled.png",
+      "source": ".tmp/uat155-native-20260916/settings-disabled.png",
+      "sourceSha256": "979f33925821f30a122056cb387acd473b71b070b73e365647b2924c42363e77",
+      "retainedSha256": "979f33925821f30a122056cb387acd473b71b070b73e365647b2924c42363e77",
+      "sourceBytes": 149222,
+      "retainedBytes": 149222,
+      "normalized": false
+    },
+    {
+      "path": "independent-audit.md",
+      "source": null,
+      "sourceSha256": null,
+      "retainedSha256": "a9d624c4bebfa974c108b3866a8f45f0560a62067fe7310c10ebcd7869cc86be",
+      "sourceBytes": null,
+      "retainedBytes": 2121,
+      "normalized": false
+    }
+  ]
+}

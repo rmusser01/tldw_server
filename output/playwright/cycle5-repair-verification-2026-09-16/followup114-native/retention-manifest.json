@@ -1,0 +1,163 @@
+{
+  "task": "TASK-13260.54",
+  "createdAt": "2026-09-16T20:57:35.407Z",
+  "scope": "Exact allowlist only; no credentials, profiles, private logs or unrelated browser evidence copied",
+  "sourceAllowlist": [
+    "visibility-control.txt",
+    "six-tabs-receipt.txt",
+    "catchup-final-receipt.txt",
+    "notification-created.json",
+    "reactivated-catchup.png",
+    "caught-up-inbox.png",
+    "install-monitor.js",
+    "create-notification.py",
+    "independent-audit.md"
+  ],
+  "generatedAllowlist": [
+    "bandit.json",
+    "acceptance-reassessment.md"
+  ],
+  "normalization": "Text only: remove trailing spaces and tabs on each line; no other content rewriting. Binary screenshots copied byte-for-byte.",
+  "secretScan": {
+    "knownCredentialSourcesRead": 6,
+    "distinctKnownValuesChecked": 26,
+    "valuesPrinted": false,
+    "knownValueHits": 0,
+    "credentialPatternHits": 0,
+    "images": "Binary strings checked; screenshots visually inspected with credentials masked or absent; no OCR claim"
+  },
+  "files": [
+    {
+      "path": "visibility-control.txt",
+      "source": ".tmp/uat114-native-20260916/visibility-control.txt",
+      "sourceSha256": "1ed9b571f5dd8f0621e3ab004a45ddebcb407812c686fd043eb615ff7dd6966d",
+      "retainedSha256": "1ed9b571f5dd8f0621e3ab004a45ddebcb407812c686fd043eb615ff7dd6966d",
+      "sourceBytes": 328,
+      "retainedBytes": 328,
+      "normalized": false
+    },
+    {
+      "path": "six-tabs-receipt.txt",
+      "source": ".tmp/uat114-native-20260916/six-tabs-receipt.txt",
+      "sourceSha256": "ad12c6653138ba60b5759aa2288d1050e49bd7d6485ef4eec8abd9b4f6318e2b",
+      "retainedSha256": "ad12c6653138ba60b5759aa2288d1050e49bd7d6485ef4eec8abd9b4f6318e2b",
+      "sourceBytes": 34810,
+      "retainedBytes": 34810,
+      "normalized": false
+    },
+    {
+      "path": "catchup-final-receipt.txt",
+      "source": ".tmp/uat114-native-20260916/catchup-final-receipt.txt",
+      "sourceSha256": "b8d1f1a5fd178857b1c88d4f41c4c83667a7176b149d833c3ebe124848d79b54",
+      "retainedSha256": "b8d1f1a5fd178857b1c88d4f41c4c83667a7176b149d833c3ebe124848d79b54",
+      "sourceBytes": 97727,
+      "retainedBytes": 97727,
+      "normalized": false
+    },
+    {
+      "path": "notification-created.json",
+      "source": ".tmp/uat114-native-20260916/notification-created.json",
+      "sourceSha256": "85fdcec61e41751ba13be125eb5a3abe18412837ef3a13d068c9234b367fd0cb",
+      "retainedSha256": "85fdcec61e41751ba13be125eb5a3abe18412837ef3a13d068c9234b367fd0cb",
+      "sourceBytes": 889,
+      "retainedBytes": 889,
+      "normalized": false
+    },
+    {
+      "path": "reactivated-catchup.png",
+      "source": ".tmp/uat114-native-20260916/reactivated-catchup.png",
+      "sourceSha256": "2bef21f2dabe9e47c6ccce94b153c15cb2991545df74cb476fa85c90144bc18e",
+      "retainedSha256": "2bef21f2dabe9e47c6ccce94b153c15cb2991545df74cb476fa85c90144bc18e",
+      "sourceBytes": 118736,
+      "retainedBytes": 118736,
+      "normalized": false
+    },
+    {
+      "path": "caught-up-inbox.png",
+      "source": ".tmp/uat114-native-20260916/caught-up-inbox.png",
+      "sourceSha256": "7bcd2a82098094d694bbe50ee61b1e53f61cd815befa9dac8f3ffb54fc508878",
+      "retainedSha256": "7bcd2a82098094d694bbe50ee61b1e53f61cd815befa9dac8f3ffb54fc508878",
+      "sourceBytes": 42417,
+      "retainedBytes": 42417,
+      "normalized": false
+    },
+    {
+      "path": "install-monitor.js",
+      "source": ".tmp/uat114-native-20260916/install-monitor.js",
+      "sourceSha256": "2ab49ba1b72197ed6c56593fe80b4a71f51eadb88b43fcaaca0036e0be325fb4",
+      "retainedSha256": "2ab49ba1b72197ed6c56593fe80b4a71f51eadb88b43fcaaca0036e0be325fb4",
+      "sourceBytes": 1044,
+      "retainedBytes": 1044,
+      "normalized": false
+    },
+    {
+      "path": "create-notification.py",
+      "source": ".tmp/uat114-native-20260916/create-notification.py",
+      "sourceSha256": "4c9482fa207cb949fd36f8cf0c2bf93b080b10e82d70a666b4de6d731655ff95",
+      "retainedSha256": "4c9482fa207cb949fd36f8cf0c2bf93b080b10e82d70a666b4de6d731655ff95",
+      "sourceBytes": 875,
+      "retainedBytes": 875,
+      "normalized": false
+    },
+    {
+      "path": "independent-audit.md",
+      "source": ".tmp/uat114-native-20260916/independent-audit.md",
+      "sourceSha256": "c8272d90f7023aa8e2d3bb566259c4869eb784b9216ea9c051c6d21002d12c55",
+      "retainedSha256": "c8272d90f7023aa8e2d3bb566259c4869eb784b9216ea9c051c6d21002d12c55",
+      "sourceBytes": 6188,
+      "retainedBytes": 6188,
+      "normalized": false
+    },
+    {
+      "path": "bandit.json",
+      "source": "/private/tmp/uat114-native-retention-bandit.json",
+      "sourceSha256": "55aeb720d6a47975b1a585dcbccee15b3df54de1eb55de27eec36cdb90002c4d",
+      "retainedSha256": "55aeb720d6a47975b1a585dcbccee15b3df54de1eb55de27eec36cdb90002c4d",
+      "sourceBytes": 812,
+      "retainedBytes": 812,
+      "normalized": false
+    },
+    {
+      "path": "acceptance-reassessment.md",
+      "source": null,
+      "sourceSha256": null,
+      "retainedSha256": "6756a8e092568a4eac7d4fcba55ed7ca533371cf3323210a8a440ebea3aea39f",
+      "sourceBytes": null,
+      "retainedBytes": 3188,
+      "normalized": false
+    }
+  ],
+  "validation": {
+    "bandit": {
+      "command": "source .venv/bin/activate && python -m bandit output/playwright/cycle5-repair-verification-2026-09-16/followup114-native/create-notification.py -f json",
+      "exit": 0,
+      "findings": 0,
+      "errors": 0,
+      "report": "bandit.json"
+    }
+  },
+  "previousManifestSha256": "e50de650329668ae5f4d13115a04b04ab6454aef6f36c71223fe0eaaef9f1bfb",
+  "updatedAt": "2026-09-16T21:11:59.487Z",
+  "reassessmentEvidence": [
+    {
+      "path": "output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/evidence-manifest.json",
+      "sha256": "2d668aa67275340f50d1653c25765df136508d8e7d23ff3fc8159db7562b8a3d"
+    },
+    {
+      "path": "output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/uat114-permanent-red.txt",
+      "sha256": "76b78086e7457fd6cf165db969d8331cbe459c9e2a5e518a68942b3ded1d57fd"
+    },
+    {
+      "path": "output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/cycle4-uat114-independent-tests.log",
+      "sha256": "61e040fd1fb528c8edc5eb571f89ed59c0f230e571a157a53f9f19caac2d05ef"
+    },
+    {
+      "path": "output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/cycle4-uat114-independent-review.md",
+      "sha256": "fc48b911adc089e63f983409977f49e1538973b1813ca73cf69e9b0216003dfa"
+    },
+    {
+      "path": "output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/uat114-review.diff",
+      "sha256": "ab19981181dbd1887be28419f81f750594a23ad129779d910557cd1c34a0baad"
+    }
+  ]
+}

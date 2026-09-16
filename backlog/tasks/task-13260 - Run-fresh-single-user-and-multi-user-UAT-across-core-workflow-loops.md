@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 20:13'
+updated_date: '2026-09-16 21:20'
 labels:
   - uat
   - testing
@@ -176,6 +176,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 19:50 UTC recovery: real vision provider correctly describes existing PNG200/5807ms; app118 remains pending. Headed two-tab visibility still both visible,114 tool gap retained. Fresh SQLite init0; private harness Python/Next path errors being corrected without product changes. Official fixtures hold separate fresh PG single/multi Auth/content DBs. No full UAT restarted.103 bounded local diagnostic policy approved under.44; design selection recorded.
 
 20:12UTC actualimagePNG attached/sent correctly; failedsecondimage turn→reload→Retry succeeds exactclientID/bytes answer3 and reloadpersists. First successful pair duplicated immediately atfallbackPOST201 (157/.95). AdminLlamaListconsoleerror158/.96also tracked. Native evidence retainednative-image118-157; nextfullUATstillblocked. Current158count140verified13awaiting1blocked4unresolved. Preauthpersona429undercharacter_chat.defaultobserved, classificationpending. Runtimeisolationauditfoundsharedinactive system_ops andoptionalrepo-relative stores; fullmatrixwillneedfrozenisolatedsourceroot; targetedimage scope disclosed.
+
+21:17UTC reconciliation162findings:150verified/10awaiting/2unresolved013and162. Final118/157 realPNG Send/failure/reload/Retry/canonicalacceptance independentlypasses; mandatoryPG32pass0skip refreshed.114genuinehidden six-tab and142actualDisconnect/route delayed200 controls accepted;155/159/160/161/153accepted.161 committed413be51cc8;162semanticlabels underrepair. Tracker/ledger are current; nofullUATrestart, nativePGmatrix stillrequired. Evidence cycle5-repair-verification/native-image118-157-final,followup114-native,followup142-native,followup152-153-native.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

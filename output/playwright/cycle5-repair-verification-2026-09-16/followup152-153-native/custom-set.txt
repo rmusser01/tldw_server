@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await page.getByRole('spinbutton').nth(5).fill('10');
+```

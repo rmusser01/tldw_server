@@ -1,0 +1,132 @@
+{
+  "task": "TASK-13260.91",
+  "createdAt": "2026-09-16T21:18:29.234Z",
+  "sourceAllowlist": [
+    "custom-set.txt",
+    "custom-before-save.txt",
+    "custom-saved.txt",
+    "custom-reload-start.txt",
+    "custom-reloaded-expanded.txt",
+    "balanced-selected.txt",
+    "balanced-saved.txt",
+    "balanced-reload-start.txt",
+    "balanced-reloaded-expanded.txt",
+    "balanced-fields-and-labels.txt"
+  ],
+  "generatedAllowlist": [
+    "independent-audit.md"
+  ],
+  "scope": "UAT153 actual Settings Custom-to-Balanced native acceptance only; UAT152 real source-generation acceptance remains pending.",
+  "excluded": "No credential source, private wrapper, profile, runtime log or screenshot copied; only the ten named already-redacted receipts.",
+  "normalization": "Strip trailing spaces/tabs from text lines only; retain original and destination hashes.",
+  "secretScan": {
+    "knownCredentialSourcesRead": 6,
+    "distinctKnownValuesChecked": 26,
+    "valuesPrinted": false,
+    "knownValueHits": 0,
+    "credentialPatternHits": 0
+  },
+  "files": [
+    {
+      "path": "custom-set.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/custom-set.txt",
+      "sourceSha256": "ad17f00e5698a6b052abf835023151bb9162ff99cd4f5ecc91c5b9f6a54b9073",
+      "retainedSha256": "ad17f00e5698a6b052abf835023151bb9162ff99cd4f5ecc91c5b9f6a54b9073",
+      "sourceBytes": 89,
+      "retainedBytes": 89,
+      "normalized": false
+    },
+    {
+      "path": "custom-before-save.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/custom-before-save.txt",
+      "sourceSha256": "0f197b6095fb22449b323a3de3c5e4c8c2e3130bb1d95d7d2f8c5c8b5692eb18",
+      "retainedSha256": "0f197b6095fb22449b323a3de3c5e4c8c2e3130bb1d95d7d2f8c5c8b5692eb18",
+      "sourceBytes": 16530,
+      "retainedBytes": 16530,
+      "normalized": false
+    },
+    {
+      "path": "custom-saved.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/custom-saved.txt",
+      "sourceSha256": "aefb1bc7eba8597854a982a4364481c4049b743cf757519965c1a33ebbc80a7f",
+      "retainedSha256": "aefb1bc7eba8597854a982a4364481c4049b743cf757519965c1a33ebbc80a7f",
+      "sourceBytes": 16904,
+      "retainedBytes": 16904,
+      "normalized": false
+    },
+    {
+      "path": "custom-reload-start.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/custom-reload-start.txt",
+      "sourceSha256": "efeb427329c7031819504d31784370292c8d7577efa7f603fc0b0ce341f6ca7e",
+      "retainedSha256": "efeb427329c7031819504d31784370292c8d7577efa7f603fc0b0ce341f6ca7e",
+      "sourceBytes": 725,
+      "retainedBytes": 725,
+      "normalized": false
+    },
+    {
+      "path": "custom-reloaded-expanded.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/custom-reloaded-expanded.txt",
+      "sourceSha256": "84b0df417ab45ac36f59c6d77a42cdbebd48533f33cbed5ee92647e83dc847df",
+      "retainedSha256": "84b0df417ab45ac36f59c6d77a42cdbebd48533f33cbed5ee92647e83dc847df",
+      "sourceBytes": 16636,
+      "retainedBytes": 16636,
+      "normalized": false
+    },
+    {
+      "path": "balanced-selected.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/balanced-selected.txt",
+      "sourceSha256": "90e3b2f722a0936eba57e741fad1abd2ad645f04470bafcd6b10648b7e5ed542",
+      "retainedSha256": "90e3b2f722a0936eba57e741fad1abd2ad645f04470bafcd6b10648b7e5ed542",
+      "sourceBytes": 16502,
+      "retainedBytes": 16502,
+      "normalized": false
+    },
+    {
+      "path": "balanced-saved.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/balanced-saved.txt",
+      "sourceSha256": "08a367a749158dffadaba023072f11e6315b64b82650497d207ace5d95ab93d1",
+      "retainedSha256": "08a367a749158dffadaba023072f11e6315b64b82650497d207ace5d95ab93d1",
+      "sourceBytes": 16731,
+      "retainedBytes": 16731,
+      "normalized": false
+    },
+    {
+      "path": "balanced-reload-start.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/balanced-reload-start.txt",
+      "sourceSha256": "56c4a8c90a4fa4d7c0acd5d500bdf8cb492b124051a40161fa2c002e45e829fe",
+      "retainedSha256": "56c4a8c90a4fa4d7c0acd5d500bdf8cb492b124051a40161fa2c002e45e829fe",
+      "sourceBytes": 791,
+      "retainedBytes": 791,
+      "normalized": false
+    },
+    {
+      "path": "balanced-reloaded-expanded.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/balanced-reloaded-expanded.txt",
+      "sourceSha256": "c92776ec12aa8cb878546e2f197fe3e133147a79cc82c3f4207bb0afd91bb8f2",
+      "retainedSha256": "c92776ec12aa8cb878546e2f197fe3e133147a79cc82c3f4207bb0afd91bb8f2",
+      "sourceBytes": 16526,
+      "retainedBytes": 16526,
+      "normalized": false
+    },
+    {
+      "path": "balanced-fields-and-labels.txt",
+      "source": ".tmp/uat152-153-final-native-20260916/balanced-fields-and-labels.txt",
+      "sourceSha256": "908e60964a4fb06b6273e5dc5fa99874c840d02e9a60bea16def30fb3d0bbef2",
+      "retainedSha256": "908e60964a4fb06b6273e5dc5fa99874c840d02e9a60bea16def30fb3d0bbef2",
+      "sourceBytes": 1016,
+      "retainedBytes": 1016,
+      "normalized": false
+    },
+    {
+      "path": "independent-audit.md",
+      "source": null,
+      "sourceSha256": null,
+      "retainedSha256": "8ced417bc2b95033edec6a8578f89e067b5f9f7b12d9104972870162aeaac3b6",
+      "sourceBytes": null,
+      "retainedBytes": 3781,
+      "normalized": false
+    }
+  ],
+  "previousManifestSha256": "c28d118d644f4863df7f56690891edcb2e1148ea29cf8ca2ed3629e408ddacb6",
+  "updatedAt": "2026-09-16T21:20:06.713Z"
+}

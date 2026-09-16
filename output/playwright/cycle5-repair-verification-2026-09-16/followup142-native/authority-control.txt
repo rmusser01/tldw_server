@@ -1,0 +1,45 @@
+### Result
+{"started":1789592815209,"startUrl":"http://127.0.0.1:18580/notifications","settingsUrl":"http://127.0.0.1:18580/settings/tldw","backendStatus":200,"backendBody":"{\"updated\":1}","requestBody":"{\"ids\":[5]}","heldAt":1789592815237,"disconnectedAt":1789592815353,"beforeReleaseUrl":"http://127.0.0.1:18580/notifications","beforeReleaseText":"Skip to main content\nNotifications\n\nUnread: 0\n\nRefresh\nPreferences\n\nSign in again to view notifications\n\nYour session must be refreshed before this inbox can update.\n\nOpen sign in\nLoading notifications...","delivery":"fulfilled","releasedAt":1789592815859,"finalUrl":"http://127.0.0.1:18580/notifications","finalText":"Skip to main content\nNotifications\n\nUnread: 0\n\nRefresh\nPreferences\n\nSign in again to view notifications\n\nYour session must be refreshed before this inbox can update.\n\nOpen sign in\nLoading notifications...","finished":1789592816362}
+### Ran Playwright code
+```js
+await (async page => {
+  const settings=page.context().pages().find(p=>p.url()==='http://127.0.0.1:18580/settings/tldw');
+  if(!settings)throw Error('Prepared real Settings tab is missing');
+  let release,resolveHeld,resolveFinished;
+  const held=new Promise(resolve=>{resolveHeld=resolve;});
+  const finished=new Promise(resolve=>{resolveFinished=resolve;});
+  const result={started:Date.now(),startUrl:page.url(),settingsUrl:settings.url()};
+  await page.route('**/api/v1/notifications/mark-read',async route=>{
+    const response=await route.fetch();
+    result.backendStatus=response.status();result.backendBody=await response.text();result.requestBody=route.request().postData();result.heldAt=Date.now();
+    resolveHeld();await new Promise(resolve=>{release=resolve;});
+    try{await route.fulfill({response});result.delivery='fulfilled';}catch(error){result.delivery='browser-request-already-settled';result.deliveryError=String(error.message);}
+    result.releasedAt=Date.now();resolveFinished();
+  });
+  await page.getByRole('listitem').filter({has:page.getByRole('heading',{name:'UAT142 disconnect during View',exact:true})}).getByRole('button',{name:'View',exact:true}).click();
+  await held;
+  await settings.bringToFront();await settings.getByRole('button',{name:'Disconnect',exact:true}).click();
+  result.disconnectedAt=Date.now();
+  await page.waitForTimeout(500);
+  result.beforeReleaseUrl=page.url();result.beforeReleaseText=await page.locator('body').innerText();
+  release();await finished;await page.waitForTimeout(500);
+  result.finalUrl=page.url();result.finalText=await page.locator('body').innerText();result.finished=Date.now();
+  await page.unroute('**/api/v1/notifications/mark-read');
+  await page.bringToFront();await page.screenshot({path:'.tmp/uat142-native-20260916/authority-after-late-response.png'});
+  return result;
+}
+)(page);
+```
+### Open tabs
+- 0: [Home | tldw](http://127.0.0.1:18582/)
+- 1: [Home | tldw](http://127.0.0.1:18580/)
+- 2: [Home | tldw](http://127.0.0.1:18580/)
+- 3: [Home | tldw](http://127.0.0.1:18580/)
+- 4: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 5: [Prompts | tldw](http://127.0.0.1:18580/prompts?edit=pa_8716-c067-557-e6c9)
+- 6: (current) [](http://127.0.0.1:18580/notifications)
+### Page
+- Page URL: http://127.0.0.1:18580/notifications
+- Console: 0 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-06-04-411Z.log#L3

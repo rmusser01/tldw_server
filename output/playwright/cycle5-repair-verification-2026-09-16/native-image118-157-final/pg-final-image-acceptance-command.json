@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-16T20:58:31.388Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Chat/integration/test_chat_image_recovery.py::test_postgres_strict_image_snapshot",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_transactions.py",
+    "tldw_Server_API/tests/DB_Management/test_media_postgres_support.py",
+    "tldw_Server_API/tests/DB_Management/test_database_backends.py",
+    "-k",
+    "postgres",
+    "-q",
+    "-rs"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

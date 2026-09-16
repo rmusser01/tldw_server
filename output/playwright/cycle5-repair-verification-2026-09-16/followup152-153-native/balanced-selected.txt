@@ -1,0 +1,278 @@
+### Ran Playwright code
+```js
+await page.getByText('Balanced', { exact: true }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+### Page
+- Page URL: http://127.0.0.1:18580/settings/tldw
+- Page Title: Server Settings | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T21-13-37-801Z.yml)
+
+- generic [ref=f16e11]:
+  - generic [ref=f16e14]:
+    - link "Skip to main content" [ref=f16e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=f16e16]:
+      - generic [ref=f16e17]:
+        - generic [ref=f16e20]:
+          - generic [ref=f16e22]:
+            - img "tldw Assistant" [ref=f16e23]
+            - generic [ref=f16e24]: tldw Assistant
+            - button "Companion Home" [ref=f16e25] [cursor=pointer]
+            - button "Show shortcuts" [ref=f16e29] [cursor=pointer]
+          - generic [ref=f16e32]:
+            - button "Search - Open command palette" [ref=f16e33] [cursor=pointer]:
+              - generic [ref=f16e37]: Search
+              - generic [ref=f16e38]: ⌘K
+            - button "Open settings" [ref=f16e39] [cursor=pointer]
+            - generic [ref=f16e51]:
+              - button "Notifications, 0 unread" [ref=f16e52] [cursor=pointer]
+              - status [ref=f16e56]: Notifications are active
+            - button "Switch to light theme" [ref=f16e57] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f16e64] [cursor=pointer]:
+              - generic [ref=f16e65]: "?"
+        - generic [ref=f16e70]:
+          - complementary [ref=f16e71]:
+            - navigation "Settings navigation" [ref=f16e72]:
+              - button "Switch to Sidebar" [disabled] [ref=f16e74]
+              - generic [ref=f16e75]:
+                - generic [ref=f16e76]: Filter settings
+                - textbox "Filter settings" [ref=f16e77]:
+                  - /placeholder: Find a setting
+              - generic [ref=f16e78]:
+                - generic [ref=f16e79]:
+                  - generic [ref=f16e80]: Setup & Recovery
+                  - list [ref=f16e82]:
+                    - listitem [ref=f16e83]:
+                      - link "Setup & Recovery" [ref=f16e84] [cursor=pointer]:
+                        - /url: /settings
+                    - listitem [ref=f16e92]:
+                      - link "tldw Server" [ref=f16e93] [cursor=pointer]:
+                        - /url: /settings/tldw
+                    - listitem [ref=f16e99]:
+                      - link "Provider Keys" [ref=f16e100] [cursor=pointer]:
+                        - /url: /settings/provider-keys
+                    - listitem [ref=f16e105]:
+                      - link "Manage Models" [ref=f16e106] [cursor=pointer]:
+                        - /url: /settings/model
+                    - listitem [ref=f16e120]:
+                      - link "Health & Diagnostics" [ref=f16e121] [cursor=pointer]:
+                        - /url: /settings/health
+                - generic [ref=f16e125]:
+                  - generic [ref=f16e126]: Preferences & Workflow
+                  - list [ref=f16e128]:
+                    - listitem [ref=f16e129]:
+                      - link "Preferences" [ref=f16e130] [cursor=pointer]:
+                        - /url: /settings/preferences
+                    - listitem [ref=f16e133]:
+                      - link "Chat" [ref=f16e134] [cursor=pointer]:
+                        - /url: /settings/chat
+                    - listitem [ref=f16e138]:
+                      - link "Chat Macros" [ref=f16e139] [cursor=pointer]:
+                        - /url: /settings/chat-macros
+                    - listitem [ref=f16e148]:
+                      - link "UI customization" [ref=f16e149] [cursor=pointer]:
+                        - /url: /settings/ui
+                    - listitem [ref=f16e152]:
+                      - link "Splash screens" [ref=f16e153] [cursor=pointer]:
+                        - /url: /settings/splash
+                    - listitem [ref=f16e158]:
+                      - link "Quick Ingest" [ref=f16e159] [cursor=pointer]:
+                        - /url: /settings/quick-ingest
+                    - listitem [ref=f16e164]:
+                      - link "Speech" [ref=f16e165] [cursor=pointer]:
+                        - /url: /settings/speech
+                    - listitem [ref=f16e170]:
+                      - link "Image Generation" [ref=f16e171] [cursor=pointer]:
+                        - /url: /settings/image-generation
+                    - listitem [ref=f16e177]:
+                      - link "Knowledge QA" [ref=f16e178] [cursor=pointer]:
+                        - /url: /settings/knowledge
+                    - listitem [ref=f16e182]:
+                      - link "RAG Settings" [ref=f16e183] [cursor=pointer]:
+                        - /url: /settings/rag
+                    - listitem [ref=f16e192]:
+                      - link "Workflow prompts" [ref=f16e193] [cursor=pointer]:
+                        - /url: /settings/prompt
+                    - listitem [ref=f16e197]:
+                      - link "Prompt Studio" [ref=f16e198] [cursor=pointer]:
+                        - /url: /settings/prompt-studio
+                      - generic [ref=f16e204]: Beta
+                    - listitem [ref=f16e205]:
+                      - link "Chatbooks settings" [ref=f16e206] [cursor=pointer]:
+                        - /url: /settings/chatbooks
+                    - listitem [ref=f16e210]:
+                      - link "Characters" [ref=f16e211] [cursor=pointer]:
+                        - /url: /settings/characters
+                    - listitem [ref=f16e215]:
+                      - link "World Books" [ref=f16e216] [cursor=pointer]:
+                        - /url: /settings/world-books
+                    - listitem [ref=f16e220]:
+                      - link "Chat Dictionaries" [ref=f16e221] [cursor=pointer]:
+                        - /url: /settings/chat-dictionaries
+                - generic [ref=f16e226]:
+                  - generic [ref=f16e227]: Data & Administration
+                  - list [ref=f16e229]:
+                    - listitem [ref=f16e230]:
+                      - link "Data Management" [ref=f16e231] [cursor=pointer]:
+                        - /url: /settings/data
+                    - listitem [ref=f16e237]:
+                      - link "Manage Share" [ref=f16e238] [cursor=pointer]:
+                        - /url: /settings/share
+                    - listitem [ref=f16e243]:
+                      - link "Evaluations" [ref=f16e244] [cursor=pointer]:
+                        - /url: /settings/evaluations
+                    - listitem [ref=f16e248]:
+                      - link "Moderation Review" [ref=f16e249] [cursor=pointer]:
+                        - /url: /moderation
+                    - listitem [ref=f16e254]:
+                      - link "Content Rules" [ref=f16e255] [cursor=pointer]:
+                        - /url: /moderation/rules
+                    - listitem [ref=f16e260]:
+                      - link "MCP Hub" [ref=f16e261] [cursor=pointer]:
+                        - /url: /settings/mcp-hub
+                    - listitem [ref=f16e266]:
+                      - link "About" [ref=f16e267] [cursor=pointer]:
+                        - /url: /settings/about
+              - button "Hide beta badges" [ref=f16e272] [cursor=pointer]
+          - region [ref=f16e273]:
+            - button "Close" [ref=f16e275] [cursor=pointer]
+            - generic [ref=f16e280]:
+              - heading "tldw Server" [level=1] [ref=f16e281]
+              - paragraph [ref=f16e283]: Current section:tldw Server
+              - generic [ref=f16e286]:
+                - generic [ref=f16e287]:
+                  - heading "About tldw server integration" [level=3] [ref=f16e288]
+                  - paragraph [ref=f16e289]: Connect to tldw server for chat, knowledge search, and media.
+                  - generic [ref=f16e290]:
+                    - paragraph [ref=f16e291]: What your tldw server provides
+                    - list [ref=f16e292]:
+                      - listitem [ref=f16e293]: Powers chat, multi-turn memory, and server-backed history.
+                      - listitem [ref=f16e294]: Enables Knowledge search & RAG so chats can reference your own documents.
+                      - listitem [ref=f16e295]: Handles media ingest, transcription, and metrics so you can review calls and videos.
+                    - button "View server setup guide" [ref=f16e296] [cursor=pointer]
+                - generic [ref=f16e297]:
+                  - generic [ref=f16e298]: Server:http://127.0.0.1:18580
+                  - generic [ref=f16e299]:
+                    - link [ref=f16e301] [cursor=pointer]:
+                      - /url: /settings/health
+                      - button "Health" [ref=f16e302]
+                    - button "Recheck" [ref=f16e305] [cursor=pointer]
+                - generic [ref=f16e307]:
+                  - tablist [ref=f16e308]:
+                    - generic [ref=f16e310]:
+                      - tab "Connection" [ref=f16e312] [cursor=pointer]
+                      - tab "Timeouts" [selected] [ref=f16e314] [cursor=pointer]
+                  - generic:
+                    - generic:
+                      - tabpanel "Timeouts"
+                - heading "tldw Server Configuration" [level=2] [ref=f16e315]
+                - generic [ref=f16e316]:
+                  - generic [ref=f16e318]:
+                    - generic "Server URL" [ref=f16e320]: "* Server URL"
+                    - generic [ref=f16e321]:
+                      - textbox "* Server URL" [ref=f16e324]:
+                        - /placeholder: http://127.0.0.1:8000
+                        - text: http://127.0.0.1:18580
+                      - generic [ref=f16e325]: "The URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000"
+                  - generic [ref=f16e328]:
+                    - generic "Authentication Mode" [ref=f16e330]: "* Authentication Mode"
+                    - radiogroup "segmented control" [ref=f16e334]:
+                      - generic [ref=f16e335]:
+                        - generic [ref=f16e336] [cursor=pointer]:
+                          - radio "Single User (API Key)" [checked]
+                          - generic "Single User (API Key)" [ref=f16e337]
+                        - generic [ref=f16e338] [cursor=pointer]:
+                          - radio "Multi User (Login)"
+                          - generic "Multi User (Login)" [ref=f16e339]
+                  - generic [ref=f16e341]:
+                    - generic "API Key" [ref=f16e343]: "* API Key"
+                    - generic [ref=f16e344]:
+                      - generic [ref=f16e347]:
+                        - textbox "* API Key" [ref=f16e348]:
+                          - /placeholder: "Enter your API key (default demo key: THIS-IS-A-SECURE-KEY-123-REPLACE-ME for local single-user setups)"
+                          - text: [REDACTED]
+                        - img "eye-invisible" [ref=f16e350] [cursor=pointer]
+                      - generic [ref=f16e354]: Your tldw_server API key for authentication. For local single-user demos, you can use the default key THIS-IS-A-SECURE-KEY-123-REPLACE-ME unless you have changed it on the server.
+                  - generic [ref=f16e361] [cursor=pointer]:
+                    - checkbox "Remember on this device" [checked] [ref=f16e363]
+                    - generic [ref=f16e365]: Remember on this device
+                  - paragraph [ref=f16e366]: Stores this API key in this browser until you disconnect or clear browser data. Turn this off on a shared device.
+                  - button "Disconnect" [ref=f16e367] [cursor=pointer]
+                  - generic [ref=f16e369]:
+                    - generic [ref=f16e371]:
+                      - button "Save" [ref=f16e373] [cursor=pointer]
+                      - button "Test Connection" [ref=f16e376] [cursor=pointer]
+                    - generic [ref=f16e380]:
+                      - generic [ref=f16e381]: Checks
+                      - generic [ref=f16e382]: "Core: not checked yet"
+                      - generic [ref=f16e383]: "RAG: not checked yet"
+                  - generic [ref=f16e386]:
+                    - button "expanded Advanced Timeouts" [expanded] [ref=f16e402] [cursor=pointer]:
+                      - img "expanded" [ref=f16e403]
+                      - generic [ref=f16e392]: Advanced Timeouts
+                    - generic [ref=f16e406]:
+                      - generic [ref=f16e407]:
+                        - generic [ref=f16e408]: Timeout profile
+                        - radiogroup "segmented control" [ref=f16e410]:
+                          - generic [ref=f16e411]:
+                            - generic [ref=f16e412] [cursor=pointer]:
+                              - radio "Balanced" [checked] [active]
+                              - generic "Balanced" [ref=f16e413]
+                            - generic [ref=f16e414] [cursor=pointer]:
+                              - radio "Extended"
+                              - generic "Extended" [ref=f16e415]
+                        - generic [ref=f16e417]: Balanced works well for most setups. Extended adds extra headroom for slower networks or long-running jobs.
+                      - generic [ref=f16e418]:
+                        - generic [ref=f16e419]:
+                          - generic [ref=f16e420]: Request Timeout (seconds)
+                          - generic [ref=f16e421]:
+                            - spinbutton "10" [ref=f16e422]
+                            - generic [ref=f16e423]: s
+                          - generic [ref=f16e424]: "Abort initial requests if no response within this time. Default: 10s."
+                        - generic [ref=f16e425]:
+                          - generic [ref=f16e426]: Streaming Idle Timeout (seconds)
+                          - generic [ref=f16e427]:
+                            - spinbutton "15" [ref=f16e428]
+                            - generic [ref=f16e429]: s
+                          - generic [ref=f16e430]: "Abort streaming if no updates received within this time. Default: 15s."
+                      - generic [ref=f16e431]:
+                        - generic [ref=f16e432]:
+                          - generic [ref=f16e433]: Chat Request Timeout
+                          - generic [ref=f16e434]:
+                            - spinbutton [ref=f16e435]: "120"
+                            - generic [ref=f16e436]: s
+                          - generic [ref=f16e437]: Applies to non-stream chat request timeout handling. Use startup timeout below for first visible token.
+                        - generic [ref=f16e438]:
+                          - generic [ref=f16e439]: Chat startup timeout
+                          - generic [ref=f16e440]:
+                            - spinbutton [ref=f16e441]: "120"
+                            - generic [ref=f16e442]: s
+                          - generic [ref=f16e443]: "Abort streaming if no visible assistant output arrives within this time. Default: 120s."
+                        - generic [ref=f16e444]:
+                          - generic [ref=f16e445]: Chat Stream Idle
+                          - generic [ref=f16e446]:
+                            - spinbutton [ref=f16e447]: "15"
+                            - generic [ref=f16e448]: s
+                        - generic [ref=f16e449]:
+                          - generic [ref=f16e450]: RAG Request Timeout
+                          - generic [ref=f16e451]:
+                            - spinbutton [ref=f16e452]: "120"
+                            - generic [ref=f16e453]: s
+                        - generic [ref=f16e454]:
+                          - generic [ref=f16e455]: Media Request Timeout
+                          - generic [ref=f16e456]:
+                            - spinbutton [ref=f16e457]: "60"
+                            - generic [ref=f16e458]: s
+                        - generic [ref=f16e459]:
+                          - generic [ref=f16e460]: Upload Request Timeout
+                          - generic [ref=f16e461]:
+                            - spinbutton [ref=f16e462]: "60"
+                            - generic [ref=f16e463]: s
+                      - button "Reset to recommended" [ref=f16e465] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f16e398] [cursor=pointer]
+  - alert [ref=f16e10]

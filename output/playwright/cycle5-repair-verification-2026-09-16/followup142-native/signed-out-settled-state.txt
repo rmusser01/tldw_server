@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18580/notifications","text":"Skip to main content\nNotifications\n\nUnread: 0\n\nRefresh\nPreferences\n\nSign in again to view notifications\n\nYour session must be refreshed before this inbox can update.\n\nOpen sign in\nNo notifications yet.","at":1789593245262}
+### Ran Playwright code
+```js
+await (async page => ({url:page.url(),text:await page.locator("body").innerText(),at:Date.now()}))(page);
+```
