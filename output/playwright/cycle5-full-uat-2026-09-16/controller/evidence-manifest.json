@@ -1,9 +1,14 @@
 {
   "mode": "controller",
-  "retainedAt": "2026-09-16T09:29:34.688Z",
+  "retainedAt": "2026-09-16T09:37:46.092Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
+    {
+      "file": "cycle5-controller-FINAL_REPORT.md",
+      "bytes": 4914,
+      "sha256": "85ee41dbfa003932a2077a0e2481f4e5d14ab984a34b0f48192f70096f8939d7"
+    },
     {
       "file": "cycle5-controller-additional-diagnosis-hashes.txt",
       "bytes": 2420,
@@ -13,6 +18,11 @@
       "file": "cycle5-controller-api-read.mjs",
       "bytes": 1115,
       "sha256": "33ce9e9e9ba0de3a4dabab0c90a234fd376ea21f320d0dc427bb643cd814abc6"
+    },
+    {
+      "file": "cycle5-controller-final-backlog-update.txt",
+      "bytes": 24,
+      "sha256": "9ef709f8bbb56c3556aacbceac0ddc096e83c5399620a396fcc5195a22017a84"
     },
     {
       "file": "cycle5-controller-inference-slot-observation.json",
@@ -92,7 +102,7 @@
     {
       "file": "cycle5-controller-running-summary.md",
       "bytes": 9041,
-      "sha256": "5d730e70748aae2b4861a3ecd61e2ca87ca7a19ee983edea0278a4de609bde10"
+      "sha256": "b893b6921ac7c143f86efb01e311f397f745bd8656835acf0a09a57de8330da1"
     },
     {
       "file": "cycle5-controller-single-biology-cards-post-review.json",
@@ -138,6 +148,11 @@
       "file": "cycle5-controller-task24-update.txt",
       "bytes": 27,
       "sha256": "42be7a838d1f066cef2e2db22a6a91346722331cd3f9b36fe23cc1b4408fc84f"
+    },
+    {
+      "file": "cycle5-controller-task66-start.txt",
+      "bytes": 27,
+      "sha256": "eb8b74a160d87197de73280f80936850a79dc7bf64eb0a5412945ab7c8fc6943"
     },
     {
       "file": "cycle5-controller-task71-update.txt",
@@ -343,6 +358,26 @@
       "file": "cycle5-controller-uat134-probe.log",
       "bytes": 3441,
       "sha256": "7525745d0dd4b0520190c006c89d7c4f7f51192f00bb7baabe65e007412ee7aa"
+    },
+    {
+      "file": "cycle5-controller-uat135-design-notes.md",
+      "bytes": 6164,
+      "sha256": "1719b141e76fc3b638d97994e337d4dc426fb67633b3cfbae9a9395424fe884b"
+    },
+    {
+      "file": "cycle5-controller-uat135-diagnosis-hashes.txt",
+      "bytes": 620,
+      "sha256": "dafc3c038b1c444ceb752e6a5591f4b15767abf09881e89102f9e5c360226af7"
+    },
+    {
+      "file": "cycle5-controller-uat135-probe-config.txt",
+      "bytes": 3027,
+      "sha256": "f82ac53da3dabce1488bceca81619d3bf830299b796ff7597cc1dc587ff5e749"
+    },
+    {
+      "file": "cycle5-controller-uat135-probe.log",
+      "bytes": 11426,
+      "sha256": "1661183600f0b025312f1cba2c884e2cd7bc84549028928825dbceb2796cc005"
     }
   ]
 }

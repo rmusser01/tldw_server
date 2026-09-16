@@ -5,7 +5,7 @@ Frozen source ab527eb3b4. Fresh runtime/API18501/UI18581; existing dependencies 
 | Row | Workflow | Status |
 |---|---|---|
 |1|Fresh setup/provider/firstChat|Pass — operator adaptation|
-|2|Auth/reload/logout/offline/reconnect/naturalexpiry|Partial — natural expiry PASS; offline/reconnect pending|
+|2|Auth/reload/logout/offline/reconnect/naturalexpiry|Partial UAT134 — natural expiry/offline/reconnect PASS; later active readiness401 loop|
 |3|Ordinary2turns/reload/failedRetry|Pass|
 |4|Publicfile→QA/citations/sourceChat|Fail UAT127 — completed job stuck Processing; independent QA/citation/source Chat PASS|
 |5|ExactWikipedia→search→Chat|External access blocked — honest failed Results; dependents blocked|
@@ -15,9 +15,9 @@ Frozen source ab527eb3b4. Fresh runtime/API18501/UI18581; existing dependencies 
 |9|ChatNote/backlink/CardStudy|Pass — Note/backlink/CardStudy/mixed practice/scheduled manual End; re-rate known128 limit|
 |10|Mediaanalysis/reanalysis/Review|Pass — explicit failed analysis preserves prior, real reanalysis saved/reloaded; Review inspected|
 |11|Permissions/DeleteTrashRestore|Pass — ordinary deny; admin only item Trash/restore; API fixture adaptation|
-|12|Reciprocalisolation/API/browser|Pass for tested API/browser ownership — Alice return restored Notes/QA; search filter observation; draft switch not exercised|
+|12|Reciprocalisolation/API/browser|Pass tested ownership + Indigo confidentiality; UAT132 search issue; unsaved-draft limit explicit|
 
-No inference yet. Tokenexpiry timer not yet started. All actual findings/artifacts appended as established.
+Historical initial state; final outcomes and actual chronology follow. All actual findings/artifacts appended as established.
 
 ## 08:05 UTC — fresh admin controls
 - Root corrected launch time to approximately07:59UTC; first main browser navigation08:00:01UTC.
@@ -95,3 +95,8 @@ No inference yet. Tokenexpiry timer not yet started. All actual findings/artifac
 - ActualunavailableOllamaanalysis POST/chat/completions502provider_unavailable, visible Failed to generate analysis; prior3bulletanalysispreserved. ExactGemma restored, customemergencymaps/sitesprompt realChat200 +versions201v3(44d2cd1e-7be4-42eb-a91e-9d2883fea6fd); normalGET/media/1reload200 exactBluecourtyard/412maps/NorthPierWillowCoveEastMarsh, priorv2retained, raw963charsunchanged. Sole9099leaseRELEASED.
 - SingleboundedBiologyCram Update scheduleON ratingEasy of78bd6449→review200session3,4remaining1reviewed; actualEndSessionPOST/review-sessions/end200completed/cards_reviewed1/client2. No re-rate. RestoredscheduleOFF/Dueonly. ActualvisiblelabelneededbecauseAntDesigninputoverlaysinterceptedprogrammaticcheck; noforceedits.
 - MainAliceSettingsidle, rootnotifiedREADY forAPIoffline/reconnect. No activegeneration/writes.
+
+##09:32UTC executionclosedwithopenfindings
+- Root-ownedAPIoutageconnection-refused→nativeTestConnectionusefulguidance→Notesreadinessgate, thenrootrestartunchangedPID69593→actualRetry/ownedkeyword200→strictNoteslistreload200. No mutation/replay.
+- Indigo syntheticliteral-tokenAPIuploadanalysisOFF/chunkONMedia2UUIDf05b4dd6, actualKnowledgeUI SpecificMedia2/generationOFF/securityunchanged search200excluded1/retained0/no documents,citations,answer. NativeSecuritysettings excludedallretrievedsources/evidence0, no protectedexcerpt. ExistingAuroracitedQApublicpositive.
+- Final findings127/129/reopened068/131/132/134 remain. Fullreportcycle5-multi-native-FINAL_REPORT.md carrieseveryrowandexplicitlimits. Rootpausedruntimes; nofurtherbrowser/network/sourceactions.

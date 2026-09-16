@@ -7,25 +7,25 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 **Goal:** Account for every authoritative workflow row in both modes without changing product `ab527eb3b4`.
 **Success Criteria:** Each row has passed, failed or blocked evidence; all observed issues are tracked; credentials are excluded; source and dev ancestry are recorded.
 **Tests:** Native named workflows, real provider responses, canonical API reads, account isolation, offline/reconnect and natural token expiry. Read-only reproductions may run in private harnesses.
-**Status:** In Progress
+**Status:** Complete
 
 - Both ordinary two-turn Chat/reload and Biology five-card loops pass. Natural multi token expiry passes. Several source/analysis/Retry workflows pass with explicit adaptations and external limits.
-- Open repairs:126–134 and reopened068. Preserve source, runtime, private browser and evidence ownership until both executors finish.
-- Retain byte hashes and independent report audit before starting Stage2.
+- Open repairs:126–135 and reopened068. Preserve source, runtime, private browser and evidence ownership until both executors finish.
+- Execution ended around09:32UTC. Root audited both final reports against canonical captures, preserved failures and bounded claims, and verified the unchanged product diff. All four owned runtimes paused; evidence retention and hashes accompany the final checkpoint.
 
 ## Stage 2: Implement bounded repairs with permanent regressions
 
 **Goal:** Correct all confirmed cycle5 failures while preserving related successful behavior.
 **Success Criteria:** Each unit has a demonstrated failing regression, a minimal fix, passing relevant controls and independent review.
 **Tests:** Actual router/handoff tests126; StrictMode/reattach/session tests127; changing multi-card queue and re-rate tests128; canonical auth and tenant tests129; real catalog-shape/model-owner tests130; actual picker/reset/route/loader/ownership tests068; creation/mirror/send identity tests131; actual SQLite FTS fallback132; final provider-bound Retry order133; actual readiness transport/refresh/polling134.
-**Status:** Not Started
+**Status:** In Progress
 
 Expected disjoint ownership after the freeze is released:
 
 - Controller:126 and128 in Flashcards, sequentially to avoid shared test/route interference.
 - Existing Chat executor:068 character route transition, then131 greeting identity after diagnosis confirms scope.
 - Existing account executor:129 Prompt auth mode, then132 FTS fallback and133 Retry context, as sequential backend units.
-- Existing integration reviewer:127 ingest lifecycle, then130 analysis catalog identity and134 readiness refresh, as sequential frontend units.
+- Existing integration reviewer:127 ingest lifecycle, then130 analysis catalog identity,134 readiness refresh and135 outage diagnostics, as sequential frontend units with shared connection ownership.
 
 Assignments are dispatched explicitly only after Stage1 closes. No worker broad staging, commits, runtime changes or inference; controller integrates exact reviewed files. Independent reviewers must differ from the author. A demonstrated scope collision is coordinated before edits.
 

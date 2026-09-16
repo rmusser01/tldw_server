@@ -1,0 +1,13 @@
+### Ran Playwright code
+```js
+// Press Escape
+await page.keyboard.press('Escape');
+```
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Knowledge | tldw](http://127.0.0.1:18581/knowledge)
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge
+- Page Title: Knowledge | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T09-29-12-161Z.log#L5-L6

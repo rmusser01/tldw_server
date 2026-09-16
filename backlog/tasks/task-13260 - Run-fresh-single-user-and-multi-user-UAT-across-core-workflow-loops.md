@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 09:24'
+updated_date: '2026-09-16 09:37'
 labels:
   - uat
   - testing
@@ -160,6 +160,8 @@ Cycle5 checkpoint08:48UTC: source remains ab527eb3b4; docs/evidence d9c8854ec0.2
 Prepared bounded post-cycle5 design Docs/Design/2026-09-16-uat-cycle-5-repairs.md and unique IMPLEMENTATION_PLAN_uat_cycle_5.md while product remainsfrozen. Five new126-130 plus reopened068/task15 require repairs. Stage1currentmatricesstillrunning; no implementation dispatch untilbothfinishand evidencepreserved. Four-stageplan recordsdisjoint existingagentownership andindependentreview, targetednative acceptance, thennextfreshmatrix.
 
 Cycle5 checkpoint09:23UTC: frozen ab527eb3b4 remains source-clean. New findings126-133 plus reopened068 tracked; task72 owns Retry context ordering133, task73 owns FTS fallback132. Both real Media reanalysis/failure-preservation workflows pass. Both new Character completion/reload pass but picker replacement fails. Reciprocal owner API/browser controls pass with search filtering kept separate. Natural away-return expiry passes; later active sessions401 polling under diagnosis. Single intentional API offline window now beginning after successful visible disconnect/key reentry. 636 evidence captures independently verified by SHA256/length at latest checkpoint; no credential matches. Design and new plan updated before implementation.
+
+Cycle5 execution closed around09:32UTC on unchanged ab527eb3b4. Root read both final reports and independently checked key native/canonical evidence, including correct failures, synthetic Indigo exclusion and ownership. Ten new findings126-135 plus reopened068: twoP3/nineP2. Final runtime pause verified only owned Next18580/18581 and API18500/18501. Same profiles/data preserved. Plan cycle5 Stage1 complete, Stage2 ready for bounded disjoint repair release after final evidence checkpoint. No full acceptance or fresh clean-machine claim; explicit missing coverage retained in tracker/reports.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

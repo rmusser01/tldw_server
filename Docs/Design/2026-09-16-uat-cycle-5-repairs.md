@@ -18,6 +18,7 @@ Preserve the authoritative frontend journeys and real server behavior. Correct t
 |132 / 13260.73|An invalid FTS query falls back to all visible owned sources|Fallback preserves the text filter and owner restrictions|MediaSearchRepository and actual SQLite query controls|
 |133 / 13260.72|Retry with descending saved history answers an older question|The exact accepted failed user turn is last in provider context once|Chat context assembly and actual final-payload/persistence controls|
 |134 / existing13260.24|Readiness polling repeats expired-session401 without refreshing|Safe readiness reads use the existing canonical refresh and terminal-invalidation path|apiSend/direct-runtime connection and actual rotation/polling controls|
+|135 / 13260.74|An outage is described as missing credentials and a CORS denial|Current failure evidence determines truthful connection guidance|Connection store and actual Knowledge SetupDiagnostics controls|
 
 Detailed read-only designs and temporary reproductions are retained under `output/playwright/cycle5-full-uat-2026-09-16/controller/`. Existing failures remain historical evidence; a passing comparison case is not a completed repair.
 
@@ -52,6 +53,8 @@ For132, an FTS syntax failure must retain a literal title/content fallback filte
 For133, move the identified accepted failed-user turn from the historical prefix to the final current-turn position without another database write. Preserve the explicit historical ordering contract for other rows; the existing suite intentionally checks descending order. Retain exact user text/images, one canonical identity, limited/zero history, ordinary repeated sends and conflict controls. Actual private context assembly reproduces2descending failures and2ascending controls; browser and canonical records independently demonstrate the wrong answer. Do not alter live configuration to hide the defect.
 
 For134, connect safe readiness reads to the existing canonical refresh-capable direct runtime. Reuse current token-pair rotation, shared single-flight, authority guards and terminal invalidation. Do not add another token store or broaden automatic mutation replay. Cover actual connection-store transport, multiple rotations, terminal failure stopping polling, owner/server changes, hosted cookies, single-user keys and transient network failures. The prior successful away-return refresh used a different transport; it does not certify this readiness caller.
+
+For135, generic browser network errors must remain cause-neutral; different frontend/backend origins do not prove a CORS denial. Current auth/UX failure takes precedence over historical onboarding-step metadata, so configured credentials are not described as missing during an unrelated outage. Preserve true401, missing-credential and explicit host/allowlist denial behavior. Use the actual store-to-diagnostics boundary. Coordinate the connection-store scope sequentially with134; do not recommend disabling CORS to work around the test outage.
 
 ## Verification and limits
 

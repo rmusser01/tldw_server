@@ -1,9 +1,19 @@
 {
   "mode": "multi",
-  "retainedAt": "2026-09-16T09:29:34.633Z",
+  "retainedAt": "2026-09-16T09:37:23.556Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
+    {
+      "file": "cycle5-multi-native-DETAILED_EVIDENCE_INDEX.md",
+      "bytes": 19334,
+      "sha256": "d0d45c52088c7a44eee52f2d1576633491a31b0be7b17189418282735067e745"
+    },
+    {
+      "file": "cycle5-multi-native-FINAL_REPORT.md",
+      "bytes": 8473,
+      "sha256": "23ca8baedd15bdde28dadb10101b8b4b03e045e350189930d8b6871e26c63ac5"
+    },
     {
       "file": "cycle5-multi-native-admin-delete-confirm-open.txt",
       "bytes": 421,
@@ -625,6 +635,46 @@
       "sha256": "3cc53d5e0c244c0c3523bea63c5bce95eac40d9d02f84510dd765d152717c7b6"
     },
     {
+      "file": "cycle5-multi-native-indigo-answer-off.txt",
+      "bytes": 399,
+      "sha256": "aead83ce431a4caccfd1cc201935b64351986a5489ee24fb4478ff0a4fd23d94"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-before-search.txt",
+      "bytes": 7687,
+      "sha256": "14091470502e06e0fce14c0552bdae1c92df1f61008ea7e72261adc5015babc1"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-categories-none.txt",
+      "bytes": 388,
+      "sha256": "f743b2f75b8764e73749adc791e33356829c6f8ecb88ceded942d969d1d9641a"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-categories.txt",
+      "bytes": 13397,
+      "sha256": "60a5ed79f2b342f2e9fb17c0c45426dc25acf028ca1eab19b8bd092406de7571"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-category-open.txt",
+      "bytes": 416,
+      "sha256": "b30ae6b10fa3c92dad4af98318441ecc368c7901a8577e69f78fb052567dbac3"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-documents-only.txt",
+      "bytes": 420,
+      "sha256": "834c66f24a937685a7e7f5fad3a1b596d68702871cfed0d4d3d05c67a0288d40"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-filter-dismiss.txt",
+      "bytes": 399,
+      "sha256": "2bf60e5a27f33e73baa87d5119e7fb110ce69c30452cb644eed93f826f796919"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-filter-dismissed.txt",
+      "bytes": 9648,
+      "sha256": "94ebc423b1900922873bacc66ed1d84db5b90a8a77821bf62f2e627b7ce5f4e0"
+    },
+    {
       "file": "cycle5-multi-native-indigo-qa-open.txt",
       "bytes": 429,
       "sha256": "1e7677868e7289d82b3e51cb8cf24856cb8d64cecc00bbfab5de5be1294d6f95"
@@ -633,6 +683,56 @@
       "file": "cycle5-multi-native-indigo-qa-ready.txt",
       "bytes": 6952,
       "sha256": "02dbb9f8f4143c9ec054170affb18309ac5679d39917866bbc3718f279de284c"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-question.txt",
+      "bytes": 163,
+      "sha256": "5c48aa4c5d1fe4025181422a9d2c472897639f85af35b37261d9a0b68cc5428b"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-result.png",
+      "bytes": 118253,
+      "sha256": "5a269244eec3ff2540056182dd65367aeb7324df984b20c20378187caa39a085"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-result.txt",
+      "bytes": 7257,
+      "sha256": "b9e09b73032530dcd20620c6faa4d822b922377022ef2345afe17f378420b8fd"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-scope-close.txt",
+      "bytes": 402,
+      "sha256": "f0fdd02a7d59a0cb67acf2f14eba3e7937155db2849cfc61590b619daa366194"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-screenshot.txt",
+      "bytes": 375,
+      "sha256": "e5d5debf4b36e3e9a2ba6c27acfede15876ffafde697274c317f6071f87b000b"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-search-wire.txt",
+      "bytes": 8430,
+      "sha256": "3d0670913b9e11c09842284eecbc8b2ba9bf2a0dbe2fcfa2b5bde4efefa22582"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-selected.txt",
+      "bytes": 498,
+      "sha256": "78fa92f541201d5596ed1ba71c039d3ca3dce7c90606f3319860efe8b1080c3f"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-settings-done.txt",
+      "bytes": 388,
+      "sha256": "ac9aece38ecf9bb2cd9e31c1eaaa44e89f4d92b0e208f486b0bd5fbb71120f8d"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-settings-open.txt",
+      "bytes": 410,
+      "sha256": "8fd3bf3ee9b947c1c3f73bab46b34007867a9bbdfceb1974ba7016f555868d7c"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-settings.txt",
+      "bytes": 14060,
+      "sha256": "bedb87dab332fdfad096ff83da04cb5bc82d3443b14d1a6164643f0adc7ddc32"
     },
     {
       "file": "cycle5-multi-native-indigo-source.txt",
@@ -648,6 +748,16 @@
       "file": "cycle5-multi-native-indigo-sources.txt",
       "bytes": 9487,
       "sha256": "f357a2894e67ba4dae38c17422eddbef08c1c8fddefd5b0852bd80c9cb5609b1"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-specific-open.txt",
+      "bytes": 403,
+      "sha256": "e226e5b62cc59bde9622db30a1a865f3741e234b5eea0c0704d047bc9e4982e3"
+    },
+    {
+      "file": "cycle5-multi-native-indigo-specific.txt",
+      "bytes": 16721,
+      "sha256": "1c4095af2bd026cde8f52738203e17cf89762813c2ca4c99bbd9596623b933c6"
     },
     {
       "file": "cycle5-multi-native-indigo-upload-run.txt",
@@ -1461,8 +1571,8 @@
     },
     {
       "file": "cycle5-multi-native-running-tracker.md",
-      "bytes": 14559,
-      "sha256": "1c22bbfca7f23e42f728dfb168f037eb67c8adedd40dac2ba03634c456231113"
+      "bytes": 15351,
+      "sha256": "490c04d9be51cf7459cf710f70f406afeed98c664186d457473d0928f7ff07e6"
     },
     {
       "file": "cycle5-multi-native-scheduled-cram-after.txt",

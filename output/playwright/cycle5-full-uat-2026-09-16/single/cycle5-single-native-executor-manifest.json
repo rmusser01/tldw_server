@@ -1,8 +1,26 @@
 {
-  "mode": "single",
-  "retainedAt": "2026-09-16T09:38:03.020Z",
-  "knownCredentialMatches": 0,
-  "jwtOrPrivateKeyPatternMatches": 0,
+  "capturedAt": "2026-09-16T09:36:48.564Z",
+  "browserCutoff": "2026-09-16T09:30:29Z",
+  "source": "ab527eb3b4",
+  "knownCredentialScanCount": 14,
+  "sensitiveMatches": [],
+  "jsonParseFailures": [],
+  "emptyArtifacts": [
+    "cycle5-single-native-045-biology-generated.txt",
+    "cycle5-single-native-053-generated-saved-terminal.txt",
+    "cycle5-single-native-075-biology-reloaded.txt",
+    "cycle5-single-native-088-scheduled-cram-rerate.txt",
+    "cycle5-single-native-093-rerated-early-end.txt",
+    "cycle5-single-native-097-actual-early-end.txt",
+    "cycle5-single-native-118-ingest-start.txt",
+    "cycle5-single-native-125-media-deleted.json",
+    "cycle5-single-native-150-reanalysis-model.txt",
+    "cycle5-single-native-164-wiki-review.txt",
+    "cycle5-single-native-182-source-chat-handoff.txt",
+    "cycle5-single-native-192-handoff-verified.txt",
+    "cycle5-single-native-270-settings-open.txt",
+    "cycle5-single-native-293-reconnected-source.txt"
+  ],
   "files": [
     {
       "file": "cycle5-single-native-001-fresh.txt",
@@ -1515,11 +1533,6 @@
       "sha256": "12c9444d048a7d8c2b47df3ec10918fee44360f6483207d02db440e09adbae41"
     },
     {
-      "file": "cycle5-single-native-executor-manifest.json",
-      "bytes": 57853,
-      "sha256": "19c2b769f9ca9bff4c684e88898e28b574af65329b295425e3eb5d88c54201cb"
-    },
-    {
       "file": "cycle5-single-native-first-chat-request.json",
       "bytes": 496,
       "sha256": "53c9e5844a0011577102bac0671514de8d528ded7a2675f16c56d094d7e0e669"
@@ -1579,5 +1592,20 @@
       "bytes": 12786,
       "sha256": "def0a1791d43d5c2a7f343519ae3db36a1f0121be8f831be4bf2c5d1770ea209"
     }
-  ]
+  ],
+  "qualifiedJsonArtifacts": [
+    {
+      "file": "cycle5-single-native-109-auto-end-response.json",
+      "kind": "whitespace-only response unavailable"
+    },
+    {
+      "file": "cycle5-single-native-231-character-persist.json",
+      "kind": "whitespace-only response unavailable"
+    },
+    {
+      "file": "cycle5-single-native-two-turn-reload.json",
+      "kind": "CLI wrapper; embedded Result JSON"
+    }
+  ],
+  "finalizedAt": "2026-09-16T09:37:25.764Z"
 }

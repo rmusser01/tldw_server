@@ -1,0 +1,150 @@
+### Open tabs
+- 0: [Sign in | tldw](http://127.0.0.1:18581/login)
+- 1: (current) [Knowledge | tldw](http://127.0.0.1:18581/knowledge)
+### Page
+- Page URL: http://127.0.0.1:18581/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f26e11]:
+  - generic [ref=f26e14]:
+    - link "Skip to main content" [ref=f26e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f26e16]:
+      - button "Expand sidebar" [ref=f26e17] [cursor=pointer]
+      - button "New Chat" [ref=f26e21] [cursor=pointer]
+      - generic [ref=f26e24]:
+        - button "Quick Ingest" [ref=f26e25] [cursor=pointer]
+        - button "Chat" [ref=f26e29] [cursor=pointer]
+        - button "Prompts" [ref=f26e32] [cursor=pointer]
+        - button "Characters" [ref=f26e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f26e41] [cursor=pointer]
+        - button "World Books" [ref=f26e45] [cursor=pointer]
+        - button "Notes" [ref=f26e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f26e52] [cursor=pointer]
+        - button "Media" [ref=f26e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f26e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f26e69] [cursor=pointer]
+        - button "Kanban" [ref=f26e75] [cursor=pointer]
+        - button "Watchlists" [ref=f26e77] [cursor=pointer]
+      - generic [ref=f26e82]:
+        - button "Open Notes Dock" [ref=f26e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f26e88] [cursor=pointer]
+        - button "Settings" [ref=f26e91] [cursor=pointer]
+    - main [ref=f26e95]:
+      - generic [ref=f26e96]:
+        - generic [ref=f26e99]:
+          - generic [ref=f26e100]:
+            - button "Expand sidebar" [ref=f26e101] [cursor=pointer]
+            - generic [ref=f26e103]:
+              - img "tldw Assistant" [ref=f26e104]
+              - generic [ref=f26e105]: tldw Assistant
+              - button "Companion Home" [ref=f26e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f26e110] [cursor=pointer]
+          - generic [ref=f26e113]:
+            - button "Search - Open command palette" [ref=f26e114] [cursor=pointer]:
+              - generic [ref=f26e118]: Search
+              - generic [ref=f26e119]: ⌘K
+            - button "Open settings" [ref=f26e120] [cursor=pointer]
+            - generic [ref=f26e132]:
+              - button "Notifications, 0 unread" [ref=f26e259] [cursor=pointer]
+              - status [ref=f26e136]: Notifications are active
+            - button "Switch to light theme" [ref=f26e137] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f26e144] [cursor=pointer]:
+              - generic [ref=f26e145]: "?"
+        - generic [ref=f26e149]:
+          - link "Skip to search" [ref=f26e150] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f26e151]:
+            - generic [ref=f26e154]:
+              - generic [ref=f26e155]:
+                - 'button "Open source scope and saved profiles. Sources: Documents & Media. Specific: 1 doc" [ref=f26e489] [cursor=pointer]':
+                  - text: "Sources: Documents & Media"
+                  - generic [ref=f26e490]: "• Specific: 1 doc"
+                - button "Custom" [ref=f26e421] [cursor=pointer]
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f26e166] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=f26e171] [cursor=pointer]:
+                  - generic [ref=f26e175]: "AI: Server default"
+                - button "Refresh source health" [ref=f26e178] [cursor=pointer]: "Sources ready: 8 of 8"
+                - button "Open Knowledge QA settings" [ref=f26e179] [cursor=pointer]
+              - generic [ref=f26e183]:
+                - generic [ref=f26e184]:
+                  - heading "Ask Your Library" [level=1] [ref=f26e187]
+                  - button "How it works" [ref=f26e188] [cursor=pointer]
+                  - paragraph [ref=f26e193]: Search selected personal-library sources and get cited answers
+                  - paragraph [ref=f26e194]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                  - paragraph [ref=f26e195]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                - button "How it works" [ref=f26e197] [cursor=pointer]
+                - generic [ref=f26e201]:
+                  - button "Explain the methodology used in this study" [ref=f26e441] [cursor=pointer]
+                  - button "Summarize the key findings in my latest sources" [ref=f26e442] [cursor=pointer]
+                  - button "What claims have direct citations?" [ref=f26e443] [cursor=pointer]
+                  - button "Compare conclusions across my documents" [ref=f26e444] [cursor=pointer]
+                - generic [ref=f26e206]:
+                  - paragraph [ref=f26e207]: Recent QA session available.
+                  - button "Continue recent session" [ref=f26e208] [cursor=pointer]
+                  - button "Select sources" [ref=f26e445] [cursor=pointer]
+                - paragraph [ref=f26e214]:
+                  - text: Need a full workspace?
+                  - link "Try Research Workspace →" [ref=f26e215] [cursor=pointer]:
+                    - /url: /research-workspace
+              - generic [ref=f26e216]:
+                - paragraph [ref=f26e217]: Recent searches
+                - button "According to the Aurora public station brief, who is the keeper and when does the weekly supply boat arrive? Cite the source. 3 Cited answer 1 citation 56m ago" [ref=f26e263] [cursor=pointer]:
+                  - paragraph [ref=f26e220]: According to the Aurora public station brief, who is the keeper and when does the weekly supply boat arrive? Cite the source.
+                  - generic [ref=f26e221]:
+                    - generic [ref=f26e222]: "3"
+                    - generic [ref=f26e230]: Cited answer
+                    - generic [ref=f26e231]: 1 citation
+                    - generic [ref=f26e232]: 56m ago
+              - generic [ref=f26e236]:
+                - paragraph [ref=f26e237]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                - generic [ref=f26e238]:
+                  - textbox "Search your knowledge base" [ref=f26e239]:
+                    - /placeholder: Summarize the main arguments in this document
+                  - button "Ask" [disabled] [ref=f26e241]
+                - generic [ref=f26e242]: Press / to focus, Cmd+K for new search
+          - button [aria-hidden] [ref=f26e264] [cursor=pointer]
+          - dialog [ref=f26e265]:
+            - generic [ref=f26e266]:
+              - heading "Source scope and profiles" [level=2] [ref=f26e268]
+              - button "Close source scope" [ref=f26e269] [cursor=pointer]
+            - generic [ref=f26e274]:
+              - generic [ref=f26e275]:
+                - generic [ref=f26e276]:
+                  - generic [ref=f26e277]:
+                    - heading "Source Scope" [level=3] [ref=f26e282]
+                    - generic [ref=f26e283]: "Sources ready: 8 of 8"
+                  - generic [ref=f26e286]:
+                    - 'button "Sources: Documents & Media" [ref=f26e446] [cursor=pointer]'
+                    - 'button "Specific: 1 doc" [ref=f26e491] [cursor=pointer]'
+                    - button "Explain source categories" [ref=f26e301] [cursor=pointer]
+                  - paragraph [ref=f26e305]: "Scope: Documents & Media • Specific filters: 1 doc — Searching 1 item"
+                - generic [ref=f26e306]:
+                  - heading "Search Profile" [level=3] [ref=f26e311]
+                  - group "Preset selection" [ref=f26e314]:
+                    - button "Fast Fastest" [ref=f26e315] [cursor=pointer]:
+                      - generic [ref=f26e316]: Fast
+                      - generic [ref=f26e317]: Fastest
+                    - button "Balanced Moderate" [ref=f26e318] [cursor=pointer]:
+                      - generic [ref=f26e319]: Balanced
+                      - generic [ref=f26e320]: Moderate
+                    - button "Deep Slower" [ref=f26e321] [cursor=pointer]:
+                      - generic [ref=f26e322]: Deep
+                      - generic [ref=f26e323]: Slower
+                  - button "Custom preset active. Open settings." [ref=f26e439] [cursor=pointer]: Custom preset active
+                  - paragraph [ref=f26e324]: "Custom: Using your manually configured retrieval and generation settings."
+              - generic [ref=f26e325]:
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f26e326] [cursor=pointer]: Web
+                - button "Choose answer model" [ref=f26e331] [cursor=pointer]:
+                  - generic [ref=f26e335]: "AI: Server default"
+                - paragraph [ref=f26e338]: Queries stay on your tldw server unless web fallback is enabled. When enabled, fallback uses your configured server default provider.
+                - button "Profiles" [ref=f26e339] [cursor=pointer]
+                - button "Settings" [ref=f26e344] [cursor=pointer]
+          - generic [ref=f26e244]:
+            - button "Switch to detailed view" [ref=f26e245] [cursor=pointer]
+            - link "Help & Documentation" [ref=f26e249] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - button "Open Next.js Dev Tools" [ref=f26e255] [cursor=pointer]
+  - alert [ref=f26e10]
+```

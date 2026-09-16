@@ -39,7 +39,7 @@ Multi Review Reprocess09:05:08 returned200 immediately for chunking+local MiniLM
 
 Single currently owns9099 for its final controlled provider failure/Retry. Root awaits both executors' idle signal before stopping only owned APIs for offline/reconnect acceptance. Product remainsab527eb3b4; later commits contain docs/evidence only.
 
-## 09:32UTC outage and final controls
+## 09:30UTC outage and final controls
 
 New findings132 FTS fallback and133 Retry ordering confirmed with actual production-boundary probes; tasks73 and72 created. Auth readiness polling missing refresh callback134 tracked as additional caller omission in existing task24. Native late-expiry observer captured2sessions401 in6.5seconds, not97fresh failures. Root Retry2RED/2GREEN independently verified through final CustomOpenAI payload. Single New saved race belongs068; empty Character preference after a successful clear is intentional.
 
