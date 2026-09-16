@@ -1,0 +1,53 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:70372) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx (11 tests) 1165ms
+(node:70384) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useLoadLocalConversation.test.tsx (13 tests) 413ms
+(node:70401) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Common/ChatSidebar/__tests__/FolderChatList.selection.test.tsx (4 tests) 255ms
+(node:70411) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx > ServerChatList reliability states > shows conflict-specific delete feedback when delete still fails after retry
+[ServerChatList] Failed to delete chat {
+  error: Error: 409 conflict: expected version mismatch
+      at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx:314:21
+      at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+      at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+      at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+      at new Promise (<anonymous>)
+      at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+      at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+      at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+      at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+      at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+    status: 409
+  },
+  chatId: 'chat-1'
+}
+
+stderr | src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx > ServerChatList reliability states > keeps server-paged search rows visible when navigating beyond page 1
+Warning: Unknown event handler property `onPressEnter`. It will be ignored.
+    at input
+    at Input
+    at div
+    at div
+    at div
+    at ServerChatList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx:69:3)
+
+ ✓ src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx (8 tests) 179ms
+(node:70413) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Layouts/__tests__/Layout.shell-overrides.test.tsx (8 tests) 86ms
+(node:70416) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/chat/__tests__/useSelectServerChat.context-reset.test.tsx (1 test) 6ms
+
+ Test Files  6 passed (6)
+      Tests  45 passed (45)
+   Start at  16:56:29
+   Duration  6.36s (transform 790ms, setup 299ms, import 2.30s, tests 2.10s, environment 1.18s)

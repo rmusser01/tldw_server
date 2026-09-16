@@ -293,7 +293,7 @@ vi.mock('@/hooks/useServerOnline', () => ({
 vi.mock('@/components/Common/ChatSidebar', () => ({
   ChatSidebar: (props: Record<string, unknown>) => {
     chatSidebarMockState.props.push(props);
-    return <aside data-testid="chat-sidebar" />;
+    return <aside data-testid="chat-sidebar"><button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>Select saved conversation</button></aside>;
   },
 }));
 
@@ -366,6 +366,8 @@ vi.mock('@web/lib/api', () => ({
 vi.mock('@web/lib/authStorage', () => ({
   getApiBearer: () => null,
   getApiKey: () => 'test-api-key',
+  getSessionAccessToken: () => null,
+  getEffectiveStoredTldwConfig: () => null,
 }));
 
 vi.mock('@web/components/ui/ToastProvider', () => ({
@@ -807,6 +809,37 @@ describe('WebLayout /chat scroll contract', () => {
         openResetKey: expect.any(Number),
       })
     );
+  });
+
+  it('closes the mobile drawer after an accepted conversation selection on the same route', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+    expect(routerState.location.pathname).toBe('/chat');
+  });
+
+  it('keeps the desktop sidebar after selecting a conversation', () => {
+    featureFlagState.showChatSidebar = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    layoutUiState.value.setChatSidebarCollapsed.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Select saved conversation' }));
+    expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
+    expect(layoutUiState.value.setChatSidebarCollapsed).not.toHaveBeenCalled();
+  });
+
+  it('still closes an open mobile drawer on an ordinary route change', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    const view = render(<OptionLayout><div>Content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    routerState.location.pathname = '/notes';
+    view.rerender(<OptionLayout><div>Content</div></OptionLayout>);
+    expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
   });
 
   it('labels and opens the legacy sidebar from the Drawer state', () => {

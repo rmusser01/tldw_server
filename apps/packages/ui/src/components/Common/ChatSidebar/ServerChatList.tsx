@@ -56,6 +56,7 @@ interface ServerChatListProps {
   searchQuery: string
   className?: string
   selectionMode?: boolean
+  onConversationSelected?: () => void
 }
 
 type UpdateChatRequestPayload = {
@@ -70,7 +71,8 @@ type UpdateChatRequestPayload = {
 export function ServerChatList({
   searchQuery,
   className,
-  selectionMode: selectionModeProp
+  selectionMode: selectionModeProp,
+  onConversationSelected
 }: ServerChatListProps) {
   const { t } = useTranslation([
     "common",
@@ -819,10 +821,10 @@ export function ServerChatList({
         return
       }
       if (isTrashView) return
-      if (chat.id === serverChatId) return
-      selectServerChat(chat)
+      if (chat.id !== serverChatId) selectServerChat(chat)
+      onConversationSelected?.()
     },
-    [isTrashView, selectionMode, selectServerChat, serverChatId, toggleChatSelected]
+    [isTrashView, onConversationSelected, selectionMode, selectServerChat, serverChatId, toggleChatSelected]
   )
 
   const selectionPropsForChat = React.useCallback(

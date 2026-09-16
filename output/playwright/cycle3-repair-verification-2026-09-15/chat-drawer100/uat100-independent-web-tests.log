@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:70374) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx (24 tests) 147ms
+
+ Test Files  1 passed (1)
+      Tests  24 passed (24)
+   Start at  16:56:29
+   Duration  870ms (transform 347ms, setup 78ms, import 359ms, tests 147ms, environment 199ms)

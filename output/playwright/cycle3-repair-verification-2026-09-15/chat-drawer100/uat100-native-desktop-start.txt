@@ -1,0 +1,180 @@
+### Open tabs
+- 0: (current) [Cycle3 BEEP Robot Chat (20260915_105530) | tldw](http://127.0.0.1:18281/chat)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Cycle3 BEEP Robot Chat (20260915_105530) | tldw
+### Snapshot
+```yaml
+- generic [ref=f70e20]:
+  - generic [ref=f70e23]:
+    - link "Skip to main content" [ref=f70e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f70e192]:
+      - button "Expand sidebar" [ref=f70e193] [cursor=pointer]
+      - button "New Chat" [ref=f70e197] [cursor=pointer]
+      - generic [ref=f70e200]:
+        - button "Quick Ingest" [ref=f70e201] [cursor=pointer]
+        - button "Chat" [ref=f70e205] [cursor=pointer]
+        - button "Prompts" [ref=f70e208] [cursor=pointer]
+        - button "Characters" [ref=f70e212] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f70e217] [cursor=pointer]
+        - button "World Books" [ref=f70e221] [cursor=pointer]
+        - button "Notes" [ref=f70e224] [cursor=pointer]
+        - button "Knowledge QA" [ref=f70e228] [cursor=pointer]
+        - button "Media" [ref=f70e236] [cursor=pointer]
+        - button "Document Workspace" [ref=f70e239] [cursor=pointer]
+        - button "Research Workspace" [ref=f70e245] [cursor=pointer]
+        - button "Kanban" [ref=f70e251] [cursor=pointer]
+        - button "Watchlists" [ref=f70e253] [cursor=pointer]
+      - generic [ref=f70e258]:
+        - button "Open Notes Dock" [ref=f70e259] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f70e264] [cursor=pointer]
+        - button "Settings" [ref=f70e267] [cursor=pointer]
+    - main [ref=f70e25]:
+      - generic [ref=f70e26]:
+        - generic [ref=f70e29]:
+          - generic [ref=f70e30]:
+            - button "Expand sidebar" [active] [ref=f70e31] [cursor=pointer]
+            - generic [ref=f70e33]:
+              - img "tldw Assistant" [ref=f70e34]
+              - generic [ref=f70e35]: tldw Assistant
+              - button "Companion Home" [ref=f70e36] [cursor=pointer]
+              - button "Show shortcuts" [ref=f70e40] [cursor=pointer]
+            - button "Cycle3 BEEP Robot Chat (20260915_105530)" [ref=f70e272] [cursor=pointer]
+            - generic [ref=f70e43]:
+              - generic "Saved chat. History is persisted." [ref=f70e44]: Saved
+              - generic "Character mode is active." [ref=f70e45]: "Character: Cycle3 BEEP Robot"
+          - generic [ref=f70e51]:
+            - button "Search - Open command palette" [ref=f70e273] [cursor=pointer]:
+              - generic [ref=f70e277]: Search
+              - generic [ref=f70e278]: ⌘K
+            - button "New saved chat" [ref=f70e52] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f70e279] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f70e280] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f70e56] [cursor=pointer]
+            - button "Open settings" [ref=f70e63] [cursor=pointer]
+            - generic [ref=f70e75]:
+              - button "Notifications, 0 unread" [ref=f70e281] [cursor=pointer]
+              - status [ref=f70e79]: Notifications are active
+            - button "Switch to light theme" [ref=f70e80] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f70e87] [cursor=pointer]:
+              - generic [ref=f70e88]: "?"
+        - generic [ref=f70e89]:
+          - heading "Chat" [level=1] [ref=f70e90]
+          - generic [ref=f70e93]:
+            - paragraph [ref=f70e94]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f70e103]:
+              - main [ref=f70e104]:
+                - generic [ref=f70e105]:
+                  - generic [ref=f70e107]:
+                    - generic [ref=f70e108]:
+                      - generic [ref=f70e109]:
+                        - text: Character Chat
+                        - generic [ref=f70e110]: Cycle3 BEEP Robot
+                      - generic [ref=f70e285]: Conversation timeline
+                    - generic [ref=f70e111]:
+                      - button "Switch to light theme" [ref=f70e112] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f70e119] [cursor=pointer]:
+                        - generic [ref=f70e286]: Focus
+                      - button "Shortcuts" [ref=f70e287] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f70e289]
+                  - log "Chat messages" [ref=f70e139]:
+                    - generic [ref=f70e141]:
+                      - article "User message 1 of 2" [ref=f70e291]:
+                        - generic [ref=f70e294]:
+                          - generic [ref=f70e296]:
+                            - generic [ref=f70e297]: You
+                            - generic [ref=f70e298]: • 3:55 AM
+                          - paragraph [ref=f70e300]: Say your required response now.
+                          - button "More actions" [ref=f70e303] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f70e307]:
+                        - generic [ref=f70e313]:
+                          - generic [ref=f70e315]:
+                            - generic [ref=f70e316]: Cycle3 BEEP Robot
+                            - generic [ref=f70e317]: • 3:55 AM
+                          - generic [ref=f70e318]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f70e321] [cursor=pointer]:
+                              - img "collapsed" [ref=f70e323]
+                              - generic [ref=f70e326]: Model’s reasoning (optional)
+                            - paragraph [ref=f70e330]: BEEP BOOP
+                          - generic [ref=f70e331]:
+                            - generic [ref=f70e332]:
+                              - generic [ref=f70e333]: Was this helpful?
+                              - generic [ref=f70e334]:
+                                - button "Helpful" [ref=f70e335] [cursor=pointer]
+                                - button "Not helpful" [ref=f70e338] [cursor=pointer]
+                                - button "More feedback" [ref=f70e341] [cursor=pointer]
+                            - button "More actions" [ref=f70e347] [cursor=pointer]: •••
+                  - generic [ref=f70e142]:
+                    - generic [ref=f70e348]: Composer
+                    - generic [ref=f70e152]:
+                      - button [aria-hidden] [ref=f70e153]
+                      - button [aria-hidden] [ref=f70e154]
+                      - generic [ref=f70e155]:
+                        - generic [ref=f70e157]:
+                          - button "Hide composer options" [expanded] [ref=f70e350] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f70e160]
+                          - generic [ref=f70e161]:
+                            - button "Improve prompt" [ref=f70e164] [cursor=pointer]
+                            - generic [ref=f70e169]:
+                              - button "Send message" [ref=f70e170] [cursor=pointer]:
+                                - generic [ref=f70e171]: Send
+                              - button "Open message delivery options" [ref=f70e176] [cursor=pointer]
+                        - generic [ref=f70e354]:
+                          - generic [ref=f70e356]:
+                            - group "Mode and context controls" [ref=f70e357]:
+                              - button "Modes" [ref=f70e358] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f70e365] [cursor=pointer]':
+                                - generic [ref=f70e366]:
+                                  - generic [ref=f70e367]: MCP
+                                  - generic [ref=f70e368]: None
+                              - button "Search & Context" [ref=f70e371] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f70e376] [cursor=pointer]:
+                                - generic [ref=f70e379]: Prompt
+                              - button "Cycle3 BEEP Robot" [ref=f70e380] [cursor=pointer]
+                              - button "Role-play setup" [ref=f70e385] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f70e392] [cursor=pointer]
+                            - group "Run input controls" [ref=f70e398]:
+                              - button "OpenUI" [ref=f70e399] [cursor=pointer]
+                              - button "Start dictation" [ref=f70e405] [cursor=pointer]
+                              - generic [ref=f70e409]:
+                                - button "Attach image" [ref=f70e411] [cursor=pointer]
+                                - button "More attachments" [ref=f70e415] [cursor=pointer]
+                              - button "More tools" [ref=f70e418] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f70e421] [cursor=pointer]:
+                                - generic [ref=f70e425]: Chat Settings
+                          - generic "Active context" [ref=f70e426]:
+                            - button "LLaMa.cpp / ../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf" [ref=f70e428] [cursor=pointer]:
+                              - generic "Provider status" [ref=f70e432]: Healthy
+                            - button "Character Cycle3 BEEP Robot" [ref=f70e433] [cursor=pointer]:
+                              - generic [ref=f70e434]: Character
+                              - generic [ref=f70e435]: Cycle3 BEEP Robot
+                            - 'generic "Character context: Included" [ref=f70e436]':
+                              - generic [ref=f70e437]: Character context
+                              - generic [ref=f70e438]: Included
+                            - button "Chat 2 messages" [ref=f70e439] [cursor=pointer]:
+                              - generic [ref=f70e440]: Chat
+                              - generic [ref=f70e441]: 2 messages
+                            - button "Configure context window size" [ref=f70e443] [cursor=pointer]:
+                              - generic [ref=f70e444]: 86 + ~0 = 86 tokens
+                            - button "Saved" [ref=f70e446] [cursor=pointer]
+                            - button "Advanced controls" [ref=f70e448] [cursor=pointer]
+                        - status [ref=f70e187]:
+                          - generic [ref=f70e188]: Add expression images for Cycle3 BEEP Robot.
+                          - generic [ref=f70e189]:
+                            - link "Edit expressions" [ref=f70e190] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=5
+                            - button "Dismiss expression image setup" [ref=f70e191] [cursor=pointer]: Dismiss
+              - generic [ref=f70e452]:
+                - button "Restore context sidechannel" [ref=f70e453] [cursor=pointer]:
+                  - generic [ref=f70e457]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f70e458]:
+                - button "Restore runtime sidechannel" [ref=f70e459] [cursor=pointer]:
+                  - generic [ref=f70e460]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f70e15] [cursor=pointer]
+  - alert [ref=f70e19]: Cycle3 BEEP Robot Chat (20260915_105530) | tldw
+```

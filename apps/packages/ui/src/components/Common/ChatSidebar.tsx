@@ -53,6 +53,8 @@ interface ChatSidebarProps {
   className?: string
   /** Monotonic signal from parent layouts when the sidebar should reset open state */
   openResetKey?: number
+  /** Called after an explicit conversation target is accepted. */
+  onConversationSelected?: () => void
 }
 
 type SidebarTab = "server" | "folders"
@@ -61,7 +63,8 @@ export function ChatSidebar({
   collapsed = false,
   onToggleCollapse,
   className,
-  openResetKey
+  openResetKey,
+  onConversationSelected
 }: ChatSidebarProps) {
   const { t } = useTranslation(["common", "sidepanel", "option", "settings"])
   const navigate = useNavigate()
@@ -584,11 +587,12 @@ export function ChatSidebar({
                 <ServerChatList
                   searchQuery={debouncedSearchQuery}
                   selectionMode={selectionMode}
+                  onConversationSelected={onConversationSelected}
                 />
               )}
 
               {currentTab === "folders" && (
-                <FolderChatList />
+                <FolderChatList onConversationSelected={onConversationSelected} />
               )}
             </div>
           </div>

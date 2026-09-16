@@ -472,6 +472,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
+                onConversationSelected={() => setSidebarOpen(false)}
               />
             </Drawer>
           )}

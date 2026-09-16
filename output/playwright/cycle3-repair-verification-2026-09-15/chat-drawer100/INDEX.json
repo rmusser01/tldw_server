@@ -1,0 +1,306 @@
+{
+  "createdAt": "2026-09-16T00:11:31.116Z",
+  "originalArtifactCount": 28,
+  "embeddedResults": 3,
+  "originalArtifacts": [
+    {
+      "name": "uat100-repair-report.md",
+      "source": "/private/tmp/uat100-repair-report.md",
+      "sourceBytes": 7058,
+      "sourceSha256": "96e9f556bd38721fbc1ee6ad9669baab9f98ee93ffa152458778fd8ebb83069d",
+      "retainedBytes": 7058,
+      "retainedSha256": "96e9f556bd38721fbc1ee6ad9669baab9f98ee93ffa152458778fd8ebb83069d",
+      "modifiedAt": "2026-09-15T23:56:13.180Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-production-freeze.json",
+      "source": "/private/tmp/uat100-production-freeze.json",
+      "sourceBytes": 924,
+      "sourceSha256": "39747d0debacc52577910e1d0cd7477f5231872bd3c2c43162643c2c2ac674a9",
+      "retainedBytes": 924,
+      "retainedSha256": "39747d0debacc52577910e1d0cd7477f5231872bd3c2c43162643c2c2ac674a9",
+      "modifiedAt": "2026-09-15T23:53:17.287Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-owned-paths.json",
+      "source": "/private/tmp/uat100-owned-paths.json",
+      "sourceBytes": 2215,
+      "sourceSha256": "503f25bf78e560559402f38ca847fe16c70af4fa1a42a25be4df86e3538a7998",
+      "retainedBytes": 2215,
+      "retainedSha256": "503f25bf78e560559402f38ca847fe16c70af4fa1a42a25be4df86e3538a7998",
+      "modifiedAt": "2026-09-15T23:56:13.181Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-source-before.json",
+      "source": "/private/tmp/uat100-source-before.json",
+      "sourceBytes": 2372,
+      "sourceSha256": "df6749498d06c17f2dcb225340483121027bbae931a530ebeb76bf7f24db7c18",
+      "retainedBytes": 2372,
+      "retainedSha256": "df6749498d06c17f2dcb225340483121027bbae931a530ebeb76bf7f24db7c18",
+      "modifiedAt": "2026-09-15T23:48:26.612Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-eslint-before.json",
+      "source": "/private/tmp/uat100-eslint-before.json",
+      "sourceBytes": 69403,
+      "sourceSha256": "a9d8353af91e917b6942f83161e34d51855bda7d2e48901ef84f6d39d53ce699",
+      "retainedBytes": 69403,
+      "retainedSha256": "a9d8353af91e917b6942f83161e34d51855bda7d2e48901ef84f6d39d53ce699",
+      "modifiedAt": "2026-09-15T23:54:12.902Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-eslint-after.json",
+      "source": "/private/tmp/uat100-eslint-after.json",
+      "sourceBytes": 68119,
+      "sourceSha256": "333c6d6e82653b1532d99ada739bc0ec96404b4a35937a8a2c38ab063eb2cdb4",
+      "retainedBytes": 68119,
+      "retainedSha256": "333c6d6e82653b1532d99ada739bc0ec96404b4a35937a8a2c38ab063eb2cdb4",
+      "modifiedAt": "2026-09-15T23:54:14.057Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-eslint-comparison.json",
+      "source": "/private/tmp/uat100-eslint-comparison.json",
+      "sourceBytes": 1632,
+      "sourceSha256": "a2ce432f7d0de73f899f2d3c19529ea9b25d2bc89d7980d46abc391e1e1385af",
+      "retainedBytes": 1632,
+      "retainedSha256": "a2ce432f7d0de73f899f2d3c19529ea9b25d2bc89d7980d46abc391e1e1385af",
+      "modifiedAt": "2026-09-15T23:55:04.409Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-shared-red.log",
+      "source": "/private/tmp/uat100-shared-red.log",
+      "sourceBytes": 8615,
+      "sourceSha256": "ceddca33c29d362e1f5a333f54b9c4d3a80f74126879f54c323b2fac04d46729",
+      "retainedBytes": 8612,
+      "retainedSha256": "c3d54e2a0f52e7245184e3c61bce76274014f91ec9d2c5acf1a01d2f9e65fe63",
+      "modifiedAt": "2026-09-15T23:50:18.946Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-folder-product-red.log",
+      "source": "/private/tmp/uat100-folder-product-red.log",
+      "sourceBytes": 4363,
+      "sourceSha256": "e8fca57736b0270a8927c4767db55b3b0e5829554b8aa412954747775c070e2b",
+      "retainedBytes": 4362,
+      "retainedSha256": "b9ab50015ba2ef93a3a0e61791a7eaf2b671e63f1b96ffadecb14c4a6ae2cff6",
+      "modifiedAt": "2026-09-15T23:51:49.780Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-web-product-red.log",
+      "source": "/private/tmp/uat100-web-product-red.log",
+      "sourceBytes": 3680,
+      "sourceSha256": "f2b47dd59069f1ac1bd1e62a05e329178eb95d8a30f4778dc8c74240f0fd7e5f",
+      "retainedBytes": 3679,
+      "retainedSha256": "47d99a0e0aa0f3f8e9877da0c205f9a4913ad9d9e3490bf27e08013f12985873",
+      "modifiedAt": "2026-09-15T23:51:31.099Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-shared-final.log",
+      "source": "/private/tmp/uat100-shared-final.log",
+      "sourceBytes": 4553,
+      "sourceSha256": "ff35e6dc478931e203892f9fcb6a0e8fd952775af083a2e212c64cd98fa910f6",
+      "retainedBytes": 4552,
+      "retainedSha256": "2e1cceabd9d780d9e27530edc73bd0ec58450bd84ad89604909f06590005b7e8",
+      "modifiedAt": "2026-09-15T23:54:19.932Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-web-green.log",
+      "source": "/private/tmp/uat100-web-green.log",
+      "sourceBytes": 529,
+      "sourceSha256": "2f9138f634a9c5fcaf529db7e230d39529c75613fc81685f820d9ee8cdaa220d",
+      "retainedBytes": 528,
+      "retainedSha256": "c5d01acce425b6ce250ef8053677550167941b7d84ec226c12d331ed7253b68a",
+      "modifiedAt": "2026-09-15T23:52:33.036Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-independent-review.md",
+      "source": "/private/tmp/uat100-independent-review.md",
+      "sourceBytes": 4524,
+      "sourceSha256": "6cacff19266467d8c197d896a2c5c6646d042d62d9ddec1df483ed16a05ee9e3",
+      "retainedBytes": 4524,
+      "retainedSha256": "6cacff19266467d8c197d896a2c5c6646d042d62d9ddec1df483ed16a05ee9e3",
+      "modifiedAt": "2026-09-15T23:57:54.849Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-independent-hashes.json",
+      "source": "/private/tmp/uat100-independent-hashes.json",
+      "sourceBytes": 1363,
+      "sourceSha256": "4548300966268fa3a3f4cb8ff1a3ebbe23b9a747da503f3218a41d79c0e0fe9e",
+      "retainedBytes": 1363,
+      "retainedSha256": "4548300966268fa3a3f4cb8ff1a3ebbe23b9a747da503f3218a41d79c0e0fe9e",
+      "modifiedAt": "2026-09-15T23:56:30.357Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-independent-final-hashes.json",
+      "source": "/private/tmp/uat100-independent-final-hashes.json",
+      "sourceBytes": 1362,
+      "sourceSha256": "80c9d387daddcb3b5a4b05c297a825cc2961f3116e0b215c978b63c640b81b65",
+      "retainedBytes": 1362,
+      "retainedSha256": "80c9d387daddcb3b5a4b05c297a825cc2961f3116e0b215c978b63c640b81b65",
+      "modifiedAt": "2026-09-15T23:57:08.158Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-independent-eslint.json",
+      "source": "/private/tmp/uat100-independent-eslint.json",
+      "sourceBytes": 66539,
+      "sourceSha256": "86b05595a7951db48ca9603b86813921273dec469e8c83845dca133ae642252d",
+      "retainedBytes": 66539,
+      "retainedSha256": "86b05595a7951db48ca9603b86813921273dec469e8c83845dca133ae642252d",
+      "modifiedAt": "2026-09-15T23:57:08.105Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-independent-shared-tests.log",
+      "source": "/private/tmp/uat100-independent-shared-tests.log",
+      "sourceBytes": 4273,
+      "sourceSha256": "e3ba98434fa4e8e7eb52a31f1790821638da39a6b89ccd69593b31ef348e4600",
+      "retainedBytes": 4272,
+      "retainedSha256": "c758b04104794dd0738f7271332baf2ad55449913e73343970e10cf18d6c0695",
+      "modifiedAt": "2026-09-15T23:56:35.726Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-independent-web-tests.log",
+      "source": "/private/tmp/uat100-independent-web-tests.log",
+      "sourceBytes": 529,
+      "sourceSha256": "1030e76c09b4cf213dc1163532bba38c510244a3347a9c20e2ebb597c21e3a79",
+      "retainedBytes": 528,
+      "retainedSha256": "e4df12b5ed4462745c471847688eede11a33780e79cf8a739a108ddbc894b0b1",
+      "modifiedAt": "2026-09-15T23:56:30.642Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-native-start.txt",
+      "source": "/private/tmp/uat100-native-start.txt",
+      "sourceBytes": 5318,
+      "sourceSha256": "8a2c705ba4572209c947398facba2a24dccb7d77a26c29a6a2c0b4c6415d66b0",
+      "retainedBytes": 5318,
+      "retainedSha256": "8a2c705ba4572209c947398facba2a24dccb7d77a26c29a6a2c0b4c6415d66b0",
+      "modifiedAt": "2026-09-15T23:56:12.012Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-native-mobile-selection.txt",
+      "source": "/private/tmp/uat100-native-mobile-selection.txt",
+      "sourceBytes": 3287,
+      "sourceSha256": "954297ea8b15d4100e98749e8a0b3cb8babb6a5563e2c22fcd48dae92d34e66e",
+      "retainedBytes": 3287,
+      "retainedSha256": "954297ea8b15d4100e98749e8a0b3cb8babb6a5563e2c22fcd48dae92d34e66e",
+      "modifiedAt": "2026-09-15T23:57:01.465Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-native-desktop-start.txt",
+      "source": "/private/tmp/uat100-native-desktop-start.txt",
+      "sourceBytes": 11669,
+      "sourceSha256": "a2d41ac22d749c5509a9525438428b73ab83e9eb33361fba46c858800a4c9c2a",
+      "retainedBytes": 11669,
+      "retainedSha256": "a2d41ac22d749c5509a9525438428b73ab83e9eb33361fba46c858800a4c9c2a",
+      "modifiedAt": "2026-09-15T23:57:46.491Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-native-desktop-selection.txt",
+      "source": "/private/tmp/uat100-native-desktop-selection.txt",
+      "sourceBytes": 1761,
+      "sourceSha256": "de06b5e63de2c1b90c4a08743cbb3bb541d69f4347234e31b3887128ff67dd7d",
+      "retainedBytes": 1761,
+      "retainedSha256": "de06b5e63de2c1b90c4a08743cbb3bb541d69f4347234e31b3887128ff67dd7d",
+      "modifiedAt": "2026-09-15T23:58:08.040Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat100-native-mobile-closed.png",
+      "source": "/private/tmp/uat100-native-mobile-closed.png",
+      "sourceBytes": 62258,
+      "sourceSha256": "a4bc5b3791a577455dad2e7fce93095b905cc887940cc89f0a2772aaa11dca6d",
+      "retainedBytes": 62258,
+      "retainedSha256": "a4bc5b3791a577455dad2e7fce93095b905cc887940cc89f0a2772aaa11dca6d",
+      "modifiedAt": "2026-09-15T23:57:00.447Z",
+      "dimensions": {
+        "width": 390,
+        "height": 844
+      },
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat100-native-desktop-open.png",
+      "source": "/private/tmp/uat100-native-desktop-open.png",
+      "sourceBytes": 150921,
+      "sourceSha256": "c0f49ba6fcb316866675885ff948a9ae82d755f1db28711e910f0c2618980881",
+      "retainedBytes": 150921,
+      "retainedSha256": "c0f49ba6fcb316866675885ff948a9ae82d755f1db28711e910f0c2618980881",
+      "modifiedAt": "2026-09-15T23:58:06.949Z",
+      "dimensions": {
+        "width": 1280,
+        "height": 720
+      },
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat-cycle3-mobile-media-final-typecheck.log",
+      "source": "/private/tmp/uat-cycle3-mobile-media-final-typecheck.log",
+      "sourceBytes": 24428,
+      "sourceSha256": "cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6",
+      "retainedBytes": 24428,
+      "retainedSha256": "cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6",
+      "modifiedAt": "2026-09-15T23:59:22.066Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat-cycle3-mobile-media-final-typecheck-comparison.json",
+      "source": "/private/tmp/uat-cycle3-mobile-media-final-typecheck-comparison.json",
+      "sourceBytes": 254,
+      "sourceSha256": "799501a7ce916a2634427c3af28a2d01c2e2c3cc0617ff612a5bb30f7267fa14",
+      "retainedBytes": 254,
+      "retainedSha256": "799501a7ce916a2634427c3af28a2d01c2e2c3cc0617ff612a5bb30f7267fa14",
+      "modifiedAt": "2026-09-16T00:00:15.340Z",
+      "transform": "Exact bytes preserved."
+    },
+    {
+      "name": "uat098-final-mobile-robot-mouse.txt",
+      "source": "/private/tmp/uat098-final-mobile-robot-mouse.txt",
+      "sourceBytes": 3658,
+      "sourceSha256": "d720770f6ab13dfbf6b49b38efd84ee65e5ff80517acb7bcdc310d1ee1935fe6",
+      "retainedBytes": 3658,
+      "retainedSha256": "d720770f6ab13dfbf6b49b38efd84ee65e5ff80517acb7bcdc310d1ee1935fe6",
+      "modifiedAt": "2026-09-15T23:43:41.601Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    },
+    {
+      "name": "uat098-final-mobile-robot-snapshot.txt",
+      "source": "/private/tmp/uat098-final-mobile-robot-snapshot.txt",
+      "sourceBytes": 17494,
+      "sourceSha256": "5c4cea5d61fe1026b3df2ebd46e0e832192f78bd21031f9953f3ae5a835f5bcb",
+      "retainedBytes": 17494,
+      "retainedSha256": "5c4cea5d61fe1026b3df2ebd46e0e832192f78bd21031f9953f3ae5a835f5bcb",
+      "modifiedAt": "2026-09-15T23:43:42.015Z",
+      "transform": "Trailing horizontal whitespace removed; final blank lines collapsed to one newline. All other content preserved."
+    }
+  ],
+  "builder": {
+    "path": "/private/tmp/uat100-build-evidence.mjs",
+    "sha256": "c6a2f237daa71aece3d9768c4e74c91831a4e3deda732bcfad6e511f866a52ee"
+  },
+  "derivedFiles": [
+    "README.md",
+    "INDEX.json",
+    "RESULTS.json",
+    "source-verification.json",
+    "SCAN.json"
+  ]
+}

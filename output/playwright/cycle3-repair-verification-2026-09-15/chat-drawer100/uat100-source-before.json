@@ -1,0 +1,50 @@
+{
+  "capturedAt": "2026-09-15T23:48:26.611Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "before": "/private/tmp/uat100-ChatSidebar.tsx.before",
+      "sha256": "0df9b9e93f81b044230ff266be1e875891d9f188072bf2be1e6116eb28085e67"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx",
+      "before": "/private/tmp/uat100-ServerChatList.tsx.before",
+      "sha256": "ce5bc011f80ec06cacef8669ee8f241b7568f4be4967e6763391875c46efc8a6"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/FolderChatList.tsx",
+      "before": "/private/tmp/uat100-FolderChatList.tsx.before",
+      "sha256": "5d78782a6dae16c7830dcdd62bd71c2f61f73933e433070eaddba6b4d2b771f1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Layouts/Layout.tsx",
+      "before": "/private/tmp/uat100-Layout.tsx.before",
+      "sha256": "db8e49a841b6bc98fdba850e00a850f618b39c79bf3e5b6836b083ce5f81f13f"
+    },
+    {
+      "path": "apps/tldw-frontend/components/layout/WebLayout.tsx",
+      "before": "/private/tmp/uat100-WebLayout.tsx.before",
+      "sha256": "fa272b08b3308f1cd00e1512913292cf6e3e549dafc6dc0f8fe492020f97f999"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx",
+      "before": "/private/tmp/uat100-ServerChatList.reliability.test.tsx.before",
+      "sha256": "93eb51320580f3a0a56943f1f0375ac2e5a226089f26c2820cf422aa0ab3e762"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx",
+      "before": "/private/tmp/uat100-ChatSidebar.tools-first.test.tsx.before",
+      "sha256": "66011d29676c760cc1fc89231f31f4bba5e0c9e707fd9800e85d3702ec04d1a1"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Layouts/__tests__/Layout.shell-overrides.test.tsx",
+      "before": "/private/tmp/uat100-Layout.shell-overrides.test.tsx.before",
+      "sha256": "d504814acffc9cfbfeb1a2faf6915cffaaf3ae69b43207817e39df62a24b08f4"
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/components/layout/WebLayout.chat-scroll-contract.test.tsx",
+      "before": "/private/tmp/uat100-WebLayout.chat-scroll-contract.test.tsx.before",
+      "sha256": "6229122ab3ba235febc6e7a2074ca7655b030de6d7ef7b6d79ef021345849cd8"
+    }
+  ]
+}

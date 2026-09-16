@@ -92,11 +92,11 @@ vi.mock("@/store/route-transition", () => ({
 }))
 
 vi.mock("../ServerChatList", () => ({
-  ServerChatList: () => <div data-testid="server-chat-list" />
+  ServerChatList: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <div data-testid="server-chat-list"><button onClick={onConversationSelected}>Accept server selection</button></div>
 }))
 
 vi.mock("../FolderChatList", () => ({
-  FolderChatList: () => <div data-testid="folder-chat-list" />
+  FolderChatList: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <div data-testid="folder-chat-list"><button onClick={onConversationSelected}>Accept folder selection</button></div>
 }))
 
 vi.mock("../../QuickChatHelper", () => ({
@@ -145,6 +145,16 @@ describe("ChatSidebar tools-first reset", () => {
         "model-catalog": false
       }
     })
+  })
+
+  it.each(["server", "folders"])("forwards only the explicit accepted %s selection", (tab) => {
+    settingState.activeTab = tab
+    const onConversationSelected = vi.fn()
+    renderSidebar({ onConversationSelected })
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    expect(onConversationSelected).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: tab === "server" ? "Accept server selection" : "Accept folder selection" }))
+    expect(onConversationSelected).toHaveBeenCalledTimes(1)
   })
 
   it("direct expanded mount opens shortcuts and keeps recent conversations collapsed", async () => {

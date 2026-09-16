@@ -1,0 +1,72 @@
+[
+  {
+    "capture": "uat100-native-mobile-selection.txt",
+    "result": {
+      "checkedAt": "2026-09-15T23:57:00.447Z",
+      "first": {
+        "box": {
+          "x": 33,
+          "y": 467.5,
+          "width": 201,
+          "height": 64
+        },
+        "dialogVisible": false,
+        "state": {
+          "id": "2b88abd0-9bcb-4782-95cc-22077dc5145d",
+          "characterId": 5,
+          "messages": 2
+        }
+      },
+      "same": {
+        "box": {
+          "x": 33,
+          "y": 467.5,
+          "width": 201,
+          "height": 64
+        },
+        "dialogVisible": false,
+        "state": {
+          "id": "2b88abd0-9bcb-4782-95cc-22077dc5145d",
+          "characterId": 5,
+          "messages": 2
+        }
+      },
+      "title": "Cycle3 BEEP Robot Chat (20260915_105530) | tldw",
+      "body": "Skip to main content\ntldw Assistant\nCycle3 BEEP Robot Chat (20260915_105530)\nSaved\nCharacter: Cycle3 BEEP Robot\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nRestore context sidechannel\nRestore runtime sidechannel\nShow context rail\nShow runtime rail\n\nCockpit panels hidden. Composer draft remains available below.\n\nCharacter Chat\nCycle3 BEEP Robot\nYou\n• 3:55 AM\n\nSay your required response now.\n\n•••\nCycle3 BEEP Robot\n• 3:55 AM\nModel’s reasoning (optional)\n\nBEEP BOOP\n\nWas this helpful?\nSEND\nBuddy & Persona\nAdd expression images for Cycle3 BEEP Robot.\nEdit expressions\nDismiss\nCharacter updates apply on the next turn.\n\nCycle3 BEEP Robot Chat (20260915_105530) | tldw"
+    }
+  },
+  {
+    "capture": "uat100-native-desktop-selection.txt",
+    "result": {
+      "checkedAt": "2026-09-15T23:58:06.949Z",
+      "title": "Cycle3 Cedar Guide Chat (20260915_103705) | tldw",
+      "sidebarStillVisible": true,
+      "collapseControls": 2,
+      "cedarRow": {
+        "x": 9,
+        "y": 275.5,
+        "width": 201,
+        "height": 88
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      }
+    }
+  },
+  {
+    "capture": "uat098-final-mobile-robot-mouse.txt",
+    "result": {
+      "checkedAt": "2026-09-15T23:43:40.525Z",
+      "title": "Cycle3 BEEP Robot Chat (20260915_105530) | tldw",
+      "rowBox": {
+        "x": 33,
+        "y": 467.5,
+        "width": 201,
+        "height": 64
+      },
+      "dialogs": 1,
+      "body": "Skip to main content\ntldw Assistant\nCycle3 BEEP Robot Chat (20260915_105530)\nSaved\nCharacter: Cycle3 BEEP Robot\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nRestore context sidechannel\nRestore runtime sidechannel\nShow context rail\nShow runtime rail\n\nCockpit panels hidden. Composer draft remains available below.\n\nCharacter Chat\nCycle3 BEEP Robot\nYou\n• 3:55 AM\n\nSay your required response now.\n\n•••\nCycle3 BEEP Robot\n• 3:55 AM\nModel’s reasoning (optional)\n\nBEEP BOOP\n\nWas this helpful?\n•••\nSEND\nBuddy & Persona\nAdd expression images for Cycle3 BEEP Robot.\nEdit expressions\nDismiss\nCharacter updates apply on the next turn.\nChats\nChats\nSHORTCUTS\nQuick Ingest\nChat\nPrompts\nCharacters\nChat Dictionaries\nWorld Books\nNotes\nKnowledge QA\nMedia\nDocument Workspace\nResearch Workspace\nKanban\nWatchlists\nRECENT CONVERSATIONS\nChat view\nServer (9)\nFolders\nChat type filter\nAll Chats\nCycle3 Cedar Guide Chat (20260915_103705)\nin-progress\nUpdated 5 minutes ago\nServer\nCycle3 BEEP Robot Chat (20260915_105530)\nin-progress\nUpdated 12 hours ago\nServer\nCycle3 Cedar Guide Chat (20260915_103943)\nin-progress\nUpdated 13 hours ago\nServer\nGreet a visitor to Project Cedar in one short sentence.\nin-progress\nUpdated 13 hours ago\nServer\nWho coordinates Project Indigo and what is its catalog token?\nin-progress\nUpdated 13 hours ago\nServer\nWho coordinates Project Cedar, how many reading tables does it have, and where is the book return?\nin-progress\nUpdated 13 hours ago\nServer\nHelpful AI Assistant (20260915_094950)\nin-progress\nUpdated 13 hours ago\nHelpful AI Assistant (20260915_094950)\nServer\nThis synthetic acceptance conversation is called Cedar continuity. Remember t…\nin-progress\nUpdated 13 hours ago\nServer\nHelpful AI Assistant (20260915_103320)\nin-progress\nUpdated 6 hours ago\nServer\nSettings\nMode\nCasual\nPro\n\nCycle3 BEEP Robot Chat (20260915_105530) | tldw"
+    }
+  }
+]
