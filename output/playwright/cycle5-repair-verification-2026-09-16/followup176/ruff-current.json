@@ -1,0 +1,580 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 2,
+      "row": 64
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.core.Character_Chat.constants import (\n    MAX_BOOK_CACHE_SIZE,\n    MAX_ENTRY_CACHE_SIZE,\n    MAX_RECURSIVE_DEPTH,\n    MAX_REGEX_MATCH_TIME_MS,\n    safe_parse_json_dict,\n    safe_parse_json_list,\n)\n\n# Import shared regex safety utilities\nfrom tldw_Server_API.app.core.Character_Chat.regex_safety import (\n    safe_compile_regex as _safe_compile_regex,\n)\nfrom tldw_Server_API.app.core.Character_Chat.regex_safety import (\n    validate_regex_safety as _validate_regex_safety,\n)\nfrom tldw_Server_API.app.core.DB_Management.backends.base import BackendType\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (\n    CharactersRAGDB,\n    CharactersRAGDBError,\n    ConflictError,\n    InputError,\n)\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 66
+          },
+          "location": {
+            "column": 1,
+            "row": 44
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 44
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 44,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "SIM118",
+    "end_location": {
+      "column": 88,
+      "row": 923
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 88,
+            "row": 923
+          },
+          "location": {
+            "column": 81,
+            "row": 923
+          }
+        }
+      ],
+      "message": "Remove `.keys()`"
+    },
+    "location": {
+      "column": 61,
+      "row": 923
+    },
+    "message": "Use `key in dict` instead of `key in dict.keys()`",
+    "noqa_row": 923,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/in-dict-keys"
+  },
+  {
+    "cell": null,
+    "code": "SIM118",
+    "end_location": {
+      "column": 80,
+      "row": 1445
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 80,
+            "row": 1445
+          },
+          "location": {
+            "column": 73,
+            "row": 1445
+          }
+        }
+      ],
+      "message": "Remove `.keys()`"
+    },
+    "location": {
+      "column": 53,
+      "row": 1445
+    },
+    "message": "Use `key in dict` instead of `key in dict.keys()`",
+    "noqa_row": 1445,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/in-dict-keys"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 94,
+      "row": 23
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "import json\nfrom datetime import datetime\nfrom unittest.mock import MagicMock, call, patch\n\nimport pytest\n\nfrom tldw_Server_API.app.core.Character_Chat.constants import MAX_REGEX_MATCH_TIME_MS\nfrom tldw_Server_API.app.core.Character_Chat.world_book_manager import (\n    BoundedDict,\n    WorldBookEntry,\n    WorldBookService,\n)\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError\n\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 26
+          },
+          "location": {
+            "column": 1,
+            "row": 12
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 12
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 12,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 12,
+      "row": 13
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 14
+          },
+          "location": {
+            "column": 1,
+            "row": 13
+          }
+        }
+      ],
+      "message": "Remove unused import: `json`"
+    },
+    "location": {
+      "column": 8,
+      "row": 13
+    },
+    "message": "`json` imported but unused",
+    "noqa_row": 13,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 43,
+      "row": 14
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from unittest.mock import MagicMock",
+          "end_location": {
+            "column": 49,
+            "row": 14
+          },
+          "location": {
+            "column": 1,
+            "row": 14
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 38,
+      "row": 14
+    },
+    "message": "`unittest.mock.patch` imported but unused",
+    "noqa_row": 14,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 49,
+      "row": 14
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from unittest.mock import MagicMock",
+          "end_location": {
+            "column": 49,
+            "row": 14
+          },
+          "location": {
+            "column": 1,
+            "row": 14
+          }
+        }
+      ],
+      "message": "Remove unused import"
+    },
+    "location": {
+      "column": 45,
+      "row": 14
+    },
+    "message": "`unittest.mock.call` imported but unused",
+    "noqa_row": 14,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 30,
+      "row": 15
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 1,
+            "row": 16
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          }
+        }
+      ],
+      "message": "Remove unused import: `datetime.datetime`"
+    },
+    "location": {
+      "column": 22,
+      "row": 15
+    },
+    "message": "`datetime.datetime` imported but unused",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 82,
+      "row": 23
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError",
+          "end_location": {
+            "column": 94,
+            "row": 23
+          },
+          "location": {
+            "column": 1,
+            "row": 23
+          }
+        }
+      ],
+      "message": "Remove unused import: `tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB`"
+    },
+    "location": {
+      "column": 67,
+      "row": 23
+    },
+    "message": "`tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB` imported but unused",
+    "noqa_row": 23,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 16,
+      "row": 115
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 19,
+            "row": 115
+          },
+          "location": {
+            "column": 9,
+            "row": 115
+          }
+        }
+      ],
+      "message": "Remove assignment to unused variable `service`"
+    },
+    "location": {
+      "column": 9,
+      "row": 115
+    },
+    "message": "Local variable `service` is assigned to but never used",
+    "noqa_row": 115,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 30,
+      "row": 404
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result",
+          "end_location": {
+            "column": 30,
+            "row": 404
+          },
+          "location": {
+            "column": 16,
+            "row": 404
+          }
+        }
+      ],
+      "message": "Replace with `result`"
+    },
+    "location": {
+      "column": 16,
+      "row": 404
+    },
+    "message": "Avoid equality comparisons to `True`; use `result:` for truth checks",
+    "noqa_row": 404,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 30,
+      "row": 420
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result",
+          "end_location": {
+            "column": 30,
+            "row": 420
+          },
+          "location": {
+            "column": 16,
+            "row": 420
+          }
+        }
+      ],
+      "message": "Replace with `result`"
+    },
+    "location": {
+      "column": 16,
+      "row": 420
+    },
+    "message": "Avoid equality comparisons to `True`; use `result:` for truth checks",
+    "noqa_row": 420,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 47,
+      "row": 440
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result[0][\"is_primary\"]",
+          "end_location": {
+            "column": 47,
+            "row": 440
+          },
+          "location": {
+            "column": 16,
+            "row": 440
+          }
+        }
+      ],
+      "message": "Replace with `result[0][\"is_primary\"]`"
+    },
+    "location": {
+      "column": 16,
+      "row": 440
+    },
+    "message": "Avoid equality comparisons to `True`; use `result[0][\"is_primary\"]:` for truth checks",
+    "noqa_row": 440,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 48,
+      "row": 441
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "not result[1][\"is_primary\"]",
+          "end_location": {
+            "column": 48,
+            "row": 441
+          },
+          "location": {
+            "column": 16,
+            "row": 441
+          }
+        }
+      ],
+      "message": "Replace with `not result[1][\"is_primary\"]`"
+    },
+    "location": {
+      "column": 16,
+      "row": 441
+    },
+    "message": "Avoid equality comparisons to `False`; use `not result[1][\"is_primary\"]:` for false checks",
+    "noqa_row": 441,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 30,
+      "row": 865
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result",
+          "end_location": {
+            "column": 30,
+            "row": 865
+          },
+          "location": {
+            "column": 16,
+            "row": 865
+          }
+        }
+      ],
+      "message": "Replace with `result`"
+    },
+    "location": {
+      "column": 16,
+      "row": 865
+    },
+    "message": "Avoid equality comparisons to `True`; use `result:` for truth checks",
+    "noqa_row": 865,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 30,
+      "row": 901
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result",
+          "end_location": {
+            "column": 30,
+            "row": 901
+          },
+          "location": {
+            "column": 16,
+            "row": 901
+          }
+        }
+      ],
+      "message": "Replace with `result`"
+    },
+    "location": {
+      "column": 16,
+      "row": 901
+    },
+    "message": "Avoid equality comparisons to `True`; use `result:` for truth checks",
+    "noqa_row": 901,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  },
+  {
+    "cell": null,
+    "code": "E712",
+    "end_location": {
+      "column": 30,
+      "row": 914
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "result",
+          "end_location": {
+            "column": 30,
+            "row": 914
+          },
+          "location": {
+            "column": 16,
+            "row": 914
+          }
+        }
+      ],
+      "message": "Replace with `result`"
+    },
+    "location": {
+      "column": 16,
+      "row": 914
+    },
+    "message": "Avoid equality comparisons to `True`; use `result:` for truth checks",
+    "noqa_row": 914,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/true-false-comparison"
+  }
+]

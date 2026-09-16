@@ -1,0 +1,80 @@
+{
+  "task": "TASK-13260.110",
+  "uat": "UAT173",
+  "headAtFreeze": "cc0f12a5d8dc21e370a5a2034c44244fa53d09af",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+      "sha256": "bf1230f2f520004eb33c663f55281e4af5d5464f3329734e176d64c79cb46822"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py",
+      "sha256": "a485ed416039854f933f2211e8a259f72c6112ecdd3e650fd0411fbbd1f0322c"
+    }
+  ],
+  "combinedResult": {
+    "passed": 22,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 23.56,
+    "runLabel": "uat173-176-green",
+    "postgresRequired": true
+  },
+  "summary": "Frozen: one named-column quota count accessor; actual backend/router 16 passed with UAT176; adjacent35 passed; combined22 passed/0 skipped.",
+  "patchSha256": "8bf28542f6ef7df53c28803e9bb15f096a30f1a6e474c52d555730dd4b237489",
+  "verification": {
+    "ruffNewFindings": 0,
+    "ruffBaselineFindings": 6,
+    "banditProductionFindings": 0,
+    "banditParseErrors": 0,
+    "diffCheck": "PASS",
+    "nativeAcceptance": "Root-owned; not performed by author",
+    "independentReview": "Requested from root"
+  },
+  "artifacts": [
+    {
+      "path": "DESIGN.md",
+      "sha256": "9a64abba01f1f52c6df142fc8680649d95ff26ff8bc141a3c94e3c13af64297b"
+    },
+    {
+      "path": "IMPLEMENTATION.md",
+      "sha256": "d98650a7b82dcfb34e6f504df1292deb84142594730e45a9866461eeb724e9dd"
+    },
+    {
+      "path": "owned.patch",
+      "sha256": "8bf28542f6ef7df53c28803e9bb15f096a30f1a6e474c52d555730dd4b237489"
+    },
+    {
+      "path": "red.log",
+      "sha256": "3ecbceab8c423f4a9862956b90e151f5b395c5b1d500b32f062e3710af51f866"
+    },
+    {
+      "path": "combined-green.log",
+      "sha256": "e2bca8ae0ed66a85d865fa295774be2f61c31830e39d71ec2bd57f2c0ff8a620"
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "f18edb6c0e9ff84ed83ede6dc7d2cdb9f7df3f1a39faf15be301caa160a1d33e"
+    },
+    {
+      "path": "ruff-current.json",
+      "sha256": "f18edb6c0e9ff84ed83ede6dc7d2cdb9f7df3f1a39faf15be301caa160a1d33e"
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "b5355f981d67e62cf70bf4c6ec16664ea221b61c3277ee18cc4adc2c2d6fa43c"
+    },
+    {
+      "path": "ordinary-control.log",
+      "sha256": "d1c46e18164fe024a431bc65ba5bb6dbdf9353ccdb71dafdc61cbe10f60ed46c"
+    },
+    {
+      "path": "quota-green-followup-failure.log",
+      "sha256": "dfea78ca92a4c1c150fbb44b8f7b6c9da04d91a0c5fc75dffbdaae75314fc646"
+    },
+    {
+      "path": "adjacent-regressions.log",
+      "sha256": "27292654b1b1b20bf51661e030003a6c7b20fd53d41449e3d5a779e23aa0f744"
+    }
+  ]
+}

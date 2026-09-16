@@ -1,0 +1,51 @@
+{
+  "task": "TASK-13260.111",
+  "uat": "UAT174",
+  "baseline_head": "cc0f12a5d8dc21e370a5a2034c44244fa53d09af",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/backends/base.py",
+      "sha256": "c7691370cbb880cf46701208fa153a61ce81cc3265cf03fdda4cf29b978ddad3",
+      "snapshot_sha256": "c7691370cbb880cf46701208fa153a61ce81cc3265cf03fdda4cf29b978ddad3",
+      "baseline_sha256": "033e32b9ab4e3e6197426485a2614c67639ce29aa4334f08d906963a553c55d8"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py",
+      "sha256": "6a85f94a1aaf7346a5d92ec237205238e72d20a47e61d118567dc771cdf9deb3",
+      "snapshot_sha256": "6a85f94a1aaf7346a5d92ec237205238e72d20a47e61d118567dc771cdf9deb3",
+      "baseline_sha256": "e2d7a9dee7d05be65676caa8bff6d99805691cc6908687ec0273fbfeb3307521"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "461c3d525f4fe89c09dd13bab0eff1cfee5104353aa35ef68eeec45a3c5ad9a4",
+      "snapshot_sha256": "461c3d525f4fe89c09dd13bab0eff1cfee5104353aa35ef68eeec45a3c5ad9a4",
+      "baseline_sha256": "7f6d7597460cfc02367dc5e7c3fe5dd40239c33d0cf3e81264e14ed2dd04ac83"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_postgres_unique_conflict.py",
+      "sha256": "0e4cd253bd7a8e6601198c80ee6a20f7221c350e3f4f8aa999245a2f18211a15",
+      "snapshot_sha256": "0e4cd253bd7a8e6601198c80ee6a20f7221c350e3f4f8aa999245a2f18211a15",
+      "baseline_sha256": null
+    }
+  ],
+  "patch_sha256": "800c8564ad3a88014e96776e7e59ec50698d3119c799bfa8a2dabd727fe19652",
+  "verification": {
+    "red": "4 failed,7 passed,4 warnings,0 skips",
+    "green": "29 passed across4 files,4 warnings,0 skips",
+    "ruff": "0 baseline and current diagnostics",
+    "bandit": {
+      "bandit-baseline.json": {
+        "findings": 0,
+        "errors": 0
+      },
+      "bandit-production.json": {
+        "findings": 0,
+        "errors": 0
+      },
+      "bandit-tests-final.json": {
+        "findings": 0,
+        "errors": 0
+      }
+    }
+  }
+}

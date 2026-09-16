@@ -43,6 +43,7 @@ def mock_db():
     mock_ctx.__enter__ = MagicMock(return_value=mock_conn)
     mock_ctx.__exit__ = MagicMock(return_value=None)
     mock.get_connection.return_value = mock_ctx
+    mock.transaction.return_value = mock_ctx
 
     return mock
 

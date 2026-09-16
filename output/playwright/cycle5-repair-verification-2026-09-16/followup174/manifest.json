@@ -1,0 +1,89 @@
+{
+  "at": "2026-09-16T23:27:20.056Z",
+  "files": [
+    {
+      "file": "DESIGN.md",
+      "source": ".tmp/uat174-repair-20260916/DESIGN.md",
+      "original_sha256": "29ede69af64fa3324d07be109ac868260837b1162bbb8c53bb412845d7bdad82",
+      "retained_sha256": "29ede69af64fa3324d07be109ac868260837b1162bbb8c53bb412845d7bdad82",
+      "normalization": "none"
+    },
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat174-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "0ea2e44183e9b344cead7a3f2834ab8eea03af9ff41e3cf2e682abbe07474552",
+      "retained_sha256": "0ea2e44183e9b344cead7a3f2834ab8eea03af9ff41e3cf2e682abbe07474552",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat174-repair-20260916/owned-manifest.json",
+      "original_sha256": "f624f3acbf84585e1c9cee66cbf63c9f32dcd4e84f83c4292a286aa761cd3272",
+      "retained_sha256": "f624f3acbf84585e1c9cee66cbf63c9f32dcd4e84f83c4292a286aa761cd3272",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat174-repair-20260916/owned.patch",
+      "original_sha256": "800c8564ad3a88014e96776e7e59ec50698d3119c799bfa8a2dabd727fe19652",
+      "retained_sha256": "faa61cc4fedce26b51be2504695f3f29e1d8b1b940b7967106cba28bf9833135",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "root-independent-review.md",
+      "source": ".tmp/uat174-repair-20260916/root-independent-review.md",
+      "original_sha256": "d2ad104e48fac2ef88c54a30df0463b0645d0e3d7f3d33fd4bbbffd7ef7dcd75",
+      "retained_sha256": "d2ad104e48fac2ef88c54a30df0463b0645d0e3d7f3d33fd4bbbffd7ef7dcd75",
+      "normalization": "none"
+    },
+    {
+      "file": "root-independent-tests.log",
+      "source": ".tmp/uat174-repair-20260916/root-independent-tests.log",
+      "original_sha256": "595dfa97ffe9f580646d050dd47c8ced281d31e8cc9fb4a89a3cedbcac372553",
+      "retained_sha256": "595dfa97ffe9f580646d050dd47c8ced281d31e8cc9fb4a89a3cedbcac372553",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff-baseline.json",
+      "source": ".tmp/uat174-repair-20260916/ruff-baseline.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "ruff-current.json",
+      "source": ".tmp/uat174-repair-20260916/ruff-current.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat174-red.redacted.log",
+      "source": ".tmp/uat174-repair-20260916/uat174-red.redacted.log",
+      "original_sha256": "b43d03a9a47d812aac560436e19c2556df724eaec28044156da6ff0dc6b33f52",
+      "retained_sha256": "dd10da235f80f7eec4fcad1ef53cf20463abcdacd917929e2e3dd42faa3a90aa",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat174-final.redacted.log",
+      "source": ".tmp/uat174-repair-20260916/uat174-final.redacted.log",
+      "original_sha256": "f6ac4f08b6a2069153ddbcbc590880c899d6c91651770cea5a2a97a33bc590b2",
+      "retained_sha256": "f6ac4f08b6a2069153ddbcbc590880c899d6c91651770cea5a2a97a33bc590b2",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit-production.json",
+      "source": ".tmp/uat174-repair-20260916/bandit-production.json",
+      "original_sha256": "4e6658f71db8a7034df8769790f6434d9bf823b12b0eed25585bea18d9020393",
+      "retained_sha256": "14d5f4aa5343c73b76648c2eb7aa06ac9f014f8efd1fd909e068781ae12d9d25",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "bandit-tests-final.json",
+      "source": ".tmp/uat174-repair-20260916/bandit-tests-final.json",
+      "original_sha256": "c3906dbe1c3ba04b60fa9473788b8f211ffc741fdd9126c4ff2b8f2190a9cbef",
+      "retained_sha256": "901eb2ffe9c5f6ead74f62a1bf532d3990dfac216618cfed50f02e57e0a4484f",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

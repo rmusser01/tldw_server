@@ -499,7 +499,7 @@ class WorldBookService:
         """Initialize world book tables in the user's database if they don't exist."""
         backend_type = getattr(self.db, "backend_type", BackendType.SQLITE)
         try:
-            with self.db.get_connection() as conn:
+            with self.db.transaction() as conn:
                 if backend_type == BackendType.POSTGRESQL:
                     conn.execute("""
                         CREATE TABLE IF NOT EXISTS world_books (
@@ -611,7 +611,6 @@ class WorldBookService:
                     "ON character_world_books(character_id, enabled, priority DESC)"
                 )
 
-                conn.commit()
                 logger.info("World book tables initialized")
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to initialize world book tables: {e}")

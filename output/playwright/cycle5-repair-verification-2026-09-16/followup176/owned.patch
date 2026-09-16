@@ -1,0 +1,88 @@
+diff --git a/tldw_Server_API/app/core/Character_Chat/world_book_manager.py b/tldw_Server_API/app/core/Character_Chat/world_book_manager.py
+index 7ae6c2925c..b2d1187632 100644
+--- a/tldw_Server_API/app/core/Character_Chat/world_book_manager.py
++++ b/tldw_Server_API/app/core/Character_Chat/world_book_manager.py
+@@ -499,7 +499,7 @@ class WorldBookService:
+         """Initialize world book tables in the user's database if they don't exist."""
+         backend_type = getattr(self.db, "backend_type", BackendType.SQLITE)
+         try:
+-            with self.db.get_connection() as conn:
++            with self.db.transaction() as conn:
+                 if backend_type == BackendType.POSTGRESQL:
+                     conn.execute("""
+                         CREATE TABLE IF NOT EXISTS world_books (
+@@ -611,7 +611,6 @@ class WorldBookService:
+                     "ON character_world_books(character_id, enabled, priority DESC)"
+                 )
+
+-                conn.commit()
+                 logger.info("World book tables initialized")
+         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
+             logger.error(f"Failed to initialize world book tables: {e}")
+diff --git a/tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py b/tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py
+new file mode 100644
+index 0000000000..4e78eb2b7f
+--- /dev/null
++++ b/tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py
+@@ -0,0 +1,50 @@
++"""World-book schema initialization respects real backend transaction ownership."""
++
++import pytest
++
++from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def world_book_db(request, tmp_path):
++    """Use the official temporary PostgreSQL DB or a temporary SQLite DB."""
++    backend = None
++    if request.param == "postgres":
++        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++    db = CharactersRAGDB(str(tmp_path / "world-books.db"), client_id="1", backend=backend)
++    try:
++        yield db
++    finally:
++        db.close_connection()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++def test_world_book_initialization_is_repeatable_and_committed(world_book_db):
++    WorldBookService(world_book_db)
++    WorldBookService(world_book_db)
++    # A later rollback must not remove successfully initialized tables.
++    world_book_db.get_connection().rollback()
++    assert world_book_db.execute_query("SELECT COUNT(*) AS cnt FROM world_books").fetchone()["cnt"] == 0
++    assert world_book_db.execute_query("SELECT COUNT(*) AS cnt FROM world_book_entries").fetchone()["cnt"] == 0
++    assert world_book_db.execute_query("SELECT COUNT(*) AS cnt FROM character_world_books").fetchone()["cnt"] == 0
++
++
++def test_world_book_initialization_does_not_commit_callers_transaction(world_book_db):
++    with pytest.raises(RuntimeError, match="Rollback caller"):
++        with world_book_db.transaction():
++            conversation_id = world_book_db.add_conversation({"title": "Uncommitted caller"})
++            WorldBookService(world_book_db)
++            raise RuntimeError("Rollback caller")
++    assert world_book_db.get_conversation_by_id(conversation_id) is None
++
++
++def test_world_book_initialization_allows_callers_commit(world_book_db):
++    with world_book_db.transaction():
++        conversation_id = world_book_db.add_conversation({"title": "Committed caller"})
++        WorldBookService(world_book_db)
++    assert world_book_db.get_conversation_by_id(conversation_id)["title"] == "Committed caller"
+diff --git a/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py b/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+index f0526f7da1..9e9d631fc4 100644
+--- a/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
++++ b/tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py
+@@ -43,6 +43,7 @@ def mock_db():
+     mock_ctx.__enter__ = MagicMock(return_value=mock_conn)
+     mock_ctx.__exit__ = MagicMock(return_value=None)
+     mock.get_connection.return_value = mock_ctx
++    mock.transaction.return_value = mock_ctx
+
+     return mock

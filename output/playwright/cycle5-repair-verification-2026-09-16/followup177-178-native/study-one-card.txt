@@ -1,0 +1,163 @@
+### Ran Playwright code
+```js
+await page.getByRole('tab', { name: 'Study' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=review)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [For this fictional UAT031 control, reply with exactly: CITRINE RETRY VERIFIED. | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=review
+- Page Title: Flashcards | tldw
+- Console: 53 errors, 49 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T23-19-16-671Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T22-23-11-605Z.log#L150-L155
+
+- generic [ref=f9e10]:
+  - generic [ref=f9e27]:
+    - link "Skip to main content" [ref=f9e28] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f9e29]:
+      - button "Expand sidebar" [ref=f9e30] [cursor=pointer]
+      - button "New Chat" [ref=f9e34] [cursor=pointer]
+      - generic [ref=f9e37]:
+        - button "Quick Ingest" [ref=f9e38] [cursor=pointer]
+        - button "Chat" [ref=f9e42] [cursor=pointer]
+        - button "Prompts" [ref=f9e45] [cursor=pointer]
+        - button "Characters" [ref=f9e49] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f9e54] [cursor=pointer]
+        - button "World Books" [ref=f9e58] [cursor=pointer]
+        - button "Notes" [ref=f9e61] [cursor=pointer]
+        - button "Knowledge QA" [ref=f9e65] [cursor=pointer]
+        - button "Media" [ref=f9e73] [cursor=pointer]
+        - button "Document Workspace" [ref=f9e76] [cursor=pointer]
+        - button "Research Workspace" [ref=f9e82] [cursor=pointer]
+        - button "Kanban" [ref=f9e88] [cursor=pointer]
+        - button "Watchlists" [ref=f9e90] [cursor=pointer]
+      - generic [ref=f9e95]:
+        - button "Open Notes Dock" [ref=f9e96] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f9e101] [cursor=pointer]
+        - button "Settings" [ref=f9e104] [cursor=pointer]
+    - main [ref=f9e108]:
+      - generic [ref=f9e109]:
+        - generic [ref=f9e112]:
+          - generic [ref=f9e113]:
+            - button "Expand sidebar" [ref=f9e114] [cursor=pointer]
+            - generic [ref=f9e116]:
+              - img "tldw Assistant" [ref=f9e117]
+              - generic [ref=f9e118]: tldw Assistant
+              - button "Companion Home" [ref=f9e119] [cursor=pointer]
+              - button "Show shortcuts" [ref=f9e123] [cursor=pointer]
+          - generic [ref=f9e126]:
+            - button "Search - Open command palette" [ref=f9e127] [cursor=pointer]:
+              - generic [ref=f9e131]: Search
+              - generic [ref=f9e132]: ⌘K
+            - button "Open settings" [ref=f9e133] [cursor=pointer]
+            - generic [ref=f9e145]:
+              - button "Notifications, 0 unread" [ref=f9e146] [cursor=pointer]
+              - status [ref=f9e150]: Notifications are active
+            - button "Switch to light theme" [ref=f9e151] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f9e158] [cursor=pointer]:
+              - generic [ref=f9e159]: "?"
+        - generic [ref=f9e580]:
+          - generic [ref=f9e582]:
+            - generic [ref=f9e584]:
+              - generic [ref=f9e585]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f9e586]
+            - navigation "Flashcards modes" [ref=f9e587]:
+              - generic [ref=f9e588]: Study
+              - generic [ref=f9e589]: Manage
+              - generic [ref=f9e590]: Import / Export
+              - generic [ref=f9e591]: Templates
+              - generic [ref=f9e592]: Scheduler
+          - generic [ref=f9e595]:
+            - tablist [ref=f9e596]:
+              - generic [ref=f9e598]:
+                - tab "Study" [active] [selected] [ref=f9e600] [cursor=pointer]
+                - tab "Manage" [ref=f9e602] [cursor=pointer]
+                - tab "Import / Export" [ref=f9e604] [cursor=pointer]
+                - tab "Templates" [ref=f9e606] [cursor=pointer]
+                - tab "Scheduler" [ref=f9e608] [cursor=pointer]
+              - generic [ref=f9e610]:
+                - button "Test with Quiz" [disabled] [ref=f9e612]
+                - button "Keyboard Shortcuts" [ref=f9e613] [cursor=pointer]
+            - generic [ref=f9e619]:
+              - tabpanel "Study" [ref=f9e1243]:
+                - generic [ref=f9e1244]:
+                  - generic [ref=f9e1245]:
+                    - generic [ref=f9e1246] [cursor=pointer]:
+                      - generic [ref=f9e1247]:
+                        - generic: Select deck
+                        - combobox [ref=f9e1248]
+                      - img "down" [ref=f9e1250]
+                    - radiogroup "segmented control" [ref=f9e1253]:
+                      - generic [ref=f9e1254]:
+                        - generic [ref=f9e1255] [cursor=pointer]:
+                          - radio "Due only" [checked]
+                          - generic "Due only" [ref=f9e1256]
+                        - generic [ref=f9e1257] [cursor=pointer]:
+                          - radio "Cram"
+                          - generic "Cram" [ref=f9e1258]
+                    - radiogroup "segmented control" [ref=f9e1259]:
+                      - generic [ref=f9e1260]:
+                        - generic [ref=f9e1261] [cursor=pointer]:
+                          - radio "Front first" [checked]
+                          - generic "Front first" [ref=f9e1262]
+                        - generic [ref=f9e1263] [cursor=pointer]:
+                          - radio "Back first"
+                          - generic "Back first" [ref=f9e1264]
+                  - region [ref=f9e1265]:
+                    - generic [ref=f9e1266]:
+                      - generic [ref=f9e1272]:
+                        - strong [ref=f9e1274]: Source reviews
+                        - generic [ref=f9e1275]: No source reviews due
+                      - button "Schedule" [ref=f9e1276] [cursor=pointer]
+                  - generic [ref=f9e1281]:
+                    - generic [ref=f9e1282]:
+                      - strong [ref=f9e1284]: Choose a study path
+                      - text: Start with all due cards, or pick a specific deck below.
+                    - button "Review all due" [ref=f9e1285] [cursor=pointer]
+                  - generic [ref=f9e1287]: Loading deck study options...
+                  - generic [ref=f9e1291]:
+                    - heading [level=3] [ref=f9e1292]
+                    - list [ref=f9e1293]:
+                      - listitem [ref=f9e1294]
+                      - listitem [ref=f9e1295]
+                      - listitem [ref=f9e1296]
+                      - listitem [ref=f9e1297]
+                  - status [ref=f9e1298]:
+                    - generic [ref=f9e1299]: "1 card remaining, 0 reviewed, Available now: 1, new: 1, learning: 0, due: 0"
+                    - generic [ref=f9e1300]:
+                      - generic [aria-hidden] [ref=f9e1301]: Study queue
+                      - generic [aria-hidden] [ref=f9e1302]: "1"
+                      - generic [aria-hidden] [ref=f9e1303]: card remaining
+                    - generic [aria-hidden] [ref=f9e1305]: 0 reviewed
+                    - generic [aria-hidden] [ref=f9e1307]: "Available now: 1"
+                    - generic [aria-hidden] [ref=f9e1309]: "new: 1"
+                    - generic [aria-hidden] [ref=f9e1311]: "learning: 0"
+                    - generic [aria-hidden] [ref=f9e1313]: "due: 0"
+                    - generic [aria-hidden] [ref=f9e1315]: ~1 min left
+                  - generic [ref=f9e1317]:
+                    - generic [ref=f9e1318]: Recent study sessions
+                    - generic [ref=f9e1321]: Loading recent study sessions...
+              - text: ": : : : : : : : : : : : : : :"
+  - generic [ref=f9e21] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=f9e22]
+    - generic [ref=f9e1208]:
+      - button "Open issues overlay" [ref=f9e1209]:
+        - generic [ref=f9e1210]:
+          - generic [aria-hidden] [ref=f9e1211]: "0"
+          - generic [ref=f9e1212]: "1"
+        - generic [ref=f9e1213]: Issue
+      - button "Collapse issues badge" [ref=f9e1214]
+  - alert [ref=f9e26]: Flashcards | tldw

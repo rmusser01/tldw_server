@@ -1,5 +1,13 @@
 # Cycle 5 UAT repairs
 
+## Latest bounded follow-ups173–178
+
+173/TASK13260.110 reads the existing conversation count alias by name; filtering and fail-closed quota logic stay unchanged.176/TASK13260.112 uses CharactersRAGDB.transaction for world-book schema initialization and removes the explicit commit so nested caller rollback remains valid.174/TASK13260.111 carries only a payload-free uniqueness category out of the trusted PostgreSQL driver catch; no SQL, values, constraint identity or raw cause/context is exposed. Existing duplicate409 handling consumes that category.
+
+175/TASK13260.113 contains expected HTTP save failures in the existing inline recovery flow. Causal Next Pages instrumentation identifies console.error(Error) as the overlay trigger despite a caught promise. Preserve rejected promises and unexpected programming-error diagnostics; do not globally suppress errors.
+
+177/TASK13260.114 diagnoses real PostgreSQL Study analytics/history/queue failures and distinguishes primary errors from transaction cascades before choosing a repair.178/TASK13260.115 is a separate ReviewTab presentation failure: a failed query must not become successful Cram completion. Use actual query loading/error/success state, show an actionable Retry through its scoped refetch, preserve cached card/progress/selection, and verify successful completion and no unintended session/rating mutations. Detailed test-first designs and original native evidence are retained with the corresponding review packages.
+
 Parent: TASK13260. This design continues the user's authorization to repair every identified issue before another full fresh UAT. Current product is frozen at `ab527eb3b4`; subsequent commits contain documentation and evidence only. Both current native matrices must finish and their evidence must be preserved before product edits.
 
 ## Outcomes and scope

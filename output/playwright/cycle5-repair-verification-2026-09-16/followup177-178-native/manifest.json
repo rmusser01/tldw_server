@@ -1,0 +1,61 @@
+{
+  "at": "2026-09-16T23:27:20.062Z",
+  "files": [
+    {
+      "file": "saved-existing-deck-result.txt",
+      "source": ".tmp/uat151-137-native-20260916/saved-existing-deck-result.txt",
+      "original_sha256": "d2906ea06db5ea8116026a00ee7e3ed648ee39886680cec78ddf272763302736",
+      "retained_sha256": "4afdfd32d94b187fb37315940254216fa5cff73dbda133221ed4faf4b21444d0",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "existing-deck-selected.txt",
+      "source": ".tmp/uat151-137-native-20260916/existing-deck-selected.txt",
+      "original_sha256": "c3d23092c75048d8c4d6cf920f9095a514ecb125f3de513aed7135ce526da320",
+      "retained_sha256": "c3d23092c75048d8c4d6cf920f9095a514ecb125f3de513aed7135ce526da320",
+      "normalization": "none"
+    },
+    {
+      "file": "save-existing-deck.txt",
+      "source": ".tmp/uat151-137-native-20260916/save-existing-deck.txt",
+      "original_sha256": "071f8d1bbc10db66fc1b4a36ee79469433120523875e88e21ebe992e4753fe92",
+      "retained_sha256": "071f8d1bbc10db66fc1b4a36ee79469433120523875e88e21ebe992e4753fe92",
+      "normalization": "none"
+    },
+    {
+      "file": "study-one-card.txt",
+      "source": ".tmp/uat151-137-native-20260916/study-one-card.txt",
+      "original_sha256": "6df9be0204048cac5c5059e8a1375b3a4f246df57c00f3c216c51415dda9b165",
+      "retained_sha256": "6df9be0204048cac5c5059e8a1375b3a4f246df57c00f3c216c51415dda9b165",
+      "normalization": "none"
+    },
+    {
+      "file": "study-deck-picker.txt",
+      "source": ".tmp/uat151-137-native-20260916/study-deck-picker.txt",
+      "original_sha256": "4a920983126abaedd846340208800c5b002f553b59a3eb3337e46e48918ef26c",
+      "retained_sha256": "4a920983126abaedd846340208800c5b002f553b59a3eb3337e46e48918ef26c",
+      "normalization": "none"
+    },
+    {
+      "file": "study-deck-selected.txt",
+      "source": ".tmp/uat151-137-native-20260916/study-deck-selected.txt",
+      "original_sha256": "03bb245da2dfd4afeaf6cb3ade5eba30dc04a532740f3b371089c379cfdba675",
+      "retained_sha256": "03bb245da2dfd4afeaf6cb3ade5eba30dc04a532740f3b371089c379cfdba675",
+      "normalization": "none"
+    },
+    {
+      "file": "cram-one-card.txt",
+      "source": ".tmp/uat151-137-native-20260916/cram-one-card.txt",
+      "original_sha256": "7551ac2e846bd276bcd1681e4a5f25f088f9ed98631af3bfaefa1bb7f815e67c",
+      "retained_sha256": "7551ac2e846bd276bcd1681e4a5f25f088f9ed98631af3bfaefa1bb7f815e67c",
+      "normalization": "none"
+    },
+    {
+      "file": "cram-one-card-result.txt",
+      "source": ".tmp/uat151-137-native-20260916/cram-one-card-result.txt",
+      "original_sha256": "9ef554cb7e9f1281bf73a5d592b5b28ec380de0b40e66a0d947373e626674f14",
+      "retained_sha256": "3b14f908532df68f65eaebd13fa91cc5048dbf91458ceb090f40b7575f7dcdd6",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

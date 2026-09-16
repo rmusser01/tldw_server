@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **23:30 UTC repair checkpoint:178 unique findings —163 verified,12 awaiting native acceptance,3 unresolved (175/177/178).**173/176 pass independent22 PostgreSQL/SQLite tests and174 passes independent29 tests; both runs have zero skips. The original generated card saves200 with source-note provenance at23:18:59UTC. Study then exposes177 API failures and178 false Cram completion after a failed queue request. These are targeted checks, not another full UAT. [Retained save/failure evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup177-178-native/README.md).
+
 - **23:17 UTC targeted repair checkpoint:176 unique findings.**171 read ownership and172 deck-query recovery pass independent review and targeted tests; native acceptance remains pending.173 quota repair exposes176 world-book initialization in actual PostgreSQL router tests. Retained native174 duplicate-deck conflict and175 runtime-overlay failures require separate repairs. The original draft remains preserved; no full UAT restart.
 
 - **23:08 UTC targeted discovery:173 unique findings.** Native PostgreSQL character Chat creation returns503 before any provider completion; new173 tracks the positional conversation quota-count read. The planned one-request provider fault was never reached and has been removed.031 remains unaccepted.171/172 repairs are under regression verification; full UAT remains gated.
@@ -96,25 +98,35 @@
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
 
+## UAT-178 — P1: Failed Cram queue load is displayed as successful completion
+
+- With one real saved new card in the selected deck, the queue GET returns500 repeatedly. Cram nevertheless says “Cram session complete! You reached the end of your cram queue.” No rating has occurred. This is distinct from039's pre-start readiness copy and128's scheduled re-rating queue shrink.
+- Status: unresolved, TASK13260.115. Preserve loading/error state, offer retry and reserve completion for a successfully loaded completed queue. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup177-178-native/README.md).137's one-card Cram acceptance remains pending.
+
+## UAT-177 — P1: PostgreSQL Study analytics and queue reads fail
+
+- After the successful card save and unfiltered list200, Study GETs for analytics summary, completed review sessions, decks, selected-deck queue and assistant context return500 at23:19–23:20UTC. Primary database failures and any transaction cascade are under diagnosis; do not infer one root cause per failed request.
+- Status: unresolved, TASK13260.114. Required real PostgreSQL regressions and native selected-deck Study acceptance must pass. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup177-178-native/README.md).
+
 ## UAT-176 — P1: PostgreSQL character creation fails initializing world books
 
 - Required actual-router PostgreSQL tests advance past173's quota count, then both global and workspace character creation return500. WorldBookService._init_tables uses the connection as a context manager; PostgreSQL BackendConnectionWrapper does not implement that protocol.
-- Status: unresolved, TASK13260.112. Keep the real initialization in tests, use supported transaction ownership, and verify PostgreSQL/SQLite plus native character creation. Failure evidence: `.tmp/uat173-repair-20260916/quota-green-followup-failure.log`, pending repair retention.
+- Status: implemented, TASK13260.112; native acceptance pending. Existing DB transaction ownership replaces the unsupported context and premature commit. Independent combined173/176 tests pass22 with zero skips; existing world-book tests pass94. [Repair, original failures and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup176/README.md).
 
 ## UAT-175 — P2: Failed generated-deck save opens a blocking runtime error overlay
 
-- The duplicate-deck save displays inline error/retry feedback but also opens a Next Runtime Error overlay. The overlay intercepts normal deck-picker clicks, blocking the recovery suggested by the inline message. Root visually confirmed the screenshot; escaped-rejection diagnosis is separate from the server's174 conflict mapping.
+- The duplicate-deck save displays inline error/retry feedback but also opens a Next Runtime Error overlay. The overlay intercepts normal deck-picker clicks, blocking the recovery suggested by the inline message. Causal reproduction identifies expected HTTP failure logging through console.error with an Error object, which Next forwards to its overlay. The caller catches the rejected promise; no unhandled rejection is observed. This is separate from174's server conflict mapping.
 - Status: unresolved, TASK13260.113. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md). Preserve failure reporting and drafts while containing the handled save failure in the recovery UI.
 
 ## UAT-174 — P2: PostgreSQL duplicate-deck creation returns a generic server error
 
 - The original167 response failure committed Alice's deck. A later recovered list returns it200, but another POST with that same name returns500 `Failed to create deck`, rather than an actionable conflict. PostgreSQL backend redaction removes the raw uniqueness details that ChaCha's string-based conflict helper expects.
-- Status: unresolved, TASK13260.111. Restore privacy-preserving uniqueness classification, preserving unrelated failure behavior. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
+- Status: implemented, TASK13260.111; native acceptance pending. A payload-free uniqueness category preserves generic diagnostics and maps the real duplicate to409. Independent29 tests pass with zero skips, including privacy, transaction and non-unique500 controls. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
 
 ## UAT-173 — P1: PostgreSQL conversation quota count prevents Chat creation
 
 - Alice's actual Characters → Chat → Send returns503 from POST /chats at23:06:05UTC: `Quota enforcement unavailable. Please try again later.` The backend logs a count failure `0`; count_conversations_for_user reads row[0] although PostgreSQL returns the named cnt column. No complete-v2 request is sent.
-- Status: unresolved, TASK13260.110. Preserve owner/workspace/deleted/character filters and fail-closed quota enforcement while correcting the result access. Official PostgreSQL and SQLite count/route regressions, review and native acceptance are required. [Retained native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173-native-failure/README.md).
+- Status: implemented, TASK13260.110; native acceptance pending. Named cnt access preserves owner/workspace/deleted/character filters and fail-closed quota enforcement. Independent combined173/176 real PostgreSQL/SQLite tests pass22 with zero skips; adjacent regressions pass35. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173-native-failure/README.md).
 - A planned first-completion provider fault never triggered; it was removed after this earlier failure. This is not evidence of UAT031 failed-provider Retry behavior.
 
 ## UAT-172 — P2: Generated-card Retry cannot recover a failed deck list

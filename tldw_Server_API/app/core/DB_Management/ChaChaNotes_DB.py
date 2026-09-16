@@ -79,6 +79,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseBackend,
     DatabaseConfig,
     QueryResult,
+    UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseError as BackendDatabaseError,
@@ -25843,6 +25844,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _is_unique_violation(self, error: Exception) -> bool:
         """Return True if the provided backend error represents a unique constraint violation."""
+        if isinstance(error, UniqueConstraintError):
+            return True
         message = str(error).lower()
         return "unique constraint" in message or "duplicate key" in message
 

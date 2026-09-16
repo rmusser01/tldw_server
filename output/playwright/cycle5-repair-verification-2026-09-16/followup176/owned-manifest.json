@@ -1,0 +1,76 @@
+{
+  "task": "TASK-13260.112",
+  "uat": "UAT176",
+  "headAtFreeze": "cc0f12a5d8dc21e370a5a2034c44244fa53d09af",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "sha256": "726d55a2ee2d0a9f7916f93a5945dc21e89d0244d66e54bac9242c7772038d38"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py",
+      "sha256": "0b37e00942c60e47e9020ce6ff256606d9ef1560b6cc0cff29fe7f144f981efa"
+    },
+    {
+      "path": "tldw_Server_API/tests/Character_Chat/test_world_book_manager_legacy.py",
+      "sha256": "ee5e88de8f15abfc39855f77212a809f86e5178fcb3b54e3990ec5fbfc7c6727"
+    }
+  ],
+  "combinedResult": {
+    "passed": 22,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 23.56,
+    "runLabel": "uat173-176-green",
+    "postgresRequired": true
+  },
+  "summary": "Frozen: initializer db.transaction with no manual commit; real backend initialization/nested ownership6 passed; existingworldbook94 passed; combined22 passed/0 skipped.",
+  "patchSha256": "c1f45c10297779b4a839c50b772155644fab599559d487a8ad6fcfb2070d1f04",
+  "verification": {
+    "ruffNewFindings": 0,
+    "ruffBaselineFindings": 17,
+    "banditProductionFindings": 0,
+    "banditParseErrors": 0,
+    "diffCheck": "PASS",
+    "nativeAcceptance": "Root-owned; not performed by author",
+    "independentReview": "Requested from root"
+  },
+  "artifacts": [
+    {
+      "path": "DESIGN.md",
+      "sha256": "c430643f1cafca7ac3c8c9436aed2f3f4aae839128805dfb0047f5f8d7ffa878"
+    },
+    {
+      "path": "IMPLEMENTATION.md",
+      "sha256": "a0a520e999fcadf009c5391c4b65b61099119c7cc20b0c788251a34b81b19d22"
+    },
+    {
+      "path": "owned.patch",
+      "sha256": "c1f45c10297779b4a839c50b772155644fab599559d487a8ad6fcfb2070d1f04"
+    },
+    {
+      "path": "red.log",
+      "sha256": "738f59f3ee9eb2b2387562c6d4a27bd9fe76b6053bd941eea81c4f1055290e2c"
+    },
+    {
+      "path": "combined-green.log",
+      "sha256": "e2bca8ae0ed66a85d865fa295774be2f61c31830e39d71ec2bd57f2c0ff8a620"
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "7d2c9655589ec7c7a6728445d457ec1d60d9b50858f488e3047cc4004f86813f"
+    },
+    {
+      "path": "ruff-current.json",
+      "sha256": "a31078fb6fc749b27219e9b89fab48109a44020df05fe32a3ebd5bf49cc3dd95"
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "60ff3bdf7c50f464492c85c266b931345b1e33e1a62acf6728ffd9ed625d2523"
+    },
+    {
+      "path": "existing-worldbook-regressions.log",
+      "sha256": "33e90f8efd386e41228f0c905d196eb8d208e1c35b4a7730dbe47819721bc770"
+    }
+  ]
+}

@@ -870,7 +870,7 @@ class ConversationStore:
         try:
             cursor = self._db.execute_query(query, tuple(params))
             row = cursor.fetchone()
-            return int(row[0] if row else 0)
+            return int(row["cnt"] if row else 0)
         except CharactersRAGDBError as exc:
             logger.error(f"Database error counting conversations for client_id {client_id}: {exc}")
             raise

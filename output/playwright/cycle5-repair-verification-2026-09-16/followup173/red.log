@@ -1,0 +1,225 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=1840868407
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 12 items
+
+tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py . [  8%]
+..F...F.FF.                                                              [100%]
+
+=================================== FAILURES ===================================
+_____ test_quota_count_preserves_owner_scope_and_deleted_filters[postgres] _____
+tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py:83: in test_quota_count_preserves_owner_scope_and_deleted_filters
+    assert quota_db.count_conversations_for_user(owner, **filters) == expected, (owner, filters)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44247: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py:873: in count_conversations_for_user
+    return int(row[0] if row else 0)
+               ^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 16:11:07.404 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 16:11:07.405 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 16:11:07.405 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:07.409 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:07.413 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 16:11:07.414 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:07.418 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:07.422 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 16:11:07.424 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 16:11:07.426 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 16:11:07.426 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 16:11:07.426 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb
+2026-09-16 16:11:07.427 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_quota_count_preserves_own0/quota.db [Client ID: 1] (backend=postgresql)
+2026-09-16 16:11:08.696 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_quota_count_preserves_own0/quota.db
+2026-09-16 16:11:08.697 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 16:11:08.698 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:162 - Added character card 'Citrine' with ID: 2.
+2026-09-16 16:11:08.699 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:162 - Added character card 'Rowan' with ID: 3.
+2026-09-16 16:11:08.699 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-first',)...
+2026-09-16 16:11:08.700 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-first',)...
+2026-09-16 16:11:08.700 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-second',)...
+2026-09-16 16:11:08.701 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-second',)...
+2026-09-16 16:11:08.703 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 39e7f8ac-6c5c-449d-a377-00e2a2fec880.
+2026-09-16 16:11:08.703 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 237a3ba1-4b89-40c9-8cb0-db57d0e6f6a7.
+2026-09-16 16:11:08.704 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 7d8d33af-16df-46e3-9e90-a052d7dd605a.
+2026-09-16 16:11:08.705 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 786a6e9d-6853-4f31-8b8a-8c51c5579750.
+2026-09-16 16:11:08.707 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:soft_delete_conversation:1308 - Soft-deleted conversation ID 786a6e9d-6853-4f31-8b8a-8c51c5579750 (was v1), new version 2.
+2026-09-16 16:11:08.708 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 69a4e204-e126-4979-acc6-e45f2218e4a4.
+2026-09-16 16:11:08.709 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: d7b23d46-1eaf-421a-84f3-9bfd12618ff5.
+2026-09-16 16:11:08.709 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:soft_delete_conversation:1308 - Soft-deleted conversation ID d7b23d46-1eaf-421a-84f3-9bfd12618ff5 (was v1), new version 2.
+2026-09-16 16:11:08.710 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 4d4e907a-b97e-4f4e-9721-3c9b14b3579f.
+2026-09-16 16:11:08.711 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 4eaefca0-3583-4536-b60a-05886880293c.
+2026-09-16 16:11:08.712 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 6ef28368-22ce-4f80-ad00-7e6e24475232.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 16:11:08.712 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) as cnt FROM conversations WHERE client_id = ? AND deleted = 0 AND scope_type = ?... Params: ('1', 'global')...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 16:11:09.071 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8037 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 16:11:09.094 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:09.094 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 16:11:09.094 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:09.094 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+____ test_create_chat_uses_real_quota_and_rejects_at_limit[postgres-global] ____
+tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py:131: in test_create_chat_uses_real_quota_and_rejects_at_limit
+    assert created.status_code == 201, created.text
+E   AssertionError: {"detail":"Quota enforcement unavailable. Please try again later."}
+E   assert 503 == 201
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 16:11:11.745 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 16:11:11.746 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 16:11:11.746 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:11.750 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:11.754 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 16:11:11.755 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:11.759 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:11.764 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 16:11:11.765 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 16:11:11.767 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 16:11:11.767 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 16:11:11.768 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb
+2026-09-16 16:11:11.768 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_create_chat_uses_real_quo2/quota.db [Client ID: 1] (backend=postgresql)
+2026-09-16 16:11:13.150 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_create_chat_uses_real_quo2/quota.db
+2026-09-16 16:11:13.168 | INFO     | tldw_Server_API.app.core.Character_Chat.character_rate_limiter:__init__:133 - CharacterRateLimiter initialized (RG only): enabled=False policy_id=character_chat.default
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 16:11:13.171 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 16:11:13.172 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:162 - Added character card 'Quota character' with ID: 2.
+2026-09-16 16:11:13.173 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-quota',)...
+2026-09-16 16:11:13.174 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-quota',)...
+2026-09-16 16:11:13.175 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: c398821e-60b1-4a53-9ff0-1e75ee92a354.
+2026-09-16 16:11:13.176 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: c91c7f30-c92f-4c4b-95b5-8240141c01b8.
+2026-09-16 16:11:13.177 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:soft_delete_conversation:1308 - Soft-deleted conversation ID c91c7f30-c92f-4c4b-95b5-8240141c01b8 (was v1), new version 2.
+2026-09-16 16:11:13.178 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: f7649989-ef77-4959-9c07-dc9298456c1a.
+2026-09-16 16:11:13.179 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: c95dd680-cc2f-4572-a1ef-b05b3faf523c.
+2026-09-16 16:11:13.180 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 70ab16eb-57a7-4f13-b9ba-f40e35da6554.
+2026-09-16 16:11:13.181 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: db255ae2-e84d-4a98-9634-87d930de21eb.
+2026-09-16 16:11:13.187 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 6159773696
+2026-09-16 16:11:13.188 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) as cnt FROM conversations WHERE client_id = ? AND deleted = 0 AND scope_type = ?... Params: ('1', 'global')...
+2026-09-16 16:11:13.188 | ERROR    | tldw_Server_API.app.api.v1.endpoints.character_chat_sessions:create_chat_session:4558 - Chat limit enforcement failed, denying request: 0
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 16:11:13.191 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8037 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 16:11:13.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:13.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 16:11:13.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:13.208 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+__ test_create_chat_uses_real_quota_and_rejects_at_limit[postgres-workspace] ___
+tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py:131: in test_create_chat_uses_real_quota_and_rejects_at_limit
+    assert created.status_code == 201, created.text
+E   AssertionError: {"detail":"Quota enforcement unavailable. Please try again later."}
+E   assert 503 == 201
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 16:11:13.850 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 16:11:13.850 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 16:11:13.851 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:13.855 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:13.859 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 16:11:13.859 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:13.864 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:13.868 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 16:11:13.870 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 16:11:13.872 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 16:11:13.872 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 16:11:13.872 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb
+2026-09-16 16:11:13.872 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_create_chat_uses_real_quo3/quota.db [Client ID: 1] (backend=postgresql)
+2026-09-16 16:11:15.229 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_create_chat_uses_real_quo3/quota.db
+2026-09-16 16:11:15.250 | INFO     | tldw_Server_API.app.core.Character_Chat.character_rate_limiter:__init__:133 - CharacterRateLimiter initialized (RG only): enabled=False policy_id=character_chat.default
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 16:11:15.258 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 16:11:15.260 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:162 - Added character card 'Quota character' with ID: 2.
+2026-09-16 16:11:15.260 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-quota',)...
+2026-09-16 16:11:15.262 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-quota',)...
+2026-09-16 16:11:15.264 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 71ad0174-c927-46f2-82e9-6dda0e2f709c.
+2026-09-16 16:11:15.265 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 9e8b0123-3e24-4345-aa00-7323078105e4.
+2026-09-16 16:11:15.266 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:soft_delete_conversation:1308 - Soft-deleted conversation ID 9e8b0123-3e24-4345-aa00-7323078105e4 (was v1), new version 2.
+2026-09-16 16:11:15.267 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 7e02e1bf-0249-44a6-a688-17a1d6e96228.
+2026-09-16 16:11:15.268 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 2cbb0554-b783-4d2c-a4ce-c5c23cfd74fd.
+2026-09-16 16:11:15.269 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: e81a229d-f278-478b-b363-233b7759f04e.
+2026-09-16 16:11:15.270 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 6506b9d5-55c3-45ce-b444-165bd94120ed.
+2026-09-16 16:11:15.277 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 6159773696
+2026-09-16 16:11:15.277 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT * FROM workspaces WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL... Params: ('ws-quota',)...
+2026-09-16 16:11:15.278 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) as cnt FROM conversations WHERE client_id = ? AND deleted = 0 AND scope_type = ? AND workspace_id = ?... Params: ('1', 'workspace', 'ws-quota')...
+2026-09-16 16:11:15.278 | ERROR    | tldw_Server_API.app.api.v1.endpoints.character_chat_sessions:create_chat_session:4558 - Chat limit enforcement failed, denying request: 02026-09-16 16:11:17.625 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 16:11:17.626 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:17.630 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:17.635 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 16:11:17.635 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:17.640 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:17.644 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 16:11:17.646 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 16:11:17.648 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 16:11:17.648 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 16:11:17.648 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-16 16:11:17.648 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-16 16:11:17.659 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 16:11:17.659 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 16:11:17.659 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 16:11:17.659 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-16 16:11:17.701 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-16 16:11:17.701 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-16 16:11:17.701 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-16 16:11:17.701 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-16 16:11:17.702 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-16 16:11:17.702 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb
+2026-09-16 16:11:17.702 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb/1/workflows/workflows_scheduler.db
+2026-09-16 16:11:17.703 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb/1/workflows/workflows_scheduler.db
+2026-09-16 16:11:17.703 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-16 16:11:17.704 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:17.704 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 16:11:17.704 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 16:11:15.281 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8037 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 16:11:15.298 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:15.298 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 16:11:15.298 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:15.298 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+___________________ test_empty_quota_count_is_zero[postgres] ___________________
+tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py:60: in test_empty_quota_count_is_zero
+    assert quota_db.count_conversations_for_user("1") == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44247: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py:873: in count_conversations_for_user
+    return int(row[0] if row else 0)
+               ^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 16:11:15.315 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 16:11:15.315 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 16:11:15.315 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:15.320 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:15.324 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 16:11:15.324 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 16:11:15.329 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 16:11:15.333 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 16:11:15.335 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 16:11:15.337 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 16:11:15.337 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 16:11:15.337 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-b36e5dbb
+2026-09-16 16:11:15.337 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7605 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_empty_quota_count_is_zero1/quota.db [Client ID: 1] (backend=postgresql)
+2026-09-16 16:11:16.634 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7612 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-104/test_empty_quota_count_is_zero1/quota.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 16:11:16.635 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_thread_connection:7968 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 16:11:16.635 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8212 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) as cnt FROM conversations WHERE client_id = ? AND deleted = 0 AND scope_type = ?... Params: ('1', 'global')...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 16:11:16.891 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8037 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 16:11:16.914 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:16.914 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 16:11:16.914 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:867 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 16:11:16.914 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:883 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py::test_quota_count_preserves_owner_scope_and_deleted_filters[postgres]
+FAILED tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py::test_create_chat_uses_real_quota_and_rejects_at_limit[postgres-global]
+FAILED tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py::test_create_chat_uses_real_quota_and_rejects_at_limit[postgres-workspace]
+FAILED tldw_Server_API/tests/DB_Management/test_conversation_quota_count_backends.py::test_empty_quota_count_is_zero[postgres]
+=================== 4 failed, 8 passed, 4 warnings in 13.81s ===================

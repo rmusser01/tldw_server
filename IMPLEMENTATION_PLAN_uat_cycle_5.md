@@ -93,6 +93,8 @@ Assignments are dispatched explicitly only after Stage1 closes. No worker broad 
 
 ## Stage 4: Run another full fresh workflow matrix
 
+Latest Stage3 checkpoint,23:30UTC:173 quota access,174 safe uniqueness classification and176 world-book transaction initialization are independently reviewed. Root required PostgreSQL runs pass22 and29 separately with zero skips.171/172 are committed and still need native acceptance. Original source-backed generated card now saves200; Study exposes177 database read failures and178 false successful Cram completion on a failed queue load.175 overlay containment remains under verification. Preserve these original failures and complete bounded repairs/native acceptance before Stage4. Evidence packages:followup173,followup174,followup176,followup177-178-native.
+
 **Goal:** Recheck the authoritative journeys on new configuration/data/browser state after all confirmed repairs.
 **Success Criteria:** Both mode matrices account for every required row on one frozen source, with any newly observed issue tracked immediately. No blanket sign-off while confirmed product failures remain.
 **Tests:** The twelve-row named-journey protocol, real model generation, canonical persistence, user/permission isolation, connection recovery and natural expiry controls.
