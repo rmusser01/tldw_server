@@ -1,0 +1,36 @@
+{
+  "unit": "combined-variants",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-variants-combined-command.json",
+      "bytes": 10431,
+      "sha256": "4d056fab3c9e5f7b532ce6574da165f3862924eac86a45f35457af8bca0db649"
+    },
+    {
+      "file": "cycle4-variants-combined-run.mjs",
+      "bytes": 1328,
+      "sha256": "0ebd2ba7c287a86453ab4235bcf0424eedfb8b4d3457863dc0fd4e6d08fe9c25"
+    },
+    {
+      "file": "cycle4-variants-combined-summary.json",
+      "bytes": 1247,
+      "sha256": "ac8bfd14613679bf7a5e0dab4bc89bb17474f554ba8da2406b4129879f7c511a"
+    },
+    {
+      "file": "cycle4-variants-combined-typecheck-comparison.json",
+      "bytes": 341,
+      "sha256": "1829266ce5a7e01d907f962c804919ca7800523436890e46dd3d3166493d38b0"
+    },
+    {
+      "file": "cycle4-variants-combined-typecheck.log",
+      "bytes": 24428,
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "file": "cycle4-variants-combined-ui.log",
+      "bytes": 81821,
+      "sha256": "2e44b3e21b084c3fe14a44049e347834b1e9787e653a8cf8fef8318cffd44f5a"
+    }
+  ]
+}

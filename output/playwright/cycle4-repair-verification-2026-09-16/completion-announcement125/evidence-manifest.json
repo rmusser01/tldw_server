@@ -1,0 +1,106 @@
+{
+  "unit": "completion-announcement125",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat125-final-green.log",
+      "bytes": 1106,
+      "sha256": "31bb792092c0263ff6cffc5ec14eff3b8acf4aece8d59025f2771cab5129f9c3"
+    },
+    {
+      "file": "cycle4-uat125-frontend-paths.json",
+      "bytes": 179,
+      "sha256": "f23b1b4e2b37f484caaa8c99a8c57f6cd509231c0621c56ff2decef2bf63efd7"
+    },
+    {
+      "file": "cycle4-uat125-green.log",
+      "bytes": 1103,
+      "sha256": "3118325043360ae8a88bfce81f3078b2525dca5b87ca0e3df39e9548a7b1e6ff"
+    },
+    {
+      "file": "cycle4-uat125-implementation.md",
+      "bytes": 1779,
+      "sha256": "6a137b4f3a48f249f3592fd4f568f78656c86c3782b2e34dd49fc8fea059384f"
+    },
+    {
+      "file": "cycle4-uat125-independent-final-green.log",
+      "bytes": 827,
+      "sha256": "7f1e6129521d11456170c9506ff155f2a71aad9378a1d7fb5415a4cdc3d8cfe9"
+    },
+    {
+      "file": "cycle4-uat125-independent-green.log",
+      "bytes": 825,
+      "sha256": "6e3d4ebb4d58b0b43aa36d1cc4d05ad291d6364c34fc53421527a4ae3ead551a"
+    },
+    {
+      "file": "cycle4-uat125-independent-manifest.json",
+      "bytes": 456,
+      "sha256": "a135961e6a3504be2fbea44b9a4275162d92a6d4e4d110e04c0cf7d9b55084f8"
+    },
+    {
+      "file": "cycle4-uat125-independent-review.md",
+      "bytes": 3795,
+      "sha256": "8f9a14e956494f575b16e835d46a3c95f4602fa04af74598c720eeb0e908924a"
+    },
+    {
+      "file": "cycle4-uat125-lint-baseline.json",
+      "bytes": 177939,
+      "sha256": "bb8b85ba2364c787347e81df8cee38021bcec93b00f304252b638c42aa58c9ad"
+    },
+    {
+      "file": "cycle4-uat125-lint-comparison.json",
+      "bytes": 124,
+      "sha256": "4db8d751f2ceb89c9dd0501f9e7ce3c53e7648c23242d408c0284a94cd894858"
+    },
+    {
+      "file": "cycle4-uat125-lint-current.json",
+      "bytes": 180507,
+      "sha256": "5e8cdc52aef9a62d5ddf6d0269028d30f923c9ccd2fffafb7380bb95d10993c9"
+    },
+    {
+      "file": "cycle4-uat125-owned-manifest.json",
+      "bytes": 478,
+      "sha256": "e653f87012b618ad408c2568d387beaac6e739fe3b1d58cb36665e3c6b4879f8"
+    },
+    {
+      "file": "cycle4-uat125-paths.json",
+      "bytes": 171,
+      "sha256": "6decf0580014cb87b84095c1a0db5134697bfd85336aaba9be834748e0b16b9b"
+    },
+    {
+      "file": "cycle4-uat125-red.log",
+      "bytes": 4376,
+      "sha256": "dcab71dc13a9a3ffd33cefb599e922063dd5501066cf8fbd3e49e19e1795da17"
+    },
+    {
+      "file": "cycle4-uat125-retry-probe-green.log",
+      "bytes": 569,
+      "sha256": "899e1c8e864cddd6e5bba7c9df0a9799d237a24a613410939d3e69692da15801"
+    },
+    {
+      "file": "cycle4-uat125-retry-probe.config.mts",
+      "bytes": 1439,
+      "sha256": "38b4d61bd77994be82e40cb5a8f124a62a32c97b5b71390b2c95d7c8024bc6df"
+    },
+    {
+      "file": "cycle4-uat125-retry-probe.log",
+      "bytes": 3075,
+      "sha256": "d7ddc3a38c9e196e13c4b0cc6ef1657e54d84a23bfa2eb3201a0dfea6c6a0424"
+    },
+    {
+      "file": "cycle4-uat125-retry-red.log",
+      "bytes": 3679,
+      "sha256": "0b87950923681c160cc8350ee1db8657faa9cac016900ce97e67730407a77e11"
+    },
+    {
+      "file": "cycle4-uat125-static-check.mjs",
+      "bytes": 1911,
+      "sha256": "668f1efdf8ff7f5b7b1649582e140114137f426b3146a5a6e85489a5c29b917c"
+    },
+    {
+      "file": "cycle4-uat125-task-search.txt",
+      "bytes": 2573,
+      "sha256": "937e75e00f0e01b5e75b79a863641da3574a0104b9cea6f9c2a1776d21bc5fa3"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "source": "53ef4bf4d5 plus frozen UAT124/125",
+  "ui": {
+    "files": 97,
+    "passed": 2604,
+    "failed": 0
+  },
+  "compiler": {
+    "exitCode": 2,
+    "baseline": 90,
+    "current": 90,
+    "added": 0,
+    "removed": 0
+  },
+  "security": "TypeScript-only changes; prior verified Python scope unchanged, Bandit not applicable to the new scope.",
+  "frozenSourceHashChecks": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "34a7daf9fa94a7f2d82e04b15f1a5080ac839867f4d4affc03b6478425e93249",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.error-variants.persistence.test.ts",
+      "sha256": "31e1f0ca2ad22d0a309589ce4d3dc5d9d85762d667f74f967fc1a0f1e5ec8b92",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/Playground/Message.tsx",
+      "sha256": "d5b4dd5084cad557efaf17934dfef2810e1833a2b2c82ad231c8bed328ab1b98",
+      "match": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx",
+      "sha256": "774dbd701af258550920b0d2f72a2717d65ec9989e3e10a078a3e2a92414ec3b",
+      "match": true
+    }
+  ]
+}

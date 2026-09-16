@@ -3108,7 +3108,7 @@ export const PlaygroundMessage = (props: Props) => {
           initialNotes={detail?.notes ?? ""}
         />
       )}
-      {streamingComplete && (
+      {streamingComplete && !errorPayload && !props.isStreaming && !props.isProcessing && (
         <span aria-live="polite" className="sr-only">
           {t("playground:message.responseComplete", { defaultValue: "Response complete" })}
         </span>

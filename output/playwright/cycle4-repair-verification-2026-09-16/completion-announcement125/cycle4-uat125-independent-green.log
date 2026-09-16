@@ -1,0 +1,15 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:9542) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx (18 tests) 315ms
+(node:9549) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Common/Playground/__tests__/Message.error-recovery.guard.test.ts (1 test) 2ms
+
+ Test Files  2 passed (2)
+      Tests  19 passed (19)
+   Start at  00:39:45
+   Duration  1.69s (transform 434ms, setup 161ms, import 497ms, tests 317ms, environment 543ms)
+
