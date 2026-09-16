@@ -91,9 +91,11 @@ Assignments are dispatched explicitly only after Stage1 closes. No worker broad 
 - Commit working reviewed units with tracking and validation; never bypass hooks.
 - PostgreSQL is required acceptance under TASK13260.75 after the user's explicit correction. Resolve official fixture/Docker startup, run affected live PostgreSQL controls with `TLDW_TEST_POSTGRES_REQUIRED=1`, and retain any failures. Earlier skipped checks are gaps, not completed validation.
 
-## Stage 4: Run another full fresh workflow matrix
-
 Latest Stage3 checkpoint,23:30UTC:173 quota access,174 safe uniqueness classification and176 world-book transaction initialization are independently reviewed. Root required PostgreSQL runs pass22 and29 separately with zero skips.171/172 are committed and still need native acceptance. Original source-backed generated card now saves200; Study exposes177 database read failures and178 false successful Cram completion on a failed queue load.175 overlay containment remains under verification. Preserve these original failures and complete bounded repairs/native acceptance before Stage4. Evidence packages:followup173,followup174,followup176,followup177-178-native.
+
+23:34UTC:175 independent66/4 plus11/2 config-correct checks pass; native recovery remains pending. Fresh PostgreSQL HTTP probes separate179 completed-session/assistant timestamp serialization failures from177's analytics SQL/aborted-transaction cascade. Both require repair before native Study acceptance.
+
+## Stage 4: Run another full fresh workflow matrix
 
 **Goal:** Recheck the authoritative journeys on new configuration/data/browser state after all confirmed repairs.
 **Success Criteria:** Both mode matrices account for every required row on one frozen source, with any newly observed issue tracked immediately. No blanket sign-off while confirmed product failures remain.

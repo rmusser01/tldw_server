@@ -95,6 +95,18 @@ const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
       query.queryKey[0].startsWith("flashcards:")
   })
 
+const reportCreateMutationError = (message: string, error: unknown) => {
+  if (error instanceof Error && "status" in error &&
+    typeof error.status === "number" && Number.isInteger(error.status) &&
+    error.status >= 400 && error.status <= 599) {
+    // HTTP failures are recoverable by the save UI. Next's Pages Router turns
+    // console.error(message, Error) into a blocking runtime overlay.
+    console.warn(message, error)
+    return
+  }
+  console.error(message, error)
+}
+
 const getListTotal = (res: { total?: number | null; count?: number }) => (res.total ?? res.count ?? 0)
 const STUDY_ASSISTANT_ACTIONS = ["explain", "mnemonic", "follow_up", "fact_check", "freeform"] as const
 
@@ -705,7 +717,7 @@ export function useCreateFlashcardMutation() {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      console.error("Failed to create flashcard:", error)
+      reportCreateMutationError("Failed to create flashcard:", error)
     }
   })
 }
@@ -771,7 +783,7 @@ export function useCreateDeckMutation() {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      console.error("Failed to create deck:", error)
+      reportCreateMutationError("Failed to create deck:", error)
     }
   })
 }

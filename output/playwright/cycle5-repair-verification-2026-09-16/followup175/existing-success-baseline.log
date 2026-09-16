@@ -1,0 +1,44 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:95891) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Flashcards/hooks/__tests__/useCreateDeckMutation.test.tsx (1 test | 1 failed) 10ms
+     × forwards full scheduler settings when creating a deck 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/hooks/__tests__/useCreateDeckMutation.test.tsx > useCreateDeckMutation > forwards full scheduler settings when creating a deck
+AssertionError: expected "vi.fn()" to be called with arguments: [ { name: 'Biology Basics', …(4) } ]
+
+Received:
+
+  1st vi.fn() call:
+
+@@ -27,6 +27,7 @@
+            10,
+          ],
+        },
+      },
+    },
++   undefined,
+  ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Flashcards/hooks/__tests__/useCreateDeckMutation.test.tsx:121:24
+    119|     })
+    120|
+    121|     expect(createDeck).toHaveBeenCalledWith({
+       |                        ^
+    122|       name: "Biology Basics",
+    123|       description: "Intro deck",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  16:29:23
+   Duration  521ms (transform 126ms, setup 87ms, import 133ms, tests 10ms, environment 207ms)

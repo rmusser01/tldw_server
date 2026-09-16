@@ -1,0 +1,221 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:95738) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 409 Failed to create deck
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+Failed to create deck: Error: Failed to create deck (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 409,
+  details: { detail: 'Failed to create deck' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 500 Failed to create deck
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+Failed to create deck: Error: Failed to create deck (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create deck' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 422 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 422,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 500 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > preserves the deck programming error rejection and Next diagnostic
+Failed to create deck: TypeError: Cannot read properties of null (reading 'trim')
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:750:27)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at processTimers (node:internal/timers:538:9)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:165:33
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > preserves the card programming error rejection and Next diagnostic
+Failed to create flashcard: TypeError: Invalid draft getter
+    at Object.get front [as front] (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:166:84)
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:702:39)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:166:16
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx (6 tests | 4 failed) 1908ms
+     × keeps a deck HTTP 409 save failure inline and retries the edited draft 696ms
+     × keeps a deck HTTP 500 save failure inline and retries the edited draft 406ms
+     × keeps a card HTTP 422 save failure inline and retries the edited draft 402ms
+     × keeps a card HTTP 500 save failure inline and retries the edited draft 395ms
+     ✓ preserves the deck programming error rejection and Next diagnostic 4ms
+     ✓ preserves the card programming error rejection and Next diagnostic 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+AssertionError: expected [ …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   Error {
++     "message": "Failed to create deck (POST /api/v1/flashcards/decks)",
++     "status": 409,
++     "details": {
++       "detail": "Failed to create deck",
++     },
++     "headers": {
++       "content-type": "application/json",
++     },
++     "retryAfterMs": null,
++   },
++ ]
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx:130:31
+    128|       expect(observer.unhandled).toEqual([])
+    129|       expect(observer.rejections).toEqual([])
+    130|       expect(observer.errors).toEqual([])
+       |                               ^
+    131|       expect(warning).toHaveBeenCalledWith(expect.stringMatching(/^Fai…
+    132|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+AssertionError: expected [ …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   Error {
++     "message": "Failed to create deck (POST /api/v1/flashcards/decks)",
++     "status": 500,
++     "details": {
++       "detail": "Failed to create deck",
++     },
++     "headers": {
++       "content-type": "application/json",
++     },
++     "retryAfterMs": null,
++   },
++ ]
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx:130:31
+    128|       expect(observer.unhandled).toEqual([])
+    129|       expect(observer.rejections).toEqual([])
+    130|       expect(observer.errors).toEqual([])
+       |                               ^
+    131|       expect(warning).toHaveBeenCalledWith(expect.stringMatching(/^Fai…
+    132|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+AssertionError: expected [ …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   Error {
++     "message": "Failed to create flashcard (POST /api/v1/flashcards)",
++     "status": 422,
++     "details": {
++       "detail": "Failed to create flashcard",
++     },
++     "headers": {
++       "content-type": "application/json",
++     },
++     "retryAfterMs": null,
++   },
++ ]
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx:130:31
+    128|       expect(observer.unhandled).toEqual([])
+    129|       expect(observer.rejections).toEqual([])
+    130|       expect(observer.errors).toEqual([])
+       |                               ^
+    131|       expect(warning).toHaveBeenCalledWith(expect.stringMatching(/^Fai…
+    132|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  __tests__/flashcards-generated-save-errors.test.tsx > generated saves through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+AssertionError: expected [ …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   Error {
++     "message": "Failed to create flashcard (POST /api/v1/flashcards)",
++     "status": 500,
++     "details": {
++       "detail": "Failed to create flashcard",
++     },
++     "headers": {
++       "content-type": "application/json",
++     },
++     "retryAfterMs": null,
++   },
++ ]
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx:130:31
+    128|       expect(observer.unhandled).toEqual([])
+    129|       expect(observer.rejections).toEqual([])
+    130|       expect(observer.errors).toEqual([])
+       |                               ^
+    131|       expect(warning).toHaveBeenCalledWith(expect.stringMatching(/^Fai…
+    132|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 passed (6)
+   Start at  16:28:28
+   Duration  3.24s (transform 235ms, setup 113ms, import 810ms, tests 1.91s, environment 300ms)

@@ -2,6 +2,8 @@
 
 ## Run status
 
+- **23:34 UTC checkpoint:179 unique findings —163 verified,13 awaiting native acceptance,3 unresolved (177/178/179).**173/174/176 are committed in `50a86e81eb`.175 passes independent66 shared-UI and11 actual Next/panel checks in separate runs; its native overlay/retry acceptance remains pending.177's first analytics error is PostgreSQL UndefinedFunction from substr(timestamp); aborted-transaction controls reproduce later read failures. Fresh-connection HTTP tests additionally identify179 timestamp response validation, which requires a separate repair.
+
 - **23:30 UTC repair checkpoint:178 unique findings —163 verified,12 awaiting native acceptance,3 unresolved (175/177/178).**173/176 pass independent22 PostgreSQL/SQLite tests and174 passes independent29 tests; both runs have zero skips. The original generated card saves200 with source-note provenance at23:18:59UTC. Study then exposes177 API failures and178 false Cram completion after a failed queue request. These are targeted checks, not another full UAT. [Retained save/failure evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup177-178-native/README.md).
 
 - **23:17 UTC targeted repair checkpoint:176 unique findings.**171 read ownership and172 deck-query recovery pass independent review and targeted tests; native acceptance remains pending.173 quota repair exposes176 world-book initialization in actual PostgreSQL router tests. Retained native174 duplicate-deck conflict and175 runtime-overlay failures require separate repairs. The original draft remains preserved; no full UAT restart.
@@ -98,6 +100,11 @@
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
 
+## UAT-179 — P1: PostgreSQL Study session and assistant timestamps fail response validation
+
+- Actual HTTP tests on fresh PostgreSQL connections fail serialization of completed-session started_at/last_activity_at/completed_at and assistant-thread created_at/last_modified datetime values against string response fields. SQLite controls pass. This is independent of177's analytics error/transaction cascade and167's deck/card response fix.
+- Status: unresolved, TASK13260.116. Preserve existing wire timestamps through the canonical conversion helper and retain actual-router PostgreSQL/SQLite coverage; native Study acceptance remains pending.
+
 ## UAT-178 — P1: Failed Cram queue load is displayed as successful completion
 
 - With one real saved new card in the selected deck, the queue GET returns500 repeatedly. Cram nevertheless says “Cram session complete! You reached the end of your cram queue.” No rating has occurred. This is distinct from039's pre-start readiness copy and128's scheduled re-rating queue shrink.
@@ -116,7 +123,7 @@
 ## UAT-175 — P2: Failed generated-deck save opens a blocking runtime error overlay
 
 - The duplicate-deck save displays inline error/retry feedback but also opens a Next Runtime Error overlay. The overlay intercepts normal deck-picker clicks, blocking the recovery suggested by the inline message. Causal reproduction identifies expected HTTP failure logging through console.error with an Error object, which Next forwards to its overlay. The caller catches the rejected promise; no unhandled rejection is observed. This is separate from174's server conflict mapping.
-- Status: unresolved, TASK13260.113. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md). Preserve failure reporting and drafts while containing the handled save failure in the recovery UI.
+- Status: implemented, TASK13260.113; native acceptance pending. Only expected HTTP create-deck/card failures use warning logging; rejected promises and unexpected-error diagnostics remain. Independent66 shared controls and11 actual Next/panel tests pass separately; compiler retains90 baseline diagnostics, lint clean. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup175/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
 
 ## UAT-174 — P2: PostgreSQL duplicate-deck creation returns a generic server error
 
