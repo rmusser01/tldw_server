@@ -410,7 +410,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   if (recipeClassification.kind === "quarantined_recipe") {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-background"
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
         data-testid="prompt-full-page-editor"
       >
         <div className="flex items-center border-b border-border px-4 py-2">
@@ -443,7 +443,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   if (recipeClassification.kind === "recipe" && initialRecipeSource) {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-background"
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
         data-testid="prompt-full-page-editor"
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -488,7 +488,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-background"
+      className="fixed inset-0 z-50 flex flex-col bg-bg"
       data-testid="prompt-full-page-editor"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -702,7 +702,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
           {showMobilePreview ? "Editor" : "Preview"}
         </button>
         {showMobilePreview && (
-          <div className="fixed inset-0 z-40 bg-background pt-12">
+          <div className="fixed inset-0 z-40 bg-bg pt-12">
             <PromptEditorPreview
               systemPrompt={previewSystemPrompt}
               userPrompt={previewUserPrompt}
