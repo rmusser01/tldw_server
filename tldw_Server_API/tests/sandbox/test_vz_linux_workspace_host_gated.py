@@ -154,6 +154,29 @@ def test_vz_linux_workspace_mismatch_then_healthy_session_reuse(
     The caller owns the isolated helper and disposable overlay. Observers never
     replace helper replies or execution. A successful create already passed the
     helper's normal guest wire-protocol validation; the guest mount is unchanged.
+
+    Args:
+        monkeypatch: Restores temporary environment/settings changes and real
+            helper-call observers after the test. Disables fake execution and
+            configures synchronous execution with isolated SQLite state.
+        tmp_path: Private test directory for sandbox state and the
+            ``guest-workspace.json`` receipt written once the drill begins.
+
+    Returns:
+        None after rejection, healthy recovery, same-session reuse and cleanup
+        meet all assertions. The negative control intentionally does not return.
+
+    Raises:
+        pytest.skip.Exception: The platform is unsupported, an opt-in is absent,
+            or normal real-E2E helper/healthy-image preflight is unavailable.
+        pytest.fail.Exception: Explicit fault-bundle/helper requirements or
+            metadata, rejection, execution, reuse or cleanup assertions fail.
+            The negative control deliberately fails the rejection assertion
+            after supported-root execution succeeds with real admission enabled.
+        OSError: Fault-bundle resolution or state/evidence file operations fail.
+
+    Helper transport errors outside preflight propagate as test errors; neither
+    errors nor skips count as acceptance in the enclosing operator workflow.
     """
     fault_bundle = _require_workspace_bundle()
     for name in (
