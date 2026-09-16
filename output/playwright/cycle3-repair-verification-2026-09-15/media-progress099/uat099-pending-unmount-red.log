@@ -1,0 +1,49 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:69784) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/__tests__/useMediaReadingProgress.test.tsx (9 tests | 1 failed | 7 skipped) 10ms
+     ↓ restores scroll position from percent_complete on load
+     ↓ does not write zero when delayed detail hydration changes the page count before progress arrives
+     ↓ restores after delayed content hydration and layout resize without overwriting saved progress
+     ↓ does not let a late progress response replace a newer user scroll
+     ✓ flushes the last actual scroll rather than resized loading geometry (loading) 7ms
+     × flushes the last actual scroll rather than resized loading geometry (unmount) 3ms
+     ↓ falls back to CFI-based scroll restore when percent_complete is absent
+     ↓ debounces scroll writes and avoids duplicate writes when unchanged
+     ↓ flushes pending progress when switching media ids and restores the next selection
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/__tests__/useMediaReadingProgress.test.tsx > useMediaReadingProgress > flushes the last actual scroll rather than resized loading geometry (unmount)
+AssertionError: expected last "vi.fn()" call to have been called with [ '1', ObjectContaining{…} ]
+
+- Expected:
+[
+  "1",
+  ObjectContaining {
+    "cfi": "scroll:40",
+    "percentage": 40,
+    "zoom_level": 100,
+  },
+]
+
++ Received:
+undefined
+
+ ❯ src/hooks/__tests__/useMediaReadingProgress.test.tsx:187:41
+    185|     }
+    186|
+    187|     expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', …
+       |                                         ^
+    188|   })
+    189|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 7 skipped (9)
+   Start at  16:54:57
+   Duration  445ms (transform 119ms, setup 63ms, import 107ms, tests 10ms, environment 187ms)

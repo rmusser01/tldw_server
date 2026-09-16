@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18280/media?id=1","clientHeight":2361,"scrollHeight":2361,"scrollTop":0,"rect":{"x":760,"y":180,"width":520,"height":2360.984375},"viewport":{"width":1280,"height":720},"textSize":["Text size M"]}
+### Ran Playwright code
+```js
+await (async (page) => { return await page.getByTestId("content-scroll-container").evaluate(el => ({url:location.href,clientHeight:el.clientHeight,scrollHeight:el.scrollHeight,scrollTop:el.scrollTop,rect:{x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y,width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height},viewport:{width:innerWidth,height:innerHeight},textSize:[...document.querySelectorAll("[aria-label^=\"Text size \"]")].filter(x=>x.getAttribute("aria-pressed")==="true").map(x=>x.getAttribute("aria-label"))})); })(page);
+```

@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-16T00:06:49.217Z","url":"http://127.0.0.1:18280/media?id=1","geometry":{"scrollTop":160,"height":540,"scrollHeight":835,"documentTop":0,"documentHeight":720},"records":[{"method":"GET","status":200,"body":{"media_id":1,"current_page":1,"total_pages":1,"zoom_level":100,"view_mode":"continuous","percent_complete":54.2,"cfi":"scroll:54.24","last_read_at":"2026-09-16T00:01:51.673898Z"}}]}
+### Ran Playwright code
+```js
+await (async page => {const records=[];const capture=async r=>{if(r.url().split("?")[0]==="http://127.0.0.1:18200/api/v1/media/1/progress"){records.push({method:r.request().method(),status:r.status(),body:await r.json()});}};page.on("response",capture);await page.reload();const c=page.getByTestId("content-scroll-container");await c.waitFor();await page.waitForFunction(()=>{const e=document.querySelector("[data-testid=content-scroll-container]");return e&&e.scrollTop>100;},null,{timeout:15000});await page.waitForTimeout(2000);page.off("response",capture);const geometry=await c.evaluate(e=>({scrollTop:e.scrollTop,height:e.clientHeight,scrollHeight:e.scrollHeight,documentTop:document.scrollingElement.scrollTop,documentHeight:document.documentElement.scrollHeight}));await page.screenshot({path:"/private/tmp/uat099-final-native-reloaded.png"});return {checkedAt:new Date().toISOString(),url:page.url(),geometry,records};})(page);
+```
+### Open tabs
+- 0: (current) [Media | tldw](http://127.0.0.1:18280/media?id=1)
+- 1: [127.0.0.1](chrome-error://chromewebdata/)
+- 2: [GitHub - rmusser01/tldw_browser_assistant: Browser extension for tldw_server · GitHub](https://github.com/rmusser01/tldw_browser_assistant)
+### Page
+- Page URL: http://127.0.0.1:18280/media?id=1
+- Page Title: Media | tldw
+### Events
+- New console entries: ../../../../../private/tmp/.playwright-cli/console-2026-09-15T23-34-47-864Z.log#L58-L59

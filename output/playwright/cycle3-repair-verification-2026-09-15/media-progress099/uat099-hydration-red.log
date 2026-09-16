@@ -1,0 +1,88 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:68077) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/__tests__/useMediaReadingProgress.test.tsx (6 tests | 2 failed | 4 skipped) 10ms
+     ↓ restores scroll position from percent_complete on load
+     × does not write zero when delayed detail hydration changes the page count before progress arrives 7ms
+     × restores after delayed content hydration and layout resize without overwriting saved progress 2ms
+     ↓ falls back to CFI-based scroll restore when percent_complete is absent
+     ↓ debounces scroll writes and avoids duplicate writes when unchanged
+     ↓ flushes pending progress when switching media ids and restores the next selection
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/__tests__/useMediaReadingProgress.test.tsx > useMediaReadingProgress > does not write zero when delayed detail hydration changes the page count before progress arrives
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 2 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "1",
+      Object {
+        "cfi": "scroll:0",
+        "current_page": 1,
+        "percentage": 0,
+        "total_pages": 1,
+        "view_mode": "continuous",
+        "zoom_level": 100,
+      },
+    ]
+
+  2nd vi.fn() call:
+
+    Array [
+      "1",
+      Object {
+        "cfi": "scroll:0",
+        "current_page": 1,
+        "percentage": 0,
+        "total_pages": 3,
+        "view_mode": "continuous",
+        "zoom_level": 100,
+      },
+    ]
+
+
+Number of calls: 2
+
+ ❯ src/hooks/__tests__/useMediaReadingProgress.test.tsx:131:45
+    129|     await act(async () => { release({ media_id: 1, percent_complete: 5…
+    130|
+    131|     expect(mocks.updateReadingProgress).not.toHaveBeenCalled()
+       |                                             ^
+    132|   })
+    133|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/hooks/__tests__/useMediaReadingProgress.test.tsx > useMediaReadingProgress > restores after delayed content hydration and layout resize without overwriting saved progress
+AssertionError: expected { top: +0, writes: [] } to deeply equal { top: 500, writes: [] }
+
+- Expected
++ Received
+
+  {
+-   "top": 500,
++   "top": 0,
+    "writes": [],
+  }
+
+ ❯ src/hooks/__tests__/useMediaReadingProgress.test.tsx:147:90
+    145|     await act(async () => { await Promise.resolve() })
+    146|
+    147|     expect({ top: container.scrollTop, writes: mocks.updateReadingProg…
+       |                                                                                          ^
+    148|   })
+    149|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 4 skipped (6)
+   Start at  16:50:26
+   Duration  456ms (transform 125ms, setup 64ms, import 114ms, tests 10ms, environment 187ms)

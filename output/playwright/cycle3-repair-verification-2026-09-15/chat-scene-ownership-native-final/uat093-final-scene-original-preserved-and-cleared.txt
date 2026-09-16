@@ -1,0 +1,15 @@
+### Result
+{"checkedAt":"2026-09-15T23:51:04.602Z","originalScene":"UAT ownership check: keep this Cedar scene on the same saved conversation.","clearedScene":"","state":{"id":"812385d9-f19b-4bdf-82a0-1d850884a4b3","characterId":4,"messages":2},"title":"Cycle3 Cedar Guide Chat (20260915_103705) | tldw"}
+### Ran Playwright code
+```js
+await (async page => {await page.getByRole("dialog",{name:"Role-play setup",exact:true}).getByRole("button",{name:"Cancel",exact:true}).click();await page.goto("http://127.0.0.1:18281/chat?settingsServerChatId=812385d9-f19b-4bdf-82a0-1d850884a4b3");await page.waitForFunction(()=>{const s=window.__tldw_useStoreMessageOption?.getState();return s?.serverChatId==="812385d9-f19b-4bdf-82a0-1d850884a4b3"&&s.serverChatMetaLoaded&&!s.isLoading&&s.messages.length===2;},null,{timeout:20000});await page.getByRole("button",{name:"Role-play setup",exact:true}).click();const dialog=page.getByRole("dialog",{name:"Role-play setup",exact:true});const scene=dialog.getByRole("textbox",{name:"Scene notes",exact:true});await scene.waitFor();const originalScene=await scene.inputValue();await dialog.getByRole("button",{name:"Clear scene",exact:true}).click();const clearedScene=await scene.inputValue();await dialog.getByRole("button",{name:"Apply",exact:true}).click();await dialog.waitFor({state:"hidden",timeout:20000});return {checkedAt:new Date().toISOString(),originalScene,clearedScene,state:await page.evaluate(()=>{const s=window.__tldw_useStoreMessageOption.getState();return {id:s.serverChatId,characterId:s.serverChatCharacterId,messages:s.messages.length};}),title:await page.title()};})(page);
+```
+### Open tabs
+- 0: (current) [Cycle3 Cedar Guide Chat (20260915_103705) | tldw](http://127.0.0.1:18281/chat)
+- 1: [Server Settings | tldw](http://127.0.0.1:18281/settings/tldw)
+- 2: [tldw_server/Docs/Getting_Started/README.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md)
+### Page
+- Page URL: http://127.0.0.1:18281/chat
+- Page Title: Cycle3 Cedar Guide Chat (20260915_103705) | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-15T23-36-42-697Z.log#L10-L15

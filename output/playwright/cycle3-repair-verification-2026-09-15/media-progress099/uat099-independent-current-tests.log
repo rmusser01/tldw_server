@@ -1,0 +1,76 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:72166) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx (23 tests) 5361ms
+     ✓ keeps saved reading position when passive chapter selection resolves after progress restoration (remembered=false)  1161ms
+     ✓ keeps saved reading position when passive chapter selection resolves after progress restoration (remembered=true)  1160ms
+     ✓ allows genuine scrolling and an explicit chapter jump to save their current positions  2384ms
+(node:72208) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.analysis-markdown.test.tsx (2 tests) 658ms
+     ✓ renders headings, emphasis and lists while copy and edit keep the original Markdown  583ms
+(node:72214) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage3.test.tsx (3 tests) 560ms
+(node:72221) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage4.accessibility.test.tsx (2 tests) 467ms
+     ✓ supports keyboard toggling for content and analysis sections  355ms
+(node:72229) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage10.findBar.test.tsx (6 tests) 438ms
+(node:72232) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage2.test.tsx (3 tests) 410ms
+(node:72250) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage12.performance.test.tsx (3 tests) 271ms
+(node:72256) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > shows inline fetch failure with retry and recovers on successful retry
+Error fetching media details: Error: temporary failure
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:303:30
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 500
+}
+
+ ✓ src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx (5 tests) 185ms
+(node:72265) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage1.test.tsx (4 tests) 156ms
+(node:72268) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > creates a collection from bulk selection and opens it in multi-review
+No routes matched location "/media-multi"
+
+ ✓ src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx (7 tests) 121ms
+(node:72271) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.stage14.reprocess.test.tsx (2 tests) 36ms
+(node:72274) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useMediaReadingProgress.test.tsx (9 tests) 70ms
+(node:72275) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/routes/__tests__/option-media-multi.connection-state.test.tsx (3 tests) 68ms
+(node:72277) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Review/__tests__/useMediaSelection.reading-progress.test.tsx (1 test) 10ms
+(node:72279) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/routes/__tests__/route-paths.viewport.test.ts (2 tests) 1ms
+
+ Test Files  15 passed (15)
+      Tests  75 passed (75)
+   Start at  17:01:48
+   Duration  20.39s (transform 870ms, setup 731ms, import 6.77s, tests 8.81s, environment 2.91s)

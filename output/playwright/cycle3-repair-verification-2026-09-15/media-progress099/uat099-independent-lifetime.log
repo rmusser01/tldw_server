@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:72609) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/hooks/__tests__/useMediaReadingProgress.test.tsx (11 tests) 72ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  17:03:48
+   Duration  505ms (transform 117ms, setup 63ms, import 106ms, tests 72ms, environment 187ms)

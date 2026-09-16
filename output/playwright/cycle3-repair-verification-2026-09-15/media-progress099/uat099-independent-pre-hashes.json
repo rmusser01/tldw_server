@@ -1,0 +1,49 @@
+{
+  "checkedAt": "2026-09-16T00:01:48.446Z",
+  "frozenAt": "2026-09-15T23:56:55.774Z",
+  "allMatched": true,
+  "files": [
+    {
+      "path": "apps/packages/ui/src/routes/route-paths.ts",
+      "sha256": "3baac68bf57f2e457c235a7b287e4cdafb30b92a5a4038eaf34dbd0f97838a61",
+      "bytes": 8140,
+      "actualSha256": "3baac68bf57f2e457c235a7b287e4cdafb30b92a5a4038eaf34dbd0f97838a61"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sha256": "0e2e76dcc45a78fb6826d6e4e5aefcc2b0550d026407fb23a7af3c5b356800d8",
+      "bytes": 71597,
+      "actualSha256": "0e2e76dcc45a78fb6826d6e4e5aefcc2b0550d026407fb23a7af3c5b356800d8"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sha256": "f994c33cb6c35921846741897f08dca1dfe5349a30ffbcc9e9be452094b1d6ac",
+      "bytes": 86800,
+      "actualSha256": "f994c33cb6c35921846741897f08dca1dfe5349a30ffbcc9e9be452094b1d6ac"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/hooks/useReadingProgress.tsx",
+      "sha256": "0e514c0057f2d982449ad230c96a87483b8b73a1b75f12659b199587fe7dc6b2",
+      "bytes": 15378,
+      "actualSha256": "0e514c0057f2d982449ad230c96a87483b8b73a1b75f12659b199587fe7dc6b2"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/useMediaReadingProgress.ts",
+      "sha256": "9f1281036339bcb2701342750e8f449faf91c24d66ae5cbfda0f29383ec71a48",
+      "bytes": 9060,
+      "actualSha256": "9f1281036339bcb2701342750e8f449faf91c24d66ae5cbfda0f29383ec71a48"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "sha256": "0b6dcc0ec5c2a990f95cb1bdf95f6e47d4383f5a5b44759bec164432697d9bfd",
+      "bytes": 35894,
+      "actualSha256": "0b6dcc0ec5c2a990f95cb1bdf95f6e47d4383f5a5b44759bec164432697d9bfd"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/__tests__/useMediaReadingProgress.test.tsx",
+      "sha256": "e9d0809cf258dd6ecb937d29c3c5bb3c2aacb8a98a3ac5063018dd5eda08488b",
+      "bytes": 11232,
+      "actualSha256": "e9d0809cf258dd6ecb937d29c3c5bb3c2aacb8a98a3ac5063018dd5eda08488b"
+    }
+  ]
+}
