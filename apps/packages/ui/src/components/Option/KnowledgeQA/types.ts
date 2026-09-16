@@ -298,6 +298,8 @@ export type KnowledgeQAState = {
   answerTrustReasonCodes: KnowledgeTrustReasonCode[]
   answerEvidenceOrigin: EvidenceOrigin | null
   extensionFailureState: ExtensionKnowledgeFailureState | null
+  // Captured request setting for the displayed completed result; null for legacy results.
+  completedGenerationEnabled: boolean | null
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null

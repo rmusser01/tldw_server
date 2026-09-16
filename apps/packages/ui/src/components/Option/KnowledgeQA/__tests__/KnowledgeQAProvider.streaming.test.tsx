@@ -81,10 +81,88 @@ describe("KnowledgeQAProvider streaming search", () => {
     latestContext = null
     mockTldwClient.normalizeRagQuery.mockImplementation((query: string) => query)
     trackMetricMock.mockResolvedValue(undefined)
+    mockTldwClient.fetchWithAuth.mockResolvedValue({ ok: false, json: async () => [], text: async () => "" })
     ragSearchMock.mockResolvedValue({
       results: [{ id: "fallback-doc" }],
       answer: "Fallback answer",
     })
+  })
+
+  it("contains timeout feedback without a console overlay and permits recovery", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    ragSearchStreamMock.mockImplementationOnce(() => { throw new Error("RAG search timed out. private-upstream-sentinel") })
+      .mockImplementation(async function* () {
+        yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
+        yield { type: "delta", text: "Cedar opens in January [1]." }
+        yield completeEvent(true)
+      })
+    try {
+      render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+      await waitFor(() => expect(latestContext).not.toBeNull())
+      await act(async () => { await latestContext!.selectThread("local-timeout-recovery") })
+      act(() => { latestContext!.setQuery("When does Cedar open?") })
+      await act(async () => { await latestContext!.search() })
+      expect(latestContext!.error).toMatch(/timed out/i)
+      expect(latestContext!.query).toBe("When does Cedar open?")
+      expect(latestContext!.isSearching).toBe(false)
+      expect(ragSearchMock).not.toHaveBeenCalled()
+      expect(consoleError).not.toHaveBeenCalled()
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain("private-upstream-sentinel")
+      await act(async () => { await latestContext!.search() })
+      expect(latestContext!.error).toBeNull()
+      expect(latestContext!.answer).toBe("Cedar opens in January [1].")
+    } finally { consoleError.mockRestore(); consoleWarn.mockRestore() }
+  })
+
+  it.each([true, false])("records completed generation=%s despite controls changing while waiting", async (requested) => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    ragSearchStreamMock.mockImplementation(async function* () {
+      await pending
+      yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
+      yield completeEvent(false)
+    })
+    ragSearchMock.mockImplementation(async () => {
+      await pending
+      return { results: [{ id: "cedar", content: "Cedar opens in January." }], answer: null }
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => { await latestContext!.selectThread("local-generation-snapshot") })
+    act(() => { latestContext!.setQuery("When does Cedar open?"); latestContext!.updateSetting("enable_generation", requested) })
+    let search!: Promise<void>
+    act(() => { search = latestContext!.search() })
+    await waitFor(() => expect(requested ? ragSearchStreamMock : ragSearchMock).toHaveBeenCalled())
+    act(() => { latestContext!.updateSetting("enable_generation", !requested); release() })
+    await act(async () => { await search })
+    expect(latestContext!.completedGenerationEnabled).toBe(requested)
+    expect(latestContext!.searchHistory[0]?.settingsSnapshot?.enable_generation).toBe(requested)
+    expect(latestContext!.settings.enable_generation).toBe(!requested)
+    expect(latestContext!.results).toHaveLength(1)
+    expect(latestContext!.answer).toBeNull()
+  })
+
+  it.each([true, false, undefined])("restores generation intent %s from a saved result independently of controls", async (enabled) => {
+    mockTldwClient.fetchWithAuth.mockResolvedValue({
+      ok: true,
+      json: async () => [{
+        id: "saved-answer", role: "assistant", content: "",
+        rag_context: {
+          search_query: "When does Cedar open?", generated_answer: "",
+          settings_snapshot: enabled === undefined ? {} : { enable_generation: enabled },
+          retrieved_documents: [{ id: "cedar", excerpt: "Cedar opens in January." }],
+        },
+      }],
+      text: async () => "",
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => { await latestContext!.selectThread("remote-empty-answer") })
+    expect(latestContext!.completedGenerationEnabled).toBe(enabled ?? null)
+    act(() => { latestContext!.updateSetting("enable_generation", enabled !== true) })
+    expect(latestContext!.completedGenerationEnabled).toBe(enabled ?? null)
+    expect(latestContext!.results).toHaveLength(1)
   })
 
   it("sends only completed question-answer pairs as follow-up context", async () => {
@@ -568,7 +646,7 @@ describe("KnowledgeQAProvider streaming search", () => {
   })
 
   it("does not replay a terminal provider credential error", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
     ragSearchStreamMock.mockImplementation(async function* () {
       yield {
         schema_version: 1,
@@ -608,11 +686,11 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(trackMetricMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "search_complete" })
     )
-    expect(consoleError).toHaveBeenCalledWith(
+    expect(consoleWarn).toHaveBeenCalledWith(
       "Search failed:",
       "provider_authentication_failed"
     )
-    consoleError.mockRestore()
+    consoleWarn.mockRestore()
   })
 
   it.each([
@@ -630,7 +708,7 @@ describe("KnowledgeQAProvider streaming search", () => {
     "stops after certified stream fallback and sanitized HTTP %i failure",
     async (status, code, expectedMessage) => {
       const sentinel = `sk-nonstream-${status}-/Users/private/provider.log`
-      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
       localStorage.setItem("tldwConfig", "keep-api-key-config")
       localStorage.setItem("access_token", "keep-access-token")
       sessionStorage.setItem("tldwManualSessionApiKey", "keep-session-api-key")
@@ -667,17 +745,17 @@ describe("KnowledgeQAProvider streaming search", () => {
       expect(sessionStorage.getItem("tldwManualSessionApiKey")).toBe(
         "keep-session-api-key"
       )
-      expect(consoleError).toHaveBeenCalledTimes(1)
-      const logged = JSON.stringify(consoleError.mock.calls)
+      expect(consoleWarn.mock.calls.filter(([label]) => label === "Search failed:")).toHaveLength(1)
+      const logged = JSON.stringify(consoleWarn.mock.calls)
       expect(logged).toContain(code)
       expect(logged).not.toContain(sentinel)
-      consoleError.mockRestore()
+      consoleWarn.mockRestore()
     }
   )
 
   it("sanitizes an unknown terminal stream error without replay", async () => {
     const sentinel = "sk-stream-secret-/Users/private/provider.log"
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
     ragSearchStreamMock.mockImplementation(async function* () {
       yield {
         schema_version: 1,
@@ -714,16 +792,16 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(latestContext!.error).toBe(
       "The selected provider is currently unavailable."
     )
-    const logged = JSON.stringify(consoleError.mock.calls)
+    const logged = JSON.stringify(consoleWarn.mock.calls)
     expect(logged).toContain("provider_unavailable")
     expect(logged).not.toContain("unknown_provider_failure")
     expect(logged).not.toContain(sentinel)
-    consoleError.mockRestore()
+    consoleWarn.mockRestore()
   })
 
   it("sanitizes an unknown non-stream error after certified fallback", async () => {
     const sentinel = "sk-nonstream-secret-/Users/private/provider.log"
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {})
     ragSearchStreamMock.mockImplementation(async function* () {
       yield preDispatchTransportError
     })
@@ -755,10 +833,10 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
     expect(ragSearchMock).toHaveBeenCalledTimes(1)
     expect(latestContext!.error).toBe("RAG search failed due to a server error.")
-    const logged = JSON.stringify(consoleError.mock.calls)
+    const logged = JSON.stringify(consoleWarn.mock.calls)
     expect(logged).not.toContain("unknown_provider_failure")
     expect(logged).not.toContain(sentinel)
-    consoleError.mockRestore()
+    consoleWarn.mockRestore()
   })
 
   it("does not replay after partial provider output", async () => {

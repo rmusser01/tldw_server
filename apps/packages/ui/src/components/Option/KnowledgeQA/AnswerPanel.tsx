@@ -183,6 +183,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     focusedSourceIndex = null,
     results,
     searchDetails,
+    completedGenerationEnabled = null,
+    search,
     query = "",
     currentThreadId = null,
     messages = [],
@@ -714,7 +716,29 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       )
     }
 
-    // Results but no generated answer
+    // Unknown legacy request settings must not be mistaken for disabled generation.
+    if (completedGenerationEnabled !== false) {
+      return (
+        <div className={cn("p-6 rounded-xl bg-warn/10 border border-warn/25", className)}>
+          <p className="font-medium text-text">No generated answer</p>
+          <p className="mt-1 text-sm text-text-muted">
+            {completedGenerationEnabled === true
+              ? "This search requested an answer, but no answer was returned. Your retrieved sources are still available. Retry the search or choose another answer model."
+              : "No generated answer is available for this result. Review generation settings and search again. Your retrieved sources are still available."}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={() => { void search() }} className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+              Retry search
+            </button>
+            <button type="button" onClick={() => setSettingsPanelOpen(true)} className="rounded-md border border-border px-2 py-1 text-xs font-medium">
+              Review generation settings
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Generation was deliberately disabled for the completed request.
     return (
       <div className={cn("p-6 rounded-xl bg-muted/30 border border-border", className)}>
         <div className="flex items-start gap-3">

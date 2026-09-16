@@ -16,6 +16,7 @@ const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
 
 type AnswerPanelTestSettings = {
+  enable_generation?: boolean
   max_generation_tokens: number
   strip_min_relevance: number
   enable_web_fallback: boolean
@@ -113,6 +114,8 @@ const state = {
   answerTrustReasonCodes: [] as KnowledgeTrustReasonCode[],
   answerEvidenceOrigin: null as EvidenceOrigin | null,
   citations: [] as Array<{ index: number }>,
+  completedGenerationEnabled: false as boolean | null,
+  search: vi.fn(),
   isSearching: false,
   error: null as string | null,
   results: [] as RagResult[],
@@ -179,6 +182,8 @@ vi.mock("../KnowledgeQAProvider", () => ({
     answerTrustReasonCodes: state.answerTrustReasonCodes,
     answerEvidenceOrigin: state.answerEvidenceOrigin,
     citations: state.citations,
+    completedGenerationEnabled: state.completedGenerationEnabled,
+    search: state.search,
     isSearching: state.isSearching,
     error: state.error,
     results: state.results,
@@ -207,6 +212,8 @@ describe("AnswerPanel state guardrails", () => {
     state.answerTrustReasonCodes = []
     state.answerEvidenceOrigin = null
     state.citations = []
+    state.completedGenerationEnabled = false
+    state.search = vi.fn().mockResolvedValue(undefined)
     state.isSearching = false
     state.error = null
     state.results = []
@@ -247,6 +254,35 @@ describe("AnswerPanel state guardrails", () => {
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Enable in Settings" }))
     expect(state.setSettingsPanelOpen).toHaveBeenCalledWith(true)
+  })
+
+  it("offers retry when the completed request enabled generation, preserving the sources", () => {
+    state.completedGenerationEnabled = true
+    state.settings.enable_generation = false
+    state.results = [{ id: "cedar", content: "Cedar opens in January." }]
+    render(<AnswerPanel />)
+    expect(screen.getByText(/requested an answer, but no answer was returned/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Enable answer generation in settings/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry search" }))
+    expect(state.search).toHaveBeenCalledTimes(1)
+    expect(state.results[0].content).toBe("Cedar opens in January.")
+  })
+
+  it("uses disabled-generation guidance from the completed request rather than edited controls", () => {
+    state.completedGenerationEnabled = false
+    state.settings.enable_generation = true
+    state.results = [{ id: "cedar" }]
+    render(<AnswerPanel />)
+    expect(screen.getByRole("button", { name: "Enable in Settings" })).toBeInTheDocument()
+  })
+
+  it("does not invent disabled-generation state for older results without a request snapshot", () => {
+    state.completedGenerationEnabled = null
+    state.settings.enable_generation = false
+    state.results = [{ id: "cedar" }]
+    render(<AnswerPanel />)
+    expect(screen.queryByText(/Enable answer generation in settings/)).not.toBeInTheDocument()
+    expect(screen.getByText(/No generated answer is available/)).toBeInTheDocument()
   })
 
   it("treats whitespace-only answers as missing generated content", () => {

@@ -72,6 +72,19 @@ describe("AnswerWorkspace accessibility announcements", () => {
     expect(screen.getByText("Search error. Search timed out")).toBeInTheDocument()
   })
 
+  it("clears the assertive timeout when a retry starts and completes", () => {
+    state.error = "Search timed out"
+    const { rerender } = render(<AnswerWorkspace queryStage="error" />)
+    expect(screen.getByText("Search error. Search timed out")).toBeInTheDocument()
+    state.error = null
+    rerender(<AnswerWorkspace queryStage="searching" />)
+    expect(screen.queryByText("Search error. Search timed out")).not.toBeInTheDocument()
+    state.results = [{ id: "cedar" }]
+    rerender(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.queryByText("Search error. Search timed out")).not.toBeInTheDocument()
+    expect(screen.getByText("Search complete. 1 source found.")).toBeInTheDocument()
+  })
+
   it("announces the security outcome instead of claiming no sources were found", () => {
     state.queryWarning = "Security settings excluded all retrieved sources."
     render(<AnswerWorkspace queryStage="complete" />)

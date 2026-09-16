@@ -146,8 +146,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   }, [queryStage, results.length, queryWarning])
 
   useEffect(() => {
-    if (!error) return
-    setAssertiveAnnouncement(`Search error. ${error}`)
+    setAssertiveAnnouncement(error ? `Search error. ${error}` : "")
   }, [error])
 
   return (

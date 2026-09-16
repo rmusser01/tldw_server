@@ -1,0 +1,11 @@
+{
+  "baseline": {
+    "errors": 0,
+    "warnings": 120
+  },
+  "final": {
+    "errors": 0,
+    "warnings": 120
+  },
+  "changedDiagnosticSignatures": []
+}

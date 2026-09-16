@@ -1,0 +1,77 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:7531) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx (12 tests | 2 failed | 10 skipped) 112ms
+     ↓ uses the persisted selected model while the catalog is still loading
+     ↓ normalizes a JSON-serialized persisted model before generation
+     ↓ waits for the catalog when no persisted model is selected
+     ↓ falls back to the live catalog when a persisted model is no longer available
+     ↓ preserves preset/custom prompt behavior and sends expected request body
+     ↓ notifies consumers only after the generated analysis is persisted
+     ↓ does not accept a stale prior analysis as persistence evidence
+     ↓ accepts a generated analysis returned only through media versions
+     ↓ recovers missing media content from a cache-busted detail request
+     × contains provider unavailable locally and leaves analysis retry available 80ms
+     × contains request timed out locally and leaves analysis retry available 31ms
+     ↓ shows provider recovery copy when generation fails without a provider
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > contains provider unavailable locally and leaves analysis retry available
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st Mock call:
+
+    Array [
+      "Generation error:",
+      [Error: provider unavailable private-upstream-sentinel],
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx:593:32
+    591|       expect(onClose).not.toHaveBeenCalled()
+    592|       expect(mocks.bgRequest.mock.calls.every(([init]) => !init.path.i…
+    593|       expect(consoleError).not.toHaveBeenCalled()
+       |                                ^
+    594|       expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('pr…
+    595|       mocks.bgStream.mockImplementation(async function* () { yield str…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > contains request timed out locally and leaves analysis retry available
+AssertionError: expected "Mock" to not be called at all, but actually been called 1 times
+
+Received: 
+
+  1st Mock call:
+
+    Array [
+      "Generation error:",
+      [Error: request timed out private-upstream-sentinel],
+    ]
+
+
+Number of calls: 1
+
+ ❯ ../packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx:593:32
+    591|       expect(onClose).not.toHaveBeenCalled()
+    592|       expect(mocks.bgRequest.mock.calls.every(([init]) => !init.path.i…
+    593|       expect(consoleError).not.toHaveBeenCalled()
+       |                                ^
+    594|       expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('pr…
+    595|       mocks.bgStream.mockImplementation(async function* () { yield str…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 skipped (12)
+   Start at  19:58:45
+   Duration  1.22s (transform 89ms, setup 131ms, import 577ms, tests 112ms, environment 314ms)
+

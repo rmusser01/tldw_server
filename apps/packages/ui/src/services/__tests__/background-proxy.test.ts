@@ -2849,6 +2849,43 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it.each(["idle", "caller"] as const)("owns errored-body cancellation after %s abort", async (cause) => {
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+      serverUrl: "http://127.0.0.1:19999", authMode: "single-user", apiKey: "synthetic-test-key",
+      credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:19999"
+    } : null)
+    const unhandled: unknown[] = []
+    const observe = (reason: unknown) => { unhandled.push(reason) }
+    process.on("unhandledRejection", observe)
+    const caller = new AbortController()
+    let bodyStarted!: () => void
+    const started = new Promise<void>((resolve) => { bodyStarted = resolve })
+    const fetchSpy = vi.fn(async (_input: unknown, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init!.signal!.addEventListener("abort", () => controller.error(new DOMException("BodyStreamBuffer was aborted", "AbortError")), { once: true })
+        bodyStarted()
+      }
+    }), { status: 200, headers: { "Content-Type": "text/event-stream" } }))
+    vi.stubGlobal("fetch", fetchSpy)
+    try {
+      const { bgStream } = await importProxy()
+      const consume = async () => { for await (const chunk of bgStream({ path: "/api/v1/rag/search/stream", method: "POST", body: { query: "Cedar" }, streamIdleTimeoutMs: cause === "idle" ? 10 : 1000, abortSignal: caller.signal, sanitizeRagProviderStreamError: true })) { void chunk } }
+      const handled = consume().catch((error: Error) => error)
+      await started
+      if (cause === "caller") caller.abort()
+      const error = await handled
+      if (cause === "idle") expect(error).toMatchObject({ message: expect.stringMatching(/timed out/i) })
+      else expect(error).toMatchObject({ name: "AbortError" })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(unhandled).toEqual([])
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      process.off("unhandledRejection", observe)
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("classifies direct stream aborts as AbortError", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: false })
     mocks.storageGet.mockImplementation(async (key: string) => {

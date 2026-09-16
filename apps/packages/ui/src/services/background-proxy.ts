@@ -1833,7 +1833,8 @@ async function* bgStreamDirectUnsafe<
   } finally {
     if (idleTimer) clearTimeout(idleTimer)
     try {
-      reader.cancel()
+      // An errored response body rejects cancellation too; preserve the primary error.
+      await reader.cancel()
     } catch {}
     if (abortSignal) {
       try {

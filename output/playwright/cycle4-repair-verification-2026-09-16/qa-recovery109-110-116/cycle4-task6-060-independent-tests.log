@@ -1,0 +1,211 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:12716) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Media/__tests__/ContentViewer.analysis-markdown.test.tsx (2 tests) 738ms
+     ✓ renders headings, emphasis and lists while copy and edit keep the original Markdown  654ms
+(node:12722) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Review/__tests__/MediaReviewReadingPane.design-system-alert.test.tsx (4 tests) 728ms
+     ✓ renders failed content through the design-system Alert and keeps retry behavior  345ms
+(node:12729) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx > AnswerPanel state guardrails > shows uncited answers as degraded rather than normal grounded answers
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx (39 tests) 782ms
+(node:12739) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Review/__tests__/MediaReviewPage.stage7.three-panel.test.tsx (14 tests) 425ms
+(node:12753) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > preserves a scoped RAG rejection while redacting provider diagnostics
+[tldw:request] POST /api/v1/rag/search 412 The server or authenticated account changed before the request was sent.
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > emits backend-unreachable event when API request fails with network status 0
+[tldw:request] GET /api/v1/llm/models/metadata 0 NetworkError when attempting to fetch resource.
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace migration chunk network failures scoped out of the global backend-unreachable modal
+[tldw:request] PUT /api/v1/workspaces/migrations/mig-1/chunks/chunk-1 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace source refresh network failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/workspaces/ws-1/sources 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps workspace upsert reconciliation failures scoped out of the global backend-unreachable modal
+[tldw:request] PUT /api/v1/workspaces/ws-1 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps Research Workspace chat command bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/chat/commands 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/audio/voices/catalog?provider=kitten_tts 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/audio/voices 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps optional ingestion-source capability bootstrap failures scoped out of the global backend-unreachable modal
+[tldw:request] GET /api/v1/ingestion-sources/capabilities 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy fallback safety > keeps caller-handled best-effort failures scoped out of the global backend-unreachable modal
+[tldw:request] PATCH /api/v1/media/3/keywords 0 Failed to fetch
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy GET coalescing > does not reuse a principal's 429 cooldown for another principal
+[tldw:request] GET /api/v1/persona/profiles 429 rate_limited
+
+stderr | src/services/__tests__/background-proxy.test.ts > background proxy GET coalescing > reuses a recent rate-limited GET failure instead of bursting
+[tldw:request] GET /api/v1/persona/profiles 429 rate_limited
+
+ ✓ src/services/__tests__/background-proxy.test.ts (125 tests) 331ms
+(node:12756) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx > MediaReviewPage stage5 export and trash handoff > exports selected items in json/markdown/text formats
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx:147:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+Warning: React does not recognize the `iconPlacement` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `iconplacement` instead. If you accidentally passed it from a parent component, remove it from the DOM element.
+    at button
+    at Button (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx:169:21)
+    at Tooltip (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx:182:22)
+    at div
+    at div
+    at div
+    at div
+    at MediaReviewReadingPane (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewReadingPane.tsx:36:35)
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+stderr | src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx > MediaReviewPage stage5 export and trash handoff > exports selected items in json/markdown/text formats
+Warning: Received `true` for a non-boolean attribute `danger`.
+
+If you want to write it to the DOM, pass a string instead: danger="true" or danger={value.toString()}.
+    at button
+    at Button (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx:169:21)
+    at div
+    at MediaReviewBatchBar (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewBatchBar.tsx:8:32)
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+stderr | src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx > MediaReviewPage stage5 export and trash handoff > navigates to trash view after successful batch delete when user chooses review trash
+Warning: You provided a `value` prop to a form field without an `onChange` handler. This will render a read-only field. If the field should be mutable use `defaultValue`. Otherwise, set either `onChange` or `readOnly`.
+    at input
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx:147:8
+    at div
+    at div
+    at MediaReviewResultsList (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewResultsList.tsx:16:35)
+    at div
+    at div
+    at div
+    at div
+    at ResizablePanels (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/ResizablePanels.tsx:7:3)
+    at div
+    at div
+    at MediaReviewPage (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/MediaReviewPage.tsx:30:54)
+
+ ✓ src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx (2 tests) 395ms
+(node:12759) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx > AnalysisModal stage 3 regression coverage > shows provider recovery copy when generation fails without a provider
+Analysis generation failed: provider_failure
+
+ ✓ src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx (12 tests) 444ms
+(node:12767) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > sends only completed question-answer pairs as follow-up context
+Search failed: Error
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > recovers from invalid RAG defaults using an explicit local provider and model
+Search failed: provider_configuration_invalid
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > does not invent citations from source prose or invalid numbered references
+Failed to create thread: TypeError: __vite_ssr_import_0__.tldwClient.createChat is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:32:76
+    at run (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:22:26)
+    at Object.createChat (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:32:55)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:1854:43
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:2273:20
+    at Object.search (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:2826:5)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx:235:29
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > explains security exclusion for a retrieval-only response
+Failed to create thread: TypeError: __vite_ssr_import_0__.tldwClient.createChat is not a function
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:32:76
+    at run (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:22:26)
+    at Object.createChat (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/knowledgeQaClient.ts:32:55)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:1854:43
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:2273:20
+    at Object.search (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx:2826:5)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx:274:29
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > falls back only for a certified pre-dispatch stream transport error
+Streaming is unavailable before provider dispatch; using standard search.
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > fails closed when a certified replay terminal is followed by a trailing delta
+Search failed: RagTerminalStreamError
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > fails closed when a certified replay terminal is followed by a second terminal
+Search failed: RagTerminalStreamError
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > does not replay after partial provider output
+Search failed: provider_unavailable
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > fails closed for malformed terminal events
+Search failed: RagTerminalStreamError
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > normalizes whitespace-only non-stream answers to null
+Streaming is unavailable before provider dispatch; using standard search.
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > removes out-of-scope local results without remapping surviving citation indexes
+Streaming is unavailable before provider dispatch; using standard search.
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > removes out-of-scope local results without remapping surviving citation indexes
+Knowledge QA returned out-of-scope sources: {
+  violations: [
+    {
+      index: 0,
+      sourceId: '99',
+      sourceType: 'media_db',
+      reason: 'excluded_source'
+    }
+  ]
+}
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > surfaces query-length warning when a submitted query exceeds backend limits
+Streaming is unavailable before provider dispatch; using standard search.
+
+stderr | src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx > KnowledgeQAProvider streaming search > merges pinned source filters into rag search options
+Streaming is unavailable before provider dispatch; using standard search.
+
+ ✓ src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx (31 tests) 254ms
+(node:12772) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/KnowledgeQA/__tests__/AnswerWorkspace.a11y.test.tsx (6 tests) 24ms
+(node:12781) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Review/__tests__/ContentRenderer.test.tsx (11 tests) 15ms
+
+ Test Files  10 passed (10)
+      Tests  246 passed (246)
+   Start at  20:08:23
+   Duration  11.52s (transform 1.05s, setup 511ms, import 3.99s, tests 4.14s, environment 2.04s)
+

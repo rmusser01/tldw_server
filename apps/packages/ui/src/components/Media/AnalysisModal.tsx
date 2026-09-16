@@ -476,7 +476,7 @@ export function AnalysisModal({
             : t('mediaPage.analysisGenerateFailed', 'Failed to generate analysis')
         )
       }
-      console.error('Generation error:', err)
+      console.warn('Analysis generation failed:', isTimeoutError(err) ? 'timeout' : 'provider_failure')
     } finally {
       clearGenerationTimer()
       if (activeAbortControllerRef.current === abortController) {

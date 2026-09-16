@@ -125,6 +125,7 @@ const initialState: KnowledgeQAState = {
   answerTrustReasonCodes: [],
   answerEvidenceOrigin: null,
   extensionFailureState: null,
+  completedGenerationEnabled: null,
   searchDetails: null,
   error: null,
   queryWarning: null,
@@ -158,6 +159,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
 type ResultsPayload = {
+  completedGenerationEnabled?: boolean | null
   results: RagResult[]
   answer: string | null
   citations: CitationRef[]
@@ -262,6 +264,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        completedGenerationEnabled: action.payload.completedGenerationEnabled ?? null,
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
@@ -329,6 +332,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: [],
+        completedGenerationEnabled: null,
         answer: null,
         citations: [],
         answerTrustState: "unknown_trust",
@@ -1449,6 +1453,8 @@ function createRestorableSettingsSnapshot(settings: RagSettings): Partial<RagSet
       typeof settings.enable_reranking === "boolean" ? settings.enable_reranking : undefined,
     enable_citations:
       typeof settings.enable_citations === "boolean" ? settings.enable_citations : undefined,
+    enable_generation:
+      typeof settings.enable_generation === "boolean" ? settings.enable_generation : undefined,
     enable_web_fallback:
       typeof settings.enable_web_fallback === "boolean" ? settings.enable_web_fallback : undefined,
     web_fallback_threshold:
@@ -1515,6 +1521,9 @@ function normalizeRestorableSettingsSnapshot(
   }
   if (typeof candidate.enable_citations === "boolean") {
     normalized.enable_citations = candidate.enable_citations
+  }
+  if (typeof candidate.enable_generation === "boolean") {
+    normalized.enable_generation = candidate.enable_generation
   }
   if (typeof candidate.enable_web_fallback === "boolean") {
     normalized.enable_web_fallback = candidate.enable_web_fallback
@@ -2613,6 +2622,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
             results,
             answer,
             citations,
+            completedGenerationEnabled: effectiveSettings.enable_generation,
             answerTrustState,
             answerTrustReasonCodes,
             answerEvidenceOrigin,
@@ -2739,7 +2749,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           dispatch({ type: "SET_QUERY_STAGE", payload: "idle" })
           return
         }
-        console.error(
+        console.warn(
           "Search failed:",
           getKnowledgeQaSearchErrorLogCode(error)
         )
@@ -2923,6 +2933,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,
@@ -3039,6 +3050,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           dispatch({
             type: "SET_RESULTS",
             payload: {
+              completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
               citations: hydration.citations,
@@ -3193,6 +3205,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
             citations: hydration.citations,

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AnalysisModal } from '../AnalysisModal'
 
 const mocks = vi.hoisted(() => ({
+  handledPromises: [] as Promise<unknown>[],
   bgRequest: vi.fn(),
   bgStream: vi.fn(),
   getChatModels: vi.fn(),
@@ -48,7 +49,10 @@ vi.mock('antd', async (importOriginal) => {
   const Button = ({ children, onClick, disabled, loading, danger: _danger, ...rest }: any) => (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event) => {
+        const result = onClick?.(event)
+        if (result?.then) mocks.handledPromises.push(result)
+      }}
       disabled={Boolean(disabled || loading)}
       data-loading={loading ? 'true' : 'false'}
       {...rest}
@@ -135,6 +139,7 @@ const streamChunk = (text: string) =>
 
 describe('AnalysisModal stage 3 regression coverage', () => {
   beforeEach(() => {
+    mocks.handledPromises.length = 0
     mocks.bgRequest.mockReset()
     mocks.bgStream.mockReset()
     mocks.getChatModels.mockReset()
@@ -567,6 +572,37 @@ describe('AnalysisModal stage 3 regression coverage', () => {
         )
       })
     )
+  })
+
+  it.each([
+    ["provider unavailable", "Failed to generate analysis"],
+    ["request timed out", "timed out"],
+  ])('contains %s locally and leaves analysis retry available', async (failureText, feedback) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const failure = new Error(failureText + ' private-upstream-sentinel')
+    mocks.bgStream.mockImplementation(() => { throw failure })
+    mocks.bgRequest.mockRejectedValue(failure)
+    const onClose = vi.fn(), onGenerated = vi.fn()
+    try {
+      render(<AnalysisModal open onClose={onClose} mediaId={42} mediaContent="Original source" onAnalysisGenerated={onGenerated} />)
+      const button = screen.getByRole('button', { name: 'Generate Analysis' })
+      await waitFor(() => expect(button).not.toBeDisabled())
+      fireEvent.click(button)
+      await waitFor(() => expect(mocks.messageError).toHaveBeenCalled())
+      expect(mocks.messageError.mock.calls[0][0]).toMatch(new RegExp(feedback, 'i'))
+      expect(button).not.toBeDisabled()
+      expect((await Promise.allSettled(mocks.handledPromises)).map((outcome) => outcome.status)).toEqual(['fulfilled'])
+      expect(onGenerated).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+      expect(mocks.bgRequest.mock.calls.every(([init]) => !init.path.includes('/versions'))).toBe(true)
+      expect(consoleError).not.toHaveBeenCalled()
+      expect(JSON.stringify(consoleWarn.mock.calls)).not.toContain('private-upstream-sentinel')
+      mocks.bgStream.mockImplementation(async function* () { yield streamChunk('Recovered analysis') })
+      mocks.bgRequest.mockResolvedValue({ processing: { analysis: 'Recovered analysis' } })
+      fireEvent.click(button)
+      await waitFor(() => expect(onGenerated).toHaveBeenCalledWith('Recovered analysis', expect.any(String)))
+    } finally { consoleError.mockRestore(); consoleWarn.mockRestore() }
   })
 
   it('shows provider recovery copy when generation fails without a provider', async () => {

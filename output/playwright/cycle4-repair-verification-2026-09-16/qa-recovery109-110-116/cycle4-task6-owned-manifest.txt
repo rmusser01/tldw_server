@@ -1,0 +1,11 @@
+apps/packages/ui/src/services/background-proxy.ts
+apps/packages/ui/src/services/__tests__/background-proxy.test.ts
+apps/packages/ui/src/components/Media/AnalysisModal.tsx
+apps/packages/ui/src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/AnswerPanel.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/types.ts
+apps/packages/ui/src/components/Option/KnowledgeQA/panels/AnswerWorkspace.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.streaming.test.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerPanel.states.test.tsx
+apps/packages/ui/src/components/Option/KnowledgeQA/__tests__/AnswerWorkspace.a11y.test.tsx
