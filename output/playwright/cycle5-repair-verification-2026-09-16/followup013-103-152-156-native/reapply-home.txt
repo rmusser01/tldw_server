@@ -1,0 +1,191 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [Home | tldw](http://127.0.0.1:18580/)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/
+- Page Title: Home | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f22e1]:
+  - generic [ref=f22e4]:
+    - link "Skip to main content" [ref=f22e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f22e6]:
+      - button "Expand sidebar" [ref=f22e7] [cursor=pointer]
+      - button "New Chat" [ref=f22e11] [cursor=pointer]
+      - generic [ref=f22e14]:
+        - button "Quick Ingest" [ref=f22e15] [cursor=pointer]
+        - button "Chat" [ref=f22e19] [cursor=pointer]
+        - button "Prompts" [ref=f22e22] [cursor=pointer]
+        - button "Characters" [ref=f22e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f22e31] [cursor=pointer]
+        - button "World Books" [ref=f22e35] [cursor=pointer]
+        - button "Notes" [ref=f22e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f22e42] [cursor=pointer]
+        - button "Media" [ref=f22e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f22e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f22e59] [cursor=pointer]
+        - button "Kanban" [ref=f22e65] [cursor=pointer]
+        - button "Watchlists" [ref=f22e67] [cursor=pointer]
+      - generic [ref=f22e72]:
+        - button "Open Notes Dock" [ref=f22e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f22e78] [cursor=pointer]
+        - button "Settings" [ref=f22e81] [cursor=pointer]
+    - main [ref=f22e85]:
+      - generic [ref=f22e86]:
+        - generic [ref=f22e89]:
+          - generic [ref=f22e90]:
+            - button "Expand sidebar" [ref=f22e91] [cursor=pointer]
+            - generic [ref=f22e93]:
+              - img "tldw Assistant" [ref=f22e94]
+              - generic [ref=f22e95]: tldw Assistant
+              - button "Companion Home" [ref=f22e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f22e100] [cursor=pointer]
+          - generic [ref=f22e103]:
+            - button "Search - Open command palette" [ref=f22e104] [cursor=pointer]:
+              - generic [ref=f22e108]: Search
+              - generic [ref=f22e109]: ⌘K
+            - button "Open settings" [ref=f22e110] [cursor=pointer]
+            - generic [ref=f22e122]:
+              - button "Notifications, 0 unread" [ref=f22e123] [cursor=pointer]
+              - status [ref=f22e127]: Notifications are active
+            - button "Switch to light theme" [ref=f22e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f22e135] [cursor=pointer]:
+              - generic [ref=f22e136]: "?"
+        - generic [ref=f22e137]:
+          - region [ref=f22e138]:
+            - generic [ref=f22e139]:
+              - generic [ref=f22e145]:
+                - heading "Add your first source" [level=2] [ref=f22e146]
+                - paragraph [ref=f22e147]: Your first source is ready for grounded chat.
+                - paragraph [ref=f22e148]: rowan-community-library-home.md
+              - button "Dismiss" [ref=f22e150] [cursor=pointer]
+            - generic [ref=f22e154]:
+              - paragraph [ref=f22e155]: Starter questions
+              - generic [ref=f22e156]:
+                - button "Summarize this source." [ref=f22e157] [cursor=pointer]
+                - button "List the key claims." [ref=f22e158] [cursor=pointer]
+                - button "What should I remember?" [ref=f22e159] [cursor=pointer]
+          - generic [ref=f22e160]:
+            - generic [ref=f22e161]:
+              - generic [ref=f22e162]:
+                - generic [ref=f22e163]:
+                  - generic [ref=f22e164]:
+                    - paragraph [ref=f22e165]: Companion Home
+                    - heading "Companion" [level=1] [ref=f22e166]
+                    - paragraph [ref=f22e167]: Review what is waiting in your inbox, what needs attention next, and which work threads are worth resuming right now.
+                  - generic [ref=f22e168]:
+                    - button "Customize Home" [ref=f22e169] [cursor=pointer]
+                    - button "Refresh" [ref=f22e170] [cursor=pointer]
+                - generic [ref=f22e171]:
+                  - paragraph [ref=f22e172]: Setup
+                  - generic [ref=f22e173]:
+                    - generic [ref=f22e174]:
+                      - heading "Companion setup required" [level=2] [ref=f22e175]
+                      - paragraph [ref=f22e176]: Personalization is unavailable on this connection. Your server operator may need to enable the backend feature using the configuration guide.
+                    - link "Personalization configuration guide" [ref=f22e177] [cursor=pointer]:
+                      - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev
+                - generic [ref=f22e178]:
+                  - generic [ref=f22e179]:
+                    - paragraph [ref=f22e180]: Inbox
+                    - paragraph [ref=f22e181]: "0"
+                    - paragraph [ref=f22e182]: Unread or newly surfaced items
+                  - generic [ref=f22e183]:
+                    - paragraph [ref=f22e184]: Goals
+                    - paragraph [ref=f22e185]: "0"
+                    - paragraph [ref=f22e186]: Live priorities in focus
+                  - generic [ref=f22e187]:
+                    - paragraph [ref=f22e188]: Reading
+                    - paragraph [ref=f22e189]: "0"
+                    - paragraph [ref=f22e190]: Queued items ready to revisit
+                  - generic [ref=f22e191]:
+                    - paragraph [ref=f22e192]: Resume
+                    - paragraph [ref=f22e193]: "0"
+                    - paragraph [ref=f22e194]: Threads worth picking back up
+              - generic [ref=f22e195]:
+                - generic [ref=f22e196]:
+                  - generic [ref=f22e197]:
+                    - generic [ref=f22e198]:
+                      - heading "Automation Inbox" [level=2] [ref=f22e199]
+                      - paragraph [ref=f22e200]: Nothing new from automations.
+                    - generic [ref=f22e201]: "0"
+                  - generic [ref=f22e202]:
+                    - generic [ref=f22e203]: No automation results yet
+                    - paragraph [ref=f22e204]: Results and failures from scheduled tasks appear here after a run. Future scheduled questions and agent outputs appear here only when routed by task visibility policy.
+                - generic [ref=f22e205]:
+                  - generic [ref=f22e206]:
+                    - generic [ref=f22e207]:
+                      - heading "Inbox Preview" [level=2] [ref=f22e208]
+                      - paragraph [ref=f22e209]: Setup required
+                    - generic [ref=f22e210]: "0"
+                  - generic [ref=f22e211]:
+                    - generic [ref=f22e212]: Setup required
+                    - paragraph [ref=f22e213]: Connect your tldw server and enable personalization to unlock this feature. Companion inbox items unlock once personalization is available for this workspace.
+                - generic [ref=f22e214]:
+                  - generic [ref=f22e215]:
+                    - generic [ref=f22e216]:
+                      - heading "Needs Attention" [level=2] [ref=f22e217]
+                      - paragraph [ref=f22e218]: Setup required
+                    - generic [ref=f22e219]: "0"
+                  - generic [ref=f22e220]:
+                    - generic [ref=f22e221]: Setup required
+                    - paragraph [ref=f22e222]: Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading.
+              - generic [ref=f22e223]:
+                - generic [ref=f22e224]:
+                  - generic [ref=f22e225]:
+                    - generic [ref=f22e226]:
+                      - heading "Resume Work" [level=2] [ref=f22e227]
+                      - paragraph [ref=f22e228]: Setup required
+                    - generic [ref=f22e229]: "0"
+                  - generic [ref=f22e230]:
+                    - generic [ref=f22e231]: Setup required
+                    - paragraph [ref=f22e232]: Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes.
+                - generic [ref=f22e233]:
+                  - generic [ref=f22e234]:
+                    - generic [ref=f22e235]:
+                      - heading "Goals / Focus" [level=2] [ref=f22e236]
+                      - paragraph [ref=f22e237]: Setup required
+                    - generic [ref=f22e238]: "0"
+                  - generic [ref=f22e239]:
+                    - generic [ref=f22e240]: Setup required
+                    - paragraph [ref=f22e241]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to turn goals and focus prompts into a live dashboard block.
+                - generic [ref=f22e242]:
+                  - generic [ref=f22e243]:
+                    - generic [ref=f22e244]:
+                      - heading "Recent Activity" [level=2] [ref=f22e245]
+                      - paragraph [ref=f22e246]: Setup required
+                    - generic [ref=f22e247]: "0"
+                  - generic [ref=f22e248]:
+                    - generic [ref=f22e249]: Setup required
+                    - paragraph [ref=f22e250]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to review recent activity and capture trails here.
+                - generic [ref=f22e251]:
+                  - generic [ref=f22e252]:
+                    - generic [ref=f22e253]:
+                      - heading "Reading Queue" [level=2] [ref=f22e254]
+                      - paragraph [ref=f22e255]: Setup required
+                    - generic [ref=f22e256]: "0"
+                  - generic [ref=f22e257]:
+                    - generic [ref=f22e258]: Setup required
+                    - paragraph [ref=f22e259]: Connect your tldw server and enable personalization to unlock your reading queue.
+            - generic [ref=f22e260]:
+              - generic [ref=f22e261]:
+                - heading "Quick actions" [level=2] [ref=f22e262]
+                - paragraph [ref=f22e263]: Jump to the main features.
+              - generic [ref=f22e264]:
+                - link "Open Chat Continue active work in the main chat workspace." [ref=f22e265] [cursor=pointer]:
+                  - /url: /chat
+                  - generic [ref=f22e266]: Open Chat
+                  - paragraph [ref=f22e267]: Continue active work in the main chat workspace.
+                - link "Open Knowledge Review sources, notes, and captured knowledge from the main workspace." [ref=f22e268] [cursor=pointer]:
+                  - /url: /knowledge
+                  - generic [ref=f22e269]: Open Knowledge
+                  - paragraph [ref=f22e270]: Review sources, notes, and captured knowledge from the main workspace.
+                - link "Open Analysis Review and compare media from the main workspace." [ref=f22e271] [cursor=pointer]:
+                  - /url: /media-multi
+                  - generic [ref=f22e272]: Open Analysis
+                  - paragraph [ref=f22e273]: Review and compare media from the main workspace.
+  - button "Open Next.js Dev Tools" [ref=f22e279] [cursor=pointer]
+  - alert [ref=f22e283]
+```

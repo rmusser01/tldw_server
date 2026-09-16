@@ -1,0 +1,27 @@
+### Ran Playwright code
+```js
+await page.reload();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T21-30-40-653Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T21-22-39-122Z.log#L8-L9
+
+- generic [active] [ref=f20e1]:
+  - status [ref=f20e4]:
+    - generic [ref=f20e6]:
+      - generic [ref=f20e7]:
+        - generic [ref=f20e8]: Loading
+        - generic [ref=f20e9]:
+          - heading "Checking server readiness" [level=2] [ref=f20e10]
+          - generic [ref=f20e11]: The WebUI is checking the API health endpoint before opening the app.
+      - button "Waiting" [disabled] [ref=f20e13]
+  - button "Open Next.js Dev Tools" [ref=f20e19] [cursor=pointer]
+  - alert [ref=f20e23]

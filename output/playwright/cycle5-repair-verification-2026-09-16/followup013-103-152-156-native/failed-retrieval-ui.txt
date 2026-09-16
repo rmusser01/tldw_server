@@ -1,0 +1,192 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw
+- Console: 1 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [ref=f19e20]:
+  - generic [ref=f19e23]:
+    - link "Skip to main content" [ref=f19e24] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f19e25]:
+      - button "Expand sidebar" [ref=f19e26] [cursor=pointer]
+      - button "New Chat" [ref=f19e30] [cursor=pointer]
+      - generic [ref=f19e33]:
+        - button "Quick Ingest" [ref=f19e34] [cursor=pointer]
+        - button "Chat" [ref=f19e38] [cursor=pointer]
+        - button "Prompts" [ref=f19e41] [cursor=pointer]
+        - button "Characters" [ref=f19e45] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f19e50] [cursor=pointer]
+        - button "World Books" [ref=f19e54] [cursor=pointer]
+        - button "Notes" [ref=f19e57] [cursor=pointer]
+        - button "Knowledge QA" [ref=f19e61] [cursor=pointer]
+        - button "Media" [ref=f19e69] [cursor=pointer]
+        - button "Document Workspace" [ref=f19e72] [cursor=pointer]
+        - button "Research Workspace" [ref=f19e78] [cursor=pointer]
+        - button "Kanban" [ref=f19e84] [cursor=pointer]
+        - button "Watchlists" [ref=f19e86] [cursor=pointer]
+      - generic [ref=f19e91]:
+        - button "Open Notes Dock" [ref=f19e92] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f19e97] [cursor=pointer]
+        - button "Settings" [ref=f19e100] [cursor=pointer]
+    - main [ref=f19e104]:
+      - generic [ref=f19e105]:
+        - generic [ref=f19e108]:
+          - generic [ref=f19e109]:
+            - button "Expand sidebar" [ref=f19e110] [cursor=pointer]
+            - generic [ref=f19e112]:
+              - img "tldw Assistant" [ref=f19e113]
+              - generic [ref=f19e114]: tldw Assistant
+              - button "Companion Home" [ref=f19e115] [cursor=pointer]
+              - button "Show shortcuts" [ref=f19e119] [cursor=pointer]
+            - button "For this fictional Cedar fixture, the coordinator is Leo Park and the return box" [ref=f19e915] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f19e917]: Saved
+          - generic [ref=f19e122]:
+            - button "Search - Open command palette" [ref=f19e123] [cursor=pointer]:
+              - generic [ref=f19e127]: Search
+              - generic [ref=f19e128]: ⌘K
+            - button "New saved chat" [ref=f19e918] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f19e922] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f19e923] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f19e924] [cursor=pointer]
+            - button "Open settings" [ref=f19e129] [cursor=pointer]
+            - generic [ref=f19e141]:
+              - button "Notifications, 0 unread" [ref=f19e142] [cursor=pointer]
+              - status [ref=f19e146]: Notifications are active
+            - button "Switch to light theme" [ref=f19e147] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f19e154] [cursor=pointer]:
+              - generic [ref=f19e155]: "?"
+        - generic [ref=f19e156]:
+          - heading "Chat" [level=1] [ref=f19e931]
+          - generic [ref=f19e934]:
+            - paragraph [ref=f19e935]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f19e936]:
+              - main [ref=f19e937]:
+                - generic [ref=f19e938]:
+                  - generic [ref=f19e940]:
+                    - generic [ref=f19e941]:
+                      - generic [ref=f19e942]: Standard chat
+                      - generic [ref=f19e943]: Conversation timeline
+                    - generic [ref=f19e944]:
+                      - button "Switch to light theme" [ref=f19e945] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f19e952] [cursor=pointer]:
+                        - generic [ref=f19e958]: Focus
+                      - button "Shortcuts" [ref=f19e959] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f19e963]
+                  - log "Chat messages" [ref=f19e965]:
+                    - generic [ref=f19e967]:
+                      - article "System message 1 of 5" [ref=f19e1218]:
+                        - generic [ref=f19e974]:
+                          - generic [ref=f19e976]:
+                            - generic [ref=f19e977]: System prompt
+                            - generic [ref=f19e978]: • 2:18 PM
+                          - paragraph [ref=f19e980]: You are a helpful AI assistant.
+                          - generic [ref=f19e981]:
+                            - generic [ref=f19e982]:
+                              - generic [ref=f19e983]: Was this helpful?
+                              - generic [ref=f19e984]:
+                                - button "Helpful" [ref=f19e985] [cursor=pointer]
+                                - button "Not helpful" [ref=f19e988] [cursor=pointer]
+                                - button "More feedback" [ref=f19e991] [cursor=pointer]
+                            - button "More actions" [ref=f19e1219] [cursor=pointer]: •••
+                      - article "User message 2 of 5" [ref=f19e1220]:
+                        - generic [ref=f19e1016]:
+                          - generic [ref=f19e1018]:
+                            - generic [ref=f19e1019]: You
+                            - generic [ref=f19e1020]: • 2:18 PM
+                          - paragraph [ref=f19e1022]: For this fictional Cedar fixture, the coordinator is Leo Park and the return box is at the west entrance. Repeat those two Cedar facts briefly.
+                          - button "More actions" [ref=f19e1025] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 5" [ref=f19e1221]:
+                        - generic [ref=f19e1035]:
+                          - generic [ref=f19e1037]:
+                            - generic [ref=f19e1038]: Assistant
+                            - generic [ref=f19e1039]: • 2:18 PM
+                          - paragraph [ref=f19e1223]: The coordinator is Leo Park, and the return box is at the west entrance.
+                          - generic [ref=f19e1043]:
+                            - generic [ref=f19e1044]:
+                              - generic [ref=f19e1045]: Was this helpful?
+                              - generic [ref=f19e1046]:
+                                - button "Helpful" [ref=f19e1047] [cursor=pointer]
+                                - button "Not helpful" [ref=f19e1050] [cursor=pointer]
+                                - button "More feedback" [ref=f19e1053] [cursor=pointer]
+                            - button "More actions" [ref=f19e1059] [cursor=pointer]: •••
+                      - article "User message 4 of 5" [ref=f19e1224]:
+                        - generic [ref=f19e1227]:
+                          - generic [ref=f19e1229]:
+                            - generic [ref=f19e1230]: You
+                            - generic [ref=f19e1231]: • 2:30 PM
+                          - paragraph [ref=f19e1233]: "Chat with this media: rowan-community-library-home.md Summarize this source."
+                          - button "More actions" [ref=f19e1236] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 5" [ref=f19e1240]:
+                        - generic [ref=f19e1246]:
+                          - generic [ref=f19e1248]:
+                            - generic [ref=f19e1249]: llama.cpp/gemma-4-26B-A4B-it
+                            - generic [ref=f19e1250]: • 2:30 PM
+                          - generic [ref=f19e1252]:
+                            - paragraph [ref=f19e1253]: I couldn't retrieve evidence from the selected sources, so I did not send this as general chat. Check that the sources are ready and indexed, then try again.
+                            - paragraph [ref=f19e1254]: "Details: Cannot reach server. Check your connection and try again."
+                          - button "More actions" [ref=f19e1257] [cursor=pointer]: •••
+                  - generic [ref=f19e1060]:
+                    - generic [ref=f19e1061]: Composer
+                    - generic [ref=f19e1069]:
+                      - button [aria-hidden] [ref=f19e1070]
+                      - button [aria-hidden] [ref=f19e1071]
+                      - generic [ref=f19e1072]:
+                        - generic [ref=f19e1074]:
+                          - button "Hide composer options" [expanded] [ref=f19e1075] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f19e1080]
+                          - generic [ref=f19e1081]:
+                            - button "Improve prompt" [ref=f19e1084] [cursor=pointer]
+                            - generic [ref=f19e1089]:
+                              - button "Send message" [ref=f19e1090] [cursor=pointer]:
+                                - generic [ref=f19e1091]: Send
+                              - button "Open message delivery options" [ref=f19e1096] [cursor=pointer]
+                        - generic [ref=f19e1101]:
+                          - generic [ref=f19e1103]:
+                            - group "Mode and context controls" [ref=f19e1104]:
+                              - button "Modes" [ref=f19e1105] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f19e1112] [cursor=pointer]':
+                                - generic [ref=f19e1113]:
+                                  - generic [ref=f19e1114]: MCP
+                                  - generic [ref=f19e1115]: None
+                              - button "Search & Context" [ref=f19e1118] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f19e1123] [cursor=pointer]:
+                                - generic [ref=f19e1126]: Prompt
+                              - button "Select character or persona" [ref=f19e1127] [cursor=pointer]
+                              - button "Role-play setup" [ref=f19e1132] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f19e1139] [cursor=pointer]
+                            - group "Run input controls" [ref=f19e1145]:
+                              - button "OpenUI" [ref=f19e1146] [cursor=pointer]
+                              - button "Start dictation" [ref=f19e1152] [cursor=pointer]
+                              - generic [ref=f19e1156]:
+                                - button "Attach image" [disabled] [ref=f19e1158]
+                                - button "More attachments" [ref=f19e1162] [cursor=pointer]
+                              - button "More tools" [ref=f19e1165] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f19e1168] [cursor=pointer]:
+                                - generic [ref=f19e1172]: Chat Settings
+                          - generic "Active context" [ref=f19e1173]:
+                            - button "LLaMa.cpp / Gemma 4 26B vision on 19099 (llama.cpp/gemma-4-26B-A4B-it)" [ref=f19e1175] [cursor=pointer]:
+                              - generic "Provider status" [ref=f19e1179]: Healthy
+                            - button "Chat 5 messages" [ref=f19e1261] [cursor=pointer]:
+                              - generic [ref=f19e1181]: Chat
+                              - generic [ref=f19e1182]: 5 messages
+                            - button "Configure context window size" [ref=f19e1184] [cursor=pointer]:
+                              - generic [ref=f19e1185]: 137 + ~0 = 137 tokens
+                            - button "Saved" [ref=f19e1187] [cursor=pointer]
+                            - button "Advanced controls" [ref=f19e1189] [cursor=pointer]
+              - generic [ref=f19e1206]:
+                - button "Restore context sidechannel" [ref=f19e1207] [cursor=pointer]:
+                  - generic [ref=f19e1211]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f19e1212]:
+                - button "Restore runtime sidechannel" [ref=f19e1213] [cursor=pointer]:
+                  - generic [ref=f19e1214]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f19e15] [cursor=pointer]
+  - alert [ref=f19e19]: Chat | tldw
+```

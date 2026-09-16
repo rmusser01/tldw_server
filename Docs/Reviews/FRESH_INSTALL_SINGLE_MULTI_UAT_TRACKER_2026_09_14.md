@@ -2,6 +2,10 @@
 
 ## Run status
 
+- **21:52 UTC reconciliation: 164 unique findings — 155 verified, 7 awaiting acceptance, 2 unresolved (163/164), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-164-source-checkpoint.json). Independent retained native acceptance passes013/103/152/156 on `223591ac4f`;162 is already accepted. Pending acceptance:024/031/137/138/139/141/151.163 repair is under review;164 is misleading empty-model guidance observed during actual PostgreSQL multi-user setup. Official PostgreSQL admin creation and native login pass; full native PostgreSQL matrix remains pending. No full UAT restart.
+
+- **21:40 UTC targeted source checkpoint: 163 unique findings.** UAT162 label repair is accepted and committed `223591ac4f`. Actual saved Chat now returns the correct Rowan facts after a14.588second scoped RAG request and retains user/answer order after reload. Local retrieval-failure diagnostics remain visible exactly once and absent from canonical history. Independent acceptance audit for013/103/152/156 is underway. New163 tracks lost retrieval activation on reload; do not attribute the earlier013 wrong-with-evidence answer to this separate defect. No full UAT restart.
+
 - **21:17 UTC reconciliation: 162 unique findings — 150 verified, 10 awaiting acceptance, 2 unresolved (013/162), zero tool-blocked checks.** [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-162-image-notification-checkpoint.json). Native114/118/142/153/155/157 and repairs159/160/161 now have passing bounded acceptance;162 is the newly observed missing timeout-label association. Required PostgreSQL32pass/0skip remains distinct from the pending full PostgreSQL workflow matrix. No full UAT restart.
 
 - **21:07 UTC acceptance checkpoint: 161 unique findings.** Final-source image118/157 acceptance on `d76746ac9a` passes independent audit: real PNG Send200, controlled provider502, reload, Retry200/“3”, reload; canonical rows3→4→5 with unchanged failed-user identity and PNG bytes. No fallback message writes occur; captured Retry acknowledgements match canonical IDs. Fresh required PostgreSQL checks pass32 with17deselected and **zero skips**. [Exact evidence and limits](../../output/playwright/cycle5-repair-verification-2026-09-16/native-image118-157-final/independent-audit.md). Native155 passes Settings disabled/Close;159 passes fresh pre-auth request gating. Native114 six-tab release/catch-up and142 delayed navigation controls pass within their recorded scope; final task reconciliation is underway. New161 records the development indicator overlapping Settings. UAT013 remains unresolved; no full UAT restart or native PostgreSQL workflow sign-off.
@@ -81,6 +85,18 @@
 - UAT056 native missing-provider gate passes:136 remains on Configure with Review disabled and an invalid/focused empty provider plus clear alert after Next. Historical exact native proof was also independently located; this capture supplements it.
 - UAT095 audit correction: independent follow-up found the launched-browser private-path sentinel requirement was stronger than the actual task/design. Retained real endpoint/transport/sink tests and independent review verify the original synthetic transport defect. No native private disclosure or launched-extension claim is made.
 - UAT114 remains tool-blocked: current supported native inventory offers only Codex in-app browser. Two actual probe tabs both report `document.visibilityState=visible` after switching. Both temporary tabs were closed; no visibility override or product/tooling patch was applied.
+
+## UAT-164 — P3: Empty model configuration is described as an extension/API-key failure
+
+- Actual PostgreSQL multi-user administrator login and model metadata reads succeed200. The catalog has no selectable chat model: most entries are unconfigured references; MLX is configured but unavailable. Model Settings nevertheless says the extension could not load providers and advises checking an API key. Home promises provider connection in Model Settings, while this multi-user path uses operator configuration.
+- Existing lower Configure server and Provider Keys links are present; this finding does not claim that all actions are absent. Expected: accurate empty-readiness guidance, existing operator/user setup direction and distinct actual network/authentication failure states.
+- Status: unresolved, TASK13260.101. Preserve Refresh, the intentional multi-user operator setup boundary and permissions. Original evidence: private `pg-multi-model-settings.txt` / `pg-multi-model-events.txt`, retained with the repair's acceptance bundle.
+
+## UAT-163 — P2: Reload silently disables selected-source retrieval
+
+- On frozen `223591ac4f`, Home's Rowan starter enables source retrieval in the saved Cedar conversation. After a controlled retrieval failure and real reload, the next Send emits ordinary Chat request79 with Cedar history, no RAG request and no Rowan source content. The model answers from Cedar. Actual persisted-session diagnosis confirms that media IDs and mode survive, while omitted `fileRetrievalEnabled` returns to its cold false default.
+- Expected: same-owner/session reload preserves the explicit retrieval choice; intentional disabled state and conversation/account changes remain safe.
+- Status: unresolved, TASK13260.100. Repair with actual cold persistence/restore/Send regressions, independent review and native scoped-request acceptance. Evidence: [retained original requests and final canonical history](../../output/playwright/cycle5-repair-verification-2026-09-16/followup013-103-152-156-native/final-source-events.txt). This is separate from013's historical wrong answer despite supplied facts.
 
 ## UAT-162 — P3: Advanced timeout controls have no associated accessible labels
 

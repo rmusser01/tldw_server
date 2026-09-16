@@ -1,0 +1,235 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: (current) [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw
+### Snapshot
+```yaml
+- generic [ref=f20e1]:
+  - generic [ref=f20e24]:
+    - link "Skip to main content" [ref=f20e25] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f20e26]:
+      - button "Expand sidebar" [ref=f20e27] [cursor=pointer]
+      - button "New Chat" [ref=f20e31] [cursor=pointer]
+      - generic [ref=f20e34]:
+        - button "Quick Ingest" [ref=f20e35] [cursor=pointer]
+        - button "Chat" [ref=f20e39] [cursor=pointer]
+        - button "Prompts" [ref=f20e42] [cursor=pointer]
+        - button "Characters" [ref=f20e46] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f20e51] [cursor=pointer]
+        - button "World Books" [ref=f20e55] [cursor=pointer]
+        - button "Notes" [ref=f20e58] [cursor=pointer]
+        - button "Knowledge QA" [ref=f20e62] [cursor=pointer]
+        - button "Media" [ref=f20e70] [cursor=pointer]
+        - button "Document Workspace" [ref=f20e73] [cursor=pointer]
+        - button "Research Workspace" [ref=f20e79] [cursor=pointer]
+        - button "Kanban" [ref=f20e85] [cursor=pointer]
+        - button "Watchlists" [ref=f20e87] [cursor=pointer]
+      - generic [ref=f20e92]:
+        - button "Open Notes Dock" [ref=f20e93] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f20e98] [cursor=pointer]
+        - button "Settings" [ref=f20e101] [cursor=pointer]
+    - main [ref=f20e105]:
+      - generic [ref=f20e106]:
+        - generic [ref=f20e109]:
+          - generic [ref=f20e110]:
+            - button "Expand sidebar" [ref=f20e111] [cursor=pointer]
+            - generic [ref=f20e113]:
+              - img "tldw Assistant" [ref=f20e114]
+              - generic [ref=f20e115]: tldw Assistant
+              - button "Companion Home" [ref=f20e116] [cursor=pointer]
+              - button "Show shortcuts" [ref=f20e120] [cursor=pointer]
+            - button "For this fictional Cedar fixture, the coordinator is Leo Park and the return box" [ref=f20e124] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f20e126]: Saved
+          - generic [ref=f20e127]:
+            - button "Search - Open command palette" [ref=f20e128] [cursor=pointer]:
+              - generic [ref=f20e132]: Search
+              - generic [ref=f20e133]: ⌘K
+            - button "New saved chat" [ref=f20e134] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f20e138] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f20e139] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f20e140] [cursor=pointer]
+            - button "Open settings" [ref=f20e147] [cursor=pointer]
+            - generic [ref=f20e159]:
+              - button "Notifications, 0 unread" [ref=f20e160] [cursor=pointer]
+              - status [ref=f20e164]: Notifications are active
+            - button "Switch to light theme" [ref=f20e165] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f20e172] [cursor=pointer]:
+              - generic [ref=f20e173]: "?"
+        - generic [ref=f20e174]:
+          - heading "Chat" [level=1] [ref=f20e175]
+          - generic [ref=f20e178]:
+            - paragraph [ref=f20e179]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f20e180]:
+              - main [ref=f20e181]:
+                - generic [ref=f20e182]:
+                  - generic [ref=f20e184]:
+                    - generic [ref=f20e185]:
+                      - generic [ref=f20e186]: Standard chat
+                      - generic [ref=f20e187]: Conversation timeline
+                    - generic [ref=f20e188]:
+                      - button "Switch to light theme" [ref=f20e189] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f20e196] [cursor=pointer]:
+                        - generic [ref=f20e202]: Focus
+                      - button "Shortcuts" [ref=f20e203] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f20e207]
+                  - log "Chat messages" [ref=f20e209]:
+                    - generic [ref=f20e211]:
+                      - article "System message 1 of 7" [ref=f20e483]:
+                        - generic [ref=f20e218]:
+                          - generic [ref=f20e220]:
+                            - generic [ref=f20e221]: System prompt
+                            - generic [ref=f20e222]: • 2:18 PM
+                          - paragraph [ref=f20e224]: You are a helpful AI assistant.
+                          - generic [ref=f20e543]:
+                            - generic [ref=f20e544]:
+                              - generic [ref=f20e545]: Was this helpful?
+                              - generic [ref=f20e546]:
+                                - button "Helpful" [ref=f20e547] [cursor=pointer]
+                                - button "Not helpful" [ref=f20e550] [cursor=pointer]
+                                - button "More feedback" [ref=f20e553] [cursor=pointer]
+                            - button "More actions" [ref=f20e559] [cursor=pointer]: •••
+                      - article "User message 2 of 7" [ref=f20e484]:
+                        - generic [ref=f20e245]:
+                          - generic [ref=f20e247]:
+                            - generic [ref=f20e248]: You
+                            - generic [ref=f20e249]: • 2:18 PM
+                          - paragraph [ref=f20e251]: For this fictional Cedar fixture, the coordinator is Leo Park and the return box is at the west entrance. Repeat those two Cedar facts briefly.
+                          - button "More actions" [ref=f20e562] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 7" [ref=f20e485]:
+                        - generic [ref=f20e264]:
+                          - generic [ref=f20e266]:
+                            - generic [ref=f20e267]: Assistant
+                            - generic [ref=f20e268]: • 2:18 PM
+                          - paragraph [ref=f20e563]: The coordinator is Leo Park, and the return box is at the west entrance.
+                          - generic [ref=f20e564]:
+                            - generic [ref=f20e565]:
+                              - generic [ref=f20e566]: Was this helpful?
+                              - generic [ref=f20e567]:
+                                - button "Helpful" [ref=f20e568] [cursor=pointer]
+                                - button "Not helpful" [ref=f20e571] [cursor=pointer]
+                                - button "More feedback" [ref=f20e574] [cursor=pointer]
+                            - button "More actions" [ref=f20e580] [cursor=pointer]: •••
+                      - article "User message 4 of 7" [ref=f20e488]:
+                        - generic [ref=f20e307]:
+                          - generic [ref=f20e309]:
+                            - generic [ref=f20e310]: You
+                            - generic [ref=f20e311]: • 2:30 PM
+                          - paragraph [ref=f20e313]: "Chat with this media: rowan-community-library-home.md Summarize this source."
+                          - button "More actions" [ref=f20e583] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 7" [ref=f20e489]:
+                        - generic [ref=f20e326]:
+                          - generic [ref=f20e328]:
+                            - generic [ref=f20e329]: llama.cpp/gemma-4-26B-A4B-it
+                            - generic [ref=f20e330]: • 2:30 PM
+                          - generic [ref=f20e490]:
+                            - paragraph [ref=f20e584]: I couldn't retrieve evidence from the selected sources, so I did not send this as general chat. Check that the sources are ready and indexed, then try again.
+                            - paragraph [ref=f20e585]: "Details: Cannot reach server. Check your connection and try again."
+                          - button "More actions" [ref=f20e588] [cursor=pointer]: •••
+                      - article "User message 6 of 7" [ref=f20e493]:
+                        - generic [ref=f20e496]:
+                          - generic [ref=f20e498]:
+                            - generic [ref=f20e499]: You
+                            - generic [ref=f20e500]: • 2:31 PM
+                          - paragraph [ref=f20e502]: Using only the selected Rowan source, who is the coordinator, when does the library open, where is the book return box, and when does the book club meet?
+                          - button "More actions" [ref=f20e591] [cursor=pointer]: •••
+                      - article "Assistant message 7 of 7" [ref=f20e509]:
+                        - generic [ref=f20e521]:
+                          - generic [ref=f20e523]:
+                            - generic [ref=f20e524]: llama.cpp/gemma-4-26B-A4B-it
+                            - generic [ref=f20e525]: • 2:31 PM
+                          - generic [ref=f20e592]:
+                            - paragraph [ref=f20e593]:
+                              - text: Since you haven't provided the
+                              - strong [ref=f20e594]: Rowan source
+                              - text: text in this conversation yet, I cannot accurately answer the questions regarding the library opening time or the book club meeting.
+                            - paragraph [ref=f20e595]:
+                              - text: However, based
+                              - strong [ref=f20e596]: only
+                              - text: "on the information you provided in your previous message (which I will treat as the only available source), here is what can be determined:"
+                            - list [ref=f20e597]:
+                              - listitem [ref=f20e598]:
+                                - strong [ref=f20e599]: "Coordinator:"
+                                - text: Leo Park
+                              - listitem [ref=f20e600]:
+                                - strong [ref=f20e601]: "Book return box location:"
+                                - text: West entrance
+                              - listitem [ref=f20e602]:
+                                - strong [ref=f20e603]: "Library opening time:"
+                                - text: Not mentioned
+                              - listitem [ref=f20e604]:
+                                - strong [ref=f20e605]: "Book club meeting time:"
+                                - text: Not mentioned
+                            - paragraph [ref=f20e606]:
+                              - strong [ref=f20e607]: If you provide the Rowan source text, I can give you the complete answer!
+                          - generic [ref=f20e608]:
+                            - generic [ref=f20e609]:
+                              - generic [ref=f20e610]: Was this helpful?
+                              - generic [ref=f20e611]:
+                                - button "Helpful" [ref=f20e612] [cursor=pointer]
+                                - button "Not helpful" [ref=f20e615] [cursor=pointer]
+                                - button "More feedback" [ref=f20e618] [cursor=pointer]
+                            - button "More actions" [ref=f20e624] [cursor=pointer]: •••
+                  - generic [ref=f20e338]:
+                    - generic [ref=f20e339]: Composer
+                    - generic [ref=f20e347]:
+                      - button [aria-hidden] [ref=f20e348]
+                      - button [aria-hidden] [ref=f20e349]
+                      - generic [ref=f20e350]:
+                        - generic [ref=f20e352]:
+                          - button "Hide composer options" [expanded] [ref=f20e353] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f20e358]
+                          - generic [ref=f20e359]:
+                            - button "Improve prompt" [ref=f20e362] [cursor=pointer]
+                            - generic [ref=f20e367]:
+                              - button "Send message" [ref=f20e625] [cursor=pointer]:
+                                - generic [ref=f20e369]: Send
+                              - button "Open message delivery options" [ref=f20e374] [cursor=pointer]
+                        - generic [ref=f20e379]:
+                          - generic [ref=f20e381]:
+                            - group "Mode and context controls" [ref=f20e382]:
+                              - button "Modes" [ref=f20e383] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f20e390] [cursor=pointer]':
+                                - generic [ref=f20e391]:
+                                  - generic [ref=f20e392]: MCP
+                                  - generic [ref=f20e393]: None
+                              - button "Search & Context" [ref=f20e396] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f20e401] [cursor=pointer]:
+                                - generic [ref=f20e404]: Prompt
+                              - button "Select character or persona" [ref=f20e405] [cursor=pointer]
+                              - button "Role-play setup" [ref=f20e410] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f20e417] [cursor=pointer]
+                            - group "Run input controls" [ref=f20e423]:
+                              - button "OpenUI" [ref=f20e424] [cursor=pointer]
+                              - button "Start dictation" [ref=f20e430] [cursor=pointer]
+                              - generic [ref=f20e434]:
+                                - button "Attach image" [disabled] [ref=f20e436]
+                                - button "More attachments" [ref=f20e440] [cursor=pointer]
+                              - button "More tools" [ref=f20e443] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f20e446] [cursor=pointer]:
+                                - generic [ref=f20e450]: Chat Settings
+                          - generic "Active context" [ref=f20e451]:
+                            - button "LLaMa.cpp / Gemma 4 26B vision on 19099 (llama.cpp/gemma-4-26B-A4B-it)" [ref=f20e453] [cursor=pointer]:
+                              - generic "Provider status" [ref=f20e457]: Healthy
+                            - button "Chat 7 messages" [ref=f20e542] [cursor=pointer]:
+                              - generic [ref=f20e459]: Chat
+                              - generic [ref=f20e460]: 7 messages
+                            - button "Configure context window size" [ref=f20e462] [cursor=pointer]:
+                              - generic [ref=f20e463]: 324 + ~0 = 324 tokens
+                            - button "Saved" [ref=f20e465] [cursor=pointer]
+                            - button "Advanced controls" [ref=f20e467] [cursor=pointer]
+              - generic [ref=f20e471]:
+                - button "Restore context sidechannel" [ref=f20e472] [cursor=pointer]:
+                  - generic [ref=f20e476]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f20e477]:
+                - button "Restore runtime sidechannel" [ref=f20e478] [cursor=pointer]:
+                  - generic [ref=f20e479]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f20e19] [cursor=pointer]
+  - alert [ref=f20e23]
+```
