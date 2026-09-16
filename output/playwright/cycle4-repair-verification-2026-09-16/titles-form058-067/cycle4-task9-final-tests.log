@@ -1,0 +1,122 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:12833) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/core-route-titles.test.tsx (12 tests) 77ms
+(node:12835) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/chat-title-late-persistence.test.tsx (2 tests) 28ms
+(node:12843) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx > CharactersManager first-use onboarding > opens quick chat from gallery preview actions
+Warning: trigger element and popup element should in same shadow root.
+
+ ✓ ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx (99 tests) 305306ms
+     ✓ waits for the real form before making a cold Create drawer interactive, then cancels and reopens cleanly  3842ms
+     ✓ serializes created/updated date filters into query params and clears them  758ms
+     ✓ forces server query mode for date filters when rollout flag is disabled  395ms
+     ✓ maps persisted last-used sort state to server sort params  590ms
+     ✓ shows template option in empty state and opens create modal with templates  823ms
+     ✓ opens Create without writing to the disconnected Edit form  1273ms
+     ✓ keeps real create, cancel, reopen and submit forms connected  7183ms
+     ✓ expands template chooser on first create-modal open and keeps it collapsed once seen  1249ms
+     ✓ keeps template chooser collapsed when seen flag already exists  2471ms
+     ✓ shows and applies the system prompt example from the create form  4208ms
+     ✓ promotes prompt preset and groups advanced fields into named sections in create mode  10160ms
+     ✓ renders the same advanced section structure in edit mode  9974ms
+     ✓ opens a focused character editor with expression images visible from route hints  8993ms
+     ✓ opens the create editor with expression images visible from a route focus hint  7909ms
+     ✓ opens a route-focused character editor when the character is not on the visible page  5780ms
+     ✓ ignores stale route-focused character fetches after the route target changes  5604ms
+     ✓ preloads world-book attachments in edit mode and syncs attachments on save  8895ms
+     ✓ syncs selected world-book attachments after creating a character  11628ms
+     ✓ shows a permission error when world-book attachment sync is forbidden  11531ms
+     ✓ persists gallery density preference and applies compact rendering  829ms
+     ✓ enforces the explicit 500-character name limit in create mode  4309ms
+     ✓ supports has-conversations filter scaffold and clear reset  2973ms
+     ✓ toggles advanced filters panel while keeping primary controls visible  2626ms
+     ✓ serializes folder filter into reserved folder tag query params and clears it  2509ms
+     ✓ hides reserved folder tokens from tag table and tag-manager surfaces  2174ms
+     ✓ replaces existing folder token when reassigning folder in edit mode  10919ms
+     ✓ filters to favorited characters when favorites-only is enabled  2030ms
+     ✓ toggles favorite state from table row actions  997ms
+     ✓ restores characters from recently-deleted scope actions  1070ms
+     ✓ shows actionable restore-window errors and emits recovery telemetry when restore fails  1091ms
+     ✓ uses soft-delete copy and undo semantics for bulk delete  2177ms
+     ✓ enables compare only when exactly two characters are selected  7700ms
+     ✓ opens a compare modal for two selected characters and shows field differences  3222ms
+     ✓ copies and exports comparison summaries from the compare modal  3775ms
+     ✓ supports keyboard Enter to trigger and commit inline name editing  1108ms
+     ✓ supports F2 and Escape for inline description edit with focus return  1067ms
+     ✓ supports Space key variants for inline name and description editing  1931ms
+     ✓ renames tags across affected characters from the manage tags modal  4700ms
+     ✓ merges source tags into destination tags from the manage tags modal  5300ms
+     ✓ deletes tags across affected characters from the manage tags modal  4999ms
+     ✓ opens version history modal and renders field-level diffs  2004ms
+     ✓ reverts character from selected version in version history modal  3746ms
+     ✓ saves alternate greetings in reordered list order  13438ms
+     ✓ supports first-run template -> create -> chat handoff  5536ms
+     ✓ submits edit flow through the shared form component  4321ms
+     ✓ seeds expression images in edit mode and saves canonical mood image metadata  10393ms
+     ✓ restores draft expression metadata before saving canonical mood image metadata  9694ms
+     ✓ exports a character from row actions as JSON  2504ms
+     ✓ sets a character as default from row actions  2896ms
+     ✓ clears default character from row actions when selected record is default  2962ms
+     ✓ shows conversation insights summary with last active and average message count  3011ms
+     ✓ opens quick chat from table actions and sends a character-scoped prompt  7776ms
+     ✓ shows an in-context blocker when quick chat has no chat model  4454ms
+     ✓ preserves row chat intent locally when no chat model is configured  3151ms
+     ✓ does not treat the first catalog model as an implicit row chat selection  1185ms
+     ✓ keeps row chat intent local when a stale selected model exists before the model catalog resolves  1163ms
+     ✓ opens quick chat from gallery preview actions  2034ms
+     ✓ shows attached world books in gallery preview context  543ms
+     ✓ opens a full-size image modal when the preview avatar is clicked  681ms
+     ✓ promotes quick chat into full chat flow without route changes until promoted  9408ms
+     ✓ opens chat in a new tab from row actions without replacing current-tab navigation  2854ms
+     ✓ opens chat in a new tab from actions menu  2995ms
+     ✓ shows a warning when chat-in-new-tab is blocked by the browser  2980ms
+     ✓ keeps AI field generation affordances wired in create mode  3838ms
+     ✓ adds skip-link, main landmark, and shortcut summary semantics  598ms
+     ✓ allows keyboard focus on display options button  576ms
+     ✓ renders reduced-motion utility classes on row action controls  1172ms
+     ✓ imports a character file through the upload control  1005ms
+     ✓ shows an OK action after successful import completion  1685ms
+     ✓ creates a persona from a character and opens Persona Garden on the new profile  3099ms
+     ✓ disables create persona while a create request is already pending for the character  5605ms
+     ✓ opens the existing derived persona in Persona Garden from row actions  2816ms
+     ✓ renders per-file runtime status transitions during batch import  966ms
+     ✓ retries only failed files from import preview without duplicating successful imports  1641ms
+     ✓ imports a batch of files and reports per-file failures  949ms
+     ✓ parses YAML metadata in preview before confirming import  956ms
+     ✓ imports markdown metadata files through preview + confirm flow  1023ms
+     ✓ imports text files containing JSON card data through preview + confirm flow  1015ms
+     ✓ imports PNG character files through preview + confirm flow  1022ms
+     ✓ round-trips exported v3 JSON shape through import preview + confirm  999ms
+     ✓ surfaces malformed JSON preview errors and blocks confirm import  995ms
+     ✓ surfaces malformed YAML preview errors and blocks confirm import  948ms
+     ✓ allows canceling import preview without persisting files  489ms
+     ✓ imports valid files and warns when malformed previews are skipped  998ms
+     ✓ shows unsupported extension errors in preview and blocks confirm  1022ms
+(node:14608) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Characters/__tests__/Manager.crossFeatureStage1.test.tsx (1 test) 732ms
+     ✓ opens focused character preview from world-books route context with attached world-book links  732ms
+(node:14614) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/chat-title.integration.test.tsx (15 tests) 889ms
+(node:14621) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Option/Characters/__tests__/CharacterEditorForm.expression-validation.test.tsx (2 tests) 1447ms
+     ✓ keeps expression image validation mounted while advanced fields are collapsed  612ms
+     ✓ opens metadata fields when collapsed expression images block submit  834ms
+ ✓ __tests__/pages/chat-title.ssr.test.tsx (1 test) 4ms
+(node:14637) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/utils/__tests__/update-page-title.test.ts (3 tests) 7ms
+
+ Test Files  8 passed (8)
+      Tests  135 passed (135)
+   Start at  20:08:46
+   Duration  314.10s (transform 1.38s, setup 475ms, import 2.89s, tests 308.49s, environment 1.53s)
+

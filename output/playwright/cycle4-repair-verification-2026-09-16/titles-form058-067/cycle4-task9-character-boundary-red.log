@@ -1,0 +1,153 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:12148) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx (99 tests | 1 failed | 98 skipped) 614ms
+     × waits for the real form before making a cold Create drawer interactive, then cancels and reopens cleanly 613ms
+     ↓ ensures aria labels include the current character name when localization is stale
+     ↓ requests character list payloads with image data for avatar rendering
+     ↓ serializes created/updated date filters into query params and clears them
+     ↓ forces server query mode for date filters when rollout flag is disabled
+     ↓ maps persisted last-used sort state to server sort params
+     ↓ falls back to legacy list loading when /characters/query hits path.character_id route conflict
+     ↓ falls back when route-conflict marker is only present on error details payload
+     ↓ degrades to an empty list with notification when query and legacy fallbacks both fail
+     ↓ pins character list query throwOnError to false
+     ↓ falls back to legacy client-side query path when rollout flag is disabled
+     ↓ renders enriched empty state with guidance and import CTA
+     ↓ shows template option in empty state and opens create modal with templates
+     ↓ opens Create without writing to the disconnected Edit form
+     ↓ keeps real create, cancel, reopen and submit forms connected
+     ↓ expands template chooser on first create-modal open and keeps it collapsed once seen
+     ↓ keeps template chooser collapsed when seen flag already exists
+     ↓ shows and applies the system prompt example from the create form
+     ↓ promotes prompt preset and groups advanced fields into named sections in create mode
+     ↓ renders the same advanced section structure in edit mode
+     ↓ opens a focused character editor with expression images visible from route hints
+     ↓ opens the create editor with expression images visible from a route focus hint
+     ↓ opens a route-focused character editor when the character is not on the visible page
+     ↓ ignores stale route-focused character fetches after the route target changes
+     ↓ preloads world-book attachments in edit mode and syncs attachments on save
+     ↓ syncs selected world-book attachments after creating a character
+     ↓ shows a permission error when world-book attachment sync is forbidden
+     ↓ persists gallery density preference and applies compact rendering
+     ↓ applies persisted page size for table pagination
+     ↓ enforces the explicit 500-character name limit in create mode
+     ↓ supports has-conversations filter scaffold and clear reset
+     ↓ toggles advanced filters panel while keeping primary controls visible
+     ↓ serializes folder filter into reserved folder tag query params and clears it
+     ↓ hides reserved folder tokens from tag table and tag-manager surfaces
+     ↓ replaces existing folder token when reassigning folder in edit mode
+     ↓ filters to favorited characters when favorites-only is enabled
+     ↓ toggles favorite state from table row actions
+     ↓ switches to recently-deleted scope and queries deleted-only records
+     ↓ restores characters from recently-deleted scope actions
+     ↓ shows actionable restore-window errors and emits recovery telemetry when restore fails
+     ↓ uses soft-delete copy and undo semantics for bulk delete
+     ↓ enables compare only when exactly two characters are selected
+     ↓ opens a compare modal for two selected characters and shows field differences
+     ↓ copies and exports comparison summaries from the compare modal
+     ↓ supports keyboard Enter to trigger and commit inline name editing
+     ↓ supports F2 and Escape for inline description edit with focus return
+     ↓ supports Space key variants for inline name and description editing
+     ↓ renames tags across affected characters from the manage tags modal
+     ↓ merges source tags into destination tags from the manage tags modal
+     ↓ deletes tags across affected characters from the manage tags modal
+     ↓ opens version history modal and renders field-level diffs
+     ↓ reverts character from selected version in version history modal
+     ↓ saves alternate greetings in reordered list order
+     ↓ supports first-run template -> create -> chat handoff
+     ↓ submits edit flow through the shared form component
+     ↓ seeds expression images in edit mode and saves canonical mood image metadata
+     ↓ restores draft expression metadata before saving canonical mood image metadata
+     ↓ exports a character from row actions as JSON
+     ↓ sets a character as default from row actions
+     ↓ clears default character from row actions when selected record is default
+     ↓ shows conversation insights summary with last active and average message count
+     ↓ opens quick chat from table actions and sends a character-scoped prompt
+     ↓ shows an in-context blocker when quick chat has no chat model
+     ↓ preserves row chat intent locally when no chat model is configured
+     ↓ does not treat the first catalog model as an implicit row chat selection
+     ↓ keeps row chat intent local when a stale selected model exists before the model catalog resolves
+     ↓ opens quick chat from gallery preview actions
+     ↓ shows attached world books in gallery preview context
+     ↓ opens a full-size image modal when the preview avatar is clicked
+     ↓ shows world-book empty state in gallery preview when no attachments exist
+     ↓ shows world-book loading state in gallery preview while attachments fetch
+     ↓ promotes quick chat into full chat flow without route changes until promoted
+     ↓ opens chat in a new tab from row actions without replacing current-tab navigation
+     ↓ opens chat in a new tab from actions menu
+     ↓ shows a warning when chat-in-new-tab is blocked by the browser
+     ↓ keeps AI field generation affordances wired in create mode
+     ↓ registers keyboard shortcut callbacks for core manager actions
+     ↓ adds skip-link, main landmark, and shortcut summary semantics
+     ↓ allows keyboard focus on display options button
+     ↓ renders reduced-motion utility classes on row action controls
+     ↓ imports a character file through the upload control
+     ↓ shows an OK action after successful import completion
+     ↓ creates a persona from a character and opens Persona Garden on the new profile
+     ↓ disables create persona while a create request is already pending for the character
+     ↓ opens the existing derived persona in Persona Garden from row actions
+     ↓ opens import preview when files are dropped on the import drop zone
+     ↓ renders per-file runtime status transitions during batch import
+     ↓ retries only failed files from import preview without duplicating successful imports
+     ↓ imports a batch of files and reports per-file failures
+     ↓ parses YAML metadata in preview before confirming import
+     ↓ imports markdown metadata files through preview + confirm flow
+     ↓ imports text files containing JSON card data through preview + confirm flow
+     ↓ imports PNG character files through preview + confirm flow
+     ↓ round-trips exported v3 JSON shape through import preview + confirm
+     ↓ surfaces malformed JSON preview errors and blocks confirm import
+     ↓ surfaces malformed YAML preview errors and blocks confirm import
+     ↓ allows canceling import preview without persisting files
+     ↓ imports valid files and warns when malformed previews are skipped
+     ↓ shows unsupported extension errors in preview and blocks confirm
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx > CharactersManager first-use onboarding > waits for the real form before making a cold Create drawer interactive, then cancels and reopens cleanly
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <button
+  aria-label="Close"
+  class="ant-drawer-close"
+  type="button"
+>
+  <span
+    aria-label="close"
+    class="anticon anticon-close"
+    role="img"
+  >
+    <svg
+      aria-hidden="true"
+      data-icon="close"
+      fill="currentColor"
+      fill-rule="evenodd"
+      focusable="false"
+      height="1em"
+      viewBox="64 64 896 896"
+      width="1em"
+    >
+      <path
+        d="M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z"
+      />
+    </svg>
+  </span>
+</button> instead
+ ❯ ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx:486:67
+    484|       await act(async () => { await new Promise((resolve) => setTimeou…
+    485|       expect(document.querySelector("form")).toBeNull()
+    486|       expect(screen.queryByRole("button", { name: "Close" })).not.toBe…
+       |                                                                   ^
+    487|       await act(async () => {
+    488|         editorLoad.pending = null
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 98 skipped (99)
+   Start at  20:07:26
+   Duration  2.17s (transform 785ms, setup 90ms, import 1.15s, tests 614ms, environment 221ms)
+

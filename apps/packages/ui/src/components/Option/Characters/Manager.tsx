@@ -613,53 +613,52 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     onValuesChange,
     onFinish
   }: SharedCharacterFormProps) => (
-    <React.Suspense fallback={null}>
-      <LazyCharacterEditorForm
-        t={t}
-        form={form}
-        mode={mode}
-        initialValues={initialValues}
-        worldBookFieldContext={worldBookFieldContext}
-        isSubmitting={isSubmitting}
-        submitButtonClassName={submitButtonClassName}
-        submitPendingLabel={submitPendingLabel}
-        submitIdleLabel={submitIdleLabel}
-        showPreview={showPreview}
-        onTogglePreview={onTogglePreview}
-        onValuesChange={onValuesChange}
-        onFinish={onFinish}
-        generatingField={generatingField}
-        isGenerating={isGenerating}
-        handleGenerateField={handleGenerateField}
-        showSystemPromptExample={
-          mode === "create"
-            ? showCreateSystemPromptExample
-            : showEditSystemPromptExample
-        }
-        setShowSystemPromptExample={
-          mode === "create"
-            ? setShowCreateSystemPromptExample
-            : setShowEditSystemPromptExample
-        }
-        markModeDirty={markModeDirty}
-        popularTags={popularTags}
-        tagOptionsWithCounts={tagOptionsWithCounts}
-        characterFolderOptions={characterFolderOptions}
-        characterFolderOptionsLoading={characterFolderOptionsLoading}
-        showAdvanced={mode === "create" ? showCreateAdvanced : showEditAdvanced}
-        setShowAdvanced={
-          mode === "create" ? setShowCreateAdvanced : setShowEditAdvanced
-        }
-        advancedSections={
-          mode === "create" ? createAdvancedSections : editAdvancedSections
-        }
-        setAdvancedSections={
-          mode === "create" ? setCreateAdvancedSections : setEditAdvancedSections
-        }
-        createNameRef={createNameRef}
-        editNameRef={editNameRef}
-      />
-    </React.Suspense>
+    // Suspend the dialog until its Form connects, before exposing reset/cancel controls.
+    <LazyCharacterEditorForm
+      t={t}
+      form={form}
+      mode={mode}
+      initialValues={initialValues}
+      worldBookFieldContext={worldBookFieldContext}
+      isSubmitting={isSubmitting}
+      submitButtonClassName={submitButtonClassName}
+      submitPendingLabel={submitPendingLabel}
+      submitIdleLabel={submitIdleLabel}
+      showPreview={showPreview}
+      onTogglePreview={onTogglePreview}
+      onValuesChange={onValuesChange}
+      onFinish={onFinish}
+      generatingField={generatingField}
+      isGenerating={isGenerating}
+      handleGenerateField={handleGenerateField}
+      showSystemPromptExample={
+        mode === "create"
+          ? showCreateSystemPromptExample
+          : showEditSystemPromptExample
+      }
+      setShowSystemPromptExample={
+        mode === "create"
+          ? setShowCreateSystemPromptExample
+          : setShowEditSystemPromptExample
+      }
+      markModeDirty={markModeDirty}
+      popularTags={popularTags}
+      tagOptionsWithCounts={tagOptionsWithCounts}
+      characterFolderOptions={characterFolderOptions}
+      characterFolderOptionsLoading={characterFolderOptionsLoading}
+      showAdvanced={mode === "create" ? showCreateAdvanced : showEditAdvanced}
+      setShowAdvanced={
+        mode === "create" ? setShowCreateAdvanced : setShowEditAdvanced
+      }
+      advancedSections={
+        mode === "create" ? createAdvancedSections : editAdvancedSections
+      }
+      setAdvancedSections={
+        mode === "create" ? setCreateAdvancedSections : setEditAdvancedSections
+      }
+      createNameRef={createNameRef}
+      editNameRef={editNameRef}
+    />
   )
 
   // Apply generated data to form

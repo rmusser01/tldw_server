@@ -22,6 +22,8 @@ import Flashcards from "@web/pages/flashcards"
 import ServerSettings from "@web/pages/settings/tldw"
 import ProviderKeys from "@web/pages/settings/provider-keys"
 import Notes from "@web/pages/notes"
+import Prompts from "@web/pages/prompts"
+import Characters from "@web/pages/characters"
 
 afterEach(() => {
   cleanup()
@@ -39,7 +41,9 @@ describe("core route title ownership", () => {
     [Flashcards, "Flashcards | tldw"],
     [ServerSettings, "Server Settings | tldw"],
     [ProviderKeys, "Provider Keys | tldw"],
-    [Notes, "Notes | tldw"]
+    [Notes, "Notes | tldw"],
+    [Prompts, "Prompts | tldw"],
+    [Characters, "Characters | tldw"]
   ] as const)("replaces previous private metadata with %s", async (Page, title) => {
     const manager = initHeadManager()
     const { rerender } = render(

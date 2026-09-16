@@ -1,0 +1,22 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:10136) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/core-route-titles.test.tsx (12 tests) 83ms
+(node:10137) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/chat-title-late-persistence.test.tsx (2 tests) 27ms
+(node:10141) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/chat-title.integration.test.tsx (15 tests) 884ms
+ ✓ __tests__/pages/chat-title.ssr.test.tsx (1 test) 4ms
+(node:10160) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/utils/__tests__/update-page-title.test.ts (1 test) 3ms
+
+ Test Files  5 passed (5)
+      Tests  31 passed (31)
+   Start at  20:02:40
+   Duration  3.61s (transform 753ms, setup 314ms, import 982ms, tests 1.00s, environment 884ms)
+

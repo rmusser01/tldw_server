@@ -1,0 +1,8 @@
+apps/tldw-frontend/pages/prompts.tsx
+apps/tldw-frontend/pages/characters.tsx
+apps/packages/ui/src/utils/update-page-title.ts
+apps/packages/ui/src/components/Option/Characters/Manager.tsx
+apps/tldw-frontend/__tests__/pages/core-route-titles.test.tsx
+apps/tldw-frontend/__tests__/pages/chat-title-late-persistence.test.tsx
+apps/packages/ui/src/utils/__tests__/update-page-title.test.ts
+apps/packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx
