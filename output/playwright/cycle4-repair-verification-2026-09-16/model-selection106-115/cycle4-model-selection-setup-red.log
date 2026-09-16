@@ -1,0 +1,159 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:90089) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (13 tests | 8 failed) 3260ms
+     × persists the verified provider-qualified choice before the parent unmounts setup 81ms
+     ✓ preserves the hydrated deliberate selection tldw:chosen 18ms
+     × preserves the hydrated deliberate selection "tldw:chosen" 17ms
+     ✓ preserves the hydrated deliberate selection   tldw:chosen   16ms
+     ✓ preserves a newer explicit choice while verification is pending 16ms
+     ✓ does not re-seed after a newer choice was deliberately cleared 16ms
+     × keeps completion actionable for a missing catalog target 1013ms
+     × keeps completion actionable for a ambiguous catalog target 1013ms
+     × retries rejected storage without repeating inference or acknowledged completion 1014ms
+     × discards delayed completion after target replacement 15ms
+     × discards delayed completion after key replacement 14ms
+     × discards delayed completion after roundtrip replacement 13ms
+     ✓ discards delayed completion after unmount replacement 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > persists the verified provider-qualified choice before the parent unmounts setup
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  tldw:custom-openai-api:gemma-tested
+Received:
+  unselected
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:42:49
+     40|     render(<Parent publish={() => { atPublication = window.localStorag…
+     41|     await screen.findByText("Workspace ready");
+     42|     expect(screen.getByLabelText("Chat model")).toHaveTextContent("tld…
+       |                                                 ^
+     43|     expect(atPublication).toBe(JSON.stringify("tldw:custom-openai-api:…
+     44|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > preserves the hydrated deliberate selection "tldw:chosen"
+AssertionError: expected '"tldw:chosen"' to be 'tldw:chosen' // Object.is equality
+
+Expected: "tldw:chosen"
+Received: ""tldw:chosen""
+
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:47:60
+     45|   it.each(["tldw:chosen", '"tldw:chosen"', "  tldw:chosen  "])("preser…
+     46|     await new Storage().set("selectedModel", stored); render(<Parent /…
+     47|     expect(useStoreMessageOption.getState().selectedModel).toBe("tldw:…
+       |                                                            ^
+     48|   });
+     49|   it("preserves a newer explicit choice while verification is pending"…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > keeps completion actionable for a missing catalog target
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > keeps completion actionable for a ambiguous catalog target
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:63:53
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > retries rejected storage without repeating inference or acknowledged completion
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:72:53
+     70|       return original.call(this, key, value);
+     71|     });
+     72|     render(<Parent />); send(); expect(await screen.findByRole("alert"…
+       |                                                     ^
+     73|     expect(screen.queryByText("Workspace ready")).not.toBeInTheDocumen…
+     74|     fireEvent.click(screen.getByRole("button", { name: "Finish setup" …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > discards delayed completion after target replacement
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > discards delayed completion after key replacement
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > discards delayed completion after roundtrip replacement
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <p>
+  Workspace ready
+</p> instead
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:89:55
+     87|     });
+     88|     expect(useStoreMessageOption.getState().selectedModel).toBeNull();…
+     89|     expect(screen.queryByText("Workspace ready")).not.toBeInTheDocumen…
+       |                                                       ^
+     90|   });
+     91| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 5 passed (13)
+   Start at  19:25:22
+   Duration  3.96s (transform 249ms, setup 68ms, import 346ms, tests 3.26s, environment 205ms)
+

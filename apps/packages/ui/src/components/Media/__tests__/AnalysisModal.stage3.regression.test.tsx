@@ -102,8 +102,8 @@ vi.mock('@plasmohq/storage', () => ({
   }
 }))
 
-vi.mock('@plasmohq/storage/hook', () => ({
-  useStorage: () => [state.selectedModel, mocks.setSelectedModel]
+vi.mock('@/hooks/chat/useSelectedModel', () => ({
+  useSelectedModel: () => ({ selectedModel: state.selectedModel, setSelectedModel: mocks.setSelectedModel })
 }))
 
 vi.mock('@/services/background-proxy', () => ({

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Modal, Button, Select, Input, Spin } from 'antd'
-import { useStorage } from '@plasmohq/storage/hook'
+import { useSelectedModel } from '@/hooks/chat/useSelectedModel'
 import { useTranslation } from 'react-i18next'
 import { bgRequest, bgStream } from '@/services/background-proxy'
 import { tldwModels } from '@/services/tldw'
@@ -83,7 +83,7 @@ export function AnalysisModal({
 }: AnalysisModalProps) {
   const { t } = useTranslation(['review', 'common'])
   const messageApi = useAntdMessage()
-  const [selectedModel, setSelectedModel] = useStorage<string | undefined>('selectedModel')
+  const { selectedModel, setSelectedModel } = useSelectedModel()
   const [models, setModels] = useState<Array<{ id: string; name?: string }>>([])
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_ANALYSIS_SUMMARY_PROMPT)
   const [userPrefix, setUserPrefix] = useState('')
@@ -566,7 +566,11 @@ export function AnalysisModal({
             id="media-analysis-model"
             aria-label={t('mediaPage.model', 'Model')}
             value={effectiveModelKey}
-            onChange={setSelectedModel}
+            onChange={(value) => {
+              void setSelectedModel(value).catch(() => {
+                messageApi.error(t('mediaPage.modelSelectionSaveFailed', 'The model choice could not be saved on this device. Select it again to retry.'))
+              })
+            }}
             className="w-full"
             placeholder={t('mediaPage.selectModel', 'Select a model')}
             notFoundContent={

@@ -1,0 +1,31 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (1 test | 1 failed) 59ms
+     × keeps the explicit choice in store and storage and sends its model and provider 59ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx > AnalysisModal explicit model with the mounted shared owner > keeps the explicit choice in store and storage and sends its model and provider
+Error: expect(element).toHaveValue(tldw:custom-openai-api:gemma-tested)
+
+Expected the element to have value:
+  tldw:custom-openai-api:gemma-tested
+Received:
+  tldw:ollama:gemma3:1b
+ ❯ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx:139:22
+    137|       fireEvent.change(select,{target:{value:'tldw:custom-openai-api:g…
+    138|       await act(async()=> { await Promise.resolve(); });
+    139|       expect(select).toHaveValue('tldw:custom-openai-api:gemma-tested'…
+       |                      ^
+    140|       expect(useStoreMessageOption.getState().selectedModel).toBe('tld…
+    141|       expect(await new Storage().get('selectedModel')).toBe('tldw:cust…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  19:26:02
+   Duration  1.32s (transform 214ms, setup 108ms, import 765ms, tests 59ms, environment 328ms)
+

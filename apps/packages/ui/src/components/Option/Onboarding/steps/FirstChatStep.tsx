@@ -181,6 +181,28 @@ export function FirstChatStep({
     null,
   );
 
+  const finishSetup = async () => {
+    try {
+      await complete({ acknowledged_steps: ["first_chat"] });
+      onComplete();
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "Try again.";
+      setCompletionError(
+        `Setup state could not be completed after the first chat succeeded. ${detail}`,
+      );
+    }
+  };
+
+  const retryCompletion = async () => {
+    setRunning(true);
+    setCompletionError(null);
+    try {
+      await finishSetup();
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const handleSend = async () => {
     const requestOwnerScope = homeScope;
     setRunning(true);
@@ -197,15 +219,16 @@ export function FirstChatStep({
           prompt,
         });
       } catch (err) {
-        const name = err && typeof err === "object" && "name" in err ? err.name : null;
+        const name =
+          err && typeof err === "object" && "name" in err ? err.name : null;
         const timedOut = name === "AbortError" || name === "TimeoutError";
         setRequestFailureCategory(timedOut ? "timeout" : "unknown");
         setVerificationError(
           timedOut
             ? "First-chat verification reached its time limit."
             : err instanceof Error
-            ? err.message
-            : "First chat request failed. Retry, edit provider, or skip setup.",
+              ? err.message
+              : "First chat request failed. Retry, edit provider, or skip setup.",
         );
         return;
       }
@@ -219,20 +242,11 @@ export function FirstChatStep({
         return;
       }
       if (requestOwnerScope) {
-        useMilestoneStore.getState().markScopedMilestone(requestOwnerScope, "first_chat");
+        useMilestoneStore
+          .getState()
+          .markScopedMilestone(requestOwnerScope, "first_chat");
       }
-      try {
-        await complete({
-          acknowledged_steps: ["first_chat"],
-        });
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : "Try again.";
-        setCompletionError(
-          `Setup state could not be completed after the first chat succeeded. ${detail}`,
-        );
-        return;
-      }
-      onComplete();
+      await finishSetup();
     } catch (err) {
       setRequestFailureCategory("unknown");
       setVerificationError(
@@ -302,9 +316,7 @@ export function FirstChatStep({
             <div className="min-w-0">
               <p className="font-medium">{recoveryCopy.title}</p>
               <p className="mt-1 text-text-muted">{recoveryCopy.guidance}</p>
-              {failureMessage ? (
-                <p className="mt-2">{failureMessage}</p>
-              ) : null}
+              {failureMessage ? <p className="mt-2">{failureMessage}</p> : null}
               {activeFailureCategory ? (
                 <p className="mt-2 font-mono text-xs text-text-muted">
                   Category: {recoveryCategory}
@@ -384,11 +396,19 @@ export function FirstChatStep({
         </button>
         <button
           type="button"
-          onClick={handleSend}
+          onClick={
+            completionError && response?.status === "ready"
+              ? retryCompletion
+              : handleSend
+          }
           disabled={running || !provider || !model}
           className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {running ? "Sending..." : "Send test chat"}
+          {running
+            ? "Sending..."
+            : completionError && response?.status === "ready"
+              ? "Finish setup"
+              : "Send test chat"}
         </button>
       </div>
     </section>

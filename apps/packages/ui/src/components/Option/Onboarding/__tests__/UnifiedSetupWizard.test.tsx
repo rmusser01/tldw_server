@@ -4,7 +4,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useStoreMessageOption } from "@/store/option";
 import type { FirstRunState } from "@/types/setup-onboarding";
+
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getConfig: async () => ({ serverUrl: "http://setup.test", authMode: "single-user", apiKey: "synthetic-key" }) } }));
 
 const setupHookMocks = vi.hoisted(() => ({
   authMode: "single_user",
@@ -204,6 +209,8 @@ vi.mock("@/hooks/useSetupReadinessSummary", () => ({
 
 describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
     setupHookMocks.authMode = "single_user";
     setupHookMocks.navigate.mockReset();
     setupHookMocks.setConfigPartial.mockReset().mockResolvedValue(undefined);

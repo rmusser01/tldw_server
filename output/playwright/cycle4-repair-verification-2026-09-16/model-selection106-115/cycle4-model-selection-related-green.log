@@ -1,0 +1,18 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ✓ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.test.tsx (32 tests) 2125ms
+     ✓ renders a focused first-run heading and setup path choices  506ms
+ ✓ src/components/Option/Onboarding/__tests__/FirstChatStep.test.tsx (20 tests) 378ms
+ ✓ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (13 tests) 631ms
+ ✓ src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (1 test) 85ms
+ ✓ src/components/Media/__tests__/AnalysisModal.stage3.regression.test.tsx (10 tests) 378ms
+ ✓ src/components/Media/__tests__/AnalysisModal.stage1.cancel.test.tsx (3 tests) 241ms
+ ✓ src/hooks/__tests__/useSetupOnboarding.test.tsx (8 tests) 331ms
+ ✓ src/utils/__tests__/model-startup-selection.test.ts (5 tests) 1ms
+
+ Test Files  8 passed (8)
+      Tests  92 passed (92)
+   Start at  19:30:22
+   Duration  8.56s (transform 561ms, setup 495ms, import 1.68s, tests 4.17s, environment 1.76s)
+

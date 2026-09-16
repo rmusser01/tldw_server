@@ -1,0 +1,58 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:98121) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.extension-authority.test.tsx (1 test | 1 failed) 1132ms
+     × discards pending completion after local canonical authority changes A to B to A without window events 1131ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.extension-authority.test.tsx > setup authority through actual extension storage > discards pending completion after local canonical authority changes A to B to A without window events
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0mtldw:custom-openai-api:gemma-tested[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0mtldw:custom-openai-api:gemma-tested[0m
+    [36m</output>[39m
+    [36m<p>[39m
+      [0mWorkspace ready[0m
+    [36m</p>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.extension-authority.test.tsx:182:25
+    180|       pending.resolve(completed);
+    181|     });
+    182|     expect(await screen.findByRole("alert")).toHaveTextContent(/connec…
+       |                         ^
+    183|     expect(screen.queryByText("Workspace ready")).not.toBeInTheDocumen…
+    184|     expect(await new Storage().get("selectedModel")).toBeUndefined();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  19:39:35
+   Duration  2.11s (transform 355ms, setup 100ms, import 454ms, tests 1.13s, environment 328ms)
+

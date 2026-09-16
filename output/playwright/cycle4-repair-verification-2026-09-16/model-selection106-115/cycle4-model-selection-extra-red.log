@@ -1,0 +1,412 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx (23 tests | 1 failed) 1999ms
+     ✓ persists the verified provider-qualified choice before the parent unmounts setup 95ms
+     ✓ preserves the hydrated deliberate selection tldw:chosen 29ms
+     ✓ preserves the hydrated deliberate selection "tldw:chosen" 21ms
+     ✓ preserves the hydrated deliberate selection   tldw:chosen   24ms
+     ✓ preserves a newer explicit choice while verification is pending 75ms
+     ✓ does not re-seed after a newer choice was deliberately cleared 74ms
+     ✓ keeps completion actionable for a missing catalog target 26ms
+     ✓ keeps completion actionable for a ambiguous catalog target 24ms
+     ✓ retries rejected storage without repeating inference or acknowledged completion 43ms
+     ✓ discards delayed completion after target replacement 68ms
+     ✓ discards delayed completion after key replacement 66ms
+     ✓ discards delayed completion after roundtrip replacement 65ms
+     ✓ discards delayed completion after unmount replacement 66ms
+     ✓ waits for persisted preference hydration (null) 15ms
+     ✓ waits for persisted preference hydration (tldw:stored-choice) 18ms
+     ✓ does not publish a model after failed verification 22ms
+     ✓ does not publish a model after throw verification 22ms
+     ✓ retries server completion without repeating a successful verification 42ms
+     ✓ does not replace a choice made while catalog resolution is pending 68ms
+     ✓ does not select the other provider's same-named model 16ms
+     × normalizes the setup spelling when the model catalog uses it too 1018ms
+     ✓ refuses verification with unknown connection authority 27ms
+     ✓ does not publish completed state after replacement during the final refresh 74ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx > verified setup model handoff through the real WebUI owner > normalizes the setup spelling when the model catalog uses it too
+TestingLibraryElementError: Unable to find an element with the text: Workspace ready. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-8"[39m
+      [33mdata-testid[39m=[32m"unified-setup-shell"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"mb-6"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs font-medium uppercase tracking-normal text-text-muted"[39m
+        [36m>[39m
+          [0mSolo onboarding[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mt-2 flex flex-wrap items-start justify-between gap-3"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<h1[39m
+              [33mclass[39m=[32m"text-2xl font-semibold text-text"[39m
+            [36m>[39m
+              [0mFirst-time setup[0m
+            [36m</h1>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"mt-2 max-w-2xl text-sm text-text-muted"[39m
+            [36m>[39m
+              [0mConfigure the minimum needed to reach a successful first chat.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mSkip for now[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"Setup readiness"[39m
+        [33mclass[39m=[32m"mb-4 rounded-md border border-border bg-surface px-3 py-3"[39m
+        [33mdata-testid[39m=[32m"setup-readiness-panel"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+            [36m>[39m
+              [0mSetup readiness[0m
+            [36m</h2>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-xs text-text-muted"[39m
+            [36m>[39m
+              [0mChat must be ready. RAG and speech can be configured later.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface2"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRetry[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"first-chat-title"[39m
+          [33mclass[39m=[32m"space-y-5"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-start gap-3"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex size-10 items-center justify-center rounded-md bg-surface2 text-primary"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-message-circle size-5"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<div>[39m
+              [36m<h2[39m
+                [33mclass[39m=[32m"text-lg font-semibold text-text"[39m
+                [33mid[39m=[32m"first-chat-title"[39m
+              [36m>[39m
+                [0mFirst chat[0m
+              [36m</h2>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"mt-1 text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mCompletion requires an actual successful response from [0m
+                [0mcustom_openai[0m
+                [0m.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-surface px-4 py-3 text-sm text-text"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"font-medium"[39m
+            [36m>[39m
+              [0mDefault chat target[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-1 text-text-muted"[39m
+            [36m>[39m
+              [0mcustom_openai[0m
+              [0m / [0m
+              [0mgemma-tested[0m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<label[39m
+            [33mclass[39m=[32m"block text-sm font-medium text-text"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0mFirst prompt[0m
+            [36m</span>[39m
+            [36m<textarea[39m
+              [33mclass[39m=[32m"mt-1 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"[39m
+              [33mrows[39m=[32m"3"[39m
+            [36m>[39m
+              [0mSay hello in one short sentence.[0m
+            [36m</textarea>[39m
+          [36m</label>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-success/40 bg-success/10 px-4 py-3 text-sm text-text"[39m
+          [36m>[39m
+            [0mVerified hello[0m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-text"[39m
+            [33mrole[39m=[32m"alert"[39m
+          [36m>[39m
+            [0mSetup state could not be completed after the first chat succeeded. The verified model provider could not be selected. Check the provider settings.[0m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap justify-between gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mBack to MCP tools[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mFinish setup[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<output[39m
+      [33maria-label[39m=[32m"Chat model"[39m
+    [36m>[39m
+      [0munselected[0m
+    [36m</output>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-8"[39m
+      [33mdata-testid[39m=[32m"unified-setup-shell"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<header[39m
+        [33mclass[39m=[32m"mb-6"[39m
+      [36m>[39m
+        [36m<p[39m
+          [33mclass[39m=[32m"text-xs font-medium uppercase tracking-normal text-text-muted"[39m
+        [36m>[39m
+          [0mSolo onboarding[0m
+        [36m</p>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"mt-2 flex flex-wrap items-start justify-between gap-3"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<h1[39m
+              [33mclass[39m=[32m"text-2xl font-semibold text-text"[39m
+            [36m>[39m
+              [0mFirst-time setup[0m
+            [36m</h1>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"mt-2 max-w-2xl text-sm text-text-muted"[39m
+            [36m>[39m
+              [0mConfigure the minimum needed to reach a successful first chat.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mSkip for now[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</header>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"Setup readiness"[39m
+        [33mclass[39m=[32m"mb-4 rounded-md border border-border bg-surface px-3 py-3"[39m
+        [33mdata-testid[39m=[32m"setup-readiness-panel"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+        [36m>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mclass[39m=[32m"text-sm font-semibold text-text"[39m
+            [36m>[39m
+              [0mSetup readiness[0m
+            [36m</h2>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-xs text-text-muted"[39m
+            [36m>[39m
+              [0mChat must be ready. RAG and speech can be configured later.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface2"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRetry[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</section>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6"[39m
+      [36m>[39m
+        [36m<section[39m
+          [33maria-labelledby[39m=[32m"first-chat-title"[39m
+          [33mclass[39m=[32m"space-y-5"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex items-start gap-3"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"inline-flex size-10 items-center justify-center rounded-md bg-surface2 text-primary"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-message-circle size-5"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"24"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"24"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<div>[39m
+              [36m<h2[39m
+                [33mclass[39m=[32m"text-lg font-semibold text-text"[39m
+                [33mid[39m=[32m"first-chat-title"[39m
+              [36m>[39m
+                [0mFirst chat[0m
+              [36m</h2>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"mt-1 text-sm text-text-muted"[39m
+              [36m>[39m
+                [0mCompletion requires an actual successful response from [0m
+                [0mcustom_openai[0m
+                [0m.[0m
+              [36m</p>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-border bg-surface px-4 py-3 text-sm text-text"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"font-medium"[39m
+            [36m>[39m
+              [0mDefault chat target[0m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-1 text-text-muted"[39m
+            [36m>[39m
+              [0mcustom_openai[0m
+              [0m / [0m
+              [0mgemma-tested[0m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<label[39m
+            [33mclass[39m=[32m"block text-sm font-medium text-text"[39m
+          [36m>[39m
+            [36m<span>[39m
+              [0mFirst prompt[0m
+            [36m</span>[39m
+            [36m<textarea[39m
+              [33mclass[39m=[32m"mt-1 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text"[39m
+              [33mrows[39m=[32m"3"[39m
+            [36m>[39m
+              [0mSay hello in one short sentence.[0m
+            [36m</textarea>[39m
+          [36m</label>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-success/40 bg-success/10 px-4 py-3 text-sm text-text"[39m
+          [36m>[39m
+            [0mVerified hello[0m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-text"[39m
+            [33mrole[39m=[32m"alert"[39m
+          [36m>[39m
+            [0mSetup state could not be completed after the first chat succeeded. The verified model provider could not be selected. Check the provider settings.[0m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap justify-between gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mBack to MCP tools[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0mFinish setup[0m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</section>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Option/Onboarding/__tests__/UnifiedSetupWizard.model-handoff.test.tsx:353:46
+    351|   it("normalizes the setup spelling when the model catalog uses it too…
+    352|     mocks.models.mockResolvedValue([{id:"gemma-tested",provider:"custo…
+    353|     render(<Parent />); send(); await screen.findByText("Workspace rea…
+       |                                              ^
+    354|     expect(await new Storage().get("selectedModel")).toBe("tldw:custom…
+    355|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 22 passed (23)
+   Start at  19:31:38
+   Duration  3.02s (transform 406ms, setup 133ms, import 496ms, tests 2.00s, environment 335ms)
+

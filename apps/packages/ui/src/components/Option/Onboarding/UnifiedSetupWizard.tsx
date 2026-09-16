@@ -5,11 +5,25 @@ import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
 import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
 import { useConnectionActions } from "@/hooks/useConnectionState";
+import {
+  normalizeSelectedModel,
+  useSelectedModel,
+} from "@/hooks/chat/useSelectedModel";
+import { useStoreMessageOption } from "@/store/option";
+import { createSafeStorage } from "@/utils/safe-storage";
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
+import { tldwModels } from "@/services/tldw";
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability";
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error";
+import { derivePromptAssistAuthorizationRevision } from "@/services/chat-surface-scope";
 import type {
   FirstRunMetadata,
   FirstRunState,
   FirstRunStepUpdateRequest,
   SetupProviderSaveResponse,
+  FirstChatVerifyResponse,
+  SetupCompleteResponse,
 } from "@/types/setup-onboarding";
 import { SetupPathStep } from "./steps/SetupPathStep";
 import { PrivacySecurityStep } from "./steps/PrivacySecurityStep";
@@ -49,6 +63,17 @@ type UnifiedSetupWizardProps = {
 
 const setupPathToBackend = (path: SoloSetupPath) =>
   path === "docker" ? "docker_single_user" : "local_single_user";
+
+const modelStorage = createSafeStorage();
+const configStorage = createSafeStorage({ area: "local" });
+type SetupModelHandoff = {
+  generation: number;
+  config: TldwConfig;
+  selectionRevision: number;
+  eligible: boolean;
+  verified?: FirstChatVerifyResponse;
+  completed?: SetupCompleteResponse;
+};
 
 const stepFromState = (state: FirstRunState | null): WizardStep => {
   const completed = new Set(state?.completed_steps ?? []);
@@ -97,6 +122,48 @@ export function UnifiedSetupWizard({
 }: UnifiedSetupWizardProps = {}) {
   const navigate = useNavigate();
   const { setConfigPartial } = useConnectionActions();
+  const { setSelectedModel } = useSelectedModel();
+  const handoffRef = React.useRef<SetupModelHandoff | null>(null);
+  const handoffGeneration = React.useRef(0);
+  const selectionRevision = React.useRef(0);
+  React.useEffect(() => {
+    const invalidate = () => {
+      handoffGeneration.current += 1;
+    };
+    const watchedConfig = Object.fromEntries(
+      ["tldwConfig", "tldwCookieSessionConfig", "tldwManualSessionApiKey"].map(
+        (key) => [key, invalidate],
+      ),
+    );
+    configStorage.watch(watchedConfig);
+    const unsubscribe = useStoreMessageOption.subscribe((next, previous) => {
+      if (next.selectedModel !== previous.selectedModel)
+        selectionRevision.current += 1;
+    });
+    const storageChanged = (event: StorageEvent) => {
+      const key = event.key?.replace(/^plasmo-(?:local|sync):/, "");
+      if (
+        key == null ||
+        [
+          "tldwConfig",
+          "tldwCookieSessionConfig",
+          "tldwManualSessionApiKey",
+        ].includes(key)
+      )
+        invalidate();
+    };
+    window.addEventListener("tldw:config-updated", invalidate);
+    window.addEventListener("tldw:auth-principal-changed", invalidate);
+    window.addEventListener("storage", storageChanged);
+    return () => {
+      invalidate();
+      configStorage.unwatch(watchedConfig);
+      unsubscribe();
+      window.removeEventListener("tldw:config-updated", invalidate);
+      window.removeEventListener("tldw:auth-principal-changed", invalidate);
+      window.removeEventListener("storage", storageChanged);
+    };
+  }, []);
   const {
     state,
     metadata,
@@ -148,8 +215,8 @@ export function UnifiedSetupWizard({
     setProviderSavedPayloadFingerprints,
   ] = React.useState<ProviderSavedPayloadFingerprintState>({});
   const [providerSavedDefaultProvider, setProviderSavedDefaultProvider] =
-    React.useState<string | null>(() =>
-      providerSelectionFromState(initialState)?.provider ?? null,
+    React.useState<string | null>(
+      () => providerSelectionFromState(initialState)?.provider ?? null,
     );
   const [providerValidationState, setProviderValidationState] = React.useState<
     Record<string, ProviderValidationViewState>
@@ -224,11 +291,17 @@ export function UnifiedSetupWizard({
     [onStateChange, saveStep],
   );
 
-  const refreshParentState = React.useCallback(async () => {
-    const nextState = await refresh().catch(() => null);
-    if (nextState) onStateChange?.(nextState);
-    return nextState;
-  }, [onStateChange, refresh]);
+  const refreshParentState = React.useCallback(
+    async (beforePublish?: () => Promise<void>) => {
+      const nextState = await refresh().catch(() => null);
+      if (nextState) {
+        await beforePublish?.();
+        onStateChange?.(nextState);
+      }
+      return nextState;
+    },
+    [onStateChange, refresh],
+  );
 
   const refreshSetupReadiness = React.useCallback(() => {
     void refreshSetupReadinessStatus().catch((err) => {
@@ -349,13 +422,135 @@ export function UnifiedSetupWizard({
     [refreshParentState, refreshSetupReadiness, validateMcpTools],
   );
 
-  const completeAndPublish = React.useCallback(
-    async (...args: Parameters<typeof complete>) => {
-      const response = await complete(...args);
-      await refreshParentState();
+  const assertHandoffCurrent = React.useCallback(
+    async (handoff: SetupModelHandoff) => {
+      const config = await tldwClient.getConfig();
+      if (
+        handoff.generation !== handoffGeneration.current ||
+        !config ||
+        !servicePromptTargetsMatch(config, handoff.config) ||
+        derivePromptAssistAuthorizationRevision(config) !==
+          derivePromptAssistAuthorizationRevision(handoff.config)
+      ) {
+        throw new Error(
+          "The connection changed. Return to setup for the current server before finishing.",
+        );
+      }
+    },
+    [],
+  );
+
+  const verifyFirstChatForHandoff = React.useCallback(
+    async (...args: Parameters<typeof verifyFirstChat>) => {
+      const generation = ++handoffGeneration.current;
+      const revision = selectionRevision.current;
+      handoffRef.current = null;
+      const config = await tldwClient.getConfig();
+      const stored = await modelStorage.get<string | null>("selectedModel");
+      if (
+        !config?.serverUrl ||
+        config.authMode !== "single-user" ||
+        generation !== handoffGeneration.current
+      ) {
+        throw new Error(
+          "The setup connection is unavailable. Reconnect before verifying the model.",
+        );
+      }
+      const handoff: SetupModelHandoff = {
+        generation,
+        config: { ...config },
+        selectionRevision: revision,
+        eligible:
+          revision === selectionRevision.current &&
+          !normalizeSelectedModel(
+            useStoreMessageOption.getState().selectedModel,
+          ) &&
+          !normalizeSelectedModel(stored),
+      };
+      await assertHandoffCurrent(handoff);
+      const response = await verifyFirstChat(...args);
+      await assertHandoffCurrent(handoff);
+      if (response.status === "ready") {
+        if (
+          normalizeProviderAvailabilityKey(response.provider) !==
+            normalizeProviderAvailabilityKey(args[0].provider) ||
+          response.model.trim() !== args[0].model.trim()
+        ) {
+          throw new Error(
+            "The verified model did not match the requested setup selection. Verify it again.",
+          );
+        }
+        handoff.verified = response;
+        handoffRef.current = handoff;
+      }
       return response;
     },
-    [complete, refreshParentState],
+    [assertHandoffCurrent, verifyFirstChat],
+  );
+
+  const completeAndPublish = React.useCallback(
+    async (...args: Parameters<typeof complete>) => {
+      const handoff = handoffRef.current;
+      if (!handoff?.verified)
+        throw new Error("Verify the current setup model before finishing.");
+      await assertHandoffCurrent(handoff);
+      const response = handoff.completed ?? (await complete(...args));
+      if (!response.success)
+        throw new Error(
+          response.message || "Setup completion could not be saved.",
+        );
+      handoff.completed = response;
+      await assertHandoffCurrent(handoff);
+      if (
+        handoff.eligible &&
+        handoff.selectionRevision === selectionRevision.current
+      ) {
+        const verified = handoff.verified;
+        const models = await tldwModels.getChatModels(true);
+        await assertHandoffCurrent(handoff);
+        if (handoff.selectionRevision === selectionRevision.current) {
+          const matches = models.filter((model) => {
+            const parsed = parseProviderQualifiedModelSelection(model.id);
+            return (
+              normalizeProviderAvailabilityKey(
+                parsed.provider || model.provider,
+              ) === normalizeProviderAvailabilityKey(verified.provider) &&
+              parsed.modelId.replace(/^tldw:/, "").trim() ===
+                verified.model.trim()
+            );
+          });
+          if (matches.length !== 1)
+            throw new Error(
+              "The verified model is missing or ambiguous in the model list. Check the provider, then finish setup again.",
+            );
+          const match = matches[0];
+          const parsed = parseProviderQualifiedModelSelection(match.id);
+          let qualified = parseProviderQualifiedModelSelection(
+            `${parsed.provider || match.provider}:${verified.model.trim()}`,
+          );
+          if (!qualified.provider) {
+            qualified = parseProviderQualifiedModelSelection(
+              `${normalizeProviderAvailabilityKey(match.provider)}:${verified.model.trim()}`,
+            );
+          }
+          if (!qualified.provider)
+            throw new Error(
+              "The verified model provider could not be selected. Check the provider settings.",
+            );
+          const write = setSelectedModel(
+            `tldw:${qualified.provider}:${qualified.modelId}`,
+          );
+          // Our own publication may be retried after a rejected device write.
+          // Any later user operation still advances beyond this revision.
+          handoff.selectionRevision = selectionRevision.current;
+          await write;
+        }
+      }
+      await assertHandoffCurrent(handoff);
+      await refreshParentState(() => assertHandoffCurrent(handoff));
+      return response;
+    },
+    [assertHandoffCurrent, complete, refreshParentState, setSelectedModel],
   );
 
   const saveProviderAndRefreshReadiness = React.useCallback(
@@ -430,14 +625,16 @@ export function UnifiedSetupWizard({
                 : "Configure the minimum needed to reach a successful first chat."}
             </p>
           </div>
-          {!isMultiUserServer ? <button
-            type="button"
-            onClick={handleSkip}
-            disabled={skipPending}
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
-          >
-            {skipPending ? "Skipping..." : "Skip for now"}
-          </button> : null}
+          {!isMultiUserServer ? (
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={skipPending}
+              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+            >
+              {skipPending ? "Skipping..." : "Skip for now"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -446,9 +643,9 @@ export function UnifiedSetupWizard({
           role="alert"
           className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-text"
         >
-          Setup progress could not be loaded. The server may still be
-          starting, or the connection details may be missing - the wizard
-          works once the app can reach your tldw server.
+          Setup progress could not be loaded. The server may still be starting,
+          or the connection details may be missing - the wizard works once the
+          app can reach your tldw server.
         </div>
       ) : null}
 
@@ -461,12 +658,14 @@ export function UnifiedSetupWizard({
         </div>
       ) : null}
 
-      {!isMultiUserServer ? <SetupReadinessPanel
-        status={setupReadinessStatus}
-        loading={setupReadinessLoading}
-        error={setupReadinessError}
-        onRetry={refreshSetupReadiness}
-      /> : null}
+      {!isMultiUserServer ? (
+        <SetupReadinessPanel
+          status={setupReadinessStatus}
+          loading={setupReadinessLoading}
+          error={setupReadinessError}
+          onRetry={refreshSetupReadiness}
+        />
+      ) : null}
 
       <div className="rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6">
         {activeStep === "setup_path" ? (
@@ -570,7 +769,7 @@ export function UnifiedSetupWizard({
           <FirstChatStep
             provider={providerSelection.provider}
             model={providerSelection.model}
-            verifyFirstChat={verifyFirstChat}
+            verifyFirstChat={verifyFirstChatForHandoff}
             complete={completeAndPublish}
             onComplete={() => {
               onComplete?.();

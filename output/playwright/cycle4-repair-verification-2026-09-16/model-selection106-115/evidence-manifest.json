@@ -1,0 +1,126 @@
+{
+  "unit": "model-selection106-115",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-model-selection-diff-check.log",
+      "bytes": 1160,
+      "sha256": "28e30fc78aeb1b8a002501c0d211f0973c9dabfb71b8b88319b228d39d558b37"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-before.json",
+      "bytes": 27822,
+      "sha256": "d8c314fb3c899ecb3fd2be49097b4aa12ce73116f55b893c8b5911898b9b933e"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-comparison.json",
+      "bytes": 150,
+      "sha256": "6ec65b273e6b27d214471eafebe674ea3051af58b4af8fb4c41739ff3887411d"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-current.json",
+      "bytes": 90299,
+      "sha256": "e3ac9cba13b747f0191c5c1f216789ec00799fe783f118ead7a73c605b2a963d"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-final.json",
+      "bytes": 65351,
+      "sha256": "78f1b932ae194ac4050e1075ae614192ed9ee7acb550e2f05d787c9bea4bdb8d"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-head.json",
+      "bytes": 72514,
+      "sha256": "e07e58497a4fe6999371b720ce7451671923ee82fed52ad3f028eca4f5a75760"
+    },
+    {
+      "file": "cycle4-model-selection-eslint-stderr.log",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "cycle4-model-selection-extension-format.log",
+      "bytes": 113,
+      "sha256": "4997dac996490493bc809737019210cd8aca666e614b2b56163f4933c13de888"
+    },
+    {
+      "file": "cycle4-model-selection-extension-green.log",
+      "bytes": 1189,
+      "sha256": "316b4fb4d4d4a5c0703260881bfa4fd7a1fafbae3717d6b41a18197d3261f4f8"
+    },
+    {
+      "file": "cycle4-model-selection-extension-red.log",
+      "bytes": 2503,
+      "sha256": "1c94b120d1876dd851f6d04fbe4c39fd94e43e44f5dd8c06be39ea7eca366c36"
+    },
+    {
+      "file": "cycle4-model-selection-extra-red.log",
+      "bytes": 19143,
+      "sha256": "61b5cae3be36133a4162b1a810bff3474ad4443b62c26ae23dbbcec5c3cb22c8"
+    },
+    {
+      "file": "cycle4-model-selection-final-tests.log",
+      "bytes": 955,
+      "sha256": "b0361d4ddfeceb9276772e1d39e6b67d39959008f3576c82b48e4b9d219f8751"
+    },
+    {
+      "file": "cycle4-model-selection-first-green.log",
+      "bytes": 812,
+      "sha256": "c478d6d768282a9fcaa167b14edf93de172f89b0916c544736f284488a059437"
+    },
+    {
+      "file": "cycle4-model-selection-format-final.log",
+      "bytes": 284,
+      "sha256": "341f28359fdc9324bea49da1a7a8938295dc1838471896bce7be74677415f9b3"
+    },
+    {
+      "file": "cycle4-model-selection-format.log",
+      "bytes": 78,
+      "sha256": "4e8e1482fdd10e2bc8fe24a44d649b341070701a5c1aecbcdbe08b6e28bd4924"
+    },
+    {
+      "file": "cycle4-model-selection-frozen-manifest.json",
+      "bytes": 2058,
+      "sha256": "1689a8c417d33335bc478e37db918b018f840bc559704ba712274dd40d020959"
+    },
+    {
+      "file": "cycle4-model-selection-implementation.md",
+      "bytes": 8970,
+      "sha256": "7fa04bfae7e46cea094d3d24b98f3c5a2cced40deea59ce5b2ac3e458949f866"
+    },
+    {
+      "file": "cycle4-model-selection-media-red.log",
+      "bytes": 1491,
+      "sha256": "0611d43f66dbf63881d2ab1d60fbfc070f666641d814f1f5c0505efcc9f95b99"
+    },
+    {
+      "file": "cycle4-model-selection-owned-paths.json",
+      "bytes": 863,
+      "sha256": "f3eceb05d2ee0fb191ffdbdc728af8898bc3121727761f21cd322feca687ebe6"
+    },
+    {
+      "file": "cycle4-model-selection-production-freeze.json",
+      "bytes": 825,
+      "sha256": "b083a97035c32b21b99870a58384412453ff719bd9e31962206bc614c81e91cf"
+    },
+    {
+      "file": "cycle4-model-selection-related-first.log",
+      "bytes": 316071,
+      "sha256": "c2588525911f60c47e551c5755913c6f6053f821c8c88f3307355c107c3cb1f0"
+    },
+    {
+      "file": "cycle4-model-selection-related-green.log",
+      "bytes": 1028,
+      "sha256": "134c7b2ee79a383ad158dac13f3fb4a8debd2f280a2ded716ab1278d9ebf63e0"
+    },
+    {
+      "file": "cycle4-model-selection-review-account-access.md",
+      "bytes": 3938,
+      "sha256": "bf8021f5994ab07ca76a215bb59a84975dce7ad022871a249032a058eb4e8243"
+    },
+    {
+      "file": "cycle4-model-selection-setup-red.log",
+      "bytes": 7961,
+      "sha256": "0b8f28ed22393ea59209be6d4aecf1b7e165d7ded6a7f29809acf342c51b97fb"
+    }
+  ]
+}

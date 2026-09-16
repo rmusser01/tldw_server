@@ -1,0 +1,12 @@
+{
+  "covered": true,
+  "current": {
+    "errors": 1,
+    "warnings": 18
+  },
+  "baseline": {
+    "errors": 1,
+    "warnings": 18
+  },
+  "added": []
+}
