@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-16T19:47:31.759Z",
+  "profile": "sqlite-single",
+  "changedKeys": [
+    "Local-API.llama_api_IP",
+    "Local-API.llama_api_key",
+    "Local-API.llama_model",
+    "LlamaCpp.enabled",
+    "LlamaCpp.executable_path",
+    "LlamaCpp.models_dir",
+    "LlamaCpp.allowed_paths",
+    "LlamaCpp.log_output_file"
+  ],
+  "externalProcessOwnedByApp": false,
+  "autostart": false
+}

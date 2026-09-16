@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 19:49'
+updated_date: '2026-09-16 20:13'
 labels:
   - uat
   - testing
@@ -174,6 +174,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 19:35UTC checkpoint on c415ac44c3: reviewed155sidebar/031failedRetry/156chronology committed with exact author+independent24/5,53/5,128/7 evidence. Full compiler90existing signatures0added/removed; fresh mandatoryPG32backend+2AuthNZ pass0skips. Reopened103local retrieval notice promotion and013wrongfinalanswer remain unresolved.156row ledger140verified12awaiting2blocked2unresolved. Missingnative151/152/153 captures require recapture; no fullUAT begun. DirectHTTPcorrectsprocess-onlymodelinventory:9099responds,alleightAPI/UIportsunavailable. Newownedvisionmodelon19099loadedmatchingprojector in separateprocess; nativeapplicationcapability andimageRetry unverified. Recoveryprofilelauncher being prepared privately under ignoredrepo .tmp; no newapplicationruntime started.
 
 19:50 UTC recovery: real vision provider correctly describes existing PNG200/5807ms; app118 remains pending. Headed two-tab visibility still both visible,114 tool gap retained. Fresh SQLite init0; private harness Python/Next path errors being corrected without product changes. Official fixtures hold separate fresh PG single/multi Auth/content DBs. No full UAT restarted.103 bounded local diagnostic policy approved under.44; design selection recorded.
+
+20:12UTC actualimagePNG attached/sent correctly; failedsecondimage turn→reload→Retry succeeds exactclientID/bytes answer3 and reloadpersists. First successful pair duplicated immediately atfallbackPOST201 (157/.95). AdminLlamaListconsoleerror158/.96also tracked. Native evidence retainednative-image118-157; nextfullUATstillblocked. Current158count140verified13awaiting1blocked4unresolved. Preauthpersona429undercharacter_chat.defaultobserved, classificationpending. Runtimeisolationauditfoundsharedinactive system_ops andoptionalrepo-relative stores; fullmatrixwillneedfrozenisolatedsourceroot; targetedimage scope disclosed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

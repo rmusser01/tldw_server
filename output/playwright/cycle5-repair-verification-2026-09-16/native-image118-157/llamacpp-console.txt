@@ -1,0 +1,8 @@
+[     154ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[    2063ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18580/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[    2087ms] [LOG] [HMR] connected @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[    2419ms] [ERROR] Warning: [antd: List] The `List` component is deprecated. And will be removed in next major version. @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:2074
+[   29770ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[   29830ms] [LOG] [Fast Refresh] done in 162ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[   64106ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[   64164ms] [LOG] [Fast Refresh] done in 160ms @ http://127.0.0.1:18580/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360

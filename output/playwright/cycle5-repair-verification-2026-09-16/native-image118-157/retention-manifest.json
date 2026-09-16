@@ -1,0 +1,96 @@
+{
+  "at": "2026-09-16T20:16:08.445Z",
+  "exactCredentialScan": "pass",
+  "files": [
+    {
+      "file": "README.md",
+      "sha256": "8a8cfd6362fa06a9659f1ab7bae7ead6d199d3a9d9fde309c69004fb5b6be6f4",
+      "bytes": 3977
+    },
+    {
+      "file": "actual-vision-catalog.json",
+      "sha256": "7b089803b56123b60ceb68e5cb63964fc90427ad634de045c393a3ca35bea3f0",
+      "bytes": 619
+    },
+    {
+      "file": "canonical-after-retry.json",
+      "sha256": "6bd88a04fcbf4a687e00dedb6b8875aa3a25c4b34b22ece40ebd1829233c2c88",
+      "bytes": 10516
+    },
+    {
+      "file": "chat-console.txt",
+      "sha256": "b06018fa83aad277d855d36ac7138cdf333ddc1ee90df65421ae22629cebc31a",
+      "bytes": 4065
+    },
+    {
+      "file": "image-failed-transport.json",
+      "sha256": "53f6723436e750411b98708b88e4815a74109ebd396a27b5a7e5cf2510b3cf81",
+      "bytes": 14121
+    },
+    {
+      "file": "image-failed.png",
+      "sha256": "71c4515f9f809b2238b758ca6147a728a370a6f3dbe749efefb2b7f01b0200fe",
+      "bytes": 297451
+    },
+    {
+      "file": "image-first-success.png",
+      "sha256": "85956354ddf5ccb91fca19c8e35cecf5fedf5c846f93b10f452257c9463cd607",
+      "bytes": 247414
+    },
+    {
+      "file": "image-retry-reloaded.png",
+      "sha256": "a0a7c3a668b4eaffd831970a02a490ec7786f10023cd09a520e5106d126f98f2",
+      "bytes": 275297
+    },
+    {
+      "file": "image-retry-success.png",
+      "sha256": "71ad480ff267d2d7db3310dbe513eb4aba7d23c8f830f0dee02542a25d83922c",
+      "bytes": 278412
+    },
+    {
+      "file": "image-retry-transport.json",
+      "sha256": "d8559ef6e3d14cfc92bedd8a71aca48c8198445ae917701c1ddc7d48695f7fac",
+      "bytes": 23547
+    },
+    {
+      "file": "llamacpp-console.txt",
+      "sha256": "52f84c8b0ebde5d44ed0810ce21e1e79d88e91497399203c1ea718300f73bdc5",
+      "bytes": 1197
+    },
+    {
+      "file": "manifest.json",
+      "sha256": "4b9862f0649e596b9dbbc34d6a2ea3d88b041a5206a4addf1a0d5f4afbe4bab2",
+      "bytes": 1797
+    },
+    {
+      "file": "native-capability-cache.txt",
+      "sha256": "f2ff46f3d86b1ddf5d9a465c9077e00f1700b1824cedf9db14076785fd508a5d",
+      "bytes": 1479
+    },
+    {
+      "file": "native-local-id-receipts.txt",
+      "sha256": "339aff395a7bf5efb6ee92b99daad4abb6435c107b57f53ae3184092ced927c7",
+      "bytes": 2997
+    },
+    {
+      "file": "persona-preauth-response.json",
+      "sha256": "9b3863e40025fd9e44641c72e869260671b6c3df426026b3514d90dd8123878c",
+      "bytes": 120
+    },
+    {
+      "file": "setup-console.txt",
+      "sha256": "3944b161f863e13abbe8e2072734c22c1b8ff86e4607bbae7c29af9fd3cf2995",
+      "bytes": 3413
+    },
+    {
+      "file": "source103-during-native.json",
+      "sha256": "22832e89af1cb97d7d79dfdaaea6dc7d51e470951eaf4c337bbb962f3e593a07",
+      "bytes": 1445
+    },
+    {
+      "file": "vision-config-receipt.json",
+      "sha256": "8b7d0c38721289e760cabf09a7982f43b64ab991d17044550af19b52821ac75a",
+      "bytes": 386
+    }
+  ]
+}
