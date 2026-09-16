@@ -270,6 +270,11 @@ describe("ManageTab no-card empty state", () => {
     expect(onNavigateToGenerate).toHaveBeenCalledTimes(1)
   })
 
+  it("names the floating create action without requiring tooltip focus", () => {
+    renderManageTab()
+    expect(screen.getByTestId("flashcards-fab-create")).toHaveAccessibleName("Create card")
+  })
+
   it("treats workspace deck visibility as an active empty-result filter", () => {
     renderManageTab({
       initialShowWorkspaceDecks: true

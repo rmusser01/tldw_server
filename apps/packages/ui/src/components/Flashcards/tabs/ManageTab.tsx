@@ -2889,6 +2889,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             className="fixed bottom-6 right-6 z-50 shadow-lg !w-14 !h-14 flex items-center justify-center"
             onClick={openManualCreateDrawer}
             data-testid="flashcards-fab-create"
+            aria-label={t("option:flashcards.createCard", { defaultValue: "Create card" })}
           />
         </Tooltip>
       )}

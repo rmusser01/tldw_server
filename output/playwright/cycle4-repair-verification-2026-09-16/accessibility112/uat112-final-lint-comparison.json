@@ -1,0 +1,1277 @@
+{
+  "sameSignatures": true,
+  "baseline": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/FlashcardCreateDrawer.tsx",
+      "messages": [
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useEffect has a missing dependency: 'inlineSchedulerDraft'. Either include it or remove the dependency array."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "The 'decks' logical expression could make the dependencies of useMemo Hook (at line 161) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-unused-vars",
+          "severity": 1,
+          "message": "'deleteMutation' is assigned a value but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "The ref value 'pendingDeletionBatchesRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'pendingDeletionBatchesRef.current' to a variable inside the effect, and use that variable in the cleanup function."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "messages": [
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useCallback has a missing dependency: 'reviewedCount'. Either include it or remove the dependency array."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useEffect has a missing dependency: 'activeCard'. Either include it or remove the dependency array."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    }
+  ],
+  "current": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/FlashcardCreateDrawer.tsx",
+      "messages": [
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useEffect has a missing dependency: 'inlineSchedulerDraft'. Either include it or remove the dependency array."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "The 'decks' logical expression could make the dependencies of useMemo Hook (at line 161) change on every render. To fix this, wrap the initialization of 'decks' in its own useMemo() Hook."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-unused-vars",
+          "severity": 1,
+          "message": "'deleteMutation' is assigned a value but never used. Allowed unused vars must match /^_/u."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "The ref value 'pendingDeletionBatchesRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'pendingDeletionBatchesRef.current' to a variable inside the effect, and use that variable in the cleanup function."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "messages": [
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useCallback has a missing dependency: 'reviewedCount'. Either include it or remove the dependency array."
+        },
+        {
+          "rule": "react-hooks/exhaustive-deps",
+          "severity": 1,
+          "message": "React Hook React.useEffect has a missing dependency: 'activeCard'. Either include it or remove the dependency array."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx",
+      "messages": [
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        },
+        {
+          "rule": "@typescript-eslint/no-explicit-any",
+          "severity": 1,
+          "message": "Unexpected any. Specify a different type."
+        }
+      ]
+    }
+  ]
+}

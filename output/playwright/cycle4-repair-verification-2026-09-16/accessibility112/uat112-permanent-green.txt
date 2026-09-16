@@ -1,0 +1,310 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:89947) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.templates.test.tsx (8 tests) 13673ms
+     ✓ applies a template through the value modal and preserves the current deck and tags  2078ms
+     ✓ disables template apply until required placeholder values are provided  935ms
+     ✓ clears omitted notes and extra fields when applying a template  1487ms
+     ✓ applies a basic reverse template and preserves the reverse model selection  1273ms
+     ✓ applies a cloze template and enables the cloze-specific draft state  1295ms
+     ✓ saves the current draft as a template using the supported template payload  2610ms
+     ✓ keeps entered template values when the template query refetches while the modal is open  767ms
+     ✓ shows an error and keeps the save modal open when template creation fails  3228ms
+(node:90030) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx (3 tests) 3906ms
+     ✓ choosing a suggested tag in Advanced options submits that tag  1893ms
+     ✓ keeps create action names stable through pending and completed loading icons  1156ms
+     ✓ typing a new tag still submits successfully  857ms
+(node:90060) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > shows explicit version-conflict guidance when review submission fails with conflict
+[flashcards:error] {
+  code: 'FLASHCARDS_VERSION_CONFLICT',
+  status: 409,
+  operation: 'submitting your review',
+  raw: 'Version mismatch: expected 4, got 5'
+}
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > retries failed review submissions with preserved answer timing
+[flashcards:error] {
+  code: 'FLASHCARDS_NETWORK',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Failed to fetch'
+}
+
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx (25 tests | 1 failed) 2666ms
+     ✓ shows the top-bar create action when there is no active review card 138ms
+     ✓ shows first-run onboarding guidance with create/import/generate actions 26ms
+     ✓ persists onboarding dismissal across remounts 46ms
+     ✓ hides the top-bar create action during active review while keeping controls accessible 130ms
+     ✓ keeps a visible re-rate action after rating an active review card  347ms
+     ✓ shows due counts in deck selector labels when available 76ms
+     ✓ shows deck study dashboard actions from review analytics  403ms
+     ✓ shows the all-deck dashboard before starting an all-deck due review 241ms
+     ✓ keeps the all-due action name stable through loading and completion 135ms
+     ✓ starts the all-deck due review from the dashboard action 84ms
+     ✓ keeps the selected-deck study path direct 23ms
+     ✓ resets the all-deck dashboard gate after scope changes 98ms
+     ✓ does not fetch dashboard analytics while the review card query is loading 14ms
+     ✓ force-shows the addressed workspace deck without widening the visible deck list 21ms
+     × matches baseline snapshot for active review state 25ms
+     ✓ matches baseline snapshot for caught-up completion state 20ms
+     ✓ keeps undo visible after rating into the completion state 45ms
+     ✓ does not offer practice again when caught up without cram cards 167ms
+     ✓ keeps practice again hidden while caught-up cram availability is loading 172ms
+     ✓ offers completion actions for recovery, creation, management, and scheduling 246ms
+     ✓ does not apply a hidden cram tag to caught-up due-mode availability probes 29ms
+     ✓ keeps deck navigation available when a cram tag filter has no matches 39ms
+     ✓ distinguishes scheduled due cards from the available study queue 19ms
+     ✓ shows explicit version-conflict guidance when review submission fails with conflict 45ms
+     ✓ retries failed review submissions with preserved answer timing 72ms
+(node:90084) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx (4 tests) 374ms
+(node:90092) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > retains one explicit global session across seven mixed cards (deck-first)
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > retains one explicit global session across seven mixed cards (deck-first)
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > retains one explicit global session across seven mixed cards (undecked-first)
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > retains one explicit global session across seven mixed cards (undecked-first)
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > clicking End Session completes the session and reveals the panel
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > clicking End Session completes the session and reveals the panel
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > offers an explicit new session for an expired session while retaining the card and answer
+[flashcards:error] {
+  code: 'FLASHCARDS_NOT_FOUND',
+  status: 404,
+  operation: 'submitting your review',
+  raw: 'Flashcard review session is not active'
+}
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > queue exhaustion auto-calls the end-session path once
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > queue exhaustion auto-calls the end-session path once
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > queue exhaustion auto-calls the end-session path once
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > recent study sessions reopen the linked snapshot from ReviewTab
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > reopens generated flashcard follow-ups in the review surface
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > reopens generated flashcard follow-ups in the review surface
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > routes generated quiz follow-ups through the flashcards handoff
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > routes generated quiz follow-ups through the flashcards handoff
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > routes generated quiz follow-ups through the flashcards handoff
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > routes generated quiz follow-ups through the flashcards handoff
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx > ReviewTab study suggestions > exploratory-only sessions use weaker copy and suppress source-aware adjacency claims
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+Warning: [antd: Space] `direction` is deprecated. Please use `orientation` instead.
+
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.study-suggestions.test.tsx (13 tests) 11089ms
+     ✓ retains one explicit global session across seven mixed cards (deck-first)  814ms
+     ✓ retains one explicit global session across seven mixed cards (undecked-first)  1967ms
+     ✓ clicking End Session completes the session and reveals the panel  1437ms
+     ✓ does not end a live session for a transient or failed next-card query  588ms
+     ✓ offers an explicit new session for an expired session while retaining the card and answer  1508ms
+     ✓ queue exhaustion auto-calls the end-session path once  539ms
+     ✓ ends the active session when the review scope changes  524ms
+     ✓ reopens generated flashcard follow-ups in the review surface  1337ms
+     ✓ routes generated quiz follow-ups through the flashcards handoff  1375ms
+     ✓ exploratory-only sessions use weaker copy and suppress source-aware adjacency claims  421ms
+(node:90165) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.cloze-help.test.tsx (3 tests) 2771ms
+     ✓ shows template guidance and blocks invalid cloze front syntax  1294ms
+     ✓ shows byte-limit guidance and blocks over-limit front content  844ms
+     ✓ does not require cloze syntax for basic cards  632ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > matches baseline snapshot for active review state
+Error: Snapshot `ReviewTab create CTA visibility > matches baseline snapshot for active review state 2` mismatched
+
+- Expected
++ Received
+
+@@ -100,94 +100,10 @@
+              <span>
+                Need help?
+              </span>
+            </button>
+          </div>
+-         <div
+-           aria-live="polite"
+-           class="absolute z-50 bottom-full mb-2 left-1/2 -translate-x-1/2 "
+-           role="tooltip"
+-         >
+-           <div
+-             class="relative max-w-xs rounded-lg bg-elevated text-text shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200"
+-           >
+-             <div
+-               aria-hidden="true"
+-               class="absolute w-0 h-0 border-[6px] top-full left-1/2 -translate-x-1/2 border-t-elevated border-l-transparent border-r-transparent border-b-transparent"
+-             />
+-             <div
+-               class="px-3 py-2"
+-             >
+-               <div
+-                 class="flex items-start gap-2"
+-               >
+-                 <svg
+-                   aria-hidden="true"
+-                   class="lucide lucide-lightbulb mt-0.5 size-4 flex-shrink-0 text-warn"
+-                   fill="none"
+-                   height="24"
+-                   stroke="currentColor"
+-                   stroke-linecap="round"
+-                   stroke-linejoin="round"
+-                   stroke-width="2"
+-                   viewBox="0 0 24 24"
+-                   width="24"
+-                   xmlns="http://www.w3.org/2000/svg"
+-                 >
+-                   <path
+-                     d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"
+-                   />
+-                   <path
+-                     d="M9 18h6"
+-                   />
+-                   <path
+-                     d="M10 22h4"
+-                   />
+-                 </svg>
+-                 <div
+-                   class="flex-1 min-w-0"
+-                 >
+-                   <p
+-                     class="text-sm font-medium text-text"
+-                   >
+-                     Study assistant
+-                   </p>
+-                   <p
+-                     class="mt-0.5 text-xs text-text-muted"
+-                   >
+-                     Need help understanding a card? Ask the study assistant.
+-                   </p>
+-                 </div>
+-                 <button
+-                   aria-label="Dismiss"
+-                   class="flex-shrink-0 rounded p-0.5 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+-                 >
+-                   <svg
+-                     aria-hidden="true"
+-                     class="lucide lucide-x size-3.5 text-text-subtle hover:text-text"
+-                     fill="none"
+-                     height="24"
+-                     stroke="currentColor"
+-                     stroke-linecap="round"
+-                     stroke-linejoin="round"
+-                     stroke-width="2"
+-                     viewBox="0 0 24 24"
+-                     width="24"
+-                     xmlns="http://www.w3.org/2000/svg"
+-                   >
+-                     <path
+-                       d="M18 6 6 18"
+-                     />
+-                     <path
+-                       d="m6 6 12 12"
+-                     />
+-                   </svg>
+-                 </button>
+-               </div>
+-             </div>
+-           </div>
+-         </div>
+        </div>
+        <div
+          class="mt-2 flex flex-col gap-3"
+        >
+          <div
+
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx:921:65
+    919| 
+    920|     expect(screen.getByTestId("flashcards-review-topbar")).toMatchSnap…
+    921|     expect(screen.getByTestId("flashcards-review-active-card")).toMatc…
+       |                                                                 ^
+    922|   })
+    923| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+  Snapshots  1 failed
+ Test Files  1 failed | 5 passed (6)
+      Tests  1 failed | 55 passed (56)
+   Start at  19:24:57
+   Duration  41.26s (transform 889ms, setup 414ms, import 4.29s, tests 34.48s, environment 1.54s)
+

@@ -1,0 +1,38 @@
+$ vitest run src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx "--maxWorkers=1" --no-file-parallelism
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:2598) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx (3 tests) 5210ms
+     ✓ choosing a suggested tag in Advanced options submits that tag  2732ms
+     ✓ keeps create action names stable through pending and completed loading icons  1472ms
+     ✓ typing a new tag still submits successfully  1005ms
+(node:2646) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > shows explicit version-conflict guidance when review submission fails with conflict
+[flashcards:error] {
+  code: 'FLASHCARDS_VERSION_CONFLICT',
+  status: 409,
+  operation: 'submitting your review',
+  raw: 'Version mismatch: expected 4, got 5'
+}
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > retries failed review submissions with preserved answer timing
+[flashcards:error] {
+  code: 'FLASHCARDS_NETWORK',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Failed to fetch'
+}
+
+ ✓ src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx (25 tests) 3293ms
+     ✓ keeps a visible re-rate action after rating an active review card  413ms
+     ✓ shows deck study dashboard actions from review analytics  512ms
+     ✓ shows the all-deck dashboard before starting an all-deck due review  303ms
+
+ Test Files  2 passed (2)
+      Tests  28 passed (28)
+   Start at  19:49:15
+   Duration  12.25s (transform 1.14s, setup 184ms, import 2.77s, tests 8.50s, environment 550ms)
+

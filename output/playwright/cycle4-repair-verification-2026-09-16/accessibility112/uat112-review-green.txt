@@ -1,0 +1,126 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:95658) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx (3 tests | 1 failed) 4860ms
+     ✓ choosing a suggested tag in Advanced options submits that tag  2308ms
+     × keeps create action names stable through pending and completed loading icons 1418ms
+     ✓ typing a new tag still submits successfully  1133ms
+(node:95743) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > shows explicit version-conflict guidance when review submission fails with conflict
+[flashcards:error] {
+  code: 'FLASHCARDS_VERSION_CONFLICT',
+  status: 409,
+  operation: 'submitting your review',
+  raw: 'Version mismatch: expected 4, got 5'
+}
+
+stderr | src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > retries failed review submissions with preserved answer timing
+[flashcards:error] {
+  code: 'FLASHCARDS_NETWORK',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Failed to fetch'
+}
+
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx (25 tests | 1 failed) 2857ms
+     ✓ shows the top-bar create action when there is no active review card 169ms
+     ✓ shows first-run onboarding guidance with create/import/generate actions 32ms
+     ✓ persists onboarding dismissal across remounts 52ms
+     ✓ hides the top-bar create action during active review while keeping controls accessible 154ms
+     ✓ keeps a visible re-rate action after rating an active review card  379ms
+     ✓ shows due counts in deck selector labels when available 87ms
+     ✓ shows deck study dashboard actions from review analytics  420ms
+     ✓ shows the all-deck dashboard before starting an all-deck due review 241ms
+     × keeps the all-due action name stable through loading and completion 165ms
+     ✓ starts the all-deck due review from the dashboard action 91ms
+     ✓ keeps the selected-deck study path direct 22ms
+     ✓ resets the all-deck dashboard gate after scope changes 102ms
+     ✓ does not fetch dashboard analytics while the review card query is loading 16ms
+     ✓ force-shows the addressed workspace deck without widening the visible deck list 20ms
+     ✓ matches baseline snapshot for active review state 21ms
+     ✓ matches baseline snapshot for caught-up completion state 19ms
+     ✓ keeps undo visible after rating into the completion state 44ms
+     ✓ does not offer practice again when caught up without cram cards 174ms
+     ✓ keeps practice again hidden while caught-up cram availability is loading 167ms
+     ✓ offers completion actions for recovery, creation, management, and scheduling 248ms
+     ✓ does not apply a hidden cram tag to caught-up due-mode availability probes 32ms
+     ✓ keeps deck navigation available when a cram tag filter has no matches 42ms
+     ✓ distinguishes scheduled due cards from the available study queue 22ms
+     ✓ shows explicit version-conflict guidance when review submission fails with conflict 73ms
+     ✓ retries failed review submissions with preserved answer timing 63ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx > FlashcardCreateDrawer tags > keeps create action names stable through pending and completed loading icons
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <span
+  aria-label="loading"
+  class="anticon anticon-loading anticon-spin"
+  role="img"
+>
+  <svg
+    aria-hidden="true"
+    data-icon="loading"
+    fill="currentColor"
+    focusable="false"
+    height="1em"
+    viewBox="0 0 1024 1024"
+    width="1em"
+  >
+    <path
+      d="M988 548c-19.9 0-36-16.1-36-36 0-59.4-11.6-117-34.6-171.3a440.45 440.45 0 00-94.3-139.9 437.71 437.71 0 00-139.9-94.3C629 83.6 571.4 72 512 72c-19.9 0-36-16.1-36-36s16.1-36 36-36c69.1 0 136.2 13.5 199.3 40.3C772.3 66 827 103 874 150c47 47 83.9 101.8 109.7 162.7 26.7 63.1 40.2 130.2 40.2 199.3.1 19.9-16 36-35.9 36z"
+    />
+  </svg>
+</span> instead
+ ❯ src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.tags.test.tsx:224:78
+    222|         else {
+    223|           expect(button).toBeEnabled()
+    224|           expect(within(button).queryByRole("img", { name: "loading" }…
+       |                                                                              ^
+    225|         }
+    226|       }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > keeps the all-due action name stable through loading and completion
+Error: expect(element).not.toBeInTheDocument()
+
+expected document not to contain element, found <span
+  aria-label="loading"
+  class="anticon anticon-loading anticon-spin"
+  role="img"
+>
+  <svg
+    aria-hidden="true"
+    data-icon="loading"
+    fill="currentColor"
+    focusable="false"
+    height="1em"
+    viewBox="0 0 1024 1024"
+    width="1em"
+  >
+    <path
+      d="M988 548c-19.9 0-36-16.1-36-36 0-59.4-11.6-117-34.6-171.3a440.45 440.45 0 00-94.3-139.9 437.71 437.71 0 00-139.9-94.3C629 83.6 571.4 72 512 72c-19.9 0-36-16.1-36-36s16.1-36 36-36c69.1 0 136.2 13.5 199.3 40.3C772.3 66 827 103 874 150c47 47 83.9 101.8 109.7 162.7 26.7 63.1 40.2 130.2 40.2 199.3.1 19.9-16 36-35.9 36z"
+    />
+  </svg>
+</span> instead
+ ❯ src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx:697:76
+    695|       if (!loading) {
+    696|         expect(button).toBeEnabled()
+    697|         expect(within(button).queryByRole("img", { name: "loading" }))…
+       |                                                                            ^
+    698|       }
+    699|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 26 passed (28)
+   Start at  19:35:27
+   Duration  11.78s (transform 1.05s, setup 222ms, import 2.75s, tests 7.72s, environment 810ms)
+

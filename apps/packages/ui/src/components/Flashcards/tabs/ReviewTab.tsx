@@ -13,7 +13,7 @@ import {
   Tooltip,
   Typography
 } from "antd"
-import { X, Minus, Check, Star, Calendar, Undo2, HelpCircle } from "lucide-react"
+import { X, Minus, Check, Star, Calendar, Undo2, HelpCircle, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { Alert } from "@/components/ui/primitives"
@@ -1241,9 +1241,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             <Button
               type="primary"
               onClick={handleStartAllDeckReview}
-              loading={isReviewCardLoading}
-              disabled={!rawDueModeActiveCard}
+              icon={isReviewCardLoading
+                ? <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                : undefined}
+              disabled={isReviewCardLoading || !rawDueModeActiveCard}
               data-testid="flashcards-review-all-due"
+              aria-label={t("option:flashcards.reviewAllDue", {
+                defaultValue: "Review all due"
+              })}
+              aria-busy={isReviewCardLoading}
             >
               {t("option:flashcards.reviewAllDue", {
                 defaultValue: "Review all due"

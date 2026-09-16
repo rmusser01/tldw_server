@@ -669,6 +669,37 @@ describe("ReviewTab create CTA visibility", () => {
     expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
   })
 
+  it("keeps the all-due action name stable through loading and completion", async () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }], isLoading: false,
+    } as ReturnType<typeof useDecksQuery>)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as ReturnType<typeof useHasCardsQuery>)
+    const card = createReviewCard({ front: "Global due question" })
+    const setReviewQuery = (loading: boolean) => {
+      vi.mocked(useReviewQuery).mockReturnValue({
+        data: card, isLoading: loading, isFetching: loading,
+        refetch: vi.fn().mockResolvedValue(undefined),
+      } as ReturnType<typeof useReviewQuery>)
+    }
+    setReviewQuery(false)
+    const props = {
+      onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(),
+      reviewDeckId: undefined, onReviewDeckChange: vi.fn(), isActive: true,
+    }
+    const { rerender } = render(<ReviewTab {...props} />)
+    for (const loading of [true, false]) {
+      setReviewQuery(loading)
+      rerender(<ReviewTab {...props} />)
+      const button = await screen.findByRole("button", { name: "Review all due", exact: true })
+      expect(button).toHaveAttribute("aria-busy", String(loading))
+      if (loading) expect(button).toBeDisabled()
+      else {
+        expect(button).toBeEnabled()
+        expect(within(button).queryByRole("img", { name: "loading" })).not.toBeInTheDocument()
+      }
+    }
+  })
+
   it("starts the all-deck due review from the dashboard action", () => {
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [{ id: 11, name: "Biology" }],

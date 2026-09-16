@@ -1,0 +1,101 @@
+{
+  "unit": "accessibility112",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-uat112-independent-rereview-tests.log",
+      "bytes": 2177,
+      "sha256": "2bf8c9fc14b21e856bc8ae5eedb65798274c2f119bb86e77fb53bd34dff89f24"
+    },
+    {
+      "file": "cycle4-uat112-independent-rereview.md",
+      "bytes": 2244,
+      "sha256": "b30aebdf862d4e3df158427632b5eafc36c4b26d3c02a56023d0f70a09e12d26"
+    },
+    {
+      "file": "uat112-accessible-name-red.log",
+      "bytes": 2207,
+      "sha256": "3337112811a4d76993092cf25faa8bb9ea39d0d55de7e3f114f4059fdf3502ee"
+    },
+    {
+      "file": "uat112-accessible-name.config.ts",
+      "bytes": 1558,
+      "sha256": "a3c6de2e75d1a7759a2ca4112adfc70850d4948178ca22e334675877019837b7"
+    },
+    {
+      "file": "uat112-final-lint-comparison.json",
+      "bytes": 43423,
+      "sha256": "0a404198b49a5882814e37a490779ee66a101d844f62d3469dfc462ae46e9fb9"
+    },
+    {
+      "file": "uat112-frozen-source-comparison.json",
+      "bytes": 979,
+      "sha256": "218145df2a8b409d3a0d13171d2905c690428f74940464693199d7527c77dc92"
+    },
+    {
+      "file": "uat112-implementation-report.md",
+      "bytes": 2009,
+      "sha256": "3998d0c509a97e2a640664586d946b31abb9397538b72b2ec54e3df5380ecb51"
+    },
+    {
+      "file": "uat112-lint-comparison.json",
+      "bytes": 43423,
+      "sha256": "a0a5e6e1884f7e1fdd52c822878c75253d94cbb4ebca9a8e7b6bd73b8b68271c"
+    },
+    {
+      "file": "uat112-permanent-green.txt",
+      "bytes": 19549,
+      "sha256": "45a3fed43720e9c304fdc4421b672a41cb6804a928e8bacaa66e23459ce78326"
+    },
+    {
+      "file": "uat112-permanent-red.txt",
+      "bytes": 42978,
+      "sha256": "a8f81c41798d4447cdc5bec30fd746968ea16fcdd83dda284d5b26cc75748bc9"
+    },
+    {
+      "file": "uat112-readonly-diagnosis.md",
+      "bytes": 3482,
+      "sha256": "507200667049161a72182b1fd2ab967d9e7fa21dd9d7cd5b1127fd24e10c389a"
+    },
+    {
+      "file": "uat112-review-final.txt",
+      "bytes": 1459,
+      "sha256": "363599873709a13af64e50611df59bd0632bdc0555221bce9b3abe6e0aaf7e6c"
+    },
+    {
+      "file": "uat112-review-green-final.txt",
+      "bytes": 1888,
+      "sha256": "72a5f2dfd018d8ed40b18685047ee1065be65dfbff745f7fd2eb117ef8990863"
+    },
+    {
+      "file": "uat112-review-green.txt",
+      "bytes": 6540,
+      "sha256": "6a950b3de58d7beba87c4c17870f2d61133b56b74bc4f7129029bfca1552117f"
+    },
+    {
+      "file": "uat112-review-red.txt",
+      "bytes": 5737,
+      "sha256": "0cbd7dd146e25e97d5fe8c830a3a4cf52237c6b1145cb2840c3157335bdcef05"
+    },
+    {
+      "file": "uat112-review-snapshot-baseline.config.ts",
+      "bytes": 878,
+      "sha256": "0e919e72eccd42ba8a8786cde4ab0b1c923f717f4b2953f97e48d903dd708424"
+    },
+    {
+      "file": "uat112-review-snapshot-baseline.txt",
+      "bytes": 6546,
+      "sha256": "2be8cf3ecac34186abe9e7822f65901802f767f0aee3256f959b274e4232bc23"
+    },
+    {
+      "file": "uat112-review-snapshot-update.txt",
+      "bytes": 580,
+      "sha256": "1255d9e72fc180343a5a29c918f26ded16265ae255e19a1d3fdfe9b470916b2e"
+    },
+    {
+      "file": "uat112-review.diff",
+      "bytes": 13330,
+      "sha256": "81e82e439c765d834105e51ba998d18406255dff2c15193f6d56d8bf006e3b66"
+    }
+  ]
+}
