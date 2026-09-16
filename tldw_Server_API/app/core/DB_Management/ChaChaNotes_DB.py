@@ -36999,6 +36999,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 WHERE fr.reviewed_at >= ? AND fr.reviewed_at < ?{metrics_suffix}
                 """.format_map(locals()),  # nosec B608
                 (today_start_iso, tomorrow_start_iso, *visibility_params),
+                read_only=True,
             ).fetchone()
 
             reviewed_today = int((daily_row["reviewed_today"] if daily_row else 0) or 0)
@@ -37015,9 +37016,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 retention_rate_today = 100.0 - lapse_rate_today
 
             # UTC day streak: count consecutive days ending at today with >=1 review
+            review_day_sql = (
+                "(fr.reviewed_at AT TIME ZONE 'UTC')::date"
+                if self.backend_type == BackendType.POSTGRESQL
+                else "substr(fr.reviewed_at, 1, 10)"
+            )
             day_rows = self.execute_query(
                 """
-                SELECT DISTINCT substr(fr.reviewed_at, 1, 10) AS review_day
+                SELECT DISTINCT {review_day_sql} AS review_day
                 FROM flashcard_reviews fr
                 JOIN flashcards f ON f.id = fr.card_id AND f.deleted = 0
                 {metrics_join}
@@ -37026,6 +37032,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 LIMIT 400
                 """.format_map(locals()),  # nosec B608
                 visibility_params,
+                read_only=True,
             ).fetchall()
             reviewed_days = {
                 str(row["review_day"])
@@ -37058,6 +37065,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ORDER BY d.name ASC
                 """.format_map(locals()),  # nosec B608
                 (now_iso, MATURE_INTERVAL_DAYS, *deck_rows_params),
+                read_only=True,
             ).fetchall()
 
             decks = []

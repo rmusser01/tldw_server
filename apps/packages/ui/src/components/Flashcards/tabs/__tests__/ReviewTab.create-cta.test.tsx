@@ -1214,6 +1214,8 @@ describe("ReviewTab create CTA visibility", () => {
     } as any)
     vi.mocked(useCramQueueQuery).mockReturnValue({
       data: [],
+      isSuccess: true,
+      isError: false,
       isLoading: false,
       isFetching: false
     } as any)

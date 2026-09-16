@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
-import type { Flashcard } from "@/services/flashcards"
+import { listFlashcards, type Flashcard, type FlashcardListResponse } from "@/services/flashcards"
+import { useCramQueueQuery as useRealCramQueueQuery } from "../../hooks/useFlashcardQueries"
 import {
   FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING,
   FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING
@@ -42,6 +44,15 @@ const messageSpies = {
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
   ...await import("./review-scope-fixture")
+}))
+
+vi.mock("@/services/flashcards", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/flashcards")>(),
+  listFlashcards: vi.fn()
+}))
+vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => true }))
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: { hasFlashcards: true }, loading: false })
 }))
 
 vi.mock("react-i18next", () => ({
@@ -158,6 +169,7 @@ describe("ReviewTab cram mode", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.mocked(listFlashcards).mockReset()
     reviewMutateAsync.mockResolvedValue({ review_session_id: 77, interval_days: 1 })
     endMutateAsync.mockResolvedValue({ id: 77 })
     vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({ mutateAsync: endMutateAsync } as ReturnType<typeof useEndFlashcardReviewSessionMutation>)
@@ -215,7 +227,11 @@ describe("ReviewTab cram mode", () => {
           model_type: "basic",
           reverse: false
         }
-      ]
+      ],
+      isSuccess: true,
+      isError: false,
+      isLoading: false,
+      isFetching: false
     } as any)
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: reviewMutateAsync
@@ -369,6 +385,133 @@ describe("ReviewTab cram mode", () => {
     }
     await act(async () => { fireEvent.click(screen.getByTestId(`flashcards-review-rate-${rating}`)) })
   }
+
+  const queueResponse = (items: Flashcard[]): FlashcardListResponse => ({ items, count: items.length, total: items.length })
+  const pendingResponse = () => {
+    let resolve!: (value: FlashcardListResponse) => void
+    const promise = new Promise<FlashcardListResponse>(done => { resolve = done })
+    return { promise, resolve }
+  }
+  const mountRealQueue = () => {
+    const template = vi.mocked(useCramQueueQuery)().data![0]
+    vi.mocked(useCramQueueQuery).mockImplementation(useRealCramQueueQuery)
+    const client = new QueryClient({ defaultOptions: { queries: {
+      retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false
+    } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ReviewTab onNavigateToCreate={vi.fn()} onNavigateToImport={vi.fn()} reviewDeckId={1} onReviewDeckChange={vi.fn()} isActive />
+      </QueryClientProvider>
+    )
+    fireEvent.click(screen.getByText("Cram"))
+    return { client, template }
+  }
+
+  it("retries a failed real Cram query without claiming completion or changing deck, tag, or scheduling", async () => {
+    vi.mocked(listFlashcards).mockRejectedValue(new Error("HTTP500 Failed to list flashcards"))
+    const { template } = mountRealQueue()
+    fireEvent.change(screen.getByTestId("flashcards-review-cram-tag"), { target: { value: "biology" } })
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await screen.findByText("Unable to load cram cards")
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(screen.queryByText("No cards match this cram tag filter.")).not.toBeInTheDocument()
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+    const response = pendingResponse()
+    vi.mocked(listFlashcards).mockReturnValueOnce(response.promise)
+    const beforeRetry = vi.mocked(listFlashcards).mock.calls.length
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-retry"))
+    await waitFor(() => expect(listFlashcards).toHaveBeenCalledTimes(beforeRetry + 1))
+    expect(screen.getByText("Loading cram cards...")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-cram-retry")).not.toBeInTheDocument()
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(listFlashcards).toHaveBeenLastCalledWith(expect.objectContaining({ deck_id: 1, tag: "biology", due_status: "all" }))
+    await act(async () => { response.resolve(queueResponse([template])) })
+    await screen.findByText("Cram front")
+    expect(screen.queryByText("Unable to load cram cards")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-deck-select")).toHaveTextContent("Biology")
+    expect(screen.getByTestId("flashcards-review-cram-tag")).toHaveValue("biology")
+    expect(screen.getByTestId("flashcards-review-cram-update-schedule")).toHaveAttribute("aria-checked", "true")
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("keeps a still-failing Cram retry actionable without rating or ending a session", async () => {
+    vi.mocked(listFlashcards).mockRejectedValue(new Error("HTTP500 Failed to list flashcards"))
+    mountRealQueue()
+    await screen.findByText("Unable to load cram cards")
+    const beforeRetry = vi.mocked(listFlashcards).mock.calls.length
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-retry"))
+    await waitFor(() => expect(listFlashcards).toHaveBeenCalledTimes(beforeRetry + 1))
+    await waitFor(() => expect(screen.getByTestId("flashcards-review-cram-retry")).toBeEnabled())
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("shows initial Cram loading without a completion claim, then renders the fetched card", async () => {
+    const response = pendingResponse()
+    vi.mocked(listFlashcards).mockReturnValue(response.promise)
+    const { template } = mountRealQueue()
+    expect(await screen.findByText("Loading cram cards...")).toBeInTheDocument()
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unable to load cram cards")).not.toBeInTheDocument()
+    await act(async () => { response.resolve(queueResponse([template])) })
+    await screen.findByText("Cram front")
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("keeps an error visible with cached cards and preserves practiced identities through retry", async () => {
+    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const cards = [template, { ...template, uuid: "second-card", front: "Second card" }]
+    vi.mocked(listFlashcards).mockResolvedValue(queueResponse(cards))
+    const { client } = mountRealQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await rate("Cram front")
+    await screen.findByText("Second card")
+    vi.mocked(listFlashcards).mockRejectedValue(new Error("HTTP500 Failed to list flashcards"))
+    await act(async () => { await client.refetchQueries({ queryKey: ["flashcards:review:cram-queue"] }) })
+    await screen.findByText("Unable to load cram cards")
+    expect(screen.getByText("Second card")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("1 card remaining, 1 reviewed")
+    vi.mocked(listFlashcards).mockResolvedValue(queueResponse(cards))
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-retry"))
+    await waitFor(() => expect(screen.queryByText("Unable to load cram cards")).not.toBeInTheDocument())
+    expect(screen.getByText("Second card")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("1 card remaining, 1 reviewed")
+    expect(reviewMutateAsync).toHaveBeenCalledTimes(1)
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("does not claim completion for a failed refresh after the cached queue is practiced", async () => {
+    const template = vi.mocked(useCramQueueQuery)().data![0]
+    vi.mocked(listFlashcards).mockResolvedValue(queueResponse([template]))
+    const { client } = mountRealQueue()
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
+    await screen.findByText("Cram front")
+    vi.mocked(listFlashcards).mockRejectedValue(new Error("HTTP500 Failed to list flashcards"))
+    await act(async () => { await client.refetchQueries({ queryKey: ["flashcards:review:cram-queue"] }) })
+    await screen.findByText("Unable to load cram cards")
+    await rate("Cram front")
+    expect(screen.queryByText("Cram session complete!")).not.toBeInTheDocument()
+    expect(screen.getByText("Unable to load cram cards")).toBeInTheDocument()
+    expect(reviewMutateAsync).toHaveBeenCalledTimes(1)
+    expect(endMutateAsync).not.toHaveBeenCalled()
+    vi.mocked(listFlashcards).mockResolvedValue(queueResponse([template]))
+    fireEvent.click(screen.getByTestId("flashcards-review-cram-retry"))
+    await screen.findByText("Cram session complete!")
+    await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
+  })
+
+  it("retains the existing completed display for a successful empty Cram queue", async () => {
+    vi.mocked(listFlashcards).mockResolvedValue(queueResponse([]))
+    mountRealQueue()
+    await screen.findByText("Cram session complete!")
+    expect(screen.queryByText("Unable to load cram cards")).not.toBeInTheDocument()
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(endMutateAsync).not.toHaveBeenCalled()
+  })
 
   it.each([false, true])("reaches every intended card after scheduled queue refetch (reordered=%s)", async reordered => {
     const { cards, refresh } = mountQueue()

@@ -1,0 +1,14 @@
+{
+  "task": "TASK-13260.114",
+  "head": "c000d451877472f79e83c2e592d755e6eb7b9a85",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "39fe562a1bf819b0d225d35a9a962c03582a1ce5c0667b1e277991f46d6e44f4"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_flashcard_analytics_backends.py",
+      "sha256": "e23e82ac69b0f94754214709153f29aecc0668125748c739df7bf2dd61b5c9d5"
+    }
+  ]
+}

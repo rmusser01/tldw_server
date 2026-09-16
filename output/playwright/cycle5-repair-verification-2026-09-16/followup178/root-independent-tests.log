@@ -1,0 +1,45 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:98802) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:98805) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:98804) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:98803) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:98806) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx (1 test) 424ms
+     ✓ keeps re-rate visible after advancing and restores the reviewed card  424ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.orientation.test.tsx (6 tests) 449ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.queue-state.test.tsx (13 tests) 703ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx (20 tests) 2003ms
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > shows explicit version-conflict guidance when review submission fails with conflict
+[flashcards:error] {
+  code: 'FLASHCARDS_VERSION_CONFLICT',
+  status: 409,
+  operation: 'submitting your review',
+  raw: 'Version mismatch: expected 4, got 5'
+}
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > retries failed review submissions with preserved answer timing
+[flashcards:error] {
+  code: 'FLASHCARDS_NETWORK',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Failed to fetch'
+}
+
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx (25 tests) 3001ms
+     ✓ keeps a visible re-rate action after rating an active review card  410ms
+     ✓ shows deck study dashboard actions from review analytics  472ms
+
+ Test Files  5 passed (5)
+      Tests  65 passed (65)
+   Start at  16:37:49
+   Duration  5.12s (transform 3.86s, setup 493ms, import 7.74s, tests 6.58s, environment 1.23s)

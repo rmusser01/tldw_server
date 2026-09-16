@@ -17,6 +17,7 @@ import { X, Minus, Check, Star, Calendar, Undo2, HelpCircle, Loader2 } from "luc
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { Alert } from "@/components/ui/primitives"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
 import type {
@@ -308,6 +309,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     isCramMode &&
     !activeCard &&
     !cramTagFilter &&
+    cramQueueQuery.isSuccess &&
     !isCramQueueLoading &&
     cramQueue.length === 0
   const isCompletionRecoveryState =
@@ -1218,6 +1220,34 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         />
       ) : null}
 
+      {isCramMode && cramQueueQuery.isError && (
+        <Alert
+          variant="error"
+          title={t("option:flashcards.cramQueueLoadFailed", {
+            defaultValue: "Unable to load cram cards"
+          })}
+          action={{
+            label: t("option:flashcards.retryAction", { defaultValue: "Retry" }),
+            onClick: () => void cramQueueQuery.refetch(),
+            loading: cramQueueQuery.isFetching,
+            "data-testid": "flashcards-review-cram-retry"
+          }}
+        >
+          {t("option:flashcards.cramQueueLoadFailedDetail", {
+            defaultValue: "Try again to load cards for the selected deck and tag filter."
+          })}
+        </Alert>
+      )}
+      {isCramQueueLoading && !activeCard && (
+        <LoadingState
+          mode="spinner"
+          size="sm"
+          label={t("option:flashcards.cramQueueLoading", {
+            defaultValue: "Loading cram cards..."
+          })}
+        />
+      )}
+
       {canShowAllDeckDashboard && (
         <div
           className="mb-3 rounded border border-border bg-surface2 p-3"
@@ -1680,6 +1710,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         </Card>
       ) : (
         !canShowAllDeckDashboard && !isReviewCardLoading && !isCramQueueLoading &&
+        (!isCramMode || cramQueueQuery.isSuccess) &&
         <Card data-testid="flashcards-review-empty-card">
           <Empty
             description={

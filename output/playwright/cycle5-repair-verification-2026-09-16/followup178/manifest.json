@@ -1,0 +1,89 @@
+{
+  "at": "2026-09-16T23:38:57.135Z",
+  "files": [
+    {
+      "file": "DESIGN.md",
+      "source": ".tmp/uat178-repair-20260916/DESIGN.md",
+      "original_sha256": "915b26e855ad362513be43ede659d74015ce02ee0bd687b0a6477a115501f8e5",
+      "retained_sha256": "915b26e855ad362513be43ede659d74015ce02ee0bd687b0a6477a115501f8e5",
+      "normalization": "none"
+    },
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat178-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "dbcdeb4f2f033827ddfd67e3ba54b235c2dfe6047759686a2e33ae1d7e23c955",
+      "retained_sha256": "dbcdeb4f2f033827ddfd67e3ba54b235c2dfe6047759686a2e33ae1d7e23c955",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat178-repair-20260916/owned-manifest.json",
+      "original_sha256": "4c73ad7973613a7e8355ecf24fe148683622a17a994b4161ee863a95ae805e09",
+      "retained_sha256": "4c73ad7973613a7e8355ecf24fe148683622a17a994b4161ee863a95ae805e09",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat178-repair-20260916/owned.patch",
+      "original_sha256": "bb36dd71551756bbe2b77c72cd5678a2d02bc4d92b2f943bdd9d50646d7119c3",
+      "retained_sha256": "feb496a6878c452cf6dbd5ce86b54789589161a0e9b11cbd3e6491230c97eded",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "root-independent-review.md",
+      "source": ".tmp/uat178-repair-20260916/root-independent-review.md",
+      "original_sha256": "b8740144998556d75f113b7869a384738fc72b683da69b273520769b9f5bd8ec",
+      "retained_sha256": "b8740144998556d75f113b7869a384738fc72b683da69b273520769b9f5bd8ec",
+      "normalization": "none"
+    },
+    {
+      "file": "root-independent-tests.log",
+      "source": ".tmp/uat178-repair-20260916/root-independent-tests.log",
+      "original_sha256": "71563ce92f5d2e29798b93e1a15892d0f44549110fee5a601c7ccb38ea5ebc3c",
+      "retained_sha256": "e28d8f1eb9c9c72e55e3f196bd227becaf587683dcfc8365e7a106e2dabe6417",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "red.log",
+      "source": ".tmp/uat178-repair-20260916/red.log",
+      "original_sha256": "5f9d4a6aef517ca9049a6cf890133036bf091d88a78dd92675d1704d39651506",
+      "retained_sha256": "e7e54d45d1ae31f29e7e8d3e4372f725930455782547e648a05a29eb6afd2101",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "final-baseline-red.log",
+      "source": ".tmp/uat178-repair-20260916/final-baseline-red.log",
+      "original_sha256": "35beb48240b7e6d7a7f54dc577450046f7cfc534050fd748ab9e6a88d871d3ac",
+      "retained_sha256": "bb252fb36ee58ae2f12d1e81ee663be263b06f904114410b9c3246b7c391c980",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "final-tests.log",
+      "source": ".tmp/uat178-repair-20260916/final-tests.log",
+      "original_sha256": "0de177395b939822beda65a9f63f35c12177beb3d7252cd52a3c15ce4e192ba6",
+      "retained_sha256": "f08ea916eb5f5e7d393423da26e9e93ee458ce8e691dda357589ccfc348cef26",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "eslint-comparison.json",
+      "source": ".tmp/uat178-repair-20260916/eslint-comparison.json",
+      "original_sha256": "83bd6cbfc5ae477942b5aeb10abb02e27d91d1223cb22be2024625bef924bc0b",
+      "retained_sha256": "83bd6cbfc5ae477942b5aeb10abb02e27d91d1223cb22be2024625bef924bc0b",
+      "normalization": "none"
+    },
+    {
+      "file": "typecheck-comparison.json",
+      "source": ".tmp/uat178-repair-20260916/typecheck-comparison.json",
+      "original_sha256": "16c2bb49ccccfda426988c23196d48648bb050bee7e34ee7cb0945d0f15df1e1",
+      "retained_sha256": "16c2bb49ccccfda426988c23196d48648bb050bee7e34ee7cb0945d0f15df1e1",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit-final.json",
+      "source": ".tmp/uat178-repair-20260916/bandit-final.json",
+      "original_sha256": "fec6ae542e25d2c5552b7d66afae64a7f6a0aae0d851d319f19f0260003a0593",
+      "retained_sha256": "642e29fe9ad66f7cebd0a022d5741431b650df1d2a03a96adb764a888a672590",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}
