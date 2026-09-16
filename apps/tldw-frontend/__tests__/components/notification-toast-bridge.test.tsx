@@ -26,7 +26,9 @@ vi.mock("@/hooks/useConnectionState", () => ({
 
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
-  getApiKey: () => "test-api-key"
+  getApiKey: () => "test-api-key",
+  getSessionAccessToken: () => null,
+  getEffectiveStoredTldwConfig: () => null
 }))
 
 vi.mock("@web/components/ui/ToastProvider", () => ({

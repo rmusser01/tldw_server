@@ -1,0 +1,233 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:94783) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/components/notification-lifecycle-provider.test.tsx (42 tests) 232ms
+(node:94792) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/pages/notifications.test.tsx (31 tests) 738ms
+(node:94799) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ __tests__/components/notification-rotation.integration.test.tsx (32 tests) 233ms
+(node:94806) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > toasts provider-owned events without creating another bootstrap or stream
+The above error occurred in the <NotificationLifecycleProvider> component:
+
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:79:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > coalesces a provider-owned burst into one summary toast
+The above error occurred in the <NotificationLifecycleProvider> component:
+
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:79:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > does not drop multiple notification frames delivered in one React batch
+The above error occurred in the <NotificationLifecycleProvider> component:
+
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:79:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > clears a queued toast when the lifecycle scope changes
+The above error occurred in the <NotificationLifecycleProvider> component:
+
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:79:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+    at VitestMocker.createError (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:311:17)
+    at Object.get (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/startModuleRunner.DEj0jb3e.js:384:16)
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:162:13)
+    at renderWithHooks (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18)
+    at mountIndeterminateComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13)
+    at beginWork (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16)
+    at HTMLUnknownElement.callCallback (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14)
+    at HTMLUnknownElement.callTheUserObjectsOperation (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+stderr | __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > clears a queued toast when credentials are removed without a scope change
+The above error occurred in the <NotificationLifecycleProvider> component:
+
+    at NotificationLifecycleProvider (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/components/notifications/NotificationLifecycleProvider.tsx:79:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+ ❯ __tests__/components/notification-toast-bridge.test.tsx (6 tests | 5 failed) 15ms
+     ✓ does no work when rendered outside the lifecycle provider 5ms
+     × toasts provider-owned events without creating another bootstrap or stream 6ms
+     × coalesces a provider-owned burst into one summary toast 1ms
+     × does not drop multiple notification frames delivered in one React batch 1ms
+     × clears a queued toast when the lifecycle scope changes 1ms
+     × clears a queued toast when credentials are removed without a scope change 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > toasts provider-owned events without creating another bootstrap or stream
+ FAIL  __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > coalesces a provider-owned burst into one summary toast
+ FAIL  __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > does not drop multiple notification frames delivered in one React batch
+ FAIL  __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > clears a queued toast when the lifecycle scope changes
+ FAIL  __tests__/components/notification-toast-bridge.test.tsx > NotificationToastBridge > clears a queued toast when credentials are removed without a scope change
+Error: [vitest] No "getSessionAccessToken" export is defined on the "@web/lib/authStorage" mock. Did you forget to return it from "vi.mock"?
+If you need to partially mock a module, you can use "importOriginal" helper inside:
+
+vi.mock(import("@web/lib/authStorage"), async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    // your mocked methods
+  }
+})
+
+ ❯ NotificationLifecycleProvider components/notifications/NotificationLifecycleProvider.tsx:162:13
+    160|   const effectSetupSeenRef = React.useRef(false)
+    161|   const observedCredentialsRef = React.useRef({
+    162|     bearer: getSessionAccessToken() || getApiBearer(),
+       |             ^
+    163|     apiKey: getApiKey(),
+    164|     scope: buildWebNotificationScopeKey()
+ ❯ renderWithHooks ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:15486:18
+ ❯ mountIndeterminateComponent ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:20103:13
+ ❯ beginWork ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:21626:16
+ ❯ beginWork$1 ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27465:14
+ ❯ performUnitOfWork ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26599:12
+ ❯ workLoopSync ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26505:5
+ ❯ renderRootSync ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:26473:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  5 failed | 106 passed (111)
+   Start at  19:34:28
+   Duration  3.25s (transform 215ms, setup 294ms, import 262ms, tests 1.22s, environment 1.09s)
+

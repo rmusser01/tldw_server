@@ -232,7 +232,8 @@ export function NotificationLifecycleProvider({
       ...initialSnapshot(scopeKey, lifecycleEpoch),
       ...(!connectionVerified || missingCredentials ? { state: "auth-required" as const } : {})
     })
-    if (!enabled || !connectionVerified || missingCredentials) return
+    if (!enabled || !connectionVerified || missingCredentials ||
+      (typeof document !== "undefined" && document.visibilityState === "hidden")) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
 
@@ -394,6 +395,21 @@ export function NotificationLifecycleProvider({
       generationRef.current += 1
       stopWork()
     }
+  }, [startWork, stopWork])
+
+  React.useEffect(() => {
+    if (typeof document === "undefined") return
+    const onVisibilityChanged = () => {
+      if (document.visibilityState === "hidden") {
+        // Invalidate continuations before aborting their reads and stream.
+        generationRef.current += 1
+        stopWork()
+      } else if (!terminalStateRef.current) {
+        void startWork()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChanged)
+    return () => document.removeEventListener("visibilitychange", onVisibilityChanged)
   }, [startWork, stopWork])
 
   React.useEffect(() => {
