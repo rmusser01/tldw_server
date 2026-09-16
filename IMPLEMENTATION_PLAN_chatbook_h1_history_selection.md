@@ -25,7 +25,9 @@
 
 ## Execution baseline
 
-All stages are **Not Started**. This is an implementation plan, not a test report. The reviewed server pin is `59049e094e0845a4611ea725ae19b7c1754ea709`; Chatbook is `24094f23d59c7a9d3cfac964c19fd263bc0393b2`. Source paths below were checked against that server object. New paths are explicitly labeled Create.
+Execution started from the reviewed design commit on `codex/chatbook-h1-history-selection`; per-stage status and the execution ledger record progress. This plan is not a passing test report. The reviewed server pin is `59049e094e0845a4611ea725ae19b7c1754ea709`; Chatbook is `24094f23d59c7a9d3cfac964c19fd263bc0393b2`. Source paths below were checked against that server object. New paths are explicitly labeled Create.
+
+Execution uses the root checkout's existing virtual environment with this isolated worktree as cwd/PYTHONPATH. After a frozen Bun install, `pnpm exec` attempted dependency reconciliation; use the installed `apps/packages/ui/node_modules/.bin/vitest` from the UI package cwd for equivalent focused test commands. The shared JSON fixture is explicitly tracked despite the repository's JSON ignore rule.
 
 - [ ] Read the current Backlog workflow and TASK-13261.1; set implementation status to In Progress when actual execution starts. Keep design and implementation completion separate.
 - [ ] Use the worktree workflow to create an isolated `codex/` branch from freshly verified `dev`. The current `codex/fresh-install-uat-fixes` checkout contains unrelated edits. Do not checkout, reset, stash or stage that work. Bring only the approved design/plan/task artifacts into the isolated worktree.
@@ -100,7 +102,7 @@ function createBranchMessage(deps: BranchDependencies):
   (request: ForkRequestV1) => Promise<ForkResultV1>
 ```
 
-`HistoryCaptureResultV1` is a successful `captured` result or the same structured non-ready errors as `HistoryResolutionV1`. `HistorySelectionCaptureV1` holds snapshot/selected rows, view fence, purpose and storage-context digest, without a final request digest. `PreparedHistoryContextV1` holds the immutable credential-free composer payload or fork policy, its request-context digest and a small adapter over existing request-scope/context/connection lease validation. `finalizeHistorySelection` must receive these inputs explicitly; it cannot consult the current global draft. Admission receives the finalized value after both phases.
+`HistoryCaptureResultV1` is a successful `captured` result or the same structured non-ready errors as `HistoryResolutionV1`. `HistorySelectionCaptureV1` holds snapshot/selected manifest rows, explicit `selected_content` bound by message ID/revision/order, view fence, purpose and storage-context digest, without a final request digest. The shared `nodes` member is the complete lightweight manifest; selected content carries text and ordered images separately. `bindSelectedHistoryContent` and native `bind_selected_history_content` validate this binding; owners still load and fence the content coherently. `PreparedHistoryContextV1` holds the immutable credential-free composer payload or fork policy, its request-context digest and a small adapter over existing request-scope/context/connection lease validation. `finalizeHistorySelection` must receive these inputs explicitly; it cannot consult the current global draft. Admission receives the finalized value after both phases.
 
 `BranchDependencies` is the typed extraction of existing handler dependencies plus the selection/operation adapters; it is not a service locator. `LocalForkProjectionV1` contains captured owner/source fences, ordered source revisions, preallocated ID map, allowlisted child rows/files and the immutable request. Preparation does not write a child; commit revalidates the source transactionally.
 
@@ -136,7 +138,7 @@ These are signature declarations, not placeholder implementations. Reuse the act
 
 **Tests:** H1-A/B/G contract vectors, invalid graph cases and generated acyclic/cyclic graph properties.
 
-**Status:** Not Started.
+**Status:** Complete.
 
 ### Task 1.1: types, pure resolver and canonical vectors
 
@@ -149,7 +151,7 @@ These are signature declarations, not placeholder implementations. Reuse the act
 
 **Interfaces:** Consumes the spec's cursor/interpretation/digest definitions. Produces `resolveParentPath`, `resolveHistorySelection`, strict `HistorySelectionV1`, `CompareHistorySelectionV1`, snapshot/admission/projection types and shared canonical vectors.
 
-- [ ] Add failing path tests. Include two equal-text assistant IDs, descendants on only one branch, `before_message(root)`, explicit empty, missing parent, duplicate ID, cycle and cross-conversation rejection. Start with this self-contained pure case:
+- [x] Add failing path tests. Include two equal-text assistant IDs, descendants on only one branch, `before_message(root)`, explicit empty, missing parent, duplicate ID, cycle and cross-conversation rejection. Start with this self-contained pure case:
 
 ```typescript
 import { expect, it } from "vitest"
@@ -170,13 +172,15 @@ it("retains the chosen stable branch and an empty before-root boundary", () => {
 })
 ```
 
-- [ ] Run `pnpm --dir apps/packages/ui exec vitest run src/utils/__tests__/history-selection.test.ts src/utils/__tests__/message-variants.test.ts`. Verify the target missing resolver/identity behavior fails, not environment setup.
-- [ ] Implement an ID map, duplicate detection, visited-set parent walk and explicit before/after/empty handling. Reverse the collected ancestor chain once. Do not sort or compare content during ancestry resolution. Add the legacy interpretation adapter without mutating original rows.
-- [ ] Implement the spec's exact nine-member selection tuple and compact literal-Unicode UTF-8 encoding in the fixture. Include Unicode, image/reference identities, request-versus-storage context digests and fork-excluded settings. Use SHA-256 from existing libraries; Python and TypeScript must match fixed tuple inputs/results. Context hashes are validated by their own owner, not by reserializing another owner's settings.
-- [ ] Remove text-only variant identity dedup when stable distinct IDs exist; preserve same-ID/server-ID updates and existing no-server-ID-inheritance tests.
-- [ ] Add a comparison vector with two common rounds, A/B responses, B finishing last and an A-specific follow-up. Validate the A projection's semantic IDs/order independently of stored cross-model parent edges.
-- [ ] Add Hypothesis properties in the Python pure test: valid ancestor paths contain no repeats, before-boundary is a proper prefix, cycles/missing parents reject, and source input is unchanged. Do not add a new JavaScript property library.
-- [ ] Run the Vitest command and `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_history_selection.py -q`; review/type-check and commit the contract plus fixtures.
+- [x] Run `pnpm --dir apps/packages/ui exec vitest run src/utils/__tests__/history-selection.test.ts src/utils/__tests__/message-variants.test.ts`. Verify the target missing resolver/identity behavior fails, not environment setup.
+- [x] Implement an ID map, duplicate detection, visited-set parent walk and explicit before/after/empty handling. Reverse the collected ancestor chain once. Do not sort or compare content during ancestry resolution. Add the legacy interpretation adapter without mutating original rows.
+- [x] Implement the spec's exact nine-member selection tuple and compact literal-Unicode UTF-8 encoding in the fixture. Include Unicode, image/reference identities, request-versus-storage context digests and fork-excluded settings. Use SHA-256 from existing libraries; Python and TypeScript must match fixed tuple inputs/results. Context hashes are validated by their own owner, not by reserializing another owner's settings.
+- [x] Remove text-only variant identity dedup when stable distinct IDs exist; preserve same-ID/server-ID updates and existing no-server-ID-inheritance tests.
+- [x] Add a comparison vector with two common rounds, A/B responses, B finishing last and an A-specific follow-up. Validate the A projection's semantic IDs/order independently of stored cross-model parent edges.
+- [x] Add Hypothesis properties in the Python pure test: valid ancestor paths contain no repeats, before-boundary is a proper prefix, cycles/missing parents reject, and source input is unchanged. Do not add a new JavaScript property library.
+- [x] Run the Vitest command and `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_history_selection.py -q`; review/type-check and commit the contract plus fixtures.
+
+Execution evidence: contract commits `28c7d1904e`, `2fed0871c4`, `77dde3d2b4`; 18 focused Vitest tests and 17 Python tests passed. Independent task review and two scoped fix reviews resolved all identified P1/P2 issues. Focused type checking, Ruff, compileall and Bandit passed; full UI type checking exceeded the default 4 GB heap and remains a Stage 5 qualification item. Owner-specific fork-exclusion behavior remains assigned to Task 4.1. Detailed evidence is in the plan-owned SDD ledger and TASK-13261.1.
 
 ## Stage 2: complete owners, legacy acceptance and parent binding
 
@@ -186,7 +190,7 @@ it("retains the chosen stable branch and an empty before-root boundary", () => {
 
 **Tests:** H1-C/D/H, more than 20,000 rows, dual review/replay, transaction rollback, metadata forgery, stale parent and SQLite/PostgreSQL concurrency.
 
-**Status:** Not Started.
+**Status:** In Progress.
 
 ### Task 2.1: native owner snapshot, migration and legacy CAS
 
@@ -216,7 +220,7 @@ def test_history_snapshot_preserves_equal_text_distinct_ids(db):
     snapshot = owner_db.get_conversation_history_snapshot(
         conversation_id, owner_client_id="message-store-user"
     )
-    assert {row.id for row in snapshot.manifest} == {first, second}
+    assert {row["id"] for row in snapshot.nodes} == {first, second}
 ```
 
 - [ ] Run the three focused files and verify a behavior/missing-table failure. Implement the next available migration on both backends. The reviewed pin is schema 67; choose the next free version at execution, update every SQLite/PostgreSQL migration path and fresh bootstrap, and test upgrade idempotence. Do not renumber a migration already integrated by UAT.
