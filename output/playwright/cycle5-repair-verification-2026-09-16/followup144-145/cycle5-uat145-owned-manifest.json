@@ -1,0 +1,14 @@
+{
+  "frozenAt": "2026-09-16T16:09:54.751Z",
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/AuthNZ/integration/test_single_user_bootstrap_postgres.py",
+      "sha256": "c2591d1390fea67550875d6c59635e313d64039bd0a3b7da1dde5b0c0efbf223"
+    },
+    {
+      "path": "backlog/tasks/task-13260.84 - Use-canonical-user-fixtures-in-PostgreSQL-single-user-bootstrap-regressions.md",
+      "sha256": "5825e44371dc5c4cac94c55a388b5c2f4570da0da69f6d270db013abe2659bd6"
+    }
+  ],
+  "recordedAt": "2026-09-16T16:13:42.018Z"
+}

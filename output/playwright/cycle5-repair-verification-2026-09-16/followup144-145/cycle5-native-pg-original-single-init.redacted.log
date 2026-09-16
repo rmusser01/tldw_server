@@ -1,0 +1,711 @@
+2026-09-16 08:55:47.904 | INFO     | tldw_Server_API.app.core.config:_flush_startup_logs:238 - Early loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Config_Files/.env
+2026-09-16 08:55:47.905 | DEBUG    | tldw_Server_API.app.core.config:_flush_startup_logs:238 - Attempting to load OpenAI TTS mappings from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/openai_tts_mappings.json
+2026-09-16 08:55:48.083 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:164 - Prometheus exporter not available: No module named 'opentelemetry.exporter.prometheus'
+2026-09-16 08:55:48.108 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:179 - FastAPI instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 08:55:48.108 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:184 - HTTPX instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 08:55:48.108 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:189 - SQLAlchemy instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 08:55:48.108 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:194 - Psycopg2 instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 08:55:48.108 | DEBUG    | tldw_Server_API.app.core.Metrics.telemetry:<module>:199 - aiohttp instrumentation not available: No module named 'opentelemetry.instrumentation'
+2026-09-16 08:55:48.252 | WARNING  | tldw_Server_API.app.core.Metrics.telemetry:_create_metric_reader:719 - Prometheus metric exporter not available
+2026-09-16 08:55:48.252 | INFO     | tldw_Server_API.app.core.Metrics.telemetry:_initialize:562 - Telemetry initialized for service: tldw_server
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_requests_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_request_duration_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_connections_active
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_queries_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: db_query_duration_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_snapshots_table_bytes
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_snapshots_table_rows
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_hits_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_misses_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_invalidations_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_generation
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: privilege_cache_entries
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_requests_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_request_duration_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars_by_user
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: stt_final_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: tts_ttfb_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: voice_to_voice_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_chat_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stream_underruns_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stream_errors_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_requests_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_sessions_started_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_sessions_ended_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_errors_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_run_writes_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_redaction_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_queue_wait_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_streaming_token_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: audio_stt_transcript_read_path_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_cost_dollars_by_operation
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total_by_user
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: llm_tokens_used_total_by_operation
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_attempts_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_duration_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_connection_errors_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: infra_redis_fallback_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_queries_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_generation_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_generation_errors_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_export_latency_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: slides_export_errors_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: app_exception_events_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: app_warning_events_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_sessions_created_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_runs_started_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_runs_completed_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_run_duration_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_log_truncations_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_full_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_ttl_expired_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_queue_wait_seconds
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_connections_opened_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_heartbeats_sent_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_disconnects_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_ws_queue_drops_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_upload_bytes_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_upload_files_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_runs_total
+2026-09-16 08:55:48.252 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_runs_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_files_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_removed_bytes_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_janitor_duration_ms
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_runs_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_corrected_users_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_corrected_bytes_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_reconcile_duration_ms
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_maintenance_cycles_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: sandbox_artifact_maintenance_cycle_duration_ms
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_latency_seconds
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_documents_retrieved
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_cache_hits_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_cache_misses_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_precision
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_recall
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_mrr
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_ndcg
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_retrieval_f1
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_timeouts_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_exceptions_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_retries_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_hard_citation_coverage
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_nli_unsupported_ratio
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_success_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_failure_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_timeout_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_output_truncated_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: template_render_duration_seconds
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_command_invoked_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_command_errors_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_conversation_search_requests_total
+2026-09-16 08:55:48.253 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_conversation_search_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_requests_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_errors_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_warnings_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chat_dictionary_validate_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_unsupported_claims_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_fix_success_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_postcheck_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_performed_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_adopted_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_adaptive_rerun_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_budget_exhausted_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranker_llm_docs_scored_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_phase_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_reranking_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_hits_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_misses_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_rewrite_cache_puts_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_batch_query_reuse_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_phase_budget_exhausted_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_total_claims_checked_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_faithfulness_score
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_coverage_score
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_eval_last_run_timestamp
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_generation_gated_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_policy_filtered_chunks_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_sanitized_docs_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_ocr_dropped_docs_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_injection_chunks_downweighted_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_numeric_mismatches_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: rag_missing_hard_citations_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: embeddings_generated_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_questions_generated_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_generation_failures_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: hyde_vectors_written_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: uploads_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: upload_bytes_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_requests_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_processing_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_validation_failures_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_chunks_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: ingestion_embeddings_enqueue_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: embedding_generation_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_requests_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_outcomes_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: quiz_generation_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_cpu_usage_percent
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_memory_usage_bytes
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: system_disk_usage_bytes
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: errors_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_fetch_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_fetch_latency_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_playwright_fallback_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_blocked_by_robots_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: scrape_content_length_bytes
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_strategy_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_strategy_duration_seconds
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: extraction_content_length_bytes
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: security_ssrf_block_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: security_headers_responses_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: byok_resolution_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: byok_missing_credentials_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: user_storage_used_mb
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: user_storage_quota_mb
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_state
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_failures_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_successes_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_rejections_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_trips_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: circuit_breaker_timeouts_total
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_queue_depth
+2026-09-16 08:55:48.254 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_processing
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_active
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_expiring_soon
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: prompt_studio_leases_stale_processing
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_tool_calls_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_tool_duration_seconds
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_cache_hits_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: agentic_span_length_chars
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: span_bytes_read_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_falsification_triggered_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_status_changes_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_anti_context_docs
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_processing_duration_seconds
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_wasted_falsification_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_claims_processed_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_adjudication_scores
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_timeout_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: fva_budget_exhausted_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_requests_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_request_duration_seconds
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_retries_total
+2026-09-16 08:55:48.255 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: http_client_egress_denials_total
+2026-09-16 08:55:48.256 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 08:55:48.256 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Config_Files/.env
+2026-09-16 08:55:48.256 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 08:55:48.256 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Config_Files/.env
+2026-09-16 08:55:48.257 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Config_Files/config.txt
+2026-09-16 08:55:48.258 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 08:55:48.270 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Databases/user_databases
+2026-09-16 08:55:48.358 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 08:55:48.358 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 08:55:48.358 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 08:55:48.358 | WARNING  | tldw_Server_API.app.core.AuthNZ.database:_apply_single_user_fallback:409 - Single-user mode: ignoring non-SQLite DATABASE_URL
+2026-09-16 08:55:48.358 | INFO     | tldw_Server_API.app.core.AuthNZ.database:initialize:942 - Using SQLite database
+2026-09-16 08:55:48.360 | INFO     | tldw_Server_API.app.core.AuthNZ.database:_create_sqlite_schema:1139 - Creating SQLite schema...
+2026-09-16 08:55:48.363 | INFO     | tldw_Server_API.app.core.AuthNZ.database:_create_sqlite_schema:1143 - SQLite schema created successfully
+2026-09-16 08:55:48.363 | INFO     | tldw_Server_API.app.core.AuthNZ.database:_create_sqlite_schema:1150 - SQLite schema harmonization: ensuring AuthNZ tables
+2026-09-16 08:55:48.366 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:ensure_authnz_tables:6665 - Database needs migrations for Databases/users.db. Current: 0, Latest: 98
+2026-09-16 08:55:48.366 | DEBUG    | tldw_Server_API.app.core.Infrastructure.distributed_lock:acquire:113 - FileLock acquired: Databases/authnz_migration.lock
+2026-09-16 08:55:48.366 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:_apply_authnz_migrations_locked:6586 - AuthNZ.apply_migrations: db=Databases/users.db target=latest latest=98
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:109 - MigrationManager.migrate: start current=0, target=98, pending=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98]
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=1 name='Create users table'
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 1: Create users table
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_001_create_users_table:93 - Migration 001: Created users table
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=1 ok
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=2 name='Create sessions table'
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 2: Create sessions table
+2026-09-16 08:55:48.367 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_002_create_sessions_table:133 - Migration 002: Created sessions table
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=2 ok
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=3 name='Create api_keys table'
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 3: Create api_keys table
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_003_create_api_keys_table:204 - Migration 003: Created api_keys table
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=3 ok
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=4 name='Create api_key_audit_log table'
+2026-09-16 08:55:48.368 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 4: Create api_key_audit_log table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_004_create_api_key_audit_log:228 - Migration 004: Created api_key_audit_log table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=4 ok
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=5 name='Create rate_limits table'
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 5: Create rate_limits table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_005_create_rate_limits_table:250 - Migration 005: Created rate_limits table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=5 ok
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=6 name='Create registration_codes table'
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 6: Create registration_codes table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_006_create_registration_codes_table:275 - Migration 006: Created registration_codes table
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=6 ok
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=7 name='Create audit_logs table'
+2026-09-16 08:55:48.369 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 7: Create audit_logs table
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_007_create_audit_logs_table:302 - Migration 007: Created audit_logs table
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=7 ok
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=8 name='Add password_history table'
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 8: Add password_history table
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_008_add_password_history_table:322 - Migration 008: Created password_history table
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=8 ok
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=9 name='Add session encryption columns'
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 9: Add session encryption columns
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_009_add_session_encryption_columns:340 - Migration 009: Added session encryption columns
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=9 ok
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=10 name='Add 2FA columns to users'
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 10: Add 2FA columns to users
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_010_add_2fa_columns:362 - Migration 010: Added 2FA columns to users table
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=10 ok
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=11 name='Enhanced auth tables + uuid'
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 11: Enhanced auth tables + uuid
+2026-09-16 08:55:48.370 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_011_add_enhanced_auth_tables:390 - Migration 011: START enhanced auth tables + uuid
+2026-09-16 08:55:48.371 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_011_add_enhanced_auth_tables:488 - Migration 011: Created enhanced authentication tables
+2026-09-16 08:55:48.371 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=11 ok
+2026-09-16 08:55:48.371 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=12 name='Create RBAC core tables'
+2026-09-16 08:55:48.371 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 12: Create RBAC core tables
+2026-09-16 08:55:48.371 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_012_create_rbac_tables:2208 - Migration 012: START RBAC core tables
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_012_create_rbac_tables:2283 - Migration 012: Created RBAC core tables (roles, permissions, mappings, overrides)
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=12 ok
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=13 name='Create RBAC limits and usage tables'
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 13: Create RBAC limits and usage tables
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_013_create_rbac_limits_and_usage:2288 - Migration 013: START RBAC limits + usage tables
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_013_create_rbac_limits_and_usage:2398 - Migration 013: Created RBAC rate limit and usage tables
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=13 ok
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=14 name='Seed default roles and permissions'
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 14: Seed default roles and permissions
+2026-09-16 08:55:48.372 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_014_seed_roles_permissions:2403 - Migration 014: START seed default roles + permissions
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_014_seed_roles_permissions:2522 - Migration 014: Seeded default roles and permissions
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=14 ok
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=15 name='Create LLM usage tables'
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 15: Create LLM usage tables
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_015_create_llm_usage_tables:2527 - Migration 015: START LLM usage tables
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_015_create_llm_usage_tables:2676 - Migration 015: Created LLM usage tables (llm_usage_log, llm_usage_daily)
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=15 ok
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=16 name='Create organizations and teams tables'
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 16: Create organizations and teams tables
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_016_create_orgs_teams:2681 - Migration 016: START organizations/teams tables
+2026-09-16 08:55:48.373 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_016_create_orgs_teams:2756 - Migration 016: Created organizations, org_members, teams, team_members
+2026-09-16 08:55:48.374 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=16 ok
+2026-09-16 08:55:48.374 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=17 name='Extend api_keys with virtual key fields'
+2026-09-16 08:55:48.374 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 17: Extend api_keys with virtual key fields
+2026-09-16 08:55:48.381 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_017_extend_api_keys_virtual:2787 - Migration 017: Extended api_keys with virtual key fields
+2026-09-16 08:55:48.381 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=17 ok
+2026-09-16 08:55:48.381 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=18 name='Add indexes for usage tables'
+2026-09-16 08:55:48.381 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 18: Add indexes for usage tables
+2026-09-16 08:55:48.381 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_018_add_usage_indexes:2801 - Migration 018: Added indexes for usage_log and usage_daily
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=18 ok
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=19 name='Add request_id to usage_log'
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 19: Add request_id to usage_log
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_019_usage_log_add_request_id:2814 - Migration 019: Added request_id column to usage_log
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=19 ok
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=20 name='Add bytes_in to usage_log'
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 20: Add bytes_in to usage_log
+2026-09-16 08:55:48.382 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_020_usage_log_add_bytes_in:2825 - Migration 020: Added bytes_in column to usage_log
+2026-09-16 08:55:48.383 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=20 ok
+2026-09-16 08:55:48.383 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=21 name='Add bytes_in_total to usage_daily'
+2026-09-16 08:55:48.383 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 21: Add bytes_in_total to usage_daily
+2026-09-16 08:55:48.383 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_021_usage_daily_add_bytes_in_total:2836 - Migration 021: Added bytes_in_total column to usage_daily
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=21 ok
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=22 name='Create tool catalogs tables'
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 22: Create tool catalogs tables
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_022_create_tool_catalogs:4046 - Migration 022: Created tool_catalogs and tool_catalog_entries tables
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=22 ok
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=23 name='Create virtual key counters tables'
+2026-09-16 08:55:48.384 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 23: Create virtual key counters tables
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_023_create_virtual_key_counters:4080 - Migration 023: Created virtual key counters tables
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=23 ok
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=24 name='Ensure api_keys status column before index'
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 24: Ensure api_keys status column before index
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_024_ensure_api_keys_status_column:4119 - Migration 024: Ensured api_keys.status column and index
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=24 ok
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=25 name='Backfill team_members added_at column'
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 25: Backfill team_members added_at column
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_025_team_members_added_at:4146 - Migration 025: Ensured team_members.added_at column with backfill
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=25 ok
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=26 name='Create privilege_snapshots table'
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 26: Create privilege_snapshots table
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_026_create_privilege_snapshots_table:4173 - Migration 026: Created privilege_snapshots table
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=26 ok
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=27 name='Ensure session revocation columns'
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 27: Ensure session revocation columns
+2026-09-16 08:55:48.385 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_027_add_session_revocation_columns:4205 - Migration 027: Harmonized session revocation columns
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=27 ok
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=28 name='Create org_invites table'
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 28: Create org_invites table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_028_create_org_invites:4212 - Migration 028: START org_invites table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_028_create_org_invites:4240 - Migration 028: Created org_invites table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=28 ok
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=29 name='Create org_invite_redemptions table'
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 29: Create org_invite_redemptions table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_029_create_org_invite_redemptions:4252 - Migration 029: START org_invite_redemptions table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_029_create_org_invite_redemptions:4271 - Migration 029: Created org_invite_redemptions table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=29 ok
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=30 name='Create subscription_plans table'
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 30: Create subscription_plans table
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_030_create_subscription_plans:4284 - Migration 030: Retired public billing plan schema bootstrap
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=30 ok
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=31 name='Create org_subscriptions table'
+2026-09-16 08:55:48.386 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 31: Create org_subscriptions table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_031_create_org_subscriptions:4297 - Migration 031: Retired public org_subscriptions schema bootstrap
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=31 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=32 name='Create stripe_webhook_events table'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 32: Create stripe_webhook_events table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_032_create_stripe_webhook_events:4310 - Migration 032: Retired public Stripe webhook schema bootstrap
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=32 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=33 name='Create payment_history table'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 33: Create payment_history table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_033_create_payment_history:4323 - Migration 033: Retired public payment history schema bootstrap
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=33 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=34 name='Create billing_audit_log table'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 34: Create billing_audit_log table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_034_create_billing_audit_log:4336 - Migration 034: Retired public billing audit schema bootstrap
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=34 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=35 name='Backfill storage_mb limits'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 35: Backfill storage_mb limits
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_035_backfill_storage_mb_limits:4354 - Migration 035: START storage_mb limit backfill
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_035_backfill_storage_mb_limits:4404 - Migration 035: Completed storage_mb limit backfill
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=35 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=36 name='Create user_provider_secrets table'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 36: Create user_provider_secrets table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_036_create_user_provider_secrets:4462 - Migration 036: Created user_provider_secrets table
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=36 ok
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=37 name='Create org_provider_secrets table'
+2026-09-16 08:55:48.387 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 37: Create org_provider_secrets table
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_037_create_org_provider_secrets:4527 - Migration 037: Created org_provider_secrets table
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=37 ok
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=38 name='Add org_provider_secrets cleanup triggers'
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 38: Add org_provider_secrets cleanup triggers
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_038_add_org_provider_secrets_cleanup_triggers:4560 - Migration 038: Added org_provider_secrets cleanup triggers
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=38 ok
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=39 name='Ensure users storage columns'
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 39: Ensure users storage columns
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_039_ensure_user_storage_columns:4573 - Migration 039: START ensure storage columns on users table
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_039_ensure_user_storage_columns:4587 - Migration 039: storage columns ensured on users table
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=39 ok
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=40 name='Extend registration_codes for org invites'
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 40: Extend registration_codes for org invites
+2026-09-16 08:55:48.388 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_040_extend_registration_codes_for_org_invites:4595 - Migration 040: START registration_codes org invite fields
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_040_extend_registration_codes_for_org_invites:4629 - Migration 040: Updated registration_codes for org invites
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=40 ok
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=41 name='Add llm_provider_overrides table'
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 41: Add llm_provider_overrides table
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_041_add_llm_provider_overrides:5122 - Migration 041: START llm_provider_overrides table
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_041_add_llm_provider_overrides:5141 - Migration 041: Created llm_provider_overrides table
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=41 ok
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=42 name='Create org_budgets table'
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 42: Create org_budgets table
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_042_create_org_budgets:5153 - Migration 042: START org_budgets table
+2026-09-16 08:55:48.393 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_042_create_org_budgets:5241 - Migration 042: Created org_budgets table and migrated legacy budgets
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=42 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=43 name='Create retention_policy_overrides table'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 43: Create retention_policy_overrides table
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_043_create_retention_policy_overrides:5253 - Migration 043: START retention_policy_overrides table
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_043_create_retention_policy_overrides:5264 - Migration 043: Created retention_policy_overrides table
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=43 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=44 name='Add api_keys.key_id column'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 44: Add api_keys.key_id column
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_044_add_api_keys_key_id:5283 - Migration 044: Added api_keys.key_id + index
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=44 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=45 name='Add users.created_by column'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 45: Add users.created_by column
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=45 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=46 name='Add org_invites allowed_email_domain'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 46: Add org_invites allowed_email_domain
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_046_add_org_invite_allowlist_domain:4634 - Migration 046: START org_invites allowlist domain
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_046_add_org_invite_allowlist_domain:4647 - Migration 046: org_invites allowlist domain ensured
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=46 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=47 name='Create user_config_overrides table'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 47: Create user_config_overrides table
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_047_create_user_config_overrides_table:4695 - Migration 047: Created user_config_overrides table
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=47 ok
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=48 name='Create org/team config overrides tables'
+2026-09-16 08:55:48.394 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 48: Create org/team config overrides tables
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_048_create_org_team_config_overrides_table:4785 - Migration 048: Created org/team config overrides tables
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=48 ok
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=49 name='Add llm_usage_log key_id + ts index'
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 49: Add llm_usage_log key_id + ts index
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_049_add_llm_usage_log_key_ts_index:2846 - Migration 049: Added llm_usage_log key_id + ts index
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=49 ok
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=50 name='Create generated_files table'
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 50: Create generated_files table
+2026-09-16 08:55:48.395 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_050_create_generated_files_table:2855 - Migration 050: START generated_files table
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_050_create_generated_files_table:2922 - Migration 050: Created generated_files table with indexes
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=50 ok
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=51 name='Create storage_quotas table'
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 51: Create storage_quotas table
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_051_create_storage_quotas_table:2938 - Migration 051: START storage_quotas table
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_051_create_storage_quotas_table:2975 - Migration 051: Created storage_quotas table with indexes
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=51 ok
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=52 name='Create org/team role permission tables'
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 52: Create org/team role permission tables
+2026-09-16 08:55:48.396 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_052_create_org_team_role_permissions:2980 - Migration 052: START org/team role permission tables
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_052_create_org_team_role_permissions:3041 - Migration 052: Created org/team role permission tables and seeded defaults
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=52 ok
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=53 name='Create BYOK OAuth state table'
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 53: Create BYOK OAuth state table
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_053_create_byok_oauth_state:3046 - Migration 053: START byok_oauth_state table
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_053_create_byok_oauth_state:3096 - Migration 053: Created byok_oauth_state table
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=53 ok
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=54 name='Add llm_usage_log router analytics columns and indexes'
+2026-09-16 08:55:48.397 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 54: Add llm_usage_log router analytics columns and indexes
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_054_add_llm_usage_log_router_analytics_columns:3111 - Migration 054: Added llm_usage_log router analytics columns/indexes
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=54 ok
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=55 name='Create MCP Hub tables'
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 55: Create MCP Hub tables
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_055_create_mcp_hub_tables:3211 - Migration 055: Created MCP Hub tables
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=55 ok
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=56 name='Create MCP Hub policy tables'
+2026-09-16 08:55:48.398 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 56: Create MCP Hub policy tables
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_056_create_mcp_hub_policy_tables:3381 - Migration 056: Created MCP Hub policy tables
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=56 ok
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=57 name='Add consumable MCP approval decision columns'
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 57: Add consumable MCP approval decision columns
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_057_add_consumable_mcp_approval_decision_columns:3400 - Migration 057: Added MCP approval decision consumption columns
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=57 ok
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=58 name='Harden MCP policy override schema'
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 58: Harden MCP policy override schema
+2026-09-16 08:55:48.399 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_058_harden_mcp_policy_override_schema:3415 - Migration 058: Hardened MCP policy override schema
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=58 ok
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=59 name='Create data subject requests table'
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 59: Create data subject requests table
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_059_create_data_subject_requests_table:4798 - Migration 059: START data_subject_requests table
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_059_create_data_subject_requests_table:4838 - Migration 059: Created data_subject_requests table
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=59 ok
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=60 name='Create admin monitoring tables'
+2026-09-16 08:55:48.400 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 60: Create admin monitoring tables
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_060_create_admin_monitoring_tables:4923 - Migration 060: Created admin monitoring tables
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=60 ok
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=61 name='Create backup schedule tables'
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 61: Create backup schedule tables
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_061_create_backup_schedule_tables:5006 - Migration 061: Created backup schedule tables
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=61 ok
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=62 name='Harden MCP external binding schema'
+2026-09-16 08:55:48.401 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 62: Harden MCP external binding schema
+2026-09-16 08:55:48.405 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_059_harden_mcp_external_binding_schema:3458 - Migration 059: Hardened MCP external binding schema
+2026-09-16 08:55:48.406 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=62 ok
+2026-09-16 08:55:48.406 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=63 name='Add MCP external credential slots'
+2026-09-16 08:55:48.406 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 63: Add MCP external credential slots
+2026-09-16 08:55:48.407 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_060_add_mcp_external_credential_slots:3617 - Migration 060: Added MCP external credential slot schema
+2026-09-16 08:55:48.407 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=63 ok
+2026-09-16 08:55:48.407 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=64 name='Add MCP path scope objects and assignment workspaces'
+2026-09-16 08:55:48.407 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 64: Add MCP path scope objects and assignment workspaces
+2026-09-16 08:55:48.410 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_061_add_mcp_path_scope_objects_and_assignment_workspaces:3687 - Migration 061: Added MCP path scope object schema
+2026-09-16 08:55:48.410 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=64 ok
+2026-09-16 08:55:48.410 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=65 name='Add MCP workspace set objects'
+2026-09-16 08:55:48.410 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 65: Add MCP workspace set objects
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_062_add_mcp_workspace_set_objects:3748 - Migration 062: Added MCP workspace set object schema
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=65 ok
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=66 name='Add MCP shared workspace registry'
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 66: Add MCP shared workspace registry
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_063_add_mcp_shared_workspaces:3781 - Migration 063: Added MCP shared workspace registry schema
+2026-09-16 08:55:48.413 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=66 ok
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=67 name='Create maintenance rotation runs table'
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 67: Create maintenance rotation runs table
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_067_create_maintenance_rotation_runs_table:5060 - Migration 067: Created maintenance rotation runs table
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=67 ok
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=68 name='Create BYOK validation runs table'
+2026-09-16 08:55:48.414 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 68: Create BYOK validation runs table
+2026-09-16 08:55:48.415 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_068_create_byok_validation_runs_table:5110 - Migration 068: Created BYOK validation runs table
+2026-09-16 08:55:48.415 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=68 ok
+2026-09-16 08:55:48.415 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=69 name='Add MCP governance pack schema'
+2026-09-16 08:55:48.415 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 69: Add MCP governance pack schema
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_069_add_mcp_governance_pack_schema:3870 - Migration 069: Added MCP governance pack schema
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=69 ok
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=70 name='Add MCP capability adapter mapping schema'
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 70: Add MCP capability adapter mapping schema
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_070_add_mcp_capability_adapter_mappings:3913 - Migration 070: Added MCP capability adapter mapping schema
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=70 ok
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=71 name='Add governance pack upgrade lineage schema'
+2026-09-16 08:55:48.419 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 71: Add governance pack upgrade lineage schema
+2026-09-16 08:55:48.423 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_071_add_governance_pack_upgrade_lineage:3988 - Migration 071: Added governance-pack upgrade lineage schema
+2026-09-16 08:55:48.423 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=71 ok
+2026-09-16 08:55:48.423 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=72 name='Create identity_providers table'
+2026-09-16 08:55:48.423 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 72: Create identity_providers table
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_072_create_identity_providers_table:5380 - Migration 072: Created identity_providers table
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=72 ok
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=73 name='Create federated_identities table'
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 73: Create federated_identities table
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_073_create_federated_identities_table:5444 - Migration 073: Created federated_identities table
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=73 ok
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=74 name='Create federated_managed_grants table'
+2026-09-16 08:55:48.424 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 74: Create federated_managed_grants table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_074_create_federated_managed_grants_table:5501 - Migration 074: Created federated_managed_grants table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=74 ok
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=75 name='Create secret_backends table'
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 75: Create secret_backends table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_075_create_secret_backends_table:5550 - Migration 075: Created secret_backends table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=75 ok
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=76 name='Create managed_secret_refs table'
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 76: Create managed_secret_refs table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_076_create_managed_secret_refs_table:5624 - Migration 076: Created managed_secret_refs table
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=76 ok
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=77 name='Create sharing tables'
+2026-09-16 08:55:48.425 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 77: Create sharing tables
+2026-09-16 08:55:48.426 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_077_create_sharing_tables:5717 - Migration 077: Created sharing tables (shared_workspaces, share_tokens, share_audit_log, sharing_config)
+2026-09-16 08:55:48.426 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=77 ok
+2026-09-16 08:55:48.426 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=78 name='Add governance-pack source provenance'
+2026-09-16 08:55:48.426 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 78: Add governance-pack source provenance
+2026-09-16 08:55:48.446 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_078_add_governance_pack_source_provenance:5809 - Migration 078: Added governance-pack source provenance schema
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=78 ok
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=79 name='Add governance-pack trust policy'
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 79: Add governance-pack trust policy
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_079_add_governance_pack_trust_policy:5827 - Migration 079: Added governance-pack trust policy schema
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=79 ok
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=80 name='Create admin webhooks tables'
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 80: Create admin webhooks tables
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_080_create_admin_webhooks_tables:5881 - Migration 080: Created admin_webhooks and delivery_log tables
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=80 ok
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=81 name='Create dependency health history table'
+2026-09-16 08:55:48.447 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 81: Create dependency health history table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_081_create_admin_dependency_health_history:5905 - Migration 081: Created admin_dependency_health_history table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=81 ok
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=82 name='Harden admin webhooks schema and create admin settings table'
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 82: Harden admin webhooks schema and create admin settings table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_082_harden_admin_webhooks_and_create_admin_settings:5943 - Migration 082: Admin webhook schema already hardened
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=82 ok
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=83 name='Create org STT settings table'
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 83: Create org STT settings table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_083_create_org_stt_settings:6024 - Migration 083: START org_stt_settings table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_083_create_org_stt_settings:6043 - Migration 083: Created org_stt_settings table
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=83 ok
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=84 name='Scope account lockouts by attempt type'
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 84: Scope account lockouts by attempt type
+2026-09-16 08:55:48.448 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_084_scope_account_lockouts_by_attempt_type:493 - Migration 084: START scope account_lockouts by attempt_type
+2026-09-16 08:55:48.453 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_084_scope_account_lockouts_by_attempt_type:527 - Migration 084: COMPLETE scope account_lockouts by attempt_type
+2026-09-16 08:55:48.453 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=84 ok
+2026-09-16 08:55:48.453 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=85 name='Remove api_keys.scope default'
+2026-09-16 08:55:48.453 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 85: Remove api_keys.scope default
+2026-09-16 08:55:48.453 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_085_remove_api_keys_scope_default:532 - Migration 085: START remove api_keys.scope default
+2026-09-16 08:55:48.459 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_085_remove_api_keys_scope_default:647 - Migration 085: COMPLETE remove api_keys.scope default
+2026-09-16 08:55:48.459 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=85 ok
+2026-09-16 08:55:48.459 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=86 name='Create prototype workspace metadata tables'
+2026-09-16 08:55:48.459 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 86: Create prototype workspace metadata tables
+2026-09-16 08:55:48.459 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_086_create_prototype_workspace_tables:652 - Migration 086: START prototype workspace metadata tables
+2026-09-16 08:55:48.461 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_086_create_prototype_workspace_tables:902 - Migration 086: Created prototype workspace metadata tables
+2026-09-16 08:55:48.461 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=86 ok
+2026-09-16 08:55:48.461 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=87 name='Expand share_tokens resource_type for prototype workspace links'
+2026-09-16 08:55:48.461 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 87: Expand share_tokens resource_type for prototype workspace links
+2026-09-16 08:55:48.461 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_087_expand_share_tokens_resource_type_for_prototypes:907 - Migration 087: START expand share_tokens resource_type for prototypes
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_087_expand_share_tokens_resource_type_for_prototypes:1003 - Migration 087: Expanded share_tokens resource_type and backfilled 0 legacy prototype rows
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=87 ok
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=88 name='Add llm_usage_log cache accounting columns'
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 88: Add llm_usage_log cache accounting columns
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_088_add_llm_usage_cache_accounting_columns:3143 - Migration 088: Added llm_usage_log cache accounting columns
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=88 ok
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=89 name='Seed MCP prompts.read permission'
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 89: Seed MCP prompts.read permission
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_089_seed_mcp_prompts_read_permission:1011 - Migration 089: START seed MCP prompts.read permission
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_089_seed_mcp_prompts_read_permission:1039 - Migration 089: Seeded MCP prompts.read permission
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=89 ok
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=90 name='Seed notification permissions and role memberships'
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 90: Seed notification permissions and role memberships
+2026-09-16 08:55:48.467 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_090_seed_notification_permissions:1044 - Migration 090: START seed notification permissions and role memberships
+2026-09-16 08:55:48.468 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_090_seed_notification_permissions:1087 - Migration 090: Seeded notification permissions and role memberships
+2026-09-16 08:55:48.468 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=90 ok
+2026-09-16 08:55:48.468 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=91 name='Add durable user profile version anchor'
+2026-09-16 08:55:48.468 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 91: Add durable user profile version anchor
+2026-09-16 08:55:48.478 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_091_add_user_profile_version:1096 - Migration 091: Added and validated users.profile_version
+2026-09-16 08:55:48.479 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=91 ok
+2026-09-16 08:55:48.479 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=92 name='Harden profile candidate version timestamps'
+2026-09-16 08:55:48.479 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 92: Harden profile candidate version timestamps
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_092_harden_profile_candidate_timestamps:1225 - Migration 092: Hardened profile candidate timestamps
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=92 ok
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=93 name='Harmonize users write columns'
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 93: Harmonize users write columns
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_093_harmonize_users_write_columns:1230 - Migration 093: START harmonize users write columns
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_093_harmonize_users_write_columns:1262 - Migration 093: Harmonized users write columns
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=93 ok
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=94 name='Create canonical admin webhook tables'
+2026-09-16 08:55:48.480 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 94: Create canonical admin webhook tables
+2026-09-16 08:55:48.482 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_094_create_canonical_admin_webhook_tables:1920 - Migration 094: Created canonical admin webhook tables
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=94 ok
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=95 name='Seed Notes graph suggestion permissions'
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 95: Seed Notes graph suggestion permissions
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_095_seed_notes_graph_suggestion_permissions:1926 - Migration 095: START seed Notes graph suggestion permissions
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_095_seed_notes_graph_suggestion_permissions:1959 - Migration 095: Seeded Notes graph suggestion permissions
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=95 ok
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=96 name='Add admin webhook delivery recovery schema'
+2026-09-16 08:55:48.483 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 96: Add admin webhook delivery recovery schema
+2026-09-16 08:55:48.496 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:migration_096_add_admin_webhook_delivery_recovery:2191 - Migration 096: Added admin webhook delivery recovery schema
+2026-09-16 08:55:48.496 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=96 ok
+2026-09-16 08:55:48.496 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=97 name='Backfill NULL users.uuid values'
+2026-09-16 08:55:48.496 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 97: Backfill NULL users.uuid values
+2026-09-16 08:55:48.496 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=97 ok
+2026-09-16 08:55:48.497 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:126 - MigrationManager.migrate: BEGIN v=98 name='Add and backfill sessions.last_activity'
+2026-09-16 08:55:48.497 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:apply:36 - Applying migration 98: Add and backfill sessions.last_activity
+2026-09-16 08:55:48.497 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:140 - MigrationManager.migrate: COMMIT v=98 ok
+2026-09-16 08:55:48.497 | INFO     | tldw_Server_API.app.core.DB_Management.migrations:migrate:150 - MigrationManager.migrate: done target=98
+2026-09-16 08:55:48.497 | INFO     | tldw_Server_API.app.core.AuthNZ.migrations:_apply_authnz_migrations_locked:6599 - Applied AuthNZ migrations to Databases/users.db
+2026-09-16 08:55:48.507 | INFO     | tldw_Server_API.app.core.AuthNZ.database:initialize:948 - Database pool initialized successfully
+2026-09-16 08:55:48.519 | DEBUG    | tldw_Server_API.app.core.DB_Management.Users_DB:_create_tables:364 - Users table and indexes created/verified
+2026-09-16 08:55:48.519 | INFO     | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+2026-09-16 08:55:48.558 | ERROR    | __main__:setup_database:639 - Postgres schema bootstrap error
+Traceback (most recent call last):
+
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/initialize.py", line 1535, in <module>
+    asyncio.run(main(non_interactive=args.non_interactive, test_setup=args.test_setup))
+    │       │   │                    │    │                           │    └ False
+    │       │   │                    │    │                           └ Namespace(non_interactive=True, test_setup=False)
+    │       │   │                    │    └ True
+    │       │   │                    └ Namespace(non_interactive=True, test_setup=False)
+    │       │   └ <function main at 0x10c061800>
+    │       └ <function run at 0x103327420>
+    └ <module 'asyncio' from '/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/_...
+
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           │      │   └ <coroutine object main at 0x10b34e150>
+           │      └ <function Runner.run at 0x1033cb7e0>
+           └ <asyncio.runners.Runner object at 0x10c04ec90>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           │    │     │                  └ <Task pending name='Task-1' coro=<main() running at /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core...
+           │    │     └ <function BaseEventLoop.run_until_complete at 0x1033c9300>
+           │    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+           └ <asyncio.runners.Runner object at 0x10c04ec90>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 641, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x1033c9260>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 608, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x1033cb060>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py", line 1936, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x10330cb80>
+    └ <Handle Task.task_wakeup(<Future finis...=(True, None)>)>
+  File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/events.py", line 84, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle Task.task_wakeup(<Future finis...=(True, None)>)>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle Task.task_wakeup(<Future finis...=(True, None)>)>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle Task.task_wakeup(<Future finis...=(True, None)>)>
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/initialize.py", line 1437, in main
+    if not await setup_database():
+                 └ <function setup_database at 0x10c061300>
+
+> File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/initialize.py", line 564, in setup_database
+    raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
+
+RuntimeError: Failed to ensure Postgres AuthNZ core tables
+
+============================================================
+       AuthNZ Module Initialization
+============================================================
+
+📋 Checking environment configuration...
+✅ Loaded environment variables from: /private/tmp/tldw-onboarding-uat-cycle5-targeted-pg-single-20260916/Config_Files/.env
+✅ Environment configuration valid
+   Mode: single_user
+   Database: postgresql://127.0.0.1:55475/tldw_test_2520e2a3
+
+🗄️  Setting up database...
+⚙️  Non-SQLite database detected - attempting basic schema bootstrap (users, sessions, api_keys, RBAC)...
+❌ Failed to bootstrap Postgres schema: Failed to ensure Postgres AuthNZ core tables
+
+❌ Database setup failed
