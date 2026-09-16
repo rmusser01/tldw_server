@@ -68,7 +68,7 @@ export const useFlashcardsGenerateHandoff = (
     if (route.legacy) {
       setAccepted(null)
       setError("This old link contains unbound source text. Reopen Flashcards from the original source while signed in to its account.")
-      latest.current.navigate(route.cleanRoute, { replace: true })
+      latest.current.navigate(latest.current.route.cleanRoute, { replace: true })
       return
     }
     if (!route.token || !scope || scope.scopeSignal.aborted) return
@@ -77,20 +77,20 @@ export const useFlashcardsGenerateHandoff = (
     scope.scopeSignal.addEventListener("abort", abort, { once: true })
     setAccepted(null)
     void consumeFlashcardsGenerateHandoff(route.token, flashcardsHandoffAuthority(scope), controller.signal).then(intent => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || latest.current.route.token !== route.token) return
       setAccepted({ token: route.token!, intent })
       setError(null)
-      latest.current.navigate(route.cleanRoute, { replace: true })
+      latest.current.navigate(latest.current.route.cleanRoute, { replace: true })
     }).catch(error => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || latest.current.route.token !== route.token) return
       setError(error instanceof Error ? error.message : "The transfer could not be opened. Reopen it from the source.")
-      latest.current.navigate(route.cleanRoute, { replace: true })
+      latest.current.navigate(latest.current.route.cleanRoute, { replace: true })
     })
     return () => {
       controller.abort()
       scope.scopeSignal.removeEventListener("abort", abort)
     }
-  }, [route.token, route.legacy, route.cleanRoute, scope])
+  }, [route.token, route.legacy, scope])
 
   return {
     intent: scope?.scopeSignal.aborted ? null : accepted?.intent ?? null,

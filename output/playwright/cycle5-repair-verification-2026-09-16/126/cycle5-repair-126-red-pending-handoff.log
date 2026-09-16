@@ -1,0 +1,257 @@
+$ vitest run src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:76996) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx (18 tests | 1 failed) 8016ms
+     ✓ delivers through the actual router after its source unmounts  638ms
+     ✓ consumes once under StrictMode, removes the token, and preserves later editor changes 107ms
+     ✓ keeps accepted tab routes on reload without losing the private editor or adding history  1076ms
+     ✓ tab-only navigation preserves a live deck choice while a new external deck still applies  1492ms
+     ✓ changes a dirty Scheduler route only after discard is accepted  377ms
+     × finishes a pending private handoff without replacing the newly selected tab 1511ms
+     ✓ restores the accepted Manage tab on remount  439ms
+     ✓ restores the accepted Templates tab on remount  418ms
+     ✓ restores the accepted Scheduler tab on remount  464ms
+     ✓ uses the real extension HashRouter for the accepted tab and reload  471ms
+     ✓ generates and saves the exact source with captured owner and provenance 110ms
+     ✓ clears private source and ignores generation completing after A to B to A 123ms
+     ✓ rejects legacy plaintext browser-history entry instead of importing Alice content into Bob 60ms
+     ✓ keeps an unresolved target token until the intended account signs in 118ms
+     ✓ does not continue saving cards after a delayed first save crosses A to B to A 163ms
+     ✓ rejects an opaque transfer from a foreign account 49ms
+     ✓ cleans an old private history entry when Bob goes Back  352ms
+     ✓ preserves manual direct-entry text during same-principal token rotation 45ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > finishes a pending private handoff without replacing the newly selected tab
+Error: expect(element).toHaveValue( 
+Alice unsaved private note
+	 )
+
+Expected the element to have value:
+ 
+  Alice unsaved private note
+	 
+Received:
+
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<output[39m
+        [33mdata-testid[39m=[32m"location"[39m
+      [36m>[39m
+        [0m/flashcards?tab=importExport[0m
+      [36m</output>[39m
+      [36m<button>[39m
+        [0mBrowser Back[0m
+      [36m</button>[39m
+      [36m<button>[39m
+        [0mOpen external deck[0m
+      [36m</button>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mx-auto max-w-6xl p-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex items-start gap-3 rounded-lg border p-3 border-warn/30 bg-warn/10"[39m
+          [33mdata-ds-component[39m=[32m"Alert"[39m
+          [33mrole[39m=[32m"alert"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"mt-0.5 flex-shrink-0 text-warn"[39m
+          [36m>[39m
+            [36m<svg[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"lucide lucide-triangle-alert size-4"[39m
+              [33mfill[39m=[32m"none"[39m
+              [33mheight[39m=[32m"24"[39m
+              [33mstroke[39m=[32m"currentColor"[39m
+              [33mstroke-linecap[39m=[32m"round"[39m
+              [33mstroke-linejoin[39m=[32m"round"[39m
+              [33mstroke-width[39m=[32m"2"[39m
+              [33mviewBox[39m=[32m"0 0 24 24"[39m
+              [33mwidth[39m=[32m"24"[39m
+              [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+            [36m>[39m
+              [36m<path[39m
+                [33md[39m=[32m"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 9v4"[39m
+              [36m/>[39m
+              [36m<path[39m
+                [33md[39m=[32m"M12 17h.01"[39m
+              [36m/>[39m
+            [36m</svg>[39m
+          [36m</span>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-w-0 flex-1"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"text-sm font-medium text-warn"[39m
+            [36m>[39m
+              [0mThis transfer is missing, expired, or already consumed. Reopen it from the source.[0m
+            [36m</p>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-tabs ant-tabs-top flashcards-responsive-tabs [&_.ant-tabs-extra-content]:min-w-0 [&_.ant-tabs-extra-content]:max-w-full [&_.ant-tabs-nav-list]:min-w-max [&_.ant-tabs-nav-wrap]:min-w-0 [&_.ant-tabs-nav-wrap]:overflow-x-auto css-dev-only-do-not-override-3uaqrl css-var-root ant-tabs-css-var"[39m
+          [33mdata-testid[39m=[32m"flashcards-tabs"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-orientation[39m=[32m"horizontal"[39m
+            [33mclass[39m=[32m"ant-tabs-nav"[39m
+            [33mrole[39m=[32m"tablist"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-tabs-nav-wrap"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-tabs-nav-list"[39m
+                [33mstyle[39m=[32m"transform: translate(0px, 0px);"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-tab"[39m
+                  [33mdata-node-key[39m=[32m"review"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-panel-review"[39m
+                    [33maria-selected[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                    [33mid[39m=[32m"rc-tabs-test-tab-review"[39m
+                    [33mrole[39m=[32m"tab"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                  [36m>[39m
+                    [0mStudy[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-tab"[39m
+                  [33mdata-node-key[39m=[32m"cards"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-panel-cards"[39m
+                    [33maria-selected[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                    [33mid[39m=[32m"rc-tabs-test-tab-cards"[39m
+                    [33mrole[39m=[32m"tab"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                  [36m>[39m
+                    [0mManage[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-tab ant-tabs-tab-active"[39m
+                  [33mdata-node-key[39m=[32m"importExport"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-panel-importExport"[39m
+                    [33maria-selected[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                    [33mid[39m=[32m"rc-tabs-test-tab-importExport"[39m
+                    [33mrole[39m=[32m"tab"[39m
+                    [33mtabindex[39m=[32m"0"[39m
+                  [36m>[39m
+                    [0mImport / Export[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-tab"[39m
+                  [33mdata-node-key[39m=[32m"templates"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-panel-templates"[39m
+                    [33maria-selected[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                    [33mid[39m=[32m"rc-tabs-test-tab-templates"[39m
+                    [33mrole[39m=[32m"tab"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                  [36m>[39m
+                    [0mTemplates[0m
+                  [36m</div>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-tabs-tab"[39m
+                  [33mdata-node-key[39m=[32m"scheduler"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33maria-controls[39m=[32m"rc-tabs-test-panel-scheduler"[39m
+                    [33maria-selected[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"ant-tabs-tab-btn"[39m
+                    [33mid[39m=[32m"rc-tabs-test-tab-scheduler"[39m
+                    [33mrole[39m=[32m"tab"[39m
+                    [33mtabindex[39m=[32m"-1"[39m
+                  [36m>[39m
+                  ...
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:212:80
+    210|     expect(screen.getByRole("tab", { name: "Study", exact: true })).to…
+    211|     fireEvent.click(screen.getByRole("tab", { name: "Import / Export",…
+    212|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |                                                                                ^
+    213|     expect(screen.queryByText(/missing, expired, or already consumed/)…
+    214|   })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 17 passed (18)
+   Start at  02:44:17
+   Duration  9.49s (transform 572ms, setup 66ms, import 1.03s, tests 8.02s, environment 264ms)
+
+error: script "test" exited with code 1

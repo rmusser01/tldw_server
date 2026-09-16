@@ -1,0 +1,93 @@
+{
+  "unit": "126",
+  "retainedAt": "2026-09-16T13:48:01.850Z",
+  "knownCredentialMatches": 0,
+  "jwtPrivateKeyPatternMatches": 0,
+  "files": [
+    {
+      "name": "cycle5-repair-126-128-independent-hashes.json",
+      "bytes": 1228,
+      "sha256": "7114363933e007221728cec3e9620b1bcb21badeaf61b5a028b2b4bacef3bae1"
+    },
+    {
+      "name": "cycle5-repair-126-128-independent-review.md",
+      "bytes": 2389,
+      "sha256": "378e5867e517c1dc74c866880bd8b610ce7a339a7b0f2863a985f6979f381c9d"
+    },
+    {
+      "name": "cycle5-repair-126-128-independent.log",
+      "bytes": 33175,
+      "sha256": "240534debe2683e23222ce687a9ec7e8af4d8c7006762efd47d4439a418345b2"
+    },
+    {
+      "name": "cycle5-repair-126-green-initial.log",
+      "bytes": 6679,
+      "sha256": "6f3a698d1a4a494e62d882e9f2a80792fc547d321d4569963687ce55726e713a"
+    },
+    {
+      "name": "cycle5-repair-126-green-pending-handoff.log",
+      "bytes": 7638,
+      "sha256": "3167da704c68841dadd2540ed4c9ea7b78dff89c6bb3fea3729bf864159c29c4"
+    },
+    {
+      "name": "cycle5-repair-126-green.log",
+      "bytes": 8918,
+      "sha256": "394fff8149f37179e6d65cd740a57ebcd89eba92086ea14e05a78f615a76e605"
+    },
+    {
+      "name": "cycle5-repair-126-lint-baseline.json",
+      "bytes": 1111,
+      "sha256": "fee44375fa1f3b4dc3479d08345293381a3131478204f5344265d3f9a864cfe6"
+    },
+    {
+      "name": "cycle5-repair-126-lint-comparison.json",
+      "bytes": 186,
+      "sha256": "05e7097b32284b60278ff366b083ac55f419b0833978132b8fc02125b09c50c4"
+    },
+    {
+      "name": "cycle5-repair-126-lint-current.json",
+      "bytes": 1111,
+      "sha256": "fee44375fa1f3b4dc3479d08345293381a3131478204f5344265d3f9a864cfe6"
+    },
+    {
+      "name": "cycle5-repair-126-manifest.json",
+      "bytes": 679,
+      "sha256": "3fbec710f5544e93f1931c9af152ce0ccd43996c5f73356da4ba27cbea60965b"
+    },
+    {
+      "name": "cycle5-repair-126-pending-handoff-act-harness-error.log",
+      "bytes": 20691,
+      "sha256": "ed36242d3058dfbf805ec55dbb41d387aae963075e038b08e3b6d45ab69ebc9f"
+    },
+    {
+      "name": "cycle5-repair-126-pre-edit-baseline.log",
+      "bytes": 1424,
+      "sha256": "2492e0fbdb5f4407a6da9041d604262af3793a0fe4202dfe38d16b6c388af189"
+    },
+    {
+      "name": "cycle5-repair-126-red-pending-handoff.log",
+      "bytes": 12179,
+      "sha256": "26b2390dbfdb9e810cc25953a6fed508295bdfe1a5d233ae45bdd5b81e9db74f"
+    },
+    {
+      "name": "cycle5-repair-126-red.log",
+      "bytes": 6767,
+      "sha256": "2531f044484821f2f427d6bb2ad9e8be4b301bc6af8d9b192584692ef6ef1dc0"
+    },
+    {
+      "name": "cycle5-repair-126-report.md",
+      "bytes": 1131,
+      "sha256": "4f7b02caf84461d6bec74e44a42a07d5542598dec2db16c33eeda2ed2771e5e7"
+    },
+    {
+      "name": "cycle5-repair-126-task-note.log",
+      "bytes": 27,
+      "sha256": "eb8b74a160d87197de73280f80936850a79dc7bf64eb0a5412945ab7c8fc6943"
+    },
+    {
+      "name": "cycle5-repair-126-task-review.log",
+      "bytes": 27,
+      "sha256": "eb8b74a160d87197de73280f80936850a79dc7bf64eb0a5412945ab7c8fc6943"
+    }
+  ]
+}

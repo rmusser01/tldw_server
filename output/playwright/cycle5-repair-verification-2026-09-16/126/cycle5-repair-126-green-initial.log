@@ -1,0 +1,147 @@
+$ vitest run src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:76167) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:76168) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > documents zero-deck behavior after first-time IA remediation
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > documents zero-deck behavior after first-time IA remediation
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > clears stale source-review context when a newer URL handoff arrives
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > clears stale source-review context when a newer URL handoff arrives
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > discards scheduler draft state when Scheduler is replaced by the zero-deck preview
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+stderr | src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx > FlashcardsManager consistency standards > discards scheduler draft state when Scheduler is replaced by the zero-deck preview
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+ ✓ src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx (39 tests) 1622ms
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ✓ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx (13 tests) 6121ms
+     ✓ delivers through the actual router after its source unmounts  803ms
+     ✓ keeps accepted tab routes on reload without losing the private editor or adding history  1415ms
+     ✓ tab-only navigation preserves a live deck choice while a new external deck still applies  1924ms
+     ✓ changes a dirty Scheduler route only after discard is accepted  460ms
+     ✓ cleans an old private history entry when Bob goes Back  449ms
+
+ Test Files  2 passed (2)
+      Tests  52 passed (52)
+   Start at  02:41:50
+   Duration  9.72s (transform 1.55s, setup 520ms, import 4.86s, tests 7.74s, environment 1.66s)
+

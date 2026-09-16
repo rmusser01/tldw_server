@@ -1,0 +1,18 @@
+{
+  "frozenAt": "2026-09-16T13:37:37.004Z",
+  "base": "ba5233a5a9",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/FlashcardsManager.tsx",
+      "sha256": "87f9644424db1b6bc943db867e9f916be96e132495a26d3e15f26dd6fcde9fd5"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardsGenerateHandoff.ts",
+      "sha256": "499231251ccb3b0b924bd22909b9bf4f29c64ba41db0d10838b7e95e9bb40a92"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx",
+      "sha256": "9b6a1c2a3371d19b33acff7d82334d74b030ae73b7edeb87b042bc277af2ead1"
+    }
+  ]
+}

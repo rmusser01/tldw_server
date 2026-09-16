@@ -92,10 +92,7 @@ export const FlashcardsManager: React.FC = () => {
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
     currentStudyIntent?.deckId ?? undefined
   )
-  const schedulerHandoffDeckId =
-    currentTab === "scheduler" && currentStudyIntent?.deckId != null
-      ? currentStudyIntent.deckId
-      : (reviewDeckId ?? null)
+  const schedulerHandoffDeckId = reviewDeckId ?? null
   const schedulerHandoffKey =
     currentTab === "scheduler" && currentStudyIntent?.deckId != null
       ? (location.key ?? `${location.pathname}:${location.search}:${location.hash}`)
@@ -207,10 +204,15 @@ export const FlashcardsManager: React.FC = () => {
       }
       setActiveTab(nextTab)
     }
+  }, [clearSourceReviewGenerateIntent, hasGenerateHandoff, currentStudyPackIntent, currentTab])
+
+  // A tab-only route update must not replay the original deck handoff over a
+  // user's live selection. A genuinely new incoming study intent still applies.
+  React.useEffect(() => {
     if (currentStudyIntent?.deckId !== undefined) {
-      applyReviewDeckChange(currentStudyIntent.deckId ?? undefined)
+      applyReviewDeckChange(currentStudyIntent.deckId)
     }
-  }, [applyReviewDeckChange, clearSourceReviewGenerateIntent, hasGenerateHandoff, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+  }, [applyReviewDeckChange, currentStudyIntent?.deckId, currentStudyIntent?.quizId, currentStudyIntent?.attemptId])
 
   React.useEffect(() => {
     if (hasNoInitialDecks && activeTab === "scheduler" && schedulerDirty) {
@@ -353,8 +355,15 @@ export const FlashcardsManager: React.FC = () => {
       }
 
       setActiveTab(nextTab)
+      const params = new URLSearchParams(location.search)
+      params.set("tab", nextTab)
+      navigate({
+        pathname: location.pathname,
+        search: `?${params.toString()}`,
+        hash: location.hash
+      }, { replace: true })
     },
-    [activeTab, clearSourceReviewGenerateIntent, discardSchedulerChanges, schedulerDirty, t]
+    [activeTab, clearSourceReviewGenerateIntent, discardSchedulerChanges, location, navigate, schedulerDirty, t]
   )
 
   const schedulerEmptyPreview = (
@@ -483,7 +492,7 @@ export const FlashcardsManager: React.FC = () => {
                 isActive={effectiveActiveTab === "cards"}
                 initialDeckId={
                   manageDeckHandoff?.deckId ??
-                  (currentTab === "cards" ? currentStudyIntent?.deckId : undefined)
+                  (currentTab === "cards" ? (reviewDeckId ?? undefined) : undefined)
                 }
                 initialDeckHandoffKey={manageDeckHandoff?.key ?? null}
                 initialShowWorkspaceDecks={

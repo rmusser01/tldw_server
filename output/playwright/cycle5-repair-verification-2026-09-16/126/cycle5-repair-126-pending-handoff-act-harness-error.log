@@ -1,0 +1,355 @@
+$ vitest run src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:76764) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+Could not parse CSS stylesheet
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx (18 tests | 13 failed) 15857ms
+     ✓ delivers through the actual router after its source unmounts  633ms
+     ✓ consumes once under StrictMode, removes the token, and preserves later editor changes 104ms
+     ✓ keeps accepted tab routes on reload without losing the private editor or adding history  1099ms
+     ✓ tab-only navigation preserves a live deck choice while a new external deck still applies  1529ms
+     ✓ changes a dirty Scheduler route only after discard is accepted  350ms
+     × finishes a pending private handoff without replacing the newly selected tab 5005ms
+     × restores the accepted Manage tab on remount 34ms
+     × restores the accepted Templates tab on remount 30ms
+     × restores the accepted Scheduler tab on remount 32ms
+     × uses the real extension HashRouter for the accepted tab and reload 27ms
+     × generates and saves the exact source with captured owner and provenance 1001ms
+     × clears private source and ignores generation completing after A to B to A 1002ms
+     × rejects legacy plaintext browser-history entry instead of importing Alice content into Bob 1002ms
+     × keeps an unresolved target token until the intended account signs in 1001ms
+     × does not continue saving cards after a delayed first save crosses A to B to A 1003ms
+     × rejects an opaque transfer from a foreign account 1002ms
+     × cleans an old private history entry when Bob goes Back 1001ms
+     × preserves manual direct-entry text during same-principal token rotation 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > finishes a pending private handoff without replacing the newly selected tab
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:193:3
+    191|   })
+    192| 
+    193|   it("finishes a pending private handoff without replacing the newly s…
+       |   ^
+    194|     const route = await createRoute()
+    195|     const removed = deferred<void>()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > restores the accepted Manage tab on remount
+TestingLibraryElementError: Unable to find an accessible element with the role "tab" and name "Manage"
+
+There are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:220:28
+    218|   ])("restores the accepted %s tab on remount", (label, key) => {
+    219|     const view = mount("/flashcards?tab=review&other=kept#anchor")
+    220|     fireEvent.click(screen.getByRole("tab", { name: label, exact: true…
+       |                            ^
+    221|     const route = screen.getByTestId("location").textContent!
+    222|     expect(route).toBe(`/flashcards?tab=${key}&other=kept#anchor`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > restores the accepted Templates tab on remount
+TestingLibraryElementError: Unable to find an accessible element with the role "tab" and name "Templates"
+
+There are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:220:28
+    218|   ])("restores the accepted %s tab on remount", (label, key) => {
+    219|     const view = mount("/flashcards?tab=review&other=kept#anchor")
+    220|     fireEvent.click(screen.getByRole("tab", { name: label, exact: true…
+       |                            ^
+    221|     const route = screen.getByTestId("location").textContent!
+    222|     expect(route).toBe(`/flashcards?tab=${key}&other=kept#anchor`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > restores the accepted Scheduler tab on remount
+TestingLibraryElementError: Unable to find an accessible element with the role "tab" and name "Scheduler"
+
+There are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:220:28
+    218|   ])("restores the accepted %s tab on remount", (label, key) => {
+    219|     const view = mount("/flashcards?tab=review&other=kept#anchor")
+    220|     fireEvent.click(screen.getByRole("tab", { name: label, exact: true…
+       |                            ^
+    221|     const route = screen.getByTestId("location").textContent!
+    222|     expect(route).toBe(`/flashcards?tab=${key}&other=kept#anchor`)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > uses the real extension HashRouter for the accepted tab and reload
+TestingLibraryElementError: Unable to find an accessible element with the role "tab" and name "Study"
+
+There are no accessible roles. But there might be some inaccessible roles. If you wish to access them, then set the `hidden` option to `true`. Learn more about this here: https://testing-library.com/docs/dom-testing-library/api-queries#byrole
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:235:30
+    233|     const view = render(tree)
+    234|     try {
+    235|       fireEvent.click(screen.getByRole("tab", { name: "Study", exact: …
+       |                              ^
+    236|       await waitFor(() => expect(window.location.hash).toBe("#/flashca…
+    237|       view.unmount()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > generates and saves the exact source with captured owner and provenance
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:249:11
+    247|   it("generates and saves the exact source with captured owner and pro…
+    248|     mount(await createRoute())
+    249|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    250|     fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    251|     await screen.findByDisplayValue("Private front")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > clears private source and ignores generation completing after A to B to A
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:264:11
+    262|     mocks.request.mockImplementation(({ path }: { path: string }) => p…
+    263|     mount(await createRoute())
+    264|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    265|     fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    266|     await waitFor(() => expect(mocks.request).toHaveBeenCalled())
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > rejects legacy plaintext browser-history entry instead of importing Alice content into Bob
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:277:11
+    275|     setUser(2)
+    276|     mount("/flashcards?tab=importExport&generate=1&generate_text=Alice…
+    277|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    278|     expect(await screen.findByText(/Reopen.*source/i)).toBeInTheDocume…
+    279|     await waitFor(() => expect(screen.getByTestId("location")).not.toH…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > keeps an unresolved target token until the intended account signs in
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:287:11
+    285|     mocks.resolveUser.mockResolvedValue(null)
+    286|     mount(route)
+    287|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    288|     expect(screen.getByTestId("location")).toHaveTextContent("generate…
+    289|     mocks.resolveUser.mockImplementation(async () => ({ id: 1, is_acti…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > does not continue saving cards after a delayed first save crosses A to B to A
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:301:11
+    299|     })
+    300|     mount(await createRoute())
+    301|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    302|     fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    303|     await screen.findByDisplayValue("First")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > rejects an opaque transfer from a foreign account
+TestingLibraryElementError: Unable to find an element with the text: /belongs to another account/. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:318:25
+    316|     setUser(2)
+    317|     mount(route)
+    318|     expect(await screen.findByText(/belongs to another account/)).toBe…
+       |                         ^
+    319|     expect(screen.getByTestId("flashcards-generate-text")).toHaveValue…
+    320|     expect(mocks.request).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > cleans an old private history entry when Bob goes Back
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m...
+ ❯ Proxy.waitForWrapper ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:326:11
+    324|     setUser(2)
+    325|     mount(["/flashcards?tab=importExport&generate_text=AlicePrivate&ge…
+    326|     await waitFor(() => expect(screen.getByTestId("flashcards-generate…
+       |           ^
+    327|     fireEvent.click(screen.getByRole("button", { name: "Browser Back" …
+    328|     expect(await screen.findByText(/old link contains unbound/)).toBeI…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/13]⎯
+
+ FAIL  src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx > actual Flashcards generation private handoff > preserves manual direct-entry text during same-principal token rotation
+TestingLibraryElementError: Unable to find an element by: [data-testid="flashcards-generate-text"]
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Flashcards/__tests__/FlashcardsManager.private-handoff.integration.test.tsx:335:26
+    333|   it("preserves manual direct-entry text during same-principal token r…
+    334|     mount("/flashcards?tab=importExport")
+    335|     const input = screen.getByTestId("flashcards-generate-text")
+       |                          ^
+    336|     fireEvent.change(input, { target: { value: "Manual source" } })
+    337|     act(() => window.dispatchEvent(new CustomEvent("tldw:config-update…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/13]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  13 failed | 5 passed (18)
+   Start at  02:43:32
+   Duration  17.63s (transform 513ms, setup 110ms, import 1.17s, tests 15.86s, environment 389ms)
+
+error: script "test" exited with code 1

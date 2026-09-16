@@ -1,7 +1,8 @@
 import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom"
+import { HashRouter, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom"
+import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
 import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
@@ -29,7 +30,17 @@ vi.mock("../hooks", async (original) => ({
   useImportLimitsQuery: () => ({ data: null })
 }))
 vi.mock("../tabs", async () => ({
-  ReviewTab: () => null, ManageTab: () => null, SchedulerTab: () => null, TemplatesTab: () => null,
+  ReviewTab: ({ reviewDeckId, onReviewDeckChange }: { reviewDeckId?: number | null; onReviewDeckChange: (id: number | undefined) => void }) => <div>
+    <output data-testid="review-deck">{reviewDeckId ?? "all"}</output>
+    <button onClick={() => onReviewDeckChange(12)}>Select live deck</button>
+    <button onClick={() => onReviewDeckChange(undefined)}>Clear live deck</button>
+  </div>,
+  ManageTab: () => null,
+  SchedulerTab: ({ onDirtyChange, discardSignal }: { onDirtyChange: (dirty: boolean) => void; discardSignal: number }) => <div>
+    <button onClick={() => onDirtyChange(true)}>Edit scheduler</button>
+    <output data-testid="scheduler-discard">{discardSignal}</output>
+  </div>,
+  TemplatesTab: () => null,
   ImportExportTab: (await import("../tabs/ImportExportTab")).ImportExportTab
 }))
 vi.mock("../components", () => ({ KeyboardShortcutsModal: () => null }))
@@ -65,7 +76,7 @@ const createRoute = async () => {
 const Location = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  return <><output data-testid="location">{location.pathname + location.search + location.hash}</output><button onClick={() => navigate(-1)}>Browser Back</button></>
+  return <><output data-testid="location">{location.pathname + location.search + location.hash}</output><button onClick={() => navigate(-1)}>Browser Back</button><button onClick={() => navigate("/flashcards?tab=review&deck_id=21")}>Open external deck</button></>
 }
 const mount = (route: string | string[], strict = false) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -127,6 +138,110 @@ describe("actual Flashcards generation private handoff", () => {
     fireEvent.change(input, { target: { value: "My later edit" } })
     await act(async () => {})
     expect(input).toHaveValue("My later edit")
+  })
+
+  it("keeps accepted tab routes on reload without losing the private editor or adding history", async () => {
+    const view = mount(["/source", await createRoute()], true)
+    await waitFor(() => expect(screen.getByTestId("flashcards-generate-text")).toHaveValue(privateIntent.text))
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("generate_handoff"))
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), { target: { value: "Edited private source" } })
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    expect.soft(screen.getByTestId("location")).toHaveTextContent("tab=review")
+    const reloadRoute = screen.getByTestId("location").textContent!
+    fireEvent.click(screen.getByRole("tab", { name: "Import / Export", exact: true }))
+    expect(screen.getByTestId("flashcards-generate-text")).toHaveValue("Edited private source")
+    expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|Edited|generate_handoff/)
+    fireEvent.click(screen.getByRole("button", { name: "Browser Back" }))
+    expect.soft(screen.getByTestId("location").textContent).toBe("/source")
+    view.unmount()
+    mount(reloadRoute)
+    expect(screen.getByRole("tab", { name: "Study", exact: true })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("tab-only navigation preserves a live deck choice while a new external deck still applies", async () => {
+    mount("/flashcards?tab=review&deck_id=9&quiz_id=3&attempt_id=4&include_workspace_items=1&other=kept#anchor")
+    expect(screen.getByTestId("review-deck")).toHaveTextContent("9")
+    fireEvent.click(screen.getByRole("button", { name: "Select live deck" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Manage", exact: true }))
+    expect.soft(screen.getByTestId("location")).toHaveTextContent("tab=cards")
+    expect(screen.getByTestId("location")).toHaveTextContent("deck_id=9&quiz_id=3&attempt_id=4&include_workspace_items=1&other=kept#anchor")
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    expect.soft(screen.getByTestId("review-deck")).toHaveTextContent("12")
+    fireEvent.click(screen.getByRole("button", { name: "Clear live deck" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Templates", exact: true }))
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    expect.soft(screen.getByTestId("review-deck")).toHaveTextContent("all")
+    fireEvent.click(screen.getByRole("button", { name: "Open external deck" }))
+    expect(screen.getByTestId("review-deck")).toHaveTextContent("21")
+  })
+
+  it("changes a dirty Scheduler route only after discard is accepted", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    mount("/flashcards?tab=scheduler&deck_id=7#policy")
+    fireEvent.click(screen.getByRole("button", { name: "Edit scheduler" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    expect(screen.getByTestId("location")).toHaveTextContent("tab=scheduler&deck_id=7#policy")
+    expect(screen.getByRole("tab", { name: "Scheduler", exact: true })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("scheduler-discard")).toHaveTextContent("0")
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    expect.soft(screen.getByTestId("location")).toHaveTextContent("tab=review&deck_id=7#policy")
+    expect(screen.getByTestId("scheduler-discard")).toHaveTextContent("1")
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it("finishes a pending private handoff without replacing the newly selected tab", async () => {
+    const route = await createRoute()
+    let removalStarted = false
+    const release = deferred<void>()
+    const originalRemove = Storage.prototype.remove
+    vi.spyOn(Storage.prototype, "remove").mockImplementation(async function (key) {
+      await originalRemove.call(this, key)
+      if (key.startsWith("tldw:flashcards-generate-handoff:")) {
+        removalStarted = true
+        await release.promise
+      }
+    })
+    mount(route)
+    await waitFor(() => expect(removalStarted).toBe(true))
+    fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+    await act(async () => { release.resolve() })
+    await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("generate_handoff"))
+    expect(screen.getByRole("tab", { name: "Study", exact: true })).toHaveAttribute("aria-selected", "true")
+    fireEvent.click(screen.getByRole("tab", { name: "Import / Export", exact: true }))
+    await waitFor(() => expect(screen.getByTestId("flashcards-generate-text")).toHaveValue(privateIntent.text))
+    expect(screen.queryByText(/missing, expired, or already consumed/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["Manage", "cards"], ["Templates", "templates"], ["Scheduler", "scheduler"]
+  ])("restores the accepted %s tab on remount", (label, key) => {
+    const view = mount("/flashcards?tab=review&other=kept#anchor")
+    fireEvent.click(screen.getByRole("tab", { name: label, exact: true }))
+    const route = screen.getByTestId("location").textContent!
+    expect(route).toBe(`/flashcards?tab=${key}&other=kept#anchor`)
+    view.unmount()
+    mount(route)
+    expect(screen.getByRole("tab", { name: label, exact: true })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("uses the real extension HashRouter for the accepted tab and reload", async () => {
+    const previousUrl = window.location.href
+    window.history.replaceState(null, "", "/#/flashcards?tab=importExport&other=kept")
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = <QueryClientProvider client={client}><HashRouter><Location /><FlashcardsManager /></HashRouter></QueryClientProvider>
+    const view = render(tree)
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: "Study", exact: true }))
+      await waitFor(() => expect(window.location.hash).toBe("#/flashcards?tab=review&other=kept"))
+      view.unmount()
+      const restored = render(tree)
+      expect(screen.getByRole("tab", { name: "Study", exact: true })).toHaveAttribute("aria-selected", "true")
+      restored.unmount()
+    } finally {
+      view.unmount()
+      window.history.replaceState(null, "", previousUrl)
+    }
   })
 
   it("generates and saves the exact source with captured owner and provenance", async () => {
