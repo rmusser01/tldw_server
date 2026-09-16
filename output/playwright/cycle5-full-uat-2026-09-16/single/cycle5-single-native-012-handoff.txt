@@ -1,0 +1,212 @@
+### Page
+- Page URL: http://127.0.0.1:18580/
+- Page Title: Home | tldw
+- Console: 0 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e479]:
+      - button "Expand sidebar" [ref=e480] [cursor=pointer]
+      - button "New Chat" [ref=e484] [cursor=pointer]
+      - generic [ref=e487]:
+        - button "Quick Ingest" [ref=e488] [cursor=pointer]
+        - button "Chat" [ref=e492] [cursor=pointer]
+        - button "Prompts" [ref=e495] [cursor=pointer]
+        - button "Characters" [ref=e499] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e504] [cursor=pointer]
+        - button "World Books" [ref=e508] [cursor=pointer]
+        - button "Notes" [ref=e511] [cursor=pointer]
+        - button "Knowledge QA" [ref=e515] [cursor=pointer]
+        - button "Media" [ref=e523] [cursor=pointer]
+        - button "Document Workspace" [ref=e526] [cursor=pointer]
+        - button "Research Workspace" [ref=e532] [cursor=pointer]
+        - button "Kanban" [ref=e538] [cursor=pointer]
+        - button "Watchlists" [ref=e540] [cursor=pointer]
+      - generic [ref=e545]:
+        - button "Open Notes Dock" [ref=e546] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e551] [cursor=pointer]
+        - button "Settings" [ref=e554] [cursor=pointer]
+    - main [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e560]:
+          - generic [ref=e561]:
+            - button "Expand sidebar" [ref=e562] [cursor=pointer]
+            - generic [ref=e564]:
+              - img "tldw Assistant" [ref=e565]
+              - generic [ref=e566]: tldw Assistant
+              - button "Companion Home" [ref=e567] [cursor=pointer]
+              - button "Show shortcuts" [ref=e571] [cursor=pointer]
+          - generic [ref=e574]:
+            - button "Search - Open command palette" [ref=e575] [cursor=pointer]:
+              - generic [ref=e579]: Search
+              - generic [ref=e580]: ⌘K
+            - button "Open settings" [ref=e581] [cursor=pointer]
+            - generic [ref=e593]:
+              - button "Notifications, 0 unread" [ref=e594] [cursor=pointer]
+              - status [ref=e598]: Notifications are active
+            - button "Switch to light theme" [ref=e599] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e606] [cursor=pointer]:
+              - generic [ref=e607]: "?"
+        - generic [ref=e18]:
+          - region [ref=e608]:
+            - generic [ref=e609]:
+              - generic [ref=e615]:
+                - heading "Add your first source" [level=2] [ref=e616]
+                - paragraph [ref=e617]: First chat is working. Add a source next so chat can use your own material.
+              - generic [ref=e618]:
+                - button "Add source" [ref=e619] [cursor=pointer]
+                - button "Dismiss" [ref=e620] [cursor=pointer]
+            - generic [ref=e624]:
+              - generic [ref=e625] [cursor=pointer]:
+                - radio "Web URL" [checked] [ref=e626]
+                - generic [ref=e630]: Web URL
+              - generic [ref=e631] [cursor=pointer]:
+                - radio "File" [ref=e632]
+                - generic [ref=e636]: File
+              - generic [ref=e637] [cursor=pointer]:
+                - radio "Paste" [ref=e638]
+                - generic [ref=e644]: Paste
+          - generic [ref=e645]:
+            - generic [ref=e646]:
+              - generic [ref=e647]:
+                - generic [ref=e648]:
+                  - generic [ref=e649]:
+                    - paragraph [ref=e650]: Companion Home
+                    - heading "Companion" [level=1] [ref=e651]
+                    - paragraph [ref=e652]: Review what is waiting in your inbox, what needs attention next, and which work threads are worth resuming right now.
+                  - generic [ref=e653]:
+                    - button "Customize Home" [ref=e654] [cursor=pointer]
+                    - button "Refresh" [ref=e655] [cursor=pointer]
+                - generic [ref=e656]:
+                  - paragraph [ref=e657]: Setup
+                  - generic [ref=e658]:
+                    - generic [ref=e659]:
+                      - heading "Companion setup required" [level=2] [ref=e660]
+                      - paragraph [ref=e661]: Personalization is unavailable on this connection. Your server operator may need to enable the backend feature using the configuration guide.
+                    - link "Personalization configuration guide" [ref=e662] [cursor=pointer]:
+                      - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev
+                - generic [ref=e663]:
+                  - generic [ref=e664]:
+                    - paragraph [ref=e665]: Inbox
+                    - paragraph [ref=e666]: "0"
+                    - paragraph [ref=e667]: Unread or newly surfaced items
+                  - generic [ref=e668]:
+                    - paragraph [ref=e669]: Goals
+                    - paragraph [ref=e670]: "0"
+                    - paragraph [ref=e671]: Live priorities in focus
+                  - generic [ref=e672]:
+                    - paragraph [ref=e673]: Reading
+                    - paragraph [ref=e674]: "0"
+                    - paragraph [ref=e675]: Queued items ready to revisit
+                  - generic [ref=e676]:
+                    - paragraph [ref=e677]: Resume
+                    - paragraph [ref=e678]: "0"
+                    - paragraph [ref=e679]: Threads worth picking back up
+              - generic [ref=e680]:
+                - generic [ref=e681]:
+                  - heading "Getting Started" [level=3] [ref=e682]
+                  - generic [ref=e683]: 1 of 2 complete
+                - generic [ref=e684]:
+                  - link "Add your first source Upload a video, article, or document to get started." [ref=e685] [cursor=pointer]:
+                    - /url: /media
+                    - generic [ref=e693]:
+                      - generic [ref=e694]: Add your first source
+                      - generic [ref=e695]: Upload a video, article, or document to get started.
+                  - link "Start a conversation Chat with the AI about anything, or ask about your content." [ref=e696] [cursor=pointer]:
+                    - /url: /chat
+                    - generic [ref=e704]:
+                      - generic [ref=e705]: Start a conversation
+                      - generic [ref=e706]: Chat with the AI about anything, or ask about your content.
+              - generic [ref=e707]:
+                - generic [ref=e710]:
+                  - generic [ref=e714]:
+                    - generic [ref=e715]: "What's next: Add your first source"
+                    - generic [ref=e716]: Upload a video, article, or document to get started.
+                  - button "Go" [ref=e717] [cursor=pointer]
+                - generic [ref=e722]:
+                  - generic [ref=e723]:
+                    - generic [ref=e724]:
+                      - heading "Automation Inbox" [level=2] [ref=e725]
+                      - paragraph [ref=e726]: Nothing new from automations.
+                    - generic [ref=e727]: "0"
+                  - generic [ref=e728]:
+                    - generic [ref=e729]: No automation results yet
+                    - paragraph [ref=e730]: Results and failures from scheduled tasks appear here after a run. Future scheduled questions and agent outputs appear here only when routed by task visibility policy.
+                - generic [ref=e731]:
+                  - generic [ref=e732]:
+                    - generic [ref=e733]:
+                      - heading "Inbox Preview" [level=2] [ref=e734]
+                      - paragraph [ref=e735]: Setup required
+                    - generic [ref=e736]: "0"
+                  - generic [ref=e737]:
+                    - generic [ref=e738]: Setup required
+                    - paragraph [ref=e739]: Connect your tldw server and enable personalization to unlock this feature. Companion inbox items unlock once personalization is available for this workspace.
+                - generic [ref=e740]:
+                  - generic [ref=e741]:
+                    - generic [ref=e742]:
+                      - heading "Needs Attention" [level=2] [ref=e743]
+                      - paragraph [ref=e744]: Setup required
+                    - generic [ref=e745]: "0"
+                  - generic [ref=e746]:
+                    - generic [ref=e747]: Setup required
+                    - paragraph [ref=e748]: Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading.
+              - generic [ref=e749]:
+                - generic [ref=e750]:
+                  - generic [ref=e751]:
+                    - generic [ref=e752]:
+                      - heading "Resume Work" [level=2] [ref=e753]
+                      - paragraph [ref=e754]: Setup required
+                    - generic [ref=e755]: "0"
+                  - generic [ref=e756]:
+                    - generic [ref=e757]: Setup required
+                    - paragraph [ref=e758]: Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes.
+                - generic [ref=e759]:
+                  - generic [ref=e760]:
+                    - generic [ref=e761]:
+                      - heading "Goals / Focus" [level=2] [ref=e762]
+                      - paragraph [ref=e763]: Setup required
+                    - generic [ref=e764]: "0"
+                  - generic [ref=e765]:
+                    - generic [ref=e766]: Setup required
+                    - paragraph [ref=e767]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to turn goals and focus prompts into a live dashboard block.
+                - generic [ref=e768]:
+                  - generic [ref=e769]:
+                    - generic [ref=e770]:
+                      - heading "Recent Activity" [level=2] [ref=e771]
+                      - paragraph [ref=e772]: Setup required
+                    - generic [ref=e773]: "0"
+                  - generic [ref=e774]:
+                    - generic [ref=e775]: Setup required
+                    - paragraph [ref=e776]: Connect your tldw server and enable personalization to unlock this feature. Enable Companion to review recent activity and capture trails here.
+                - generic [ref=e777]:
+                  - generic [ref=e778]:
+                    - generic [ref=e779]:
+                      - heading "Reading Queue" [level=2] [ref=e780]
+                      - paragraph [ref=e781]: Setup required
+                    - generic [ref=e782]: "0"
+                  - generic [ref=e783]:
+                    - generic [ref=e784]: Setup required
+                    - paragraph [ref=e785]: Connect your tldw server and enable personalization to unlock your reading queue.
+            - generic [ref=e786]:
+              - generic [ref=e787]:
+                - heading "Quick actions" [level=2] [ref=e788]
+                - paragraph [ref=e789]: Jump to the main features.
+              - generic [ref=e790]:
+                - link "Open Chat Continue active work in the main chat workspace." [ref=e791] [cursor=pointer]:
+                  - /url: /chat
+                  - generic [ref=e792]: Open Chat
+                  - paragraph [ref=e793]: Continue active work in the main chat workspace.
+                - link "Open Knowledge Review sources, notes, and captured knowledge from the main workspace." [ref=e794] [cursor=pointer]:
+                  - /url: /knowledge
+                  - generic [ref=e795]: Open Knowledge
+                  - paragraph [ref=e796]: Review sources, notes, and captured knowledge from the main workspace.
+                - link "Open Analysis Review and compare media from the main workspace." [ref=e797] [cursor=pointer]:
+                  - /url: /media-multi
+                  - generic [ref=e798]: Open Analysis
+                  - paragraph [ref=e799]: Review and compare media from the main workspace.
+  - button "Open Next.js Dev Tools" [ref=e88] [cursor=pointer]
+  - alert [ref=e10]
+```

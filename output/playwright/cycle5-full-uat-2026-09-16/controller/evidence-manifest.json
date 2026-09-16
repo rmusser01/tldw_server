@@ -1,9 +1,19 @@
 {
   "mode": "controller",
-  "retainedAt": "2026-09-16T08:12:48.732Z",
+  "retainedAt": "2026-09-16T08:23:41.859Z",
   "knownCredentialMatches": 0,
   "jwtOrPrivateKeyPatternMatches": 0,
   "files": [
+    {
+      "file": "cycle5-controller-api-read.mjs",
+      "bytes": 1106,
+      "sha256": "033ff094f24663d916b186b9b788bd81b2f4d09aae9a127bf6c51e69bc2e358a"
+    },
+    {
+      "file": "cycle5-controller-initial-independent-audit.md",
+      "bytes": 5544,
+      "sha256": "f1d02aad0d31ad405589e47e6f14c01801dcb5335f33c555a981c3b84b853eb4"
+    },
     {
       "file": "cycle5-controller-model-capabilities.json",
       "bytes": 300,
@@ -11,13 +21,38 @@
     },
     {
       "file": "cycle5-controller-running-summary.md",
-      "bytes": 2723,
-      "sha256": "7edeba5a15d73e9c2cfe2062b117c35dbddf043a3923db02d6c3206ee424eb64"
+      "bytes": 3021,
+      "sha256": "b3d67ce8aff728c972bbe1d66b4e82645aa1e9144e26a752d6610fd946550852"
+    },
+    {
+      "file": "cycle5-controller-single-biology-cards-post-review.json",
+      "bytes": 7311,
+      "sha256": "8c11eabdf484d0c777e1f5d5b7aada33aca06d78b74f307fccf9ff6a00506c6d"
+    },
+    {
+      "file": "cycle5-controller-single-biology-decks-post-review.json",
+      "bytes": 1559,
+      "sha256": "01a802d44da784a2d738e09db5d542ad41295cc3f88738b8315d068df14911e6"
+    },
+    {
+      "file": "cycle5-controller-single-biology-sessions-post-review.json",
+      "bytes": 575,
+      "sha256": "0950e0f75131d430e8132e7bc53fe8337dcdaacc5a32502f6826b870b5bb5580"
+    },
+    {
+      "file": "cycle5-controller-single-initial-chat-note.json",
+      "bytes": 719,
+      "sha256": "0ffe5e398beea5a018cd314b7a1e5ca92c17df787c5ccbb99d4fa359927e2d29"
     },
     {
       "file": "cycle5-controller-source-isolation.json",
       "bytes": 3137,
       "sha256": "ef44fe5a438f1b0cd9ea9fa4ae5de1c5cd999f30bf270437984455d6db058b28"
+    },
+    {
+      "file": "cycle5-controller-task-closure-audit.md",
+      "bytes": 13204,
+      "sha256": "f5607da919c3a692921993acbc3eee6ff9daadd0f8b5efc85a18ff7cd25042bb"
     }
   ]
 }

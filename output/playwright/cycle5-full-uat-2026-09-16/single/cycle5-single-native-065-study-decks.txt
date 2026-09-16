@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByRole('combobox').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-17-27-143Z.yml)

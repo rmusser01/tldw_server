@@ -1,0 +1,209 @@
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. | tldw
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e24]:
+      - link "Skip to main content" [ref=f1e25] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e26]:
+        - button "Expand sidebar" [ref=f1e27] [cursor=pointer]
+        - button "New Chat" [ref=f1e31] [cursor=pointer]
+        - generic [ref=f1e34]:
+          - button "Quick Ingest" [ref=f1e35] [cursor=pointer]
+          - button "Chat" [ref=f1e39] [cursor=pointer]
+          - button "Prompts" [ref=f1e42] [cursor=pointer]
+          - button "Characters" [ref=f1e46] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f1e51] [cursor=pointer]
+          - button "World Books" [ref=f1e55] [cursor=pointer]
+          - button "Notes" [ref=f1e58] [cursor=pointer]
+          - button "Knowledge QA" [ref=f1e62] [cursor=pointer]
+          - button "Media" [ref=f1e70] [cursor=pointer]
+          - button "Document Workspace" [ref=f1e73] [cursor=pointer]
+          - button "Research Workspace" [ref=f1e79] [cursor=pointer]
+          - button "Kanban" [ref=f1e85] [cursor=pointer]
+          - button "Watchlists" [ref=f1e87] [cursor=pointer]
+        - generic [ref=f1e92]:
+          - button "Open Notes Dock" [ref=f1e93] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f1e98] [cursor=pointer]
+          - button "Settings" [ref=f1e101] [cursor=pointer]
+      - main [ref=f1e105]:
+        - generic [ref=f1e106]:
+          - generic [ref=f1e109]:
+            - generic [ref=f1e110]:
+              - button "Expand sidebar" [ref=f1e111] [cursor=pointer]
+              - generic [ref=f1e113]:
+                - img "tldw Assistant" [ref=f1e114]
+                - generic [ref=f1e115]: tldw Assistant
+                - button "Companion Home" [ref=f1e116] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e120] [cursor=pointer]
+              - 'button "Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f1e1026] [cursor=pointer]'
+              - generic "Saved chat. History is persisted." [ref=f1e1028]: Saved
+            - generic [ref=f1e127]:
+              - button "Search - Open command palette" [ref=f1e128] [cursor=pointer]:
+                - generic [ref=f1e132]: Search
+                - generic [ref=f1e133]: ⌘K
+              - button "New saved chat" [ref=f1e1029] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f1e1033] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f1e1034] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f1e1035] [cursor=pointer]
+              - button "Open settings" [ref=f1e147] [cursor=pointer]
+              - generic [ref=f1e159]:
+                - button "Notifications, 0 unread" [ref=f1e160] [cursor=pointer]
+                - status [ref=f1e164]: Notifications are active
+              - button "Switch to light theme" [ref=f1e165] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e172] [cursor=pointer]:
+                - generic [ref=f1e173]: "?"
+          - generic [ref=f1e174]:
+            - heading "Chat" [level=1] [ref=f1e1042]
+            - generic [ref=f1e1045]:
+              - paragraph [ref=f1e1046]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f1e1047]:
+                - main [ref=f1e1048]:
+                  - generic [ref=f1e1049]:
+                    - generic [ref=f1e1051]:
+                      - generic [ref=f1e1052]:
+                        - generic [ref=f1e1053]: Standard chat
+                        - generic [ref=f1e1054]: Conversation timeline
+                      - generic [ref=f1e1055]:
+                        - button "Switch to light theme" [ref=f1e1056] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f1e1063] [cursor=pointer]:
+                          - generic [ref=f1e1069]: Focus
+                        - button "Shortcuts" [ref=f1e1070] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f1e1074]
+                    - log "Chat messages" [ref=f1e1076]:
+                      - generic [ref=f1e1078]:
+                        - article "System message 1 of 5" [ref=f1e1079]:
+                          - generic [ref=f1e1085]:
+                            - generic [ref=f1e1087]:
+                              - generic [ref=f1e1088]: System prompt
+                              - generic [ref=f1e1089]: • 1:04 AM
+                            - paragraph [ref=f1e1091]: You are a helpful AI assistant.
+                            - generic [ref=f1e1092]:
+                              - generic [ref=f1e1093]:
+                                - generic [ref=f1e1094]: Was this helpful?
+                                - generic [ref=f1e1095]:
+                                  - button "Helpful" [ref=f1e1096] [cursor=pointer]
+                                  - button "Not helpful" [ref=f1e1099] [cursor=pointer]
+                                  - button "More feedback" [ref=f1e1102] [cursor=pointer]
+                              - button "More actions" [ref=f1e1108] [cursor=pointer]: •••
+                        - article "User message 2 of 5" [ref=f1e1109]:
+                          - generic [ref=f1e1112]:
+                            - generic [ref=f1e1114]:
+                              - generic [ref=f1e1115]: You
+                              - generic [ref=f1e1116]: • 1:04 AM
+                            - paragraph [ref=f1e1118]: "Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY."
+                            - button "More actions" [ref=f1e1121] [cursor=pointer]: •••
+                        - article "Assistant message 3 of 5" [ref=f1e1125]:
+                          - generic [ref=f1e1131]:
+                            - generic [ref=f1e1133]:
+                              - generic [ref=f1e1134]: Assistant
+                              - generic [ref=f1e1135]: • 1:04 AM
+                            - paragraph [ref=f1e1434]: WILLOW-85 READY.
+                            - generic [ref=f1e1139]:
+                              - generic [ref=f1e1140]:
+                                - generic [ref=f1e1141]: Was this helpful?
+                                - generic [ref=f1e1142]:
+                                  - button "Helpful" [ref=f1e1143] [cursor=pointer]
+                                  - button "Not helpful" [ref=f1e1146] [cursor=pointer]
+                                  - button "More feedback" [ref=f1e1149] [cursor=pointer]
+                              - button "More actions" [ref=f1e1435] [cursor=pointer]: •••
+                        - article "User message 4 of 5" [ref=f1e1171]:
+                          - generic [ref=f1e1174]:
+                            - generic [ref=f1e1176]:
+                              - generic [ref=f1e1177]: You
+                              - generic [ref=f1e1178]: • 1:05 AM
+                            - paragraph [ref=f1e1180]: What is the launch code I just gave you? Reply with only the code.
+                            - button "More actions" [ref=f1e1183] [cursor=pointer]: •••
+                        - article "Assistant message 5 of 5" [ref=f1e1187]:
+                          - generic [ref=f1e1193]:
+                            - generic [ref=f1e1195]:
+                              - generic [ref=f1e1196]: Assistant
+                              - generic [ref=f1e1197]: • 1:05 AM
+                            - paragraph [ref=f1e1433]: WILLOW-85
+                            - generic [ref=f1e1201]:
+                              - generic [ref=f1e1202]:
+                                - generic [ref=f1e1203]: Was this helpful?
+                                - generic [ref=f1e1204]:
+                                  - button "Helpful" [ref=f1e1205] [cursor=pointer]
+                                  - button "Not helpful" [ref=f1e1208] [cursor=pointer]
+                                  - button "More feedback" [ref=f1e1211] [cursor=pointer]
+                              - button "More actions" [ref=f1e1217] [cursor=pointer]: •••
+                    - generic [ref=f1e1218]:
+                      - generic [ref=f1e1219]: Composer
+                      - generic [ref=f1e1227]:
+                        - button [aria-hidden] [ref=f1e1228]
+                        - button [aria-hidden] [ref=f1e1229]
+                        - generic [ref=f1e1230]:
+                          - generic [ref=f1e1232]:
+                            - button "Hide composer options" [expanded] [ref=f1e1233] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f1e1238]
+                            - generic [ref=f1e1239]:
+                              - button "Improve prompt" [ref=f1e1242] [cursor=pointer]
+                              - generic [ref=f1e1247]:
+                                - button "Send message" [ref=f1e1248] [cursor=pointer]:
+                                  - generic [ref=f1e1249]: Send
+                                - button "Open message delivery options" [ref=f1e1254] [cursor=pointer]
+                          - generic [ref=f1e1259]:
+                            - generic [ref=f1e1261]:
+                              - group "Mode and context controls" [ref=f1e1262]:
+                                - button "Modes" [ref=f1e1263] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f1e1270] [cursor=pointer]':
+                                  - generic [ref=f1e1271]:
+                                    - generic [ref=f1e1272]: MCP
+                                    - generic [ref=f1e1273]: None
+                                - button "Search & Context" [ref=f1e1276] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f1e1281] [cursor=pointer]:
+                                  - generic [ref=f1e1284]: Prompt
+                                - button "Select character or persona" [ref=f1e1285] [cursor=pointer]
+                                - button "Role-play setup" [ref=f1e1290] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f1e1297] [cursor=pointer]
+                              - group "Run input controls" [ref=f1e1303]:
+                                - button "OpenUI" [ref=f1e1304] [cursor=pointer]
+                                - button "Start dictation" [ref=f1e1310] [cursor=pointer]
+                                - generic [ref=f1e1314]:
+                                  - button "Attach image" [ref=f1e1316] [cursor=pointer]
+                                  - button "More attachments" [ref=f1e1320] [cursor=pointer]
+                                - button "More tools" [ref=f1e1323] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f1e1326] [cursor=pointer]:
+                                  - generic [ref=f1e1330]: Chat Settings
+                            - generic "Active context" [ref=f1e1331]:
+                              - button "Custom / tldw:custom-openai-api:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f1e1333] [cursor=pointer]:
+                                - generic "Provider status" [ref=f1e1338]: Healthy
+                              - button "Chat 5 messages" [ref=f1e1339] [cursor=pointer]:
+                                - generic [ref=f1e1340]: Chat
+                                - generic [ref=f1e1341]: 5 messages
+                              - button "Configure context window size" [ref=f1e1343] [cursor=pointer]:
+                                - generic [ref=f1e1344]: 51 + ~0 = 51 tokens
+                              - button "Saved" [ref=f1e1346] [cursor=pointer]
+                              - button "Advanced controls" [ref=f1e1348] [cursor=pointer]
+                - generic [ref=f1e1352]:
+                  - button "Restore context sidechannel" [ref=f1e1353] [cursor=pointer]:
+                    - generic [ref=f1e1357]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f1e1358]:
+                  - button "Restore runtime sidechannel" [ref=f1e1359] [cursor=pointer]:
+                    - generic [ref=f1e1360]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - generic [ref=f1e1436]:
+      - dialog "Review flashcard":
+        - generic [ref=f1e1437]:
+          - button "Close" [active] [ref=f1e1438] [cursor=pointer]:
+            - generic "Close" [ref=f1e1439]:
+              - img "close" [ref=f1e1440]
+          - generic [ref=f1e1443]: Review flashcard
+          - generic [ref=f1e1446]:
+            - generic [ref=f1e1447]:
+              - text: Question
+              - textbox "Question" [ref=f1e1448]
+            - generic [ref=f1e1449]:
+              - text: Answer
+              - textbox "Answer" [ref=f1e1450]: WILLOW-85 READY.
+          - generic [ref=f1e1451]:
+            - button "Cancel" [ref=f1e1452] [cursor=pointer]
+            - button "Save flashcard" [disabled] [ref=f1e1454]
+  - button "Open Next.js Dev Tools" [ref=f1e19] [cursor=pointer]
+  - alert [ref=f1e23]: Chat | tldw
+```

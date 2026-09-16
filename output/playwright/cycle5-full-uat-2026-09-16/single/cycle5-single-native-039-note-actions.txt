@@ -1,0 +1,6 @@
+### Result
+"Create\nDuplicate\nFrom Template\nOrganize\nPin\nAI\nNotes Studio\nGenerate flashcards\nExport\nCopy note content\nExport\nDelete"
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("region", {name:"Note editor"}).getByRole("button", {name:"More actions", exact:true}).click(); return await page.getByRole("menu").innerText(); })(page);
+```

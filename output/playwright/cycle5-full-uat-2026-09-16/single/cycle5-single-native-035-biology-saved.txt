@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.getByTestId('notes-save-button').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/notes
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-11-51-754Z.yml)

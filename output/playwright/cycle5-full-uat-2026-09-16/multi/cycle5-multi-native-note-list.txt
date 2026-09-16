@@ -1,0 +1,11 @@
+### Result
+{"path":"http://127.0.0.1:18501/api/v1/notes/keywords/?limit=1000&offset=0&include_note_counts=true","status":200,"body":[]}
+### Ran Playwright code
+```js
+await (async(page)=>{const pending=page.waitForResponse(r=>r.url().includes("/api/v1/notes")&&r.request().method()==="GET",{timeout:20000}); await page.getByRole("button",{name:"Notes",exact:true}).click(); const r=await pending;return {path:r.url(),status:r.status(),body:await r.json()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18581/notes
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T08-10-01-025Z.log#L17-L20

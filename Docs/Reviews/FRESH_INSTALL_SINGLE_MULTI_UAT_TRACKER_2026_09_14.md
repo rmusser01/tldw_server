@@ -16,6 +16,34 @@
 - Workflow source: frontend E2E/UAT and shared integration tests, as clarified by the user. Exact named journeys and coverage limitations are recorded below; no literal A/B/C loop mapping was found.
 - AI provider: existing llama.cpp on port 9099. Cycle4 used the advertised `../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf`; earlier cycles used `../../Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf`. No mock response counts as real model acceptance.
 
+## Cycle 5 fresh workflow run — in progress
+
+Frozen product`ab527eb3b4`, with documentation-only checkpoints`a325e01010`/`9909c4e19f`. [Controller evidence](../../output/playwright/cycle5-full-uat-2026-09-16/controller/README.md). Single-user uses visible setup; multi-user uses documented operator provider configuration and one API restart. Neither mode certifies installing dependencies on a clean machine. One new P3 navigation finding126 is confirmed at08:23UTC; remaining workflows continue without source changes.
+
+| Workflow | Single-user | Multi-user |
+|---|---|---|
+|Fresh setup/provider/first ordinary Chat|PASS: real setup and first ordinary Chat without API restart|PASS with operator setup adaptation; admin CLI, Alice/Bob created through UI|
+|Auth/reload/offline/reconnect/expiry|Pending remaining controls|Natural expiry underway in separate Alice context; return after08:39:10UTC|
+|Two-turn saved Chat/reload and failed Retry|Two-turn/canonical reload PASS; failed Retry pending|Two-turn/canonical reload PASS; failed Retry pending|
+|Public file/chunks/search/cited QA/source Chat|Pending|Pending|
+|Exact Wikipedia journey|Pending|Pending|
+|Biology Note/five generated cards/study|Functional PASS: five grounded cards, five distinct reviews, completed session1/count5 independently confirmed; reload opens wrong tab126, reselection retains completion|PASS: five grounded cards, five distinct reviews, completed session1/count5 and reload|
+|Saved pirate Prompt applied to Chat|Pending|Pending|
+|Character creation/replacement/complete-v2/reload|Pending|Pending|
+|Chat→Note/backlink; Chat→card/Study/mixed counts|Note/backlink PASS; reviewed Chat card saved; Study pending|In progress|
+|Media analysis/Review/reanalysis/reload/failure|Pending|Pending|
+|Permission-aware soft delete/Trash/restore|Pending|Pending|
+|Reciprocal account isolation|Single identity only; multi controls cover reciprocal behavior|Pending|
+
+Known limits remain explicit: real vision inference unavailable; native hidden-tab notification verification unavailable after prior tool attempts; no optional subsystem certification. Existing pre-key setup warnings, delayed first-use Notes tour and hover-replaced action controls are documented as context/harness observations. No product repairs occur during this frozen run.
+
+### UAT-126 — P3: Flashcards tab selection leaves a stale route on reload
+
+- Notes→Generate opens `/flashcards?tab=importExport`. Clicking Study displays Study but leaves the URL unchanged. After five completed Biology reviews, normal reload opens Import / Export. Actual Study reselection restores the completed five-card session.
+- Expected: the route reflects the selected workspace, so ordinary reload returns to Study. Saved cards and review events remain intact; this is navigation UX, not data loss.
+- Read-only source confirmation: `FlashcardsManager` reads the tab query on mount, but `handleTabChange` updates only local state. Preserve private generation handoffs, owned deck/quiz context and Scheduler dirty-state confirmation in the later repair.
+- Status: open, TASK13260.66. Native captures074/075/078/079 under the cycle5 single evidence prefix; independent controller API reads confirm session1 completed/cards_reviewed5 and all five cards at repetitions1/version2. No repair during the frozen matrix.
+
 ## Cycle 4 running findings — 2026-09-16 UTC
 
 Separate frozen running records: [single-user](../../output/playwright/cycle4-full-uat-2026-09-16/single/RUNNING_TRACKER.md), [multi-user](../../output/playwright/cycle4-full-uat-2026-09-16/multi/RUNNING_TRACKER.md). Execution has ended; repairs now follow the preserved results. Historical observations below remain the findings from that run.

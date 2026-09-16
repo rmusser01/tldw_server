@@ -1,0 +1,8 @@
+### Result
+{"timing":{"path":"/api/v1/auth/login","status":200,"issuedAt":"2026-09-16T08:08:59.302Z","expires_in":1800},"tabs":["about:blank"],"parkedAt":"2026-09-16T08:08:59.318Z"}
+### Ran Playwright code
+```js
+await (async(page)=>{ const pending=page.waitForResponse(r=>r.url().endsWith("/api/v1/auth/login"),{timeout:20000}); await page.getByRole("button",{name:"Login",exact:true}).click(); const response=await pending; const body=await response.json(); const timing={path:"/api/v1/auth/login",status:response.status(),issuedAt:new Date().toISOString(),expires_in:typeof body.expires_in==="number"?body.expires_in:null}; await page.getByText("Logged In",{exact:true}).waitFor(); await page.goto("about:blank"); return {timing,tabs:page.context().pages().map(p=>p.url()),parkedAt:new Date().toISOString()};})(page);
+```
+### Page
+- Page URL: about:blank

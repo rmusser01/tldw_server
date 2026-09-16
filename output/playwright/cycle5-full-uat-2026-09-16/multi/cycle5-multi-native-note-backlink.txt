@@ -1,0 +1,194 @@
+### Page
+- Page URL: http://127.0.0.1:18581/chat
+- Page Title: Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns | tldw
+### Snapshot
+```yaml
+- generic [ref=f4e1]:
+  - generic [ref=f4e4]:
+    - link "Skip to main content" [ref=f4e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e6]:
+      - button "Expand sidebar" [ref=f4e7] [cursor=pointer]
+      - button "New Chat" [ref=f4e11] [cursor=pointer]
+      - generic [ref=f4e14]:
+        - button "Quick Ingest" [ref=f4e15] [cursor=pointer]
+        - button "Chat" [ref=f4e19] [cursor=pointer]
+        - button "Prompts" [ref=f4e22] [cursor=pointer]
+        - button "Characters" [ref=f4e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e31] [cursor=pointer]
+        - button "World Books" [ref=f4e35] [cursor=pointer]
+        - button "Notes" [ref=f4e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e42] [cursor=pointer]
+        - button "Media" [ref=f4e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e59] [cursor=pointer]
+        - button "Kanban" [ref=f4e65] [cursor=pointer]
+        - button "Watchlists" [ref=f4e67] [cursor=pointer]
+      - generic [ref=f4e72]:
+        - button "Open Notes Dock" [ref=f4e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e78] [cursor=pointer]
+        - button "Settings" [ref=f4e81] [cursor=pointer]
+    - main [ref=f4e85]:
+      - generic [ref=f4e86]:
+        - generic [ref=f4e89]:
+          - generic [ref=f4e90]:
+            - button "Expand sidebar" [ref=f4e91] [cursor=pointer]
+            - generic [ref=f4e93]:
+              - img "tldw Assistant" [ref=f4e94]
+              - generic [ref=f4e95]: tldw Assistant
+              - button "Companion Home" [ref=f4e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e100] [cursor=pointer]
+            - 'button "Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns" [ref=f4e1004] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=f4e1006]: Saved
+          - generic [ref=f4e107]:
+            - button "Search - Open command palette" [ref=f4e108] [cursor=pointer]:
+              - generic [ref=f4e112]: Search
+              - generic [ref=f4e113]: ⌘K
+            - button "New saved chat" [ref=f4e1007] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f4e1011] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f4e1012] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f4e1013] [cursor=pointer]
+            - button "Open settings" [ref=f4e127] [cursor=pointer]
+            - generic [ref=f4e139]:
+              - button "Notifications, 0 unread" [ref=f4e140] [cursor=pointer]
+              - status [ref=f4e144]: Notifications are active
+            - button "Switch to light theme" [ref=f4e145] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e152] [cursor=pointer]:
+              - generic [ref=f4e153]: "?"
+        - generic [ref=f4e154]:
+          - heading "Chat" [level=1] [ref=f4e1020]
+          - generic [ref=f4e1023]:
+            - paragraph [ref=f4e1024]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f4e1025]:
+              - main [ref=f4e1026]:
+                - generic [ref=f4e1027]:
+                  - generic [ref=f4e1029]:
+                    - generic [ref=f4e1030]:
+                      - generic [ref=f4e1031]: Standard chat
+                      - generic [ref=f4e1032]: Conversation timeline
+                    - generic [ref=f4e1033]:
+                      - button "Switch to light theme" [ref=f4e1034] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f4e1041] [cursor=pointer]:
+                        - generic [ref=f4e1047]: Focus
+                      - button "Shortcuts" [ref=f4e1048] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f4e1052]
+                  - log "Chat messages" [ref=f4e1054]:
+                    - generic [ref=f4e1056]:
+                      - article "System message 1 of 5" [ref=f4e1057]:
+                        - generic [ref=f4e1063]:
+                          - generic [ref=f4e1065]:
+                            - generic [ref=f4e1066]: System prompt
+                            - generic [ref=f4e1067]: • 1:10 AM
+                          - paragraph [ref=f4e1069]: You are a helpful AI assistant.
+                          - generic [ref=f4e1070]:
+                            - generic [ref=f4e1071]:
+                              - generic [ref=f4e1072]: Was this helpful?
+                              - generic [ref=f4e1073]:
+                                - button "Helpful" [ref=f4e1074] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e1077] [cursor=pointer]
+                                - button "More feedback" [ref=f4e1080] [cursor=pointer]
+                            - button "More actions" [ref=f4e1086] [cursor=pointer]: •••
+                      - article "User message 2 of 5" [ref=f4e1087]:
+                        - generic [ref=f4e1090]:
+                          - generic [ref=f4e1092]:
+                            - generic [ref=f4e1093]: You
+                            - generic [ref=f4e1094]: • 1:11 AM
+                          - paragraph [ref=f4e1096]: "Cycle5 multi memory check: the fictional Aurora station stores 23 amber lanterns. Briefly acknowledge that exact fact."
+                          - button "More actions" [ref=f4e1099] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 5" [ref=f4e1103]:
+                        - generic [ref=f4e1109]:
+                          - generic [ref=f4e1111]:
+                            - generic [ref=f4e1112]: Assistant
+                            - generic [ref=f4e1113]: • 1:11 AM
+                          - paragraph [ref=f4e1341]: "Acknowledged: the fictional Aurora station stores 23 amber lanterns."
+                          - generic [ref=f4e1117]:
+                            - generic [ref=f4e1118]:
+                              - generic [ref=f4e1119]: Was this helpful?
+                              - generic [ref=f4e1120]:
+                                - button "Helpful" [ref=f4e1121] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e1124] [cursor=pointer]
+                                - button "More feedback" [ref=f4e1127] [cursor=pointer]
+                            - generic [ref=f4e1134]:
+                              - button "Copy to clipboard" [ref=f4e1135] [cursor=pointer]
+                              - button "Edit" [ref=f4e1140] [cursor=pointer]
+                              - button "More actions" [ref=f4e1144] [cursor=pointer]
+                      - article "User message 4 of 5" [ref=f4e1149]:
+                        - generic [ref=f4e1152]:
+                          - generic [ref=f4e1154]:
+                            - generic [ref=f4e1155]: You
+                            - generic [ref=f4e1156]: • 1:11 AM
+                          - paragraph [ref=f4e1158]: What does Aurora station store, and how many? Answer from our conversation in one short sentence.
+                          - button "More actions" [ref=f4e1161] [cursor=pointer]: •••
+                      - article "Assistant message 5 of 5" [ref=f4e1165]:
+                        - generic [ref=f4e1171]:
+                          - generic [ref=f4e1173]:
+                            - generic [ref=f4e1174]: Assistant
+                            - generic [ref=f4e1175]: • 1:11 AM
+                          - paragraph [ref=f4e1342]: Aurora station stores 23 amber lanterns.
+                          - generic [ref=f4e1179]:
+                            - generic [ref=f4e1180]:
+                              - generic [ref=f4e1181]: Was this helpful?
+                              - generic [ref=f4e1182]:
+                                - button "Helpful" [ref=f4e1183] [cursor=pointer]
+                                - button "Not helpful" [ref=f4e1186] [cursor=pointer]
+                                - button "More feedback" [ref=f4e1189] [cursor=pointer]
+                            - button "More actions" [ref=f4e1195] [cursor=pointer]: •••
+                  - generic [ref=f4e1196]:
+                    - generic [ref=f4e1197]: Composer
+                    - generic [ref=f4e1205]:
+                      - button [aria-hidden] [ref=f4e1206]
+                      - button [aria-hidden] [ref=f4e1207]
+                      - generic [ref=f4e1208]:
+                        - generic [ref=f4e1210]:
+                          - button "Hide composer options" [expanded] [ref=f4e1211] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f4e1216]
+                          - generic [ref=f4e1217]:
+                            - button "Improve prompt" [ref=f4e1220] [cursor=pointer]
+                            - generic [ref=f4e1225]:
+                              - button "Send message" [ref=f4e1226] [cursor=pointer]:
+                                - generic [ref=f4e1227]: Send
+                              - button "Open message delivery options" [ref=f4e1232] [cursor=pointer]
+                        - generic [ref=f4e1237]:
+                          - generic [ref=f4e1239]:
+                            - group "Mode and context controls" [ref=f4e1240]:
+                              - button "Modes" [ref=f4e1241] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f4e1248] [cursor=pointer]':
+                                - generic [ref=f4e1249]:
+                                  - generic [ref=f4e1250]: MCP
+                                  - generic [ref=f4e1251]: None
+                              - button "Search & Context" [ref=f4e1254] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f4e1259] [cursor=pointer]:
+                                - generic [ref=f4e1262]: Prompt
+                              - button "Select character or persona" [ref=f4e1263] [cursor=pointer]
+                              - button "Role-play setup" [ref=f4e1268] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f4e1275] [cursor=pointer]
+                            - group "Run input controls" [ref=f4e1281]:
+                              - button "OpenUI" [ref=f4e1282] [cursor=pointer]
+                              - button "Start dictation" [ref=f4e1288] [cursor=pointer]
+                              - generic [ref=f4e1292]:
+                                - button "Attach image" [ref=f4e1294] [cursor=pointer]
+                                - button "More attachments" [ref=f4e1298] [cursor=pointer]
+                              - button "More tools" [ref=f4e1301] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f4e1304] [cursor=pointer]:
+                                - generic [ref=f4e1308]: Chat Settings
+                          - generic "Active context" [ref=f4e1309]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f4e1311] [cursor=pointer]:
+                              - generic "Provider status" [ref=f4e1315]: Healthy
+                            - button "Chat 5 messages" [ref=f4e1316] [cursor=pointer]:
+                              - generic [ref=f4e1317]: Chat
+                              - generic [ref=f4e1318]: 5 messages
+                            - button "Configure context window size" [ref=f4e1320] [cursor=pointer]:
+                              - generic [ref=f4e1321]: 89 + ~0 = 89 tokens
+                            - button "Saved" [ref=f4e1323] [cursor=pointer]
+                            - button "Advanced controls" [ref=f4e1325] [cursor=pointer]
+              - generic [ref=f4e1329]:
+                - button "Restore context sidechannel" [ref=f4e1330] [cursor=pointer]:
+                  - generic [ref=f4e1334]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f4e1335]:
+                - button "Restore runtime sidechannel" [ref=f4e1336] [cursor=pointer]:
+                  - generic [ref=f4e1337]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=f4e466] [cursor=pointer]
+  - alert [ref=f4e470]: Chat | tldw
+```

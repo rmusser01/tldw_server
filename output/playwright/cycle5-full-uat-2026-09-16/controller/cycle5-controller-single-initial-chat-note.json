@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-09-16T08:17:58.214Z",
+  "method": "GET",
+  "endpoint": "/api/v1/notes/68b9dd56-d337-4e91-80bf-4a3620bf355f",
+  "status": 200,
+  "body": {
+    "title": "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY.",
+    "content": "WILLOW-85",
+    "conversation_id": "5b22027f-193b-4166-9662-bd62ae0032ac",
+    "message_id": "dec0c263-6b38-4a71-bc95-809b2df3c4ab",
+    "id": "68b9dd56-d337-4e91-80bf-4a3620bf355f",
+    "created_at": "2026-09-16T08:07:13.382000Z",
+    "last_modified": "2026-09-16T08:07:13.382000Z",
+    "version": 1,
+    "client_id": "1",
+    "deleted": false,
+    "studio": null,
+    "keywords": [],
+    "folders": [],
+    "keyword_sync": null
+  }
+}

@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18580/flashcards?tab=importExport","textareas":[{"id":"","value":"The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level."},{"id":"","value":""}],"numbers":[{"id":"","value":"10"}]}
+### Ran Playwright code
+```js
+await (async (page) => { return {url:page.url(), textareas:await page.locator("textarea").evaluateAll(es=>es.map(e=>({id:e.id,value:e.value}))), numbers:await page.locator("input[type=number]").evaluateAll(es=>es.map(e=>({id:e.id,value:e.value}))) }; })(page);
+```

@@ -1,0 +1,238 @@
+### Page
+- Page URL: http://127.0.0.1:18580/notes
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e24]:
+      - link "Skip to main content" [ref=f1e25] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e26]:
+        - button "Expand sidebar" [ref=f1e27] [cursor=pointer]
+        - button "New Chat" [ref=f1e31] [cursor=pointer]
+        - generic [ref=f1e34]:
+          - button "Quick Ingest" [ref=f1e35] [cursor=pointer]
+          - button "Chat" [ref=f1e39] [cursor=pointer]
+          - button "Prompts" [ref=f1e42] [cursor=pointer]
+          - button "Characters" [ref=f1e46] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f1e51] [cursor=pointer]
+          - button "World Books" [ref=f1e55] [cursor=pointer]
+          - button "Notes" [ref=f1e58] [cursor=pointer]
+          - button "Knowledge QA" [ref=f1e62] [cursor=pointer]
+          - button "Media" [ref=f1e70] [cursor=pointer]
+          - button "Document Workspace" [ref=f1e73] [cursor=pointer]
+          - button "Research Workspace" [ref=f1e79] [cursor=pointer]
+          - button "Kanban" [ref=f1e85] [cursor=pointer]
+          - button "Watchlists" [ref=f1e87] [cursor=pointer]
+        - generic [ref=f1e92]:
+          - button "Open Notes Dock" [ref=f1e93] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f1e98] [cursor=pointer]
+          - button "Settings" [ref=f1e101] [cursor=pointer]
+      - main [ref=f1e105]:
+        - generic [ref=f1e106]:
+          - generic [ref=f1e109]:
+            - generic [ref=f1e110]:
+              - button "Expand sidebar" [ref=f1e111] [cursor=pointer]
+              - generic [ref=f1e113]:
+                - img "tldw Assistant" [ref=f1e114]
+                - generic [ref=f1e115]: tldw Assistant
+                - button "Companion Home" [ref=f1e116] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e120] [cursor=pointer]
+            - generic [ref=f1e127]:
+              - button "Search - Open command palette" [ref=f1e128] [cursor=pointer]:
+                - generic [ref=f1e132]: Search
+                - generic [ref=f1e133]: ⌘K
+              - button "Open settings" [ref=f1e147] [cursor=pointer]
+              - generic [ref=f1e159]:
+                - button "Notifications, 0 unread" [ref=f1e160] [cursor=pointer]
+                - status [ref=f1e164]: Notifications are active
+              - button "Switch to light theme" [ref=f1e165] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e172] [cursor=pointer]:
+                - generic [ref=f1e173]: "?"
+          - generic [ref=f1e613]:
+            - link "Skip to notes list" [ref=f1e614] [cursor=pointer]:
+              - /url: "#notes-list-region"
+            - link "Skip to editor" [ref=f1e615] [cursor=pointer]:
+              - /url: "#notes-editor-region"
+            - paragraph [ref=f1e616]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+            - region "Notes list" [ref=f1e617]:
+              - generic [ref=f1e618]:
+                - generic [ref=f1e619]:
+                  - generic [ref=f1e620]:
+                    - generic [ref=f1e621]:
+                      - generic [ref=f1e622]: Notes
+                      - generic [ref=f1e623]: 1 total
+                    - button "New note" [ref=f1e624] [cursor=pointer]
+                  - generic [ref=f1e627]:
+                    - generic [ref=f1e628]:
+                      - button "Views" [expanded] [ref=f1e630] [cursor=pointer]
+                      - generic [ref=f1e635]:
+                        - generic [ref=f1e636]:
+                          - button "Notes" [ref=f1e637] [cursor=pointer]
+                          - button "Trash" [ref=f1e639] [cursor=pointer]
+                        - generic [ref=f1e641]:
+                          - button "List" [ref=f1e642] [cursor=pointer]
+                          - button "Timeline" [ref=f1e644] [cursor=pointer]
+                          - button "Inbox" [ref=f1e646] [cursor=pointer]
+                          - button "Collection" [ref=f1e648] [cursor=pointer]
+                          - button "Graph" [ref=f1e650] [cursor=pointer]
+                        - generic [ref=f1e659]:
+                          - button "Organize" [ref=f1e660] [cursor=pointer]
+                          - button "Organize help" [ref=f1e666] [cursor=pointer]:
+                            - img "question-circle" [ref=f1e667]
+                    - generic [ref=f1e671]:
+                      - textbox "Search notes" [ref=f1e678]:
+                        - /placeholder: Search titles and contents
+                      - generic [ref=f1e680] [cursor=pointer]:
+                        - generic [ref=f1e681]:
+                          - generic "Date modified (newest first)" [ref=f1e682]
+                          - combobox "Sort notes" [ref=f1e683]
+                        - img "down" [ref=f1e685]
+                    - generic [ref=f1e688]:
+                      - button "Filters" [expanded] [ref=f1e690] [cursor=pointer]
+                      - generic [ref=f1e695]:
+                        - generic [ref=f1e696]:
+                          - button "Captured" [ref=f1e697] [cursor=pointer]
+                          - button "Search tips" [ref=f1e699] [cursor=pointer]
+                        - generic [ref=f1e701]:
+                          - generic [ref=f1e702]:
+                            - generic: Filter by tag
+                            - combobox "Filter by tag" [ref=f1e704]
+                          - img "down" [ref=f1e706]
+                        - generic [ref=f1e710]:
+                          - button "Browse tags" [ref=f1e711] [cursor=pointer]
+                          - button "Tags help" [ref=f1e713] [cursor=pointer]:
+                            - img "question-circle" [ref=f1e714]
+                        - generic [ref=f1e718]: For in-note search, use browser Ctrl/Cmd+F.
+                    - generic [ref=f1e903]:
+                      - generic [ref=f1e904]: Recent notes
+                      - 'button "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f1e906] [cursor=pointer]'
+                - generic [ref=f1e720]:
+                  - generic [ref=f1e722]:
+                    - generic [ref=f1e723]: Results
+                    - generic [ref=f1e724]:
+                      - button "Import" [ref=f1e725] [cursor=pointer]
+                      - button "Sync folder" [ref=f1e727] [cursor=pointer]
+                      - button "Export" [ref=f1e730] [cursor=pointer]
+                  - list "Notes" [ref=f1e733]:
+                    - listitem [ref=f1e734]:
+                      - generic [ref=f1e735]:
+                        - 'checkbox "Select note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. for bulk actions" [ref=f1e736]'
+                        - 'button "Pin note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f1e737] [cursor=pointer]'
+                        - 'button "Open note Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [ref=f1e740] [cursor=pointer]':
+                          - generic [ref=f1e741]:
+                            - generic [ref=f1e742]: "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-..."
+                            - generic [ref=f1e751]: WILLOW-85
+                            - generic [ref=f1e752]: "Linked to conversation: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. · msg dec0c263-6b38-4a71-bc95-809b2df3c4ab"
+                            - generic [ref=f1e753]: 9/16/2026, 1:07:13 AM
+                  - generic [ref=f1e755]:
+                    - generic [ref=f1e756]: Showing 1-1 of 1
+                    - list [ref=f1e757]:
+                      - listitem "Previous Page" [ref=f1e758]:
+                        - button [disabled] [ref=f1e759]:
+                          - img "left" [ref=f1e760]
+                      - listitem "1" [ref=f1e763] [cursor=pointer]
+                      - listitem "Next Page" [ref=f1e765]:
+                        - button [disabled] [ref=f1e766]:
+                          - img "right" [ref=f1e767]
+                      - listitem [ref=f1e770]:
+                        - generic [ref=f1e771]:
+                          - generic [ref=f1e772]:
+                            - generic "20 / page" [ref=f1e773]
+                            - combobox "Page Size" [ref=f1e774]
+                          - img "down" [ref=f1e776]
+            - button "Collapse sidebar" [ref=f1e779] [cursor=pointer]
+            - region "Note editor" [ref=f1e783]:
+              - generic [ref=f1e784]:
+                - generic [ref=f1e785]:
+                  - generic [ref=f1e786]:
+                    - 'heading "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY." [level=5] [ref=f1e907]'
+                    - status [ref=f1e788]:
+                      - generic [ref=f1e909]: Saved 1m ago
+                  - generic [ref=f1e910]: "Linked to conversation: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. · msg dec0c263-6b38-4a71-bc95-809b2df3c4ab"
+                - generic [ref=f1e789]:
+                  - button "Save note" [ref=f1e790] [cursor=pointer]:
+                    - generic [ref=f1e916]: Save
+                  - button "Save and start another note" [ref=f1e791] [cursor=pointer]:
+                    - generic [ref=f1e921]: Save & new
+                  - group "Editor mode" [ref=f1e792]:
+                    - button "Edit" [pressed] [ref=f1e793] [cursor=pointer]
+                    - button "Split" [ref=f1e798] [cursor=pointer]
+                    - button "Preview" [ref=f1e803] [cursor=pointer]
+                  - button "Create study pack" [ref=f1e809] [cursor=pointer]
+                  - button "More actions" [active] [ref=f1e810] [cursor=pointer]
+              - generic [ref=f1e816]:
+                - generic [ref=f1e823]:
+                  - textbox "Note title" [ref=f1e824]:
+                    - /placeholder: Title
+                    - text: "Snippet: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY."
+                  - button "Generate title from content" [ref=f1e825] [cursor=pointer]:
+                    - generic [ref=f1e927]: Generate title
+                  - button "Keyboard shortcuts" [ref=f1e826] [cursor=pointer]
+                - generic [ref=f1e828]:
+                  - generic [ref=f1e829]:
+                    - generic [ref=f1e830]:
+                      - generic: Tags
+                      - combobox "Note tags" [ref=f1e832]
+                    - img "down" [ref=f1e834]
+                  - status "Note save status" [ref=f1e928]: All changes saved
+                - generic [ref=f1e930]:
+                  - button "Connections" [ref=f1e931] [cursor=pointer]
+                  - button "Connections help" [ref=f1e937] [cursor=pointer]:
+                    - img "question-circle" [ref=f1e938]
+                - generic [ref=f1e837]:
+                  - group "Input mode" [ref=f1e838]:
+                    - button "Markdown" [ref=f1e839] [cursor=pointer]
+                    - button "WYSIWYG" [ref=f1e841] [cursor=pointer]
+                  - generic [ref=f1e843]: Formatting
+                  - button "Bold" [ref=f1e844] [cursor=pointer]
+                  - button "Italic" [ref=f1e848] [cursor=pointer]
+                  - button "Heading" [ref=f1e852] [cursor=pointer]
+                  - button "List" [ref=f1e856] [cursor=pointer]
+                  - button "Link" [ref=f1e859] [cursor=pointer]
+                  - button "Attachment" [ref=f1e864] [cursor=pointer]
+                  - button "Code" [ref=f1e868] [cursor=pointer]
+                  - generic [ref=f1e875]: Assist
+                  - button "Summarize" [ref=f1e876] [cursor=pointer]
+                  - button "Expand outline" [ref=f1e877] [cursor=pointer]
+                  - button "Suggest tags" [ref=f1e878] [cursor=pointer]
+                - generic [ref=f1e880]:
+                  - textbox "Note content" [ref=f1e881]:
+                    - /placeholder: Write your note here... (Markdown supported)
+                    - text: WILLOW-85
+                  - generic [ref=f1e882]: Markdown + LaTeX supported
+                - generic [ref=f1e883]:
+                  - text: 1 word · 9 chars · 1 min read
+                  - generic [ref=f1e884]: Version 1 · Last saved 9/16/2026, 1:07:13 AM
+                  - generic [ref=f1e885]: "Origin: Saved from Chat"
+    - generic:
+      - menu [ref=f1e960]:
+        - text: Create
+        - group [ref=f1e961]:
+          - menuitem "Duplicate" [ref=f1e962] [cursor=pointer]
+          - menuitem "From Template right" [ref=f1e967] [cursor=pointer]:
+            - generic [ref=f1e971]: From Template
+            - img "right" [ref=f1e973]
+        - text: Organize
+        - group [ref=f1e976]:
+          - menuitem "Pin" [ref=f1e977] [cursor=pointer]
+          - menuitem "Open conversation" [ref=f1e981] [cursor=pointer]
+        - text: AI
+        - group [ref=f1e986]:
+          - menuitem "Notes Studio" [ref=f1e987] [cursor=pointer]
+          - menuitem "Generate flashcards" [ref=f1e992] [cursor=pointer]
+        - text: Export
+        - group [ref=f1e997]:
+          - menuitem "Copy note content right" [ref=f1e998] [cursor=pointer]:
+            - generic [ref=f1e1002]: Copy note content
+            - img "right" [ref=f1e1004]
+          - menuitem "Export right" [ref=f1e1007] [cursor=pointer]:
+            - generic [ref=f1e1012]: Export
+            - img "right" [ref=f1e1014]
+        - separator [ref=f1e1017]
+        - menuitem "Delete" [ref=f1e1018] [cursor=pointer]
+      - tooltip "More actions" [ref=f1e1024]
+  - button "Open Next.js Dev Tools" [ref=f1e19] [cursor=pointer]
+  - alert [ref=f1e23]: Notes | tldw
+```

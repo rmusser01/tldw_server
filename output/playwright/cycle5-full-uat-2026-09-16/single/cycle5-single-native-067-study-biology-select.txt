@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await page.locator('#tldw-portal-root').getByTitle('Cycle5 Single Biology Cards').click();
+```
+### Page
+- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-16T08-17-51-137Z.yml)

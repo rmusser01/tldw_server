@@ -1,0 +1,151 @@
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Chat | tldw
+- Console: 0 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e479]:
+      - button "Expand sidebar" [ref=e480] [cursor=pointer]
+      - button "New Chat" [ref=e484] [cursor=pointer]
+      - generic [ref=e487]:
+        - button "Quick Ingest" [ref=e488] [cursor=pointer]
+        - button "Chat" [ref=e492] [cursor=pointer]
+        - button "Prompts" [ref=e495] [cursor=pointer]
+        - button "Characters" [ref=e499] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e504] [cursor=pointer]
+        - button "World Books" [ref=e508] [cursor=pointer]
+        - button "Notes" [ref=e511] [cursor=pointer]
+        - button "Knowledge QA" [ref=e515] [cursor=pointer]
+        - button "Media" [ref=e523] [cursor=pointer]
+        - button "Document Workspace" [ref=e526] [cursor=pointer]
+        - button "Research Workspace" [ref=e532] [cursor=pointer]
+        - button "Kanban" [ref=e538] [cursor=pointer]
+        - button "Watchlists" [ref=e540] [cursor=pointer]
+      - generic [ref=e545]:
+        - button "Open Notes Dock" [ref=e546] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e551] [cursor=pointer]
+        - button "Settings" [ref=e554] [cursor=pointer]
+    - main [ref=e16]:
+      - generic [ref=e17]:
+        - generic [ref=e560]:
+          - generic [ref=e561]:
+            - button "Expand sidebar" [ref=e562] [cursor=pointer]
+            - generic [ref=e564]:
+              - img "tldw Assistant" [ref=e565]
+              - generic [ref=e566]: tldw Assistant
+              - button "Companion Home" [ref=e567] [cursor=pointer]
+              - button "Show shortcuts" [ref=e571] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=e801]: Saved
+          - generic [ref=e574]:
+            - button "Search - Open command palette" [ref=e575] [cursor=pointer]:
+              - generic [ref=e579]: Search
+              - generic [ref=e580]: ⌘K
+            - button "New saved chat" [ref=e802] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=e806] [cursor=pointer]: Temp
+            - button "Character chat" [ref=e807] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=e808]
+            - button "Open settings" [ref=e581] [cursor=pointer]
+            - generic [ref=e593]:
+              - button "Notifications, 0 unread" [ref=e594] [cursor=pointer]
+              - status [ref=e598]: Notifications are active
+            - button "Switch to light theme" [ref=e599] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e606] [cursor=pointer]:
+              - generic [ref=e607]: "?"
+        - generic [ref=e18]:
+          - heading "Chat" [level=1] [ref=e815]
+          - generic [ref=e818]:
+            - paragraph [ref=e819]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=e820]:
+              - main [ref=e821]:
+                - generic [ref=e822]:
+                  - generic [ref=e824]:
+                    - generic [ref=e825]:
+                      - generic [ref=e826]: Standard chat
+                      - generic [ref=e827]: Conversation timeline
+                    - generic [ref=e828]:
+                      - button "Switch to light theme" [ref=e829] [cursor=pointer]
+                      - button "Enter focus chat" [ref=e836] [cursor=pointer]:
+                        - generic [ref=e842]: Focus
+                      - button "Shortcuts" [ref=e843] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=e847]
+                  - log "Chat messages" [ref=e849]:
+                    - generic [ref=e855]:
+                      - heading "Start a new chat" [level=2] [ref=e860]
+                      - paragraph [ref=e861]: Experiment with different models, prompts, and knowledge sources here.
+                      - generic [ref=e862]:
+                        - button "Start chatting" [ref=e863] [cursor=pointer]
+                        - button "Quick Ingest" [ref=e864] [cursor=pointer]
+                      - generic [ref=e865]:
+                        - generic [ref=e867]:
+                          - generic [ref=e868]:
+                            - paragraph [ref=e869]: Chat modes
+                            - paragraph [ref=e870]: Use a different starting point when the conversation needs structure.
+                          - button "Explore chat modes" [ref=e871] [cursor=pointer]
+                        - generic [ref=e873]:
+                          - generic [ref=e874]:
+                            - generic [ref=e875]: Type / for commands like /search or /web
+                            - generic [ref=e876]: Set a system prompt to customize AI behavior
+                          - button "Take a quick tour" [ref=e877] [cursor=pointer]
+                  - generic [ref=e881]:
+                    - generic [ref=e882]: Composer
+                    - button "Scroll to latest messages" [ref=e884] [cursor=pointer]
+                    - generic [ref=e893]:
+                      - button [aria-hidden] [ref=e894]
+                      - button [aria-hidden] [ref=e895]
+                      - generic [ref=e896]:
+                        - generic [ref=e898]:
+                          - button "Hide composer options" [expanded] [ref=e899] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=e904]
+                          - generic [ref=e905]:
+                            - button "Improve prompt" [ref=e908] [cursor=pointer]
+                            - generic [ref=e913]:
+                              - button "Send message" [ref=e914] [cursor=pointer]:
+                                - generic [ref=e915]: Send
+                              - button "Open message delivery options" [ref=e920] [cursor=pointer]
+                        - generic [ref=e925]:
+                          - generic [ref=e927]:
+                            - group "Mode and context controls" [ref=e928]:
+                              - button "Modes" [ref=e929] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=e936] [cursor=pointer]':
+                                - generic [ref=e937]:
+                                  - generic [ref=e938]: MCP
+                                  - generic [ref=e939]: None
+                              - button "Search & Context" [ref=e942] [cursor=pointer]
+                              - button "Select a Prompt" [ref=e947] [cursor=pointer]:
+                                - generic [ref=e950]: Prompt
+                              - button "Select character or persona" [ref=e951] [cursor=pointer]
+                              - button "Role-play setup" [ref=e956] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=e963] [cursor=pointer]
+                            - group "Run input controls" [ref=e969]:
+                              - button "OpenUI" [ref=e970] [cursor=pointer]
+                              - button "Start dictation" [ref=e976] [cursor=pointer]
+                              - generic [ref=e980]:
+                                - button "Attach image" [ref=e982] [cursor=pointer]
+                                - button "More attachments" [ref=e986] [cursor=pointer]
+                              - button "More tools" [ref=e989] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=e992] [cursor=pointer]:
+                                - generic [ref=e996]: Chat Settings
+                          - generic "Active context" [ref=e997]:
+                            - button "Custom / tldw:custom-openai-api:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=e999] [cursor=pointer]:
+                              - generic "Provider status" [ref=e1004]: Healthy
+                            - button "Configure context window size" [ref=e1006] [cursor=pointer]:
+                              - generic [ref=e1007]: 0 + ~0 = 0 tokens
+                            - button "Saved" [ref=e1009] [cursor=pointer]
+                            - button "Advanced controls" [ref=e1011] [cursor=pointer]
+              - generic [ref=e1015]:
+                - button "Restore context sidechannel" [ref=e1016] [cursor=pointer]:
+                  - generic [ref=e1020]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=e1021]:
+                - button "Restore runtime sidechannel" [ref=e1022] [cursor=pointer]:
+                  - generic [ref=e1023]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - button "Open Next.js Dev Tools" [ref=e88] [cursor=pointer]
+  - alert [ref=e10]: Chat | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L15

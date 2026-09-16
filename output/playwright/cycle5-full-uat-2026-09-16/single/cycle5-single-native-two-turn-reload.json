@@ -1,0 +1,9 @@
+### Result
+{"url":"http://127.0.0.1:18580/chat","articles":[{"id":"pa_5900-0f86-5da-4442:server:bd4b3fb4-a099-4841-8084-7bca2d015cf1","role":"system","text":"System prompt\n• 1:04 AM\n\nYou are a helpful AI assistant.\n\nWas this helpful?\n•••"},{"id":"pa_cbbe-a8dc-b40-7131","role":"user","text":"You\n• 1:04 AM\n\nRemember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY.\n\n•••"},{"id":"pa_bc11-ecc0-b17-b9a9","role":"assistant","text":"Assistant\n• 1:04 AM\n\nWILLOW-85 READY.\n\nWas this helpful?\n•••"},{"id":"pa_025a-a5e1-d85-0e59","role":"user","text":"You\n• 1:05 AM\n\nWhat is the launch code I just gave you? Reply with only the code.\n\n•••"},{"id":"pa_e0f4-38a9-f58-05a1","role":"assistant","text":"Assistant\n• 1:05 AM\n\nWILLOW-85\n\nWas this helpful?\n•••"}]}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("article",{name:"Assistant message 4 of 4",exact:true}).waitFor({state:"visible"}); await page.screenshot({path:"/private/tmp/cycle5-single-native-two-turn-reload.png",fullPage:true}); return {url:page.url(),articles:await page.locator("article").evaluateAll(nodes=>nodes.map(n=>({id:n.getAttribute("data-message-id"),role:n.getAttribute("data-role"),text:n.innerText})))}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18580/chat
+- Page Title: Remember that the launch code is WILLOW-85. Reply with exactly: WILLOW-85 READY. | tldw

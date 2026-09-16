@@ -1,0 +1,7 @@
+Cycle5 Aurora Public Station Brief
+
+This is a public synthetic fixture for the cycle5 multi-user UAT. Aurora Station is a fictional coastal research station. Its keeper is Maya Chen. The station stores exactly 23 amber lanterns in the west tower. The weekly supply boat arrives on Thursday at 09:30. The emergency meeting point is the blue courtyard beside the library. The library contains 412 catalogued maps.
+
+Aurora's water sampling project is named Project Copperfin. Teams collect samples from three marked sites: North Pier, Willow Cove, and East Marsh. Each sample is labelled with the site, local time, and collector initials. The project review meeting happens every Tuesday at 14:00. Maya Chen signs the final weekly report.
+
+The station uses the phrase "AURORA-CYCLE5-MULTI-23" as its public fixture search marker. All people, locations, counts, and schedules here are invented test data. This document is not confidential and contains no credentials.

@@ -14,3 +14,5 @@ Single initial outcomes: wizard local path, provider validation/discovery/save20
 Harness observations: hover replaces Chat actionchip with actiontoolbar, requiring fresh snapshot after initial intercepted click. Delayed first-use Notes tour likewise intercepted one click; actual Skip tour dismissed it. Neither initial click submitted a failed product action. Two pre-key warnings, no errors at initial checkpoint. Other workflow rows continue under per-mode running records.
 
 Native114 hidden-tab notification check remains unavailable after prior documented tool attempts; automated regression evidence retained. Optional speech/MCP/evaluations/watchlists are not certified. Exact Wikipedia must be attempted without substitution or denial bypass.
+
+Prior-cycle resource cleanup: after PID/command/port verification, root sent SIGTERM only to completed cycle4 API18301 PID76485, API18402 PID81392 and Next18482 CLI12027/listener12030. Data/config/browser evidence retained. Freshcycle5 APIs18500/18501 and all unrelated runtimes remain unchanged.
