@@ -175,8 +175,9 @@ def test_vz_linux_workspace_mismatch_then_healthy_session_reuse(
             after supported-root execution succeeds with real admission enabled.
         OSError: Fault-bundle resolution or state/evidence file operations fail.
 
-    Helper transport errors outside preflight propagate as test errors; neither
-    errors nor skips count as acceptance in the enclosing operator workflow.
+    The runner converts helper errors to failed run results, and cleanup may
+    convert them to assertion failures. Uncaught helper exceptions are test
+    errors. Neither errors nor skips count as operator-workflow acceptance.
     """
     fault_bundle = _require_workspace_bundle()
     for name in (
