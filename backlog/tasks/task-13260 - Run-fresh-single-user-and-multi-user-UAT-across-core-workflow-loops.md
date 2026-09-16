@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 19:12'
+updated_date: '2026-09-16 19:36'
 labels:
   - uat
   - testing
@@ -170,6 +170,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 2026-09-16 16:00 checkpoint: reviewed frontend commits013=3f50f408df, notifications139/141/142=d547be4719, stale-tests143=08d7728e0d. Final3143UI/150suites and332WebUI/17suites pass separately;90existing compiler signatures,0added/removed. Current144-row ledger:130verified,11awaiting exact acceptance,2blocked,1unresolved. New normal-runtime PostgreSQL startup UAT144/task83 is being fixed: explicit PG selection silently falls back toSQLite, while bootstrap expectsPG. Official empty holder remainsalive; nativePGprofile never startedserver. Separate true native-window minimize probe still returned visible and was closed, retaining114 tool limit. Full UAT gate remainsblocked.
 
 2026-09-16 19:10 UTC recovery: HEAD remains 2d5ad06c86. Prior temporary UAT profiles, launchers, native captures and agent sessions are unavailable; direct process/listener inventory confirms the six named UAT PIDs and ports18500-18503/18580-18583/9099/55475 are stopped. Cause is not established. Preserve committed evidence and record recent transcript-only findings without recreating artifacts or closing acceptance. Latest native observations reopen013 (wrong source answer, extra out-of-order rows after reload) and031 (failed character Retry creates a new conversation, then greeting Save Notes400). New155 already tracked. Native151 and timeout152/153 looked correct but need retained recapture. End source freeze, repair confirmed issues, and rebuild isolated runtime through repository fixtures before further targeted acceptance. No new full UAT is authorized by this checkpoint.
+
+19:35UTC checkpoint on c415ac44c3: reviewed155sidebar/031failedRetry/156chronology committed with exact author+independent24/5,53/5,128/7 evidence. Full compiler90existing signatures0added/removed; fresh mandatoryPG32backend+2AuthNZ pass0skips. Reopened103local retrieval notice promotion and013wrongfinalanswer remain unresolved.156row ledger140verified12awaiting2blocked2unresolved. Missingnative151/152/153 captures require recapture; no fullUAT begun. DirectHTTPcorrectsprocess-onlymodelinventory:9099responds,alleightAPI/UIportsunavailable. Newownedvisionmodelon19099loadedmatchingprojector in separateprocess; nativeapplicationcapability andimageRetry unverified. Recoveryprofilelauncher being prepared privately under ignoredrepo .tmp; no newapplicationruntime started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

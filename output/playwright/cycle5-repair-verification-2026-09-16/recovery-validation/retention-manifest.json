@@ -1,0 +1,30 @@
+{
+  "at": "2026-09-16T19:33:27.172Z",
+  "secretScan": "Known cluster password absent; JWT and credential URL patterns redacted.",
+  "files": [
+    {
+      "name": "pg-recovery-validation-command.json",
+      "sha256": "c5b5fcf22847f6e4b1aa529c1d108f05de2cf8514bf30669233caa5e3b28d7ee"
+    },
+    {
+      "name": "pg-recovery-validation.redacted.log",
+      "sha256": "a68e50ad097954590773b509a7e6cb27a3389f1d213b764f0d1123007f03e5e3"
+    },
+    {
+      "name": "pg-recovery-auth-command.json",
+      "sha256": "a7ea6573f8b8fe14cc93e54674bcd4ed0bfc51409b56a63d632146fc7ea5bda6"
+    },
+    {
+      "name": "pg-recovery-auth.redacted.log",
+      "sha256": "58d918bd7511301db2dc5a1cc2b6afaecdb9534e5683baa59cd51d1f84e9c3a7"
+    },
+    {
+      "name": "typecheck-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "name": "typecheck-comparison.json",
+      "sha256": "5c751f63f7b6f7c950a604edd7474d538ee950bf776c969a6434ce03c9042f2c"
+    }
+  ]
+}

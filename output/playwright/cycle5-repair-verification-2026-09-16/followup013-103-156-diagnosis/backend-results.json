@@ -1,0 +1,46 @@
+[
+  {
+    "order": "asc",
+    "appends": [
+      {
+        "role": "user",
+        "content": "Chat with this media: Rowan.md\nSummarize this source."
+      },
+      {
+        "role": "assistant",
+        "content": "I could not retrieve evidence from the selected sources, so I did not send this as general chat.",
+        "name": "Helpful_AI_Assistant"
+      },
+      {
+        "role": "user",
+        "content": "Context: <doc>Rowan is a fictional observatory. Mara Chen coordinates it. Opens 7 December 2026. Entrance east. Volunteers meet Friday at 19:30.</doc>\nQuestion: Chat with this media: Rowan.md\nSummarize this source.",
+        "client_message_id": "current-user"
+      }
+    ],
+    "ack": "new-3",
+    "provider_last_user": "Context: &lt;doc&gt;Rowan is a fictional observatory. Mara Chen coordinates it. Opens 7 December 2026. Entrance east. Volunteers meet Friday at 19:30.&lt;/doc&gt;\nQuestion: Chat with this media: Rowan.md\nSummarize this source.",
+    "provider_message_count": 6
+  },
+  {
+    "order": "desc",
+    "appends": [
+      {
+        "role": "user",
+        "content": "Chat with this media: Rowan.md\nSummarize this source."
+      },
+      {
+        "role": "assistant",
+        "content": "I could not retrieve evidence from the selected sources, so I did not send this as general chat.",
+        "name": "Helpful_AI_Assistant"
+      },
+      {
+        "role": "user",
+        "content": "Context: <doc>Rowan is a fictional observatory. Mara Chen coordinates it. Opens 7 December 2026. Entrance east. Volunteers meet Friday at 19:30.</doc>\nQuestion: Chat with this media: Rowan.md\nSummarize this source.",
+        "client_message_id": "current-user"
+      }
+    ],
+    "ack": "new-3",
+    "provider_last_user": "Context: &lt;doc&gt;Rowan is a fictional observatory. Mara Chen coordinates it. Opens 7 December 2026. Entrance east. Volunteers meet Friday at 19:30.&lt;/doc&gt;\nQuestion: Chat with this media: Rowan.md\nSummarize this source.",
+    "provider_message_count": 6
+  }
+]

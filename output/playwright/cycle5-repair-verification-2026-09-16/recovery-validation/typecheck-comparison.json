@@ -1,0 +1,10 @@
+{
+  "baseline": "output/playwright/cycle5-repair-verification-2026-09-16/followup151-154-combined/cycle5-154-verified-typecheck.log",
+  "current": ".tmp/fresh-uat-recovery-20260916/typecheck-current.log",
+  "baselineDiagnostics": 90,
+  "currentDiagnostics": 90,
+  "added": [],
+  "removed": [],
+  "compilerExitCode": 2,
+  "note": "Existing diagnostic baseline comparison; not a clean typecheck."
+}

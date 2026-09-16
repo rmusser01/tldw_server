@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-16T19:28:41.556Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/AuthNZ/integration/test_auth_principal_jwt_happy_path.py",
+    "tldw_Server_API/tests/AuthNZ/integration/test_auth_principal_prompt_studio_invariants.py",
+    "-q",
+    "-rs"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

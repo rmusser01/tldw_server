@@ -1,0 +1,77 @@
+{
+  "head": "05e0c5593ef79e1b9cacc4e741f7a4ee559a6f87",
+  "files": [
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/REPORT.md",
+      "sha256": "453e939a66bc1e1e5712c60a292da0f426d924a158448580d723168139e079df"
+    },
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/mirror.test.ts",
+      "sha256": "701c805b5afbfe14297e37fe75e29b380bd5a4fd5f71f61b49ac0e60e2346079"
+    },
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/vitest.config.mjs",
+      "sha256": "5c5660bbd635a0faa743a0e7ccb67c4508d77251b6571027ccee50a0506d34a9"
+    },
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/mirror-results.txt",
+      "sha256": "3f21fabfe65178c183c07f004bd77375c6b512d10cd5cf5bca36eb6d0b0edcc4"
+    },
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/backend_probe.py",
+      "sha256": "40937242239ae7182ea0cf2a379af8bdd069199a60b34ee94b00f531c83a11ca"
+    },
+    {
+      "path": "/private/tmp/source013-diagnosis-20260916/backend-results.json",
+      "sha256": "558e1dc4783081a3b41d9f7d8db6e8b1c357a1b087730fd4773c6b5da68b1eb3"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/server-chat-mirror.ts",
+      "sha256": "9474ea785c871a25954979efc07d34b344f3fbf09b53aec5348de63cbfbbc7c7"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/db/dexie/helpers.ts",
+      "sha256": "aa7091c62dbfe62b8bb13817e366637d34f28d6d4f2742c18754fa138683fb07"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/ragMode.ts",
+      "sha256": "7a4ed549f1922c438e430ff113a4816c45b448cfd5d82cf9b836f1722c020433"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/chatModePipeline.ts",
+      "sha256": "34a7daf9fa94a7f2d82e04b15f1a5080ac839867f4d4affc03b6478425e93249"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-helper/index.ts",
+      "sha256": "406e021c9c4a38e763d392dac4833dec80578fcefec8d7a2a265a49a8c966dd9"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "de948f35cca0b8624edceb2128c75c51760028f3bf617edf7587b5ce5c2ffe6a"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
+      "sha256": "2578758cc6010e7310bd5456963cebaa5d78c8ad5889242610088b33a9e23720"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/models/ChatTldw.ts",
+      "sha256": "0ffdcba7c7abc69e5dc4eda3076360ccbee65a6276341d61e5fccde8ff3e4b94"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "sha256": "0e2df34c47ef1994724a768bea3aa567d8aab4327eebae772157c06ac87e3445"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py",
+      "sha256": "02b32a2562e0942b494d6b8f440bb81b184f28f2b86aaaad3983af6b1cdd8c7a"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/streaming_utils.py",
+      "sha256": "224c45ad9821bee5147c28234a88833281461eac5c2bc8bcb5aa149be5e787a5"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/chat.py",
+      "sha256": "db01e193a4dcbbc1dc760bc4bc0d756733969755001265301b3cb6bd8d057a6f"
+    }
+  ]
+}
