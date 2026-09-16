@@ -1,0 +1,36 @@
+{
+  "unit": "repair-discovery",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-prompt-layout-sync-readonly-diagnosis.md",
+      "bytes": 7976,
+      "sha256": "1400a443394ad5ef7544879c46de46c94721b1ff6c6b48f1d51f9c6b4efc440c"
+    },
+    {
+      "file": "cycle4-uat111-retained-error-probe.config.mts",
+      "bytes": 786,
+      "sha256": "7ffc72e4f5e99d3e896a1564063e5adc8ccf8fb351c7bff02450b7e81a29b776"
+    },
+    {
+      "file": "cycle4-uat111-retained-error-probe.log",
+      "bytes": 10722,
+      "sha256": "fecd16a701b14ad1684489eab0ae45a69c773fd5ed38380da939d389aff76a7c"
+    },
+    {
+      "file": "cycle4-uat111-retained-error-probe.test.tsx",
+      "bytes": 21091,
+      "sha256": "168282fd1e124447190ddf6a3da67e5ce94daff57257e3213501590d4cabc264"
+    },
+    {
+      "file": "cycle4-uat118-image-recovery-design.md",
+      "bytes": 17352,
+      "sha256": "db56e4348ba32ccce721cdea0c3154b8e99647460ec17db7b70b2a4986a1f7f7"
+    },
+    {
+      "file": "cycle4-uat118-independent-design-review.md",
+      "bytes": 6118,
+      "sha256": "23806742831c56751531271f9b4fef1365dcbd5dd49900b924a530b269366733"
+    }
+  ]
+}

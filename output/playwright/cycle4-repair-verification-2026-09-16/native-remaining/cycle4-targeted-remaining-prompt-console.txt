@@ -1,0 +1,101 @@
+[      85ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18482/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[      99ms] [LOG] [HMR] connected @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   31901ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[   31994ms] [LOG] [Fast Refresh] done in 194ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  123065ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  123264ms] [LOG] [Fast Refresh] done in 300ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[  125185ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  126187ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  127189ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  128192ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  129194ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  134196ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  139200ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  144203ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  149207ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  154209ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  159212ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[  164214ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:18482/_next/webpack-hmr' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_client_eccc5b4d._.js:2265
+[ 1604631ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18482/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[ 1604675ms] [LOG] [HMR] connected @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1604776ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1604842ms] [LOG] [Fast Refresh] done in 167ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1610158ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1610310ms] [LOG] [Fast Refresh] done in 252ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1644171ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1646611ms] [LOG] [Fast Refresh] done in 2542ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1646726ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1647180ms] [LOG] [Fast Refresh] done in 568ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1736614ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1740037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1740038ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1740038ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1740038ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1745037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1745037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1745037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1745037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1750038ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1750038ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1750038ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1750038ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1755038ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1755038ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1755038ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1755038ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1760036ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1760036ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1760037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1760037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1760163ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/notifications/unread-count:0
+[ 1765037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1765037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1765037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1765037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1766615ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1770037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1770037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1770037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1770037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1775037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1775037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1775037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1775037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1780037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1780037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1780037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1780037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1785037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1785037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1785037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1785037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1790037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1790037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1790037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1790037ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1790164ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/notifications/unread-count:0
+[ 1795037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies?limit=100&offset=0:0
+[ 1795037ms] [WARNING] [tldw:request] GET /api/v1/buddies?limit=100&offset=0 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1795037ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/buddies/attachment?client_slot=default:0
+[ 1795038ms] [WARNING] [tldw:request] GET /api/v1/buddies/attachment?client_slot=default 0 Failed to fetch @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1796614ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1801622ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1804387ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/prompt-studio/prompts/update/1:0
+[ 1806622ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1811622ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1816621ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1821622ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1826622ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1831623ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1836623ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:18402/api/v1/health/live:0
+[ 1928593ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1930566ms] [LOG] [Fast Refresh] done in 2075ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1930675ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 1930734ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) @ http://127.0.0.1:18482/settings/tldw:0
+[ 1930911ms] [LOG] [Fast Refresh] done in 343ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2271963ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18482/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[ 2271988ms] [LOG] [HMR] connected @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2272591ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2275735ms] [LOG] [Fast Refresh] done in 3244ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2275950ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
+[ 2276670ms] [LOG] [Fast Refresh] done in 929ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

@@ -1,0 +1,12 @@
+### Result
+{"alerts":["Prompt AddedPrompt has been added successfully","Prompts | tldw"],"status":["TitlePromptTagsUpdatedSyncActions","Cycle4 Prompt sync recovery 0527SystemReply with one concise sentence. Retain the word WILLOW when asked about the observatory.Just nowLast used: UnknownSynced#1"],"editor":"Reply with one concise sentence. Retain WILLOW. Offline recovery revision 0528."}
+### Ran Playwright code
+```js
+await (async (page) => ({alerts: await page.getByRole("alert").allTextContents(), status: await page.getByRole("row").allTextContents(), editor: await page.getByRole("textbox", {name:"AI Instructions (System Prompt)", exact:true}).inputValue()}))(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18482/prompts?edit=pa_596f-703e-7e4-e97a
+- Page Title: Prompts | tldw
+- Console: 9 errors, 8 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T04-57-43-747Z.log#L29-L45

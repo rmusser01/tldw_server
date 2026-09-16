@@ -1,0 +1,6 @@
+### Result
+{"title":"Chat | tldw","url":"http://127.0.0.1:18482/chat","draft":"Cycle4 late title ownership 0539: explain in about 150 words why a library catalog helps readers find sources. End with WILLOW COMPLETE."}
+### Ran Playwright code
+```js
+await (async (page) => { await page.getByRole("textbox", {name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Cycle4 late title ownership 0539: explain in about 150 words why a library catalog helps readers find sources. End with WILLOW COMPLETE."); return {title:await page.title(),url:page.url(),draft:await page.getByRole("textbox", {name:"Type a message... (/ commands, @ mentions)",exact:true}).inputValue()}; })(page);
+```

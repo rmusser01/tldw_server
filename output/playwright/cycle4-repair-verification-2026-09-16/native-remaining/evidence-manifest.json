@@ -1,0 +1,141 @@
+{
+  "unit": "native-remaining",
+  "knownRuntimeCredentialMatches": 0,
+  "files": [
+    {
+      "file": "cycle4-targeted-remaining-prompt-console.txt",
+      "bytes": 16199,
+      "sha256": "e56573f92e050db4b8460c88b4eb1d947ee86e58048070e4a4dd5fdc3a0145b7"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-layout-observation.json",
+      "bytes": 1465,
+      "sha256": "28d49c783feba6d6862575ab38b150130b044397d68cec294323f50d89799c68"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-recovered-response.json",
+      "bytes": 600,
+      "sha256": "bd0e88cd0c621d19578e8034a12ceb0d661c915aa47015daa0b3f4e7ffdb4ea3"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-requests.txt",
+      "bytes": 23888,
+      "sha256": "9b78252eccf016417ad7205eb5389c46aae35bf7a4005f06a1b3148d8c744f5e"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-saved.txt",
+      "bytes": 5709,
+      "sha256": "2f9a3785c1a57616ef098e6253427562dbb28827c4dc01924e7e9721069aee9f"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-failure-settled.txt",
+      "bytes": 915,
+      "sha256": "1ddd2066239fa904b417b866a5d1994697a0761aed8ae71ff0e17a685ac297fc"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-failure-visible.txt",
+      "bytes": 1017,
+      "sha256": "fb44a007555e7da039c6682549648b72053322c6b603c085b9ed5932eb9293d5"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-failure.png",
+      "bytes": 130977,
+      "sha256": "5f58cd81590c4f9ce34dbc4ef063f1b745012c0f08f91ea6575b808dc1ef8664"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-failure.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-restored.txt",
+      "bytes": 750,
+      "sha256": "99569df30f968999ec4255adc0fa3b980ac4715b29ae2250e97ff455a1903158"
+    },
+    {
+      "file": "cycle4-targeted-remaining-prompt-sync-status.txt",
+      "bytes": 767,
+      "sha256": "2360a20dd016b8896fe808d55a81fd53f8602e76f926dcecc61d5b37ed9734cb"
+    },
+    {
+      "file": "cycle4-targeted-remaining-report.md",
+      "bytes": 2815,
+      "sha256": "bb9b124089f16e1f0d1f4a719ee0930104eb68900a670c4e9da588e5b8c012bd"
+    },
+    {
+      "file": "cycle4-targeted-remaining-settings-initial.txt",
+      "bytes": 4604,
+      "sha256": "efa575ec233b66c35c0411dbd03f4519210e72528c78f536b279e5ef4efb61ce"
+    },
+    {
+      "file": "cycle4-targeted-remaining-settings-loaded.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-canonical.json",
+      "bytes": 3068,
+      "sha256": "9157b3b395e28d8e3cb7e3e0c0e328e36bf9fc0157e3e6c5598c387378bfb1a8"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-chat-new.txt",
+      "bytes": 5099,
+      "sha256": "dd1dfb42ccadcbe2817563b69b133d5f12d66bf5c2c49e6cc59e5a423cd68121"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-disconnect.txt",
+      "bytes": 8801,
+      "sha256": "1ab60405c1c2f37d312f85fc51c097fc818978267516a5eb54396dfe95789c1c"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-disconnected-snapshot.txt",
+      "bytes": 10961,
+      "sha256": "e9abfcff4c0290fb0e28e2b36ee53c9efe42f41cc9f9316fa211bcdbef003de6"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-final-requests.txt",
+      "bytes": 68606,
+      "sha256": "786e648ad8d90faa67a4aaf41e52bb02401fd53a4c3d4d29ad1178fc8906708e"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-late-completion.json",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-prepared.txt",
+      "bytes": 694,
+      "sha256": "13aa3bfc2d4d8447015f470eb102097c5273b71e407a47374533ea8f16a087e9"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-reconnect.txt",
+      "bytes": 2773,
+      "sha256": "e3ade8c961ba39fd4c727bccef29194fae96dbbd4443f14078e7e02551d010fb"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-reconnected.txt",
+      "bytes": 3055,
+      "sha256": "aab6c5b7a90a75630ababd9b5623a90eba9863a8e98d2ca0568ac66d8d5bc203"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-request.json",
+      "bytes": 552,
+      "sha256": "29070ecc4686126b27eff299c34d8a0a48da0670f81bd41a7515c1181cf47b9d"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-requests.txt",
+      "bytes": 58941,
+      "sha256": "8738c6040907505da832ff1342940f0c16dd3b810990dd97a4428b2372c0329f"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-response.txt",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "file": "cycle4-targeted-remaining-title-settings-settled.json",
+      "bytes": 296,
+      "sha256": "76178406b97b79b730f14cb6d3dd3871c65f8884423f88231c67dd0f1eee5397"
+    }
+  ]
+}

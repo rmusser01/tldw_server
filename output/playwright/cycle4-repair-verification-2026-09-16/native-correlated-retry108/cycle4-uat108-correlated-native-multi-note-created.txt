@@ -1,0 +1,6 @@
+### Result
+{"notes":[]}
+### Ran Playwright code
+```js
+await (async page => ({notes:page.__correlatedNotes}))(page);
+```

@@ -1,0 +1,16 @@
+### Ran Playwright code
+```js
+await page.getByRole('menuitem', { name: 'Open conversation' }).click();
+```
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Notes | tldw](http://127.0.0.1:18381/notes)
+### Page
+- Page URL: http://127.0.0.1:18381/notes
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](../../../../../private/tmp/.playwright-cli/page-2026-09-16T05-35-21-940Z.yml)

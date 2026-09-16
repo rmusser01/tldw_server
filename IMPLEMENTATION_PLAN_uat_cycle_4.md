@@ -133,7 +133,31 @@ Final108source review is clear after an actual successful-Regenerate probe found
 
 Targeted native105/060/109/116 now pass: source-preserving warning and Media link, Review Markdown reload, real stream timeout/local recovery, and generation-enabled missing-answer guidance.108 follow-up `7dcee3d72c` remains incomplete: after the initial502, the loader materializes another unacknowledged user before Retry; Retry then persists both. A permanent mounted action+loader+mirror RED reproduces this. TASK13260.49 adds durable identity correlation and rejection of Retry requests that retain extra user rows, with independent review. Both Next frontends are stopped for this repair. No full fresh matrix has started.
 
+Independent targeted-evidence audit confirmed179 retained hashes and the105/060/109/116 claims. Before the full run, finish three remaining native boundaries alongside the108 recheck:102 Prompt sync-failure feedback,058 late Chat completion/title ownership during Settings navigation/reconnect, and117 a newly completed reasoning-only response. Restored117 transcript presentation remains a narrower positive control.
+
+The ordinary-text108 correlation follow-up passes independent review and combined 1,346 UI / 383 backend cases (one existing skip); final loader safety controls pass separately. Bandit is clear and the 90-diagnostic compiler baseline is unchanged. Native verification is still required.
+
+### Additional repair: failed image-bearing Chat identity — TASK-13260.58, UAT-118
+
+**Goal:** Preserve and recover unchanged user image attachments through the actual canonical listing and Retry boundary.
+**Success criteria:** No duplicate visible or canonical user for an unchanged failed image-bearing turn; changed or ambiguous local work stays intact; account ownership remains enforced.
+**Tests:** Actual endpoint/listing/client/mapper controls for text + image, image-only, changed content, intentional repeats and legacy data; independent review and targeted native verification.
+**Status:** In Progress — approved design is recorded in `Docs/Design/2026-09-16-uat-image-recovery.md`. Native checks are paused and the author has the disjoint eight-file source window. Opt-in bounded attachment reads, conservative synthetic-placeholder projection and exact failed-Retry matching are being verified at actual endpoint/client/loader boundaries; independent source review follows the freeze.
+
+### Additional presentation repair — TASK-13260.59, UAT-119
+
+**Goal:** Give the full Prompt editor and mobile preview opaque backgrounds using the existing `bg-bg` theme token.
+**Evidence:** Native screenshot and computed style show the current unsupported `bg-background` leaves the library and header visible through the editor.
+**Tests:** Existing editor controls, scoped lint and dark/light native screenshots with computed background checks. This class-only correction does not need an implementation-mirroring unit test.
+**Status:** Reviewed and committed as `a8e5430d76`: four existing theme-token replacements,10 editor tests passing, generated opaque Tailwind CSS and unchanged lint. Native dark/light acceptance follows the remaining source freeze.
+
 ## Stage5: Integrated verification and another full fresh UAT
+Additional independent repair ownership: TASK13260.60 / UAT120 belongs to the Prompt sync service and its existing behavioral tests; `review_ingest065` implements, then a separate reviewer verifies. Actual normalized transport failure must persist Pending without weakening structured-recipe uncertainty protections. TASK13260.51 / UAT111 is reopened by a real no-navigation Note backlink; `account_access` investigates the callback/router boundary. Neither overlaps root's Prompt background file or the Chat attachment unit. All source edits wait until the current native window closes.
+
+The native window closed after058 Settings title/disconnect/reconnect passed and117 produced a valid final answer. Missing Character token settings are new121 / TASK13260.61, owned by `account_access` after the separate111 repair. Source edits are now released with disjoint modules/tests; coordinate before touching another owner's tests. Root's119 four-class correction is reviewed/committed `a8e5430d76`; native dark/light acceptance waits for the next stable window. No full fresh cycle5 has started.
+
+Follow-up independent review is clear for111 and120. Root repeated136 tests/4 suites, including24 Note cases after adding image-draft preservation and the actual normalized Prompt network-failure/remount/acknowledgement boundary. Commits `142cc2f1cc` and `28dc9ddffa` retain code, task notes and evidence.121's bounded four-setting Character mapping is frozen for independent review;118 remains in implementation. Current-chat settings retain their existing in-memory lifetime, so no persistence feature is added for a blank post-reload field.
+
 **Goal:** Verify repaired behavior together, then execute both full named matrices on frozen code.
 **Success criteria:** Identified product issues have reviewed fixes and targeted native evidence; new fresh matrices report every required row with explicit limits.
 **Tests:** Combined affected frontend/backend suites, TypeScript baseline comparison, scoped lint/Bandit, independent review, real browser/model workflows.

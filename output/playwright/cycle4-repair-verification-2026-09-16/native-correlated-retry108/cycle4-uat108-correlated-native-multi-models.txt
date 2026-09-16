@@ -1,0 +1,185 @@
+### Open tabs
+- 0: [127.0.0.1](chrome-error://chromewebdata/)
+- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18301/setup)
+- 2: [127.0.0.1](chrome-error://chromewebdata/)
+- 3: [127.0.0.1](chrome-error://chromewebdata/)
+- 4: [127.0.0.1](chrome-error://chromewebdata/)
+- 5: (current) [Chat | tldw](http://127.0.0.1:18381/chat)
+### Page
+- Page URL: http://127.0.0.1:18381/chat
+- Page Title: Chat | tldw
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f8e11]:
+  - generic [ref=f8e12]:
+    - generic [ref=f8e14]:
+      - link "Skip to main content" [ref=f8e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f8e16]:
+        - button "Expand sidebar" [ref=f8e17] [cursor=pointer]
+        - button "New Chat" [ref=f8e21] [cursor=pointer]
+        - generic [ref=f8e24]:
+          - button "Quick Ingest" [ref=f8e25] [cursor=pointer]
+          - button "Chat" [ref=f8e29] [cursor=pointer]
+          - button "Prompts" [ref=f8e32] [cursor=pointer]
+          - button "Characters" [ref=f8e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f8e41] [cursor=pointer]
+          - button "World Books" [ref=f8e45] [cursor=pointer]
+          - button "Notes" [ref=f8e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f8e52] [cursor=pointer]
+          - button "Media" [ref=f8e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f8e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f8e69] [cursor=pointer]
+          - button "Kanban" [ref=f8e75] [cursor=pointer]
+          - button "Watchlists" [ref=f8e77] [cursor=pointer]
+        - generic [ref=f8e82]:
+          - button "Open Notes Dock" [ref=f8e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f8e88] [cursor=pointer]
+          - button "Settings" [ref=f8e91] [cursor=pointer]
+      - main [ref=f8e95]:
+        - generic [ref=f8e96]:
+          - generic [ref=f8e99]:
+            - generic [ref=f8e100]:
+              - button "Expand sidebar" [ref=f8e101] [cursor=pointer]
+              - generic [ref=f8e103]:
+                - img "tldw Assistant" [ref=f8e104]
+                - generic [ref=f8e105]: tldw Assistant
+                - button "Companion Home" [ref=f8e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f8e110] [cursor=pointer]
+              - generic "Saved chat. History is persisted." [ref=f8e116]: Saved
+            - generic [ref=f8e117]:
+              - button "Search - Open command palette" [ref=f8e118] [cursor=pointer]:
+                - generic [ref=f8e122]: Search
+                - generic [ref=f8e123]: ⌘K
+              - button "New saved chat" [ref=f8e124] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f8e128] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f8e129] [cursor=pointer]: Character
+              - button "Share conversation" [disabled] [ref=f8e130]
+              - button "Open settings" [ref=f8e137] [cursor=pointer]
+              - generic [ref=f8e149]:
+                - button "Notifications, 0 unread" [ref=f8e150] [cursor=pointer]
+                - status [ref=f8e154]: Notifications are active
+              - button "Switch to light theme" [ref=f8e155] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f8e162] [cursor=pointer]:
+                - generic [ref=f8e163]: "?"
+          - generic [ref=f8e164]:
+            - heading "Chat" [level=1] [ref=f8e165]
+            - generic [ref=f8e168]:
+              - paragraph [ref=f8e169]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f8e170]:
+                - main [ref=f8e171]:
+                  - generic [ref=f8e172]:
+                    - generic [ref=f8e174]:
+                      - generic [ref=f8e175]:
+                        - generic [ref=f8e176]: Standard chat
+                        - generic [ref=f8e177]: Conversation timeline
+                      - generic [ref=f8e178]:
+                        - button "Switch to light theme" [ref=f8e179] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f8e186] [cursor=pointer]:
+                          - generic [ref=f8e192]: Focus
+                        - button "Shortcuts" [ref=f8e193] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f8e197]
+                    - log "Chat messages" [ref=f8e199]:
+                      - generic [ref=f8e477]:
+                        - heading "Start a new chat" [level=2] [ref=f8e482]
+                        - paragraph [ref=f8e483]: Experiment with different models, prompts, and knowledge sources here.
+                        - generic [ref=f8e484]:
+                          - button "Start chatting" [ref=f8e485] [cursor=pointer]
+                          - button "Quick Ingest" [ref=f8e486] [cursor=pointer]
+                        - generic [ref=f8e487]:
+                          - generic [ref=f8e489]:
+                            - generic [ref=f8e490]:
+                              - paragraph [ref=f8e491]: Chat modes
+                              - paragraph [ref=f8e492]: Use a different starting point when the conversation needs structure.
+                            - button "Explore chat modes" [ref=f8e493] [cursor=pointer]
+                          - generic [ref=f8e495]:
+                            - generic [ref=f8e496]:
+                              - generic [ref=f8e497]: Type / for commands like /search or /web
+                              - generic [ref=f8e498]: Set a system prompt to customize AI behavior
+                            - button "Take a quick tour" [ref=f8e499] [cursor=pointer]
+                    - generic [ref=f8e320]:
+                      - generic [ref=f8e321]: Composer
+                      - generic [ref=f8e329]:
+                        - button [aria-hidden] [ref=f8e330]
+                        - button [aria-hidden] [ref=f8e331]
+                        - generic [ref=f8e332]:
+                          - generic [ref=f8e334]:
+                            - button "Hide composer options" [expanded] [ref=f8e335] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f8e340]
+                            - generic [ref=f8e341]:
+                              - button "Improve prompt" [ref=f8e344] [cursor=pointer]
+                              - generic [ref=f8e349]:
+                                - button "Send message" [ref=f8e350] [cursor=pointer]:
+                                  - generic [ref=f8e351]: Send
+                                - button "Open message delivery options" [ref=f8e356] [cursor=pointer]
+                          - generic [ref=f8e361]:
+                            - generic [ref=f8e363]:
+                              - group "Mode and context controls" [ref=f8e364]:
+                                - button "Modes" [ref=f8e365] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f8e372] [cursor=pointer]':
+                                  - generic [ref=f8e373]:
+                                    - generic [ref=f8e374]: MCP
+                                    - generic [ref=f8e375]: None
+                                - button "Search & Context" [ref=f8e378] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f8e383] [cursor=pointer]:
+                                  - generic [ref=f8e386]: Prompt
+                                - button "Select character or persona" [ref=f8e387] [cursor=pointer]
+                                - button "Role-play setup" [ref=f8e392] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f8e399] [cursor=pointer]
+                              - group "Run input controls" [ref=f8e405]:
+                                - button "OpenUI" [ref=f8e406] [cursor=pointer]
+                                - button "Start dictation" [ref=f8e412] [cursor=pointer]
+                                - generic [ref=f8e416]:
+                                  - button "Attach image" [ref=f8e418] [cursor=pointer]
+                                  - button "More attachments" [ref=f8e422] [cursor=pointer]
+                                - button "More tools" [ref=f8e425] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f8e428] [cursor=pointer]:
+                                  - generic [ref=f8e432]: Chat Settings
+                            - generic "Active context" [ref=f8e433]:
+                              - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [expanded] [active] [ref=f8e435] [cursor=pointer]:
+                                - generic "Provider status" [ref=f8e439]: Healthy
+                              - button "Configure context window size" [ref=f8e444] [cursor=pointer]:
+                                - generic [ref=f8e445]: 0 + ~0 = 0 tokens
+                              - button "Saved" [ref=f8e447] [cursor=pointer]
+                              - button "Advanced controls" [ref=f8e449] [cursor=pointer]
+                - generic [ref=f8e453]:
+                  - button "Restore context sidechannel" [ref=f8e454] [cursor=pointer]:
+                    - generic [ref=f8e458]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f8e459]:
+                  - button "Restore runtime sidechannel" [ref=f8e460] [cursor=pointer]:
+                    - generic [ref=f8e461]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - generic:
+      - generic [ref=f8e506]:
+        - generic [ref=f8e507]:
+          - generic [ref=f8e508]:
+            - button "Search all models" [ref=f8e509] [cursor=pointer]
+            - generic [ref=f8e510]: Usable configured models
+          - generic [ref=f8e511]:
+            - textbox "Search models" [ref=f8e513]
+            - generic [ref=f8e515] [cursor=pointer]:
+              - generic [ref=f8e516]:
+                - generic "Provider" [ref=f8e517]
+                - combobox [ref=f8e518]
+              - img "down" [ref=f8e520]
+        - menu [ref=f8e524]:
+          - text: Current
+          - group [ref=f8e525]:
+            - menuitem "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf Add to favorites" [ref=f8e526] [cursor=pointer]:
+              - generic [ref=f8e528]:
+                - generic [ref=f8e531]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                - button "Add to favorites" [ref=f8e532]
+          - text: Recent
+          - group [ref=f8e535]:
+            - menuitem "gemma3:1b Add to favorites" [ref=f8e536] [cursor=pointer]:
+              - generic [ref=f8e538]:
+                - generic [ref=f8e543]: gemma3:1b
+                - button "Add to favorites" [ref=f8e544]
+        - link "Help me choose a model" [ref=f8e548] [cursor=pointer]:
+          - /url: /docs/models
+      - tooltip "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f8e556]
+  - button "Open Next.js Dev Tools" [ref=f8e470] [cursor=pointer]
+  - alert [ref=f8e10]
+```

@@ -1,0 +1,6 @@
+### Result
+{"url":"http://127.0.0.1:18482/settings/tldw","title":"Server Settings | tldw","heading":["tldw Server"]}
+### Ran Playwright code
+```js
+await (async (page) => ({url:page.url(), title:await page.title(), heading:await page.getByRole("heading",{level:1}).allTextContents()}))(page);
+```
