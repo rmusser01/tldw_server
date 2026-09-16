@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 02:13'
+updated_date: '2026-09-16 02:19'
 labels:
   - uat
   - testing
@@ -127,6 +127,8 @@ Cycle3 repair checkpoints complete through UAT101: source7c9409fad2 includes rev
 Cycle4 remains frozen at product7c9409fad2 while fresh single and multi matrices run. New observed findings UAT102-110 tracked in children43-50. Setup succeeds; single ordinary Chat blocked by failing initial selection and stale advertised-model validation (read-only diagnosis), multi reload duplicates client users. No repair source changes during this pass. Global and per-mode running trackers updated.
 
 Cycle4 frozen execution closed on product7c9409fad2. Both mode FINAL_REPORT matrices retained;16new findings102-117 map to43-57 plus scope follow-ups058/067. Independent evidence review verified203single hashes and62diagnosis hashes;28multi JSON parse; no material outcome contradictions. Correcting historical current-status/provider labels before checkpoint. Single disconnected local Chat is expected connection-only retention; no cross-account leakage claim. Full acceptance is not achieved. Next: preserve checkpoint, integrate newer dev under32, execute cycle4 repairs and focused verification before another full fresh pass.
+
+Cycle4 repair design Docs/Design/2026-09-16-uat-cycle-4-repairs.md and IMPLEMENTATION_PLAN_uat_cycle_4.md written. Independent initial domains:44/51Chat acknowledgement;47/55consolidated model handoff;46safe summarization;root45minimize. Shared chat_service and AnalysisModal follow-ups serialize after owners release. No full new UAT until reviewed fixes and targeted checks pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
