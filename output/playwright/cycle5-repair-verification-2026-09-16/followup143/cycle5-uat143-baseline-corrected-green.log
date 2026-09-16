@@ -1,0 +1,52 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:6438) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:6439) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.image-refine.integration.test.tsx > PlaygroundForm image prompt refinement modal integration > supports create -> refine -> accept flow and submits refine metadata
+Warning: React does not recognize the `allowClear` prop on a DOM element. If you intentionally want it to appear in the DOM as a custom attribute, spell it as lowercase `allowclear` instead. If you accidentally passed it from a parent component, remove it from the DOM element.
+    at select
+    at SelectComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.image-refine.integration.test.tsx:164:5)
+    at div
+    at div
+    at div
+    at div
+    at ModalComponent (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.image-refine.integration.test.tsx:291:5)
+    at PlaygroundImageGenModal2 (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundImageGenModal.tsx:31:5)
+    at Suspense
+    at div
+    at PlaygroundForm (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx:299:3)
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.follow-up-research.test.tsx (5 tests) 975ms
+     ✓ opens the follow-up confirmation surface for a saved chat with attached background  317ms
+(node:6462) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.voice-visibility.integration.test.tsx > PlaygroundForm voice visibility
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+stderr | src/components/Option/Playground/__tests__/PlaygroundForm.voice-visibility.integration.test.tsx > PlaygroundForm voice visibility > shows the most recent chat error above the composer with a diagnostics action
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key.
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.voice-visibility.integration.test.tsx (2 tests) 145ms
+(node:6465) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.image-refine.integration.test.tsx (15 tests) 2256ms
+     ✓ queues the current draft instead of sending when disconnected  456ms
+     ✓ shows and applies attached research context edits in the raw request preview  502ms
+     ✓ clears refine candidate when prompt is manually edited before submit  410ms
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.document-processing.test.tsx (6 tests) 25ms
+(node:6467) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.llamacpp-controls.guard.test.ts (3 tests) 9ms
+(node:6468) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/components/Option/Playground/__tests__/PlaygroundForm.composer-options.guard.test.ts (4 tests) 77ms
+
+ Test Files  6 passed (6)
+      Tests  35 passed (35)
+   Start at  08:53:35
+   Duration  4.78s (transform 2.54s, setup 435ms, import 3.45s, tests 3.49s, environment 1.46s)

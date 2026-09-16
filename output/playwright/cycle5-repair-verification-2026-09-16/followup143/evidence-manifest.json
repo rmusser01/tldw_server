@@ -1,0 +1,147 @@
+{
+  "retainedAt": "2026-09-16T15:59:59.276Z",
+  "sourceManifest": "cycle5-uat143-manifest.json",
+  "sourceHashesVerified": true,
+  "normalization": "Logs only: trailing horizontal whitespace and terminal blank lines normalized; original and retained SHA256 are recorded separately.",
+  "secretScan": {
+    "knownRuntimeValues": 14,
+    "jwtPattern": true,
+    "credentialUrl": true,
+    "findings": 0
+  },
+  "files": [
+    {
+      "file": "cycle5-uat143-baseline-corrected-green.log",
+      "source": "/private/tmp/cycle5-uat143-baseline-corrected-green.log",
+      "bytes": 4462,
+      "original_sha256": "e815d9d0468d7f66a5b7bd880849bd0b098ec144c3b063559b48268838314dcc",
+      "sha256": "ae4808c01e50e370d13223c53502319bda40ff11f9afd6e0b4bb8bf578cd8049"
+    },
+    {
+      "file": "cycle5-uat143-baseline-red.log",
+      "source": "/private/tmp/cycle5-uat143-baseline-red.log",
+      "bytes": 652776,
+      "original_sha256": "092498e5df7f27e505a20e088d68354cd30899d8adebbb78a391d1932c0641c9",
+      "sha256": "a29d821ba31b3dc8dd5f93cfff6750d4a37355059b8e3ab3229ccf24b17e477b"
+    },
+    {
+      "file": "cycle5-uat143-baseline.config.mts",
+      "source": "/private/tmp/cycle5-uat143-baseline.config.mts",
+      "bytes": 1247,
+      "original_sha256": "e6d4d9997d1067511b59641755a4fea672fe428eb5b59067e110a584e0ef6822",
+      "sha256": "e6d4d9997d1067511b59641755a4fea672fe428eb5b59067e110a584e0ef6822"
+    },
+    {
+      "file": "cycle5-uat143-before.json",
+      "source": "/private/tmp/cycle5-uat143-before.json",
+      "bytes": 1275,
+      "original_sha256": "18ea231aca26428d394189e991d6e936128175df23f78533f01bcc35ef01979c",
+      "sha256": "18ea231aca26428d394189e991d6e936128175df23f78533f01bcc35ef01979c"
+    },
+    {
+      "file": "cycle5-uat143-corrected-first.log",
+      "source": "/private/tmp/cycle5-uat143-corrected-first.log",
+      "bytes": 387282,
+      "original_sha256": "71acb4fc225fd775886854e6ba069e502e62048588059568d102ac9db66d0a50",
+      "sha256": "d5bafd8dce51a193c6c668391ff5601ac104d0b287602e3e04f1456478d2d129"
+    },
+    {
+      "file": "cycle5-uat143-corrected-second.log",
+      "source": "/private/tmp/cycle5-uat143-corrected-second.log",
+      "bytes": 60683,
+      "original_sha256": "c139925f98b65eb453274247b164b8b5b1a8b7ad76e2bf6a481a795d069cd952",
+      "sha256": "14646b0115112b295043d875910975b465793ed58cfad61d763bdb51e2afb14b"
+    },
+    {
+      "file": "cycle5-uat143-corrected-third.log",
+      "source": "/private/tmp/cycle5-uat143-corrected-third.log",
+      "bytes": 4362,
+      "original_sha256": "6bb6fdba61dd39327ddfc1466907dc34ec4c170300f98c19605d09c06f6e51d4",
+      "sha256": "704ae6bbf6338ed3fafca3e1f0995766e70c4ba5d5b64f9ad12b4482b1c45f77"
+    },
+    {
+      "file": "cycle5-uat143-eslint-baseline.json",
+      "source": "/private/tmp/cycle5-uat143-eslint-baseline.json",
+      "bytes": 199332,
+      "original_sha256": "cdf9c4f200eb537c9ba3e4d41437c73167725c60045d4e469b8e9df139cfc559",
+      "sha256": "cdf9c4f200eb537c9ba3e4d41437c73167725c60045d4e469b8e9df139cfc559"
+    },
+    {
+      "file": "cycle5-uat143-eslint-comparison.json",
+      "source": "/private/tmp/cycle5-uat143-eslint-comparison.json",
+      "bytes": 211,
+      "original_sha256": "bd72c10190a09c8a4becd1f2e3c23ed8021f4f487deb7563e548381eb964b262",
+      "sha256": "bd72c10190a09c8a4becd1f2e3c23ed8021f4f487deb7563e548381eb964b262"
+    },
+    {
+      "file": "cycle5-uat143-eslint-final.json",
+      "source": "/private/tmp/cycle5-uat143-eslint-final.json",
+      "bytes": 169438,
+      "original_sha256": "fedc58f33e44529b424c507a18c1a79c4165dbb9b7426ee425b8178f8d1a83d2",
+      "sha256": "fedc58f33e44529b424c507a18c1a79c4165dbb9b7426ee425b8178f8d1a83d2"
+    },
+    {
+      "file": "cycle5-uat143-eslint-stderr.log",
+      "source": "/private/tmp/cycle5-uat143-eslint-stderr.log",
+      "bytes": 261,
+      "original_sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "file": "cycle5-uat143-fixtures.mjs",
+      "source": "/private/tmp/cycle5-uat143-fixtures.mjs",
+      "bytes": 2530,
+      "original_sha256": "ee9bedca0e57f2de368a0684705e3f55895bd0b9e60f09c1c2ab78b671b30606",
+      "sha256": "ee9bedca0e57f2de368a0684705e3f55895bd0b9e60f09c1c2ab78b671b30606"
+    },
+    {
+      "file": "cycle5-uat143-independent-hashes.json",
+      "source": "/private/tmp/cycle5-uat143-independent-hashes.json",
+      "bytes": 2813,
+      "original_sha256": "e7190adb313ddc8c97e92a366572cbfe41f9efd7cd032da5a46912ff23a42bd1",
+      "sha256": "e7190adb313ddc8c97e92a366572cbfe41f9efd7cd032da5a46912ff23a42bd1"
+    },
+    {
+      "file": "cycle5-uat143-independent-review.md",
+      "source": "/private/tmp/cycle5-uat143-independent-review.md",
+      "bytes": 4983,
+      "original_sha256": "6dba1f1323483713be8de9a546b3472084066f532cf0231e4a909345e02fac04",
+      "sha256": "6dba1f1323483713be8de9a546b3472084066f532cf0231e4a909345e02fac04"
+    },
+    {
+      "file": "cycle5-uat143-independent-tests.log",
+      "source": "/private/tmp/cycle5-uat143-independent-tests.log",
+      "bytes": 4362,
+      "original_sha256": "c45d32c92372f4f01d1bb05e4fbd46e3ef7f954e04df0189341be7e648843021",
+      "sha256": "3dc830a0605659fb152aa48de4e275a0763f3d4ce3df38c94ff26691366aaae1"
+    },
+    {
+      "file": "cycle5-uat143-lint-compare.mjs",
+      "source": "/private/tmp/cycle5-uat143-lint-compare.mjs",
+      "bytes": 1835,
+      "original_sha256": "6d35c4b573bdd9f5a00d53e6286edbb1ddf80a09996d82f405cd65ffef143d89",
+      "sha256": "6d35c4b573bdd9f5a00d53e6286edbb1ddf80a09996d82f405cd65ffef143d89"
+    },
+    {
+      "file": "cycle5-uat143-manifest.json",
+      "source": "/private/tmp/cycle5-uat143-manifest.json",
+      "bytes": 1843,
+      "original_sha256": "05a4030356a3eb1066afb63aac055d7e4d53970a9011ba136d516d37ebf246e7",
+      "sha256": "05a4030356a3eb1066afb63aac055d7e4d53970a9011ba136d516d37ebf246e7"
+    },
+    {
+      "file": "cycle5-uat143-prompt-boundary.mjs",
+      "source": "/private/tmp/cycle5-uat143-prompt-boundary.mjs",
+      "bytes": 803,
+      "original_sha256": "2d0133317898f75a4675e0218b3892c309d25a7c979345e7b0ae97bd7a89456d",
+      "sha256": "2d0133317898f75a4675e0218b3892c309d25a7c979345e7b0ae97bd7a89456d"
+    },
+    {
+      "file": "cycle5-uat143-report.md",
+      "source": "/private/tmp/cycle5-uat143-report.md",
+      "bytes": 5998,
+      "original_sha256": "033e7a36acc7c82303bdb046878294089baaed68927fd515faeb6aeb8be329dd",
+      "sha256": "033e7a36acc7c82303bdb046878294089baaed68927fd515faeb6aeb8be329dd"
+    }
+  ]
+}
