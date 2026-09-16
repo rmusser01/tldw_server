@@ -32,7 +32,9 @@
 **Goal:** Fix the major defects with permanent reproductions and bounded interfaces.
 **Success criteria:** Each failing behavior becomes green while its draft/account/positive controls remain green.
 **Tests:** Actual pipeline/component/store tests and backend caller tests specified per unit.
-**Status:** Not Started
+**Status:** In Progress
+
+Reviewed code checkpoints: Task1/4 `14f33af27c`; Task2 `0dcca3c032`; Task3 `8128c93c1b`. Permanent regression and independent review evidence is in the tracker repair table. Native acceptance remains pending, so combined acceptance/commit bullets below stay incomplete.
 
 ### Task1: Canonical user acknowledgement — TASK13260.44/51, UAT103/111
 **Files:** `apps/packages/ui/src/models/ChatTldw.ts`, `hooks/chat-modes/chatModePipeline.ts`, `hooks/chat/useChatActions.ts`, `hooks/chat-helper/index.ts`, their existing tests; `tldw_Server_API/app/core/Chat/chat_service.py`, streaming metadata helper and associated Chat tests as needed.
@@ -72,7 +74,9 @@
 **Goal:** Make failed or incomplete requests truthful and keep navigation/network usable.
 **Success criteria:** Recovery acts on the intended turn/request, local failure UI contains expected errors, and hidden tabs release streams.
 **Tests:** Actual request projection, stream cancellation, QA completed-request states, visibility transitions and native controls.
-**Status:** Not Started
+**Status:** In Progress
+
+Task7 reviewed code committed `e4552e4764` (111 independent tests); native six-tab acceptance pending. Task5 andTask6 implementation now active after their predecessor owners released shared files.
 
 ### Task5: Chat retry, character route and missing final answer — TASK13260.49/53/57, UAT108/113/117
 **Files:** `utils/generate-history.ts`, `hooks/chat/useChatActions.ts`, `components/Option/Playground/PlaygroundForm.tsx`, `components/Option/Playground/Playground.tsx`, session persistence and existing tests.
@@ -101,7 +105,9 @@
 **Goal:** Repair remaining visible/accessible interaction defects and classify secondary observations.
 **Success criteria:** Minimize dismisses, actions have stable names, context feedback/title/form lifecycle has no newly observed warnings.
 **Tests:** Actual modal, AntD feedback/form lifecycle, title owner and accessibility behavior.
-**Status:** Not Started
+**Status:** In Progress
+
+Task8 code reviewed/committed: feedback102 andMinimize104 `6d2f3abc55`, accessibility112 `db141cbd90`; native controls pending. Task9 titles/form implementation active. Review Markdown triage confirms the existing060 omission under TASK13260.17; use the existing safe renderer in the analysis reading pane, preserving raw copy/edit/export data.
 
 ### Task8: Minimize and feedback/accessibility — TASK13260.45/43/52, UAT104/102/112
 **Files:** shared `components/Common/QuickIngest/ProcessingStep.tsx`, `QuickIngestWizardModal.tsx`; actual admin creation and Prompt sync feedback owners; `components/Flashcards/tabs/ManageTab.tsx` and affected action/loading components; existing tests.

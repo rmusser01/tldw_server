@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 02:19'
+updated_date: '2026-09-16 02:59'
 labels:
   - uat
   - testing
@@ -129,6 +129,8 @@ Cycle4 remains frozen at product7c9409fad2 while fresh single and multi matrices
 Cycle4 frozen execution closed on product7c9409fad2. Both mode FINAL_REPORT matrices retained;16new findings102-117 map to43-57 plus scope follow-ups058/067. Independent evidence review verified203single hashes and62diagnosis hashes;28multi JSON parse; no material outcome contradictions. Correcting historical current-status/provider labels before checkpoint. Single disconnected local Chat is expected connection-only retention; no cross-account leakage claim. Full acceptance is not achieved. Next: preserve checkpoint, integrate newer dev under32, execute cycle4 repairs and focused verification before another full fresh pass.
 
 Cycle4 repair design Docs/Design/2026-09-16-uat-cycle-4-repairs.md and IMPLEMENTATION_PLAN_uat_cycle_4.md written. Independent initial domains:44/51Chat acknowledgement;47/55consolidated model handoff;46safe summarization;root45minimize. Shared chat_service and AnalysisModal follow-ups serialize after owners release. No full new UAT until reviewed fixes and targeted checks pass.
+
+Cycle4 reviewed repair checkpoints committed: feedback/minimize6d2f3abc55, model-selection0dcca3c032, analysis8128c93c1b, accessibilitydb141cbd90, hidden-tab transporte4552e4764, Chat acknowledgements+inventory14f33af27c. Tracker and plan now distinguish reviewed code from pending targeted native/full UAT. Remaining Chat/QA/title/form units active. Review raw Markdown confirmed existing060 omission under task17; permanent reading-pane regression begins.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

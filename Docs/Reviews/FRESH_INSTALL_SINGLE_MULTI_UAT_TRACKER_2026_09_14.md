@@ -16,7 +16,23 @@
 
 ## Cycle 4 running findings — 2026-09-16 UTC
 
-Separate running records: [single-user](../../output/playwright/cycle4-full-uat-2026-09-16/single/RUNNING_TRACKER.md), [multi-user](../../output/playwright/cycle4-full-uat-2026-09-16/multi/RUNNING_TRACKER.md). The product remains frozen during this pass; repairs follow observed workflow results.
+Separate frozen running records: [single-user](../../output/playwright/cycle4-full-uat-2026-09-16/single/RUNNING_TRACKER.md), [multi-user](../../output/playwright/cycle4-full-uat-2026-09-16/multi/RUNNING_TRACKER.md). Execution has ended; repairs now follow the preserved results. Historical observations below remain the findings from that run.
+
+### Repair checkpoint — reviewed code, native acceptance pending
+
+All following units have independent review and permanent regressions. These checkpoints do not convert the frozen failures into passes. No subsequent full UAT or targeted native acceptance is claimed yet.
+
+| Findings | Code checkpoint | Verification and retained evidence |
+| --- | --- | --- |
+|102 admin/Prompt feedback;104 Minimize|`6d2f3abc55`|68 feedback cases and124 ingest cases; independent reviews clear. [Feedback](../../output/playwright/cycle4-repair-verification-2026-09-16/context-feedback102/uat102-implementation-report.md), [Minimize](../../output/playwright/cycle4-repair-verification-2026-09-16/ingest-minimize104/uat104-implementation-report.md).|
+|106 setup model;115 analysis model|`0dcca3c032`|Independent103tests/9suites; existing lint1error/18warnings unchanged. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/model-selection106-115/README.md).|
+|105 invalid analysis outcome|`8128c93c1b`|120 broader cases before bounded review correction; final93 covering cases independently pass, including real worker/persistence controls. Nested/malformed reasoning rejected safely; production Bandit0. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/analysis105/README.md).|
+|112 Flashcard action accessibility|`db141cbd90`|Independent28covering cases after decorative-spinner correction; broader56 cases at initial checkpoint; no new lint diagnostics. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/accessibility112/README.md).|
+|114 hidden-tab request starvation|`e4552e4764`|Independent111cases cover visibility, cancellation, terminal auth and account changes; lint0. Actual six-tab check pending. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/hidden-tabs114/README.md).|
+|103 Chat duplicates;111 Note backlink|`14f33af27c`|Independent251frontend/153backend cases plus1existing backend skip; bounded review corrections independently pass126cases. Ambiguous parentless old mirrors are preserved and guarded; fresh acknowledgements and defensible anchored recovery are covered. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/chat-ack103-111/README.md).|
+|107 stale configured-model inventory|`14f33af27c`|Independent57cases use actual setup saves and config refresh; warm/cold/repeated saves, numbered-slot isolation and environment precedence pass; Ruff/Bandit0. Native no-restart acceptance pending. [Evidence](../../output/playwright/cycle4-repair-verification-2026-09-16/model-inventory107/README.md).|
+
+Remaining implementation:108/113/117 Chat recovery;109/110/116 QA/analysis feedback;058 route-title and067 New-character form followups. Review's raw Markdown is confirmed as the existing060 scope omission (TASK13260.17): the read-only analysis pane bypasses the renderer used by the repaired Inspector. This is being repaired under the existing presentation contract, preserving raw copy/edit/export text.
 
 ### UAT-102 — P3: Successful admin account creation emits a static-feedback warning
 
