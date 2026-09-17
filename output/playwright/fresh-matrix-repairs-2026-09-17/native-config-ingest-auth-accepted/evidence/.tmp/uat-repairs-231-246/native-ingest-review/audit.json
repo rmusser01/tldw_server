@@ -1,0 +1,501 @@
+{
+  "at": "2026-09-17T22:40:31.235Z",
+  "scope": [
+    "UAT233",
+    "UAT238",
+    "UAT244",
+    "UAT245",
+    "UAT247"
+  ],
+  "run": "repairs231-250-targeted-20260917",
+  "upgradedSource": "a7d3155a567afb25982eb360ea24b973cc3249c9",
+  "sourceBinding": "Reused independently reviewed upgrade254 actual startup/preservation report; no fresh process or runtime inspection.",
+  "checks": [
+    {
+      "name": "single: real queued admission",
+      "pass": true
+    },
+    {
+      "name": "single: completed correct job owner/media/UUID",
+      "pass": true
+    },
+    {
+      "name": "single: exactly one terminal truncation warning",
+      "pass": true
+    },
+    {
+      "name": "single: minimized before completion",
+      "pass": true
+    },
+    {
+      "name": "single: actual minimize and Media navigation receipt",
+      "pass": true
+    },
+    {
+      "name": "single: observation only, no reload/search/click",
+      "pass": true
+    },
+    {
+      "name": "single: owned catalogue one result",
+      "pass": true
+    },
+    {
+      "name": "single: own detail exact complete fixture minus final newline",
+      "pass": true
+    },
+    {
+      "name": "single: source saved and chunked without analysis success",
+      "pass": true
+    },
+    {
+      "name": "alice: real queued admission",
+      "pass": true
+    },
+    {
+      "name": "alice: completed correct job owner/media/UUID",
+      "pass": true
+    },
+    {
+      "name": "alice: exactly one terminal truncation warning",
+      "pass": true
+    },
+    {
+      "name": "alice: minimized before completion",
+      "pass": true
+    },
+    {
+      "name": "alice: actual minimize and Media navigation receipt",
+      "pass": true
+    },
+    {
+      "name": "alice: observation only, no reload/search/click",
+      "pass": true
+    },
+    {
+      "name": "alice: owned catalogue one result",
+      "pass": true
+    },
+    {
+      "name": "alice: own detail exact complete fixture minus final newline",
+      "pass": true
+    },
+    {
+      "name": "alice: source saved and chunked without analysis success",
+      "pass": true
+    },
+    {
+      "name": "bob: real queued admission",
+      "pass": true
+    },
+    {
+      "name": "bob: completed correct job owner/media/UUID",
+      "pass": true
+    },
+    {
+      "name": "bob: exactly one terminal truncation warning",
+      "pass": true
+    },
+    {
+      "name": "bob: minimized before completion",
+      "pass": true
+    },
+    {
+      "name": "bob: actual minimize and Media navigation receipt",
+      "pass": true
+    },
+    {
+      "name": "bob: observation only, no reload/search/click",
+      "pass": true
+    },
+    {
+      "name": "bob: owned catalogue one result",
+      "pass": true
+    },
+    {
+      "name": "bob: own detail exact complete fixture minus final newline",
+      "pass": true
+    },
+    {
+      "name": "bob: source saved and chunked without analysis success",
+      "pass": true
+    },
+    {
+      "name": "multi: two owners persisted distinct media identities",
+      "pass": true
+    },
+    {
+      "name": "Bob identity 3 corroborates foreign and own reads",
+      "pass": true
+    },
+    {
+      "name": "Alice identity 2 after ordinary re-login",
+      "pass": true
+    },
+    {
+      "name": "Bob cannot read Alice Media 1",
+      "pass": true
+    },
+    {
+      "name": "Alice cannot read Bob Media 2",
+      "pass": true
+    },
+    {
+      "name": "Alice reciprocal own catalogue has only Rowan",
+      "pass": true
+    },
+    {
+      "name": "Bob own catalogue excludes Alice source",
+      "pass": true
+    }
+  ],
+  "passed": 34,
+  "failed": [],
+  "jobs": [
+    {
+      "name": "single",
+      "jobId": 1,
+      "ownerUserId": 1,
+      "mediaId": 1,
+      "mediaUuid": "d4a0d5e2-6e9a-4d7a-bc9e-f011af4149d0",
+      "admittedAt": "2026-09-17T20:31:17.129Z",
+      "minimizedAt": "2026-09-17T20:32:02.100Z",
+      "completedAt": "2026-09-17 20:32:22",
+      "firstTerminalResponseAt": "2026-09-17T20:32:23.641Z",
+      "terminalReadCount": 2,
+      "observedAt": "2026-09-17T20:32:47.232Z",
+      "resultStatus": "Warning",
+      "warnings": [
+        "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+      ],
+      "detailAt": "2026-09-17T21:40:49.077Z",
+      "contentLength": 1914,
+      "contentSha256": "a94b1e966d89b7b94e0cd69dafe9ab1c554dc81accf43e57957276b08294225c",
+      "chunkingStatus": "completed",
+      "analysisPresent": false,
+      "sourceVersionCreated": "2026-09-17T20:32:22.772000Z",
+      "emptyBefore": false,
+      "listingRequestsRetained": 0
+    },
+    {
+      "name": "alice",
+      "jobId": 4,
+      "ownerUserId": 2,
+      "mediaId": 1,
+      "mediaUuid": "be7b0cbc-a4db-4036-8d53-e1c6f481f79d",
+      "admittedAt": "2026-09-17T22:08:50.108Z",
+      "minimizedAt": "2026-09-17T22:09:16.657Z",
+      "completedAt": "2026-09-17 22:09:44",
+      "firstTerminalResponseAt": "2026-09-17T22:09:44.530Z",
+      "terminalReadCount": 1,
+      "observedAt": "2026-09-17T22:09:58.957Z",
+      "resultStatus": "Warning",
+      "warnings": [
+        "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+      ],
+      "detailAt": "2026-09-17T22:11:24.693Z",
+      "contentLength": 1914,
+      "contentSha256": "a94b1e966d89b7b94e0cd69dafe9ab1c554dc81accf43e57957276b08294225c",
+      "chunkingStatus": "completed",
+      "analysisPresent": false,
+      "sourceVersionCreated": "2026-09-17T22:09:44.323000Z",
+      "emptyBefore": false,
+      "listingRequestsRetained": 0
+    },
+    {
+      "name": "bob",
+      "jobId": 5,
+      "ownerUserId": 3,
+      "mediaId": 2,
+      "mediaUuid": "bfbd4ff9-2f2e-4e6d-bc7a-a9e0886ae6d4",
+      "admittedAt": "2026-09-17T22:18:21.859Z",
+      "minimizedAt": "2026-09-17T22:18:46.914Z",
+      "completedAt": "2026-09-17 22:19:12",
+      "firstTerminalResponseAt": "2026-09-17T22:19:12.198Z",
+      "terminalReadCount": 1,
+      "observedAt": "2026-09-17T22:23:31.098Z",
+      "resultStatus": "Warning",
+      "warnings": [
+        "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+      ],
+      "detailAt": "2026-09-17T22:25:34.837Z",
+      "contentLength": 1906,
+      "contentSha256": "cbae9d1e7cf5a4f43ebc728cddd0bcb837b9de0bc8ffb77f98e96e0915c5584f",
+      "chunkingStatus": "completed",
+      "analysisPresent": false,
+      "sourceVersionCreated": "2026-09-17T22:19:11.977000Z",
+      "emptyBefore": true,
+      "listingRequestsRetained": 0
+    }
+  ],
+  "identityTimeline": [
+    {
+      "at": "2026-09-17T22:14:50.706Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:14:50.908Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:14:51.378Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:25:34.857Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:26:05.771Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:27:58.341Z",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T22:29:31.112Z",
+      "status": 200,
+      "id": 2,
+      "username": "alice"
+    }
+  ],
+  "foreignReadControls": {
+    "bob": {
+      "file": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-foreign-alice-media-captured.txt",
+      "at": "2026-09-17T22:15:40.948Z",
+      "status": 404
+    },
+    "alice": {
+      "file": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-foreign-bob-media-v2.txt",
+      "at": "2026-09-17T22:31:07.974Z",
+      "status": 404
+    }
+  },
+  "excluded": [
+    {
+      "file": ".tmp/uat-repairs-231-246/native-targeted/pg-single/ingest-open-settled.txt",
+      "pageUrl": "http://127.0.0.1:18782/chat?mode=character&characterId=3&chatId=fdea51b6-6f24-462e-b505-7d4a5495b61b",
+      "referenceError": false,
+      "reason": "Landed in Chat; not an Open-in-Media success."
+    },
+    {
+      "file": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-open.txt",
+      "pageUrl": "http://127.0.0.1:18783/chat?mode=character&characterId=4&chatId=335f57df-78c2-4831-b7de-5275f376bd69",
+      "referenceError": false,
+      "reason": "Landed in Chat; not an Open-in-Media success."
+    },
+    {
+      "file": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-foreign-bob-media.txt",
+      "pageUrl": null,
+      "referenceError": true,
+      "reason": "Initial helper failure excluded; use corrected v2."
+    }
+  ],
+  "limitations": [
+    "Native Quick Ingest terminal Results panel warning label was not recaptured; terminal Warning responses and saved source are proven.",
+    "Minimize→Media automatic refresh is supported; literal wizard Open in Media action was not successfully captured.",
+    "Observer filtered out bare /media list URLs, so exact list-fetch time is not established.",
+    "Single/Alice immediate post-click body snapshots still show prior Chat; receipt records Media navigation before completion. Bob has an actual empty catalogue baseline.",
+    "No native rerun of deliberate search/filter preservation, hard-quota rejection, concurrent sequence allocation, SQLite cells or full matrix; use separately reviewed controlled coverage for those branches.",
+    "UAT238 source-dependent full-source Chat succeeds in the separate native-media audit; all QA/reanalysis/Trash workflows are not certified here."
+  ],
+  "reviewedFiles": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/fixtures/birch-workshop-bob-public-20260917.txt",
+      "bytes": 1909,
+      "sha256": "856dbc5412042a29486a09a7446f7f91d9e478a3e325ca700c31a6d1819e9ddf"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt",
+      "bytes": 1917,
+      "sha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-media-review/REVIEW.md",
+      "bytes": 5265,
+      "sha256": "979d0fc1666ea17bdd07cdc49b1b48789e6744b97e99f511ccc4e56ac512574a"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-media-review/audit.json",
+      "bytes": 38943,
+      "sha256": "512fb8de464589ba84e6f33bbe62d2c7b16fee8a31465354e5c9b9627f7766a7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-preparation/ACCEPTANCE.md",
+      "bytes": 2247,
+      "sha256": "04f74b25d12e9d927d2d012ace0b6d9a9af4abdf1354e361e4d119639782edff"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/RUN.md",
+      "bytes": 1655,
+      "sha256": "293dae699b1caec61aa30335277fd8f0006efc6d84583841195ce62b46ea9991"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/UPGRADED_NATIVE_NOTES.md",
+      "bytes": 2632,
+      "sha256": "f30825241ffb6fe9eabc07ed178872a10ab309008fd720def66eda28e887b5a6"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-foreign-bob-media-v2.txt",
+      "bytes": 6542,
+      "sha256": "fb8750b61e1ebbbbd41b503ed81bcb66d32a82298eebdbc887ce7f4875355698"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-foreign-bob-media.txt",
+      "bytes": 133,
+      "sha256": "1199cab1905d11fbc8e587d3e6f197bd1556d6c5653baf22f2434ec1d4c200a9"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-minimized-media.txt",
+      "bytes": 11579,
+      "sha256": "87e0ea4cffc97fb91e67ffae914a0e2be8851c8d5d43cfadf22bd90e4d19a341"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-observed.txt",
+      "bytes": 90758,
+      "sha256": "966011554f15d32d9d460c73521033ec2d2a45ce9b0b161098198723f286616b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-open.txt",
+      "bytes": 4889,
+      "sha256": "97a6ded7fc758cd3050507b3d544b6da75c28178859297b66a44880218e6441b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-start.txt",
+      "bytes": 1759,
+      "sha256": "e65a4524668289eccf11fe396c243264f7a6dca00f981238e294661b4e445916"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-selected.txt",
+      "bytes": 14048,
+      "sha256": "a2644092b5ef03776b868114b2f1b4da58d368ecc0e20867d81a24f8cfb045da"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ownership-login.txt",
+      "bytes": 7485,
+      "sha256": "64e99a53b97885fcda298541b316482e6a5dae560d21f8cbccb88ffae61027af"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-foreign-alice-media-captured.txt",
+      "bytes": 3150,
+      "sha256": "00c38ed8031889e0b9a5331d665f63bd5f613892d1ab7bfc23ddc205b80686c7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ingest-minimized-media.txt",
+      "bytes": 8350,
+      "sha256": "4d00255642bc5042092bb76c80bb0a09d337dc612fc4e40511b5e05287d51d40"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ingest-observed.txt",
+      "bytes": 186200,
+      "sha256": "07e6f8949f3781fba78c60c1a27faebbd4333cae7a616dd6a73d2a477ac743e7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ingest-start.txt",
+      "bytes": 10500,
+      "sha256": "6e40b0d37a5c412c2e6add74295222eec69ac1bd41ebc898efdb324d783307b7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-own-media-selected.txt",
+      "bytes": 13026,
+      "sha256": "f8af9a48cdc3c7a5c2d2074ed886b8c79c0b9dc81b00af65cf04e6aba19afcaf"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ownership-logout.txt",
+      "bytes": 5968,
+      "sha256": "4320d04ffc318b489a2b79c13af36ca5d49dd73a93f15439e4750f79ff1fcc51"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/ingest-minimize-media.txt",
+      "bytes": 11546,
+      "sha256": "e0c6c03318765b22efa69e38069c28dc2d7ff7cdf1a6a23c173ef352df4d32b2"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/ingest-observed.txt",
+      "bytes": 112732,
+      "sha256": "2890430c9c936aaf50595339b1014da5e04b5f2b4d58ba5c6226f7c732e1786c"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/ingest-open-settled.txt",
+      "bytes": 13934,
+      "sha256": "b8cc9a97d4c80d8ebeb32d4c39ea7b862588467bddcf77d166784775571d2bc3"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/ingest-start.txt",
+      "bytes": 1759,
+      "sha256": "1befe35de87e1520595db735ae8366d8367d3f9540ca5d69d116c496a9e9e517"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-upgraded-read-v2.txt",
+      "bytes": 15152,
+      "sha256": "f8dd8bc0ef2d9fafd77a05abde1ba331f6443962aae7afdaf41a4b5b236f5970"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review-media/REVIEW.md",
+      "bytes": 1738,
+      "sha256": "6fc633d980808ebb521d8d42d71e8fc0b543dfff6ac6537c74f1554264f6e585"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review233-238-247/REVIEW.md",
+      "bytes": 2638,
+      "sha256": "d85d861f2d74daf837272cf3e7bd56f5ccac91b34e5ebf35333423cafe017a17"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review245/REVIEW.md",
+      "bytes": 1957,
+      "sha256": "174830032d443fdebde1fc8e85fd01fbf6cae160ff1fff35b3a0b2b636ff6eaa"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/upgrade254-native-review/REVIEW.md",
+      "bytes": 4443,
+      "sha256": "e89ef5f7508ec73347af5509cd68aeffccf17548c8106d0b170e981082b24c47"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/upgrade254-native-review/audit.json",
+      "bytes": 29661,
+      "sha256": "be0127da527763cc46b450c3885b8de84c8ebc6dcdc2491cda7bf9873f793be1"
+    },
+    {
+      "path": "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md",
+      "bytes": 550805,
+      "sha256": "a7c40c1cb54f9ba9987ca5a22a313ee2aa2102fd3e173ded8fe386098ead7c16"
+    },
+    {
+      "path": "backlog/tasks/task-13260.175 - Deduplicate-ingestion-job-terminal-warnings.md",
+      "bytes": 2515,
+      "sha256": "b3ac9fe0a01e18e01fd6f34b96f9c00212ef338d8c341d02b60fa459737e4594"
+    },
+    {
+      "path": "backlog/tasks/task-13260.180 - Repair-fresh-PostgreSQL-media-ingestion-database-write-failure.md",
+      "bytes": 3527,
+      "sha256": "220c48cfab82f975115546c72351cef97f3f5fffb9056819610b4aa2be90bdb6"
+    },
+    {
+      "path": "backlog/tasks/task-13260.186 - Refresh-the-Media-catalogue-after-native-Quick-Ingest-handoff.md",
+      "bytes": 2659,
+      "sha256": "9c42e1bc335ac8b220ba023afb1fa9d94183259a1e798353648bad27ec77446f"
+    },
+    {
+      "path": "backlog/tasks/task-13260.187 - Initialize-PostgreSQL-storage-quota-schema-for-fresh-multi-user-uploads.md",
+      "bytes": 3115,
+      "sha256": "8b6c009ca7bc2e6dc367f2a82886b24a39898692b043a844a9452e153c3593b1"
+    },
+    {
+      "path": "backlog/tasks/task-13260.189 - Keep-PostgreSQL-Media-sequences-above-all-allocated-IDs-under-tenant-scope.md",
+      "bytes": 2853,
+      "sha256": "4a635d9e220c3b7b7b22b741521722147dae06d2a18251b2faa8bf0c60d2f321"
+    }
+  ]
+}

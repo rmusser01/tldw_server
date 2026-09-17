@@ -1,0 +1,1 @@
+async page=>{const at=new Date().toISOString();await page.getByRole('button',{name:'Open Settings',exact:true}).click();await page.getByRole('textbox',{name:'* API Key',exact:true}).waitFor({timeout:15000});return {at,url:page.url(),ui:await page.locator('body').ariaSnapshot()};}

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now254), and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now258), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
-**Task:** TASK13260 and children173–196.
+**Task:** TASK13260 and children173–200.
 
 ## Global constraints
 
@@ -101,3 +101,48 @@
 - 22:33UTC:232 ordinary native400 still renders generic guidance. Existing task174 reopened implementation; cause-chain mapping passes20focused checks after causal red2/18controls. Independent review and native updated-source retry required.241/246/251/253 native reviews clear, retention review pending. Alice/Bob reciprocal media isolation captured; both upload analyses warn truthfully on truncation. Full matrix remains held.
 
 - 22:40UTC:241/246/251/253 accepted after independent native/retention review; tasksDone.232 cause-chain fix independently203passes and90unchangedcompiler, nativeupdatedsourcepending. New255/task197 actualPGworldbookcreation500 requires tests-first supported transaction/readback repair and independent review. Fullmatrixheld.
+
+## Task 255: PostgreSQL world-book creation and endpoint readback
+
+**Backlog:** TASK13260.197. **Status:** In Progress. **Baseline:**6f6983b0620aae1f0892c6b0d3ae3bebfc105e02.
+
+**Requirements:** Repair the observed normal Create World Book500 on actual PostgreSQL using existing supported DB lifecycle interfaces. Native Alice POST22:37:24.025UTC on a7d3155 returns Failed to create world book; backend15:37:24PDT confirms BackendConnectionWrapper context-manager error. The creation method uses an unsupported connection context; endpoint subsequently calls get_world_book and get_entries. Investigate and cover that complete endpoint path, avoiding unrelated CRUD rewrites.
+
+**Owned scope:** tldw_Server_API/app/core/Character_Chat/world_book_manager.py and narrowly necessary tests under tldw_Server_API/tests/DB_Management/. Existing adjacent world-book tests and WorldBookService are references. Parent owns all Git, Backlog, tracker, native browser/runtime, frozen archives and model services; author must not edit these or commit. No subagents from implementer.
+
+**Steps:**
+1. Read actual manager, service, endpoint and existing portable transaction/read helpers; reproduce before implementation with official PostgreSQL fixtures plus SQLite controls.
+2. Use supported write transaction and read-only lifecycle boundaries. Preserve outer caller rollback/commit ownership, standalone durability, duplicate-name conflict mapping, owner isolation, flags/defaults, soft-deletion filters and entry-count readback. No raw SQL outside existing DB abstraction, no schema/RLS/role relaxation.
+3. Make the smallest repair for the actual create/readback path; run focused and relevant adjacent SQLite/PostgreSQL tests with zero skips. Record causal RED and final GREEN with commands, evidence files and exit codes.
+4. Run .venv Ruff/compile/Bandit on touched Python scope, compare any existing findings rather than silently excluding new ones; self-review, write source hashes and full report. Parent dispatches independent spec/code review and original native acceptance before closure.
+
+**Mandatory test runner:** activate .venv first, then use `TLDW_UAT_EVIDENCE_LABEL=worldbook255-<unique> node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs <test paths> -q --tb=short`. This runner uses official fixtures with explicit required PostgreSQL provisioning. Do not set no-Docker or create substitute databases. Never print/cat private credentials/configs/raw runtime logs. Retain sanitized outputs under .tmp/uat-repairs-231-246/worldbook255/. Actual browser failure is .tmp/uat-repairs-231-246/native-targeted/pg-multi/worldbook239-created.txt; safe cause extraction is worldbook255-error-cause-v2.json in that directory.
+
+**Success criteria:** Real create+endpoint readback succeeds with persisted unique ID/metadata/entries on both DB backends; caller transactions and other-owner controls remain valid; no added static/security findings; independent review and later native Create/catalog/Character-editor readback accepted. Existing catalog239 and initialization112/Character-read153 repairs remain intact. No native runtime/source archive changes by implementer.
+
+- 22:50UTC:232 native model_not_available guidance nowcorrect on6f6983b062. New256: repeated new identicalquestion/clientID failsRetry409againstolder answeredquestion; original5canonicalrows unchanged.256 repair required before232recovery acceptance/fullmatrix.255 implementation remains independent; no concurrent second implementer.
+
+## Task 256: distinguish a new repeated question from an answered retry replay
+
+**Backlog:** TASK13260.198. **Status:** In Progress. **Baseline:**6f6983b0620aae1f0892c6b0d3ae3bebfc105e02.
+
+**Requirements:** A new ordinary saved-chat user turn may have the exact text/images of an earlier answered turn. If the new request fails model validation before persistence, explicit Retry with its same new client identity must create that new question and answer normally. Preserve the existing completed-tail replay rejection, pending/error-tail content and attachment mismatches, conservative legacy callers without valid correlation IDs, conversation/owner isolation and canonical row identity. Do not use timestamps or text equality alone as identity. This repair does not introduce a global historical idempotency contract.
+
+**Observed scenario:** cb561345-2d7f-43eb-93e2-ef60d5d3e07f contains the earlier answered question with client pa_e8ad-169b-120-f818. A new identical question has client pa_556d-145c-831-c040, receives real invalid-model400 at22:47:04.251 before persistence, then real Retry409 at22:47:46.363. Earlier5canonical rows remain after reload. Native evidence under .tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-*.txt. Read-only diagnosis at .tmp/uat-repairs-231-246/retry256-diagnosis/REVIEW.md when available. Existing Chat/chat_service.py retry matching inspects an answered content-matching tail before the saved client-ID match used for pending/error tails.
+
+**Owned scope:** tldw_Server_API/app/core/Chat/chat_service.py and narrowly necessary existing/new ordinary Chat retry tests. Parent alone owns Git, Backlog/docs, native browser/runtime/model, profile config and frozen archives. No implementation subagents, no commits or runtime actions by author. WorldBook255 changes are unrelated and must be left untouched.
+
+**Steps:**
+1. Read the relevant retry service, endpoint ordering and existing actual SQLite/PostgreSQL retry tests; add causal red regression for a new distinct client ID following an answered identical question, including canonical persisted new user and assistant rows.
+2. Make the smallest identity-aware repair. Test same answered-tail ID replay, no/invalid ID legacy behavior, unresolved-tail mismatch, changed content/attachments, existing acknowledged-tail reuse, owner/conversation isolation and transaction behavior as applicable. Preserve request shape and existing frontend recovery metadata. Confirm the newly accepted turn cannot itself be replayed after success.
+3. Use official SQLite/PostgreSQL fixtures via mandatory runner, with zero skips; run focused and relevant adjacent suites. Preserve causal RED and final GREEN logs, commands, exit codes and source hashes.
+4. Activate .venv and run scoped Ruff/compile/Bandit; distinguish unchanged baseline findings and pytest B101 from newly introduced production issues. Self-review and write full report. Parent requires independent review then native exact repeated-question failure/Retry/reload on reviewed source before closure.
+
+**Mandatory runner:** `source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=retry256-<unique> node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs <test paths> -q --tb=short`. No fixture substitution, disabled PostgreSQL, weakening guards, broad refactors, timeout/provider tuning or mocked successful native responses. Keep test artifacts in .tmp/uat-repairs-231-246/retry256/. Never output private profiles, credentials or raw runtime logs. Maximum3 failed implementation attempts per issue before documented reassessment.
+
+**Success criteria:** causal regression passes on both actual backends; fresh new identical retry persists its own rows; real answered replays and ownership/content/image violations remain rejected; no new production lint/security findings; independent review clear and parent native canonical reload positive.
+
+-23:17UTC:255 implementation committed15c1bd5134 after36actualSQLite/PostgreSQL passes and independent round-one review. Retained packetworldbook255-reviewed manifest9833ed2b817b980e0f484c27397d33431704a06c4d6f329a7a3594b16aa4d1b0,46payload/checksum comparisons; original audit-overwrite correction explicit. Runtime remains6f6983b062; no native255 claim yet.
+- New257/task199: source-only QA factual and broaderRowan searches return emptycontexts despite ready/readable originalPostgreSQLsource. Independent diagnosis active. New258/task200: fresh unconfiguredWebUI sends protected ingestion-capability request401; separately tracked from corrected231guidance.256 mandatoryPG initially blocked by sandbox reachability; realDockerfixture up, rerun with authorized local-network access. Do not skip PostgreSQL.
+
+- 23:34 UTC: UAT231/233/237/244/245/247 accepted and tasks closed after independent native and retention review. Total 258 findings: 250 verified, 5 awaiting native acceptance, 3 active repairs. Retained manifest c4f50b39282f2d6f71d8ac82763357608f7f6d9dffd475b3186fe0433fb95cbf. Running metadata hash changes are historical observations, not payload corruption. Full matrix remains held.

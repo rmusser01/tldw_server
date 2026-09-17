@@ -1,0 +1,219 @@
+### Page
+- Page URL: http://127.0.0.1:18782/chat?mode=character&characterId=3&chatId=fdea51b6-6f24-462e-b505-7d4a5495b61b
+- Page Title: E2E-TestBot — Repair PGsingle 20260917 Chat (20260917_201430) | tldw
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e4]:
+    - link "Skip to main content" [ref=f1e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f1e6]:
+      - button "Expand sidebar" [ref=f1e7] [cursor=pointer]
+      - button "New Chat" [ref=f1e11] [cursor=pointer]
+      - generic [ref=f1e14]:
+        - button "Quick Ingest" [ref=f1e15] [cursor=pointer]
+        - button "Chat" [ref=f1e19] [cursor=pointer]
+        - button "Prompts" [ref=f1e22] [cursor=pointer]
+        - button "Characters" [ref=f1e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f1e31] [cursor=pointer]
+        - button "World Books" [ref=f1e35] [cursor=pointer]
+        - button "Notes" [ref=f1e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f1e42] [cursor=pointer]
+        - button "Media" [ref=f1e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f1e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f1e59] [cursor=pointer]
+        - button "Kanban" [ref=f1e65] [cursor=pointer]
+        - button "Watchlists" [ref=f1e67] [cursor=pointer]
+      - generic [ref=f1e72]:
+        - button "Open Notes Dock" [ref=f1e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f1e78] [cursor=pointer]
+        - button "Settings" [ref=f1e81] [cursor=pointer]
+    - main [ref=f1e85]:
+      - generic [ref=f1e86]:
+        - generic [ref=f1e89]:
+          - generic [ref=f1e90]:
+            - button "Expand sidebar" [ref=f1e91] [cursor=pointer]
+            - generic [ref=f1e93]:
+              - img "tldw Assistant" [ref=f1e94]
+              - generic [ref=f1e95]: tldw Assistant
+              - button "Companion Home" [ref=f1e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f1e100] [cursor=pointer]
+            - button "E2E-TestBot — Repair PGsingle 20260917 Chat (20260917_201430)" [ref=f1e104] [cursor=pointer]
+            - generic [ref=f1e105]:
+              - generic "Saved chat. History is persisted." [ref=f1e106]: Saved
+              - generic "Character mode is active." [ref=f1e107]: "Character: E2E-TestBot — Repair PGsingle 20260917"
+          - generic [ref=f1e113]:
+            - button "Search - Open command palette" [ref=f1e114] [cursor=pointer]:
+              - generic [ref=f1e118]: Search
+              - generic [ref=f1e119]: ⌘K
+            - button "New saved chat" [ref=f1e120] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f1e124] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f1e125] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f1e126] [cursor=pointer]
+            - button "Open settings" [ref=f1e133] [cursor=pointer]
+            - generic [ref=f1e145]:
+              - button "Notifications, 0 unread" [ref=f1e146] [cursor=pointer]
+              - status [ref=f1e150]: Notifications are active
+            - button "Switch to light theme" [ref=f1e151] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f1e158] [cursor=pointer]:
+              - generic [ref=f1e159]: "?"
+        - generic [ref=f1e160]:
+          - heading "Chat" [level=1] [ref=f1e161]
+          - generic [ref=f1e164]:
+            - paragraph [ref=f1e165]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f1e166]:
+              - main [ref=f1e167]:
+                - generic [ref=f1e168]:
+                  - generic [ref=f1e170]:
+                    - generic [ref=f1e171]:
+                      - generic [ref=f1e172]:
+                        - text: Character Chat
+                        - generic [ref=f1e173]: E2E-TestBot — Repair PGsingle 20260917
+                      - generic [ref=f1e174]: Conversation timeline
+                    - generic [ref=f1e175]:
+                      - button "Switch to light theme" [ref=f1e176] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f1e183] [cursor=pointer]:
+                        - generic [ref=f1e189]: Focus
+                      - button "Shortcuts" [ref=f1e190] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f1e194]
+                  - log "Chat messages" [ref=f1e196]:
+                    - generic [ref=f1e198]:
+                      - article "User message 1 of 2" [ref=f1e199]:
+                        - generic [ref=f1e202]:
+                          - generic [ref=f1e204]:
+                            - generic [ref=f1e205]: You
+                            - generic [ref=f1e206]: • 1:14 PM
+                          - paragraph [ref=f1e208]: Hello, who are you?
+                          - button "More actions" [ref=f1e211] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f1e215]:
+                        - generic [ref=f1e221]:
+                          - generic [ref=f1e223]:
+                            - generic [ref=f1e224]: E2E-TestBot — Repair PGsingle 20260917
+                            - generic [ref=f1e225]: • 1:15 PM
+                          - generic [ref=f1e226]:
+                            - button "collapsed Model’s reasoning (optional)" [ref=f1e229] [cursor=pointer]:
+                              - img "collapsed" [ref=f1e231]
+                              - generic [ref=f1e234]: Model’s reasoning (optional)
+                            - paragraph [ref=f1e238]: BEEP BOOP.
+                          - generic [ref=f1e239]:
+                            - generic [ref=f1e240]:
+                              - generic [ref=f1e241]: Was this helpful?
+                              - generic [ref=f1e242]:
+                                - button "Helpful" [ref=f1e243] [cursor=pointer]
+                                - button "Not helpful" [ref=f1e246] [cursor=pointer]
+                                - button "More feedback" [ref=f1e249] [cursor=pointer]
+                            - button "More actions" [ref=f1e255] [cursor=pointer]: •••
+                  - generic [ref=f1e256]:
+                    - generic [ref=f1e257]: Composer
+                    - generic [ref=f1e265]:
+                      - button [aria-hidden] [ref=f1e266]
+                      - button [aria-hidden] [ref=f1e267]
+                      - generic [ref=f1e268]:
+                        - generic [ref=f1e270]:
+                          - button "Hide composer options" [expanded] [ref=f1e271] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f1e276]
+                          - generic [ref=f1e277]:
+                            - button "Improve prompt" [ref=f1e280] [cursor=pointer]
+                            - generic [ref=f1e285]:
+                              - button "Send message" [ref=f1e286] [cursor=pointer]:
+                                - generic [ref=f1e287]: Send
+                              - button "Open message delivery options" [ref=f1e292] [cursor=pointer]
+                        - generic [ref=f1e297]:
+                          - generic [ref=f1e299]:
+                            - group "Mode and context controls" [ref=f1e300]:
+                              - button "Modes" [ref=f1e301] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f1e308] [cursor=pointer]':
+                                - generic [ref=f1e309]:
+                                  - generic [ref=f1e310]: MCP
+                                  - generic [ref=f1e311]: None
+                              - button "Search & Context" [ref=f1e314] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f1e319] [cursor=pointer]:
+                                - generic [ref=f1e322]: Prompt
+                              - button "E2E-TestBot — Repair PGsingle 20260917" [ref=f1e323] [cursor=pointer]
+                              - button "Role-play setup" [ref=f1e328] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f1e335] [cursor=pointer]
+                            - group "Run input controls" [ref=f1e341]:
+                              - button "OpenUI" [ref=f1e342] [cursor=pointer]
+                              - button "Start dictation" [ref=f1e348] [cursor=pointer]
+                              - generic [ref=f1e352]:
+                                - button "Attach image" [ref=f1e354] [cursor=pointer]
+                                - button "More attachments" [ref=f1e358] [cursor=pointer]
+                              - button "More tools" [ref=f1e361] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f1e364] [cursor=pointer]:
+                                - generic [ref=f1e368]: Chat Settings
+                          - generic "Active context" [ref=f1e369]:
+                            - button "Custom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f1e371] [cursor=pointer]:
+                              - generic "Provider status" [ref=f1e376]: Healthy
+                            - button "Character E2E-TestBot — Repair PGsingle 20260917" [ref=f1e377] [cursor=pointer]:
+                              - generic [ref=f1e378]: Character
+                              - generic [ref=f1e379]: E2E-TestBot — Repair PGsingle 20260917
+                            - 'generic "Character context: Included" [ref=f1e380]':
+                              - generic [ref=f1e381]: Character context
+                              - generic [ref=f1e382]: Included
+                            - button "Chat 2 messages" [ref=f1e383] [cursor=pointer]:
+                              - generic [ref=f1e384]: Chat
+                              - generic [ref=f1e385]: 2 messages
+                            - button "Configure context window size" [ref=f1e387] [cursor=pointer]:
+                              - generic [ref=f1e388]: 2,490 + ~0 = 2,490 tokens
+                            - button "Saved" [ref=f1e390] [cursor=pointer]
+                            - button "Advanced controls" [ref=f1e392] [cursor=pointer]
+                        - status [ref=f1e396]:
+                          - generic [ref=f1e397]: Add expression images for E2E-TestBot — Repair PGsingle 20260917.
+                          - generic [ref=f1e398]:
+                            - link "Edit expressions" [ref=f1e399] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=3
+                            - button "Dismiss expression image setup" [ref=f1e400] [cursor=pointer]: Dismiss
+              - generic [ref=f1e401]:
+                - button "Restore context sidechannel" [ref=f1e402] [cursor=pointer]:
+                  - generic [ref=f1e406]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f1e407]:
+                - button "Restore runtime sidechannel" [ref=f1e408] [cursor=pointer]:
+                  - generic [ref=f1e409]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+      - generic [ref=f1e413]:
+        - dialog "Quick Ingest":
+          - generic [ref=f1e414]:
+            - button "Close" [active] [ref=f1e415] [cursor=pointer]:
+              - generic "Close" [ref=f1e416]:
+                - img "close" [ref=f1e417]
+            - generic [ref=f1e420]: Quick Ingest
+            - generic [ref=f1e422]:
+              - navigation "Ingest wizard progress" [ref=f1e423]:
+                - list [ref=f1e424]:
+                  - listitem [ref=f1e425]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=f1e426]':
+                      - generic [ref=f1e430]: Add
+                  - listitem [ref=f1e432]:
+                    - 'button "Step 2: Configure" [disabled] [ref=f1e433]':
+                      - generic [ref=f1e437]: Configure
+                  - listitem [ref=f1e439]:
+                    - 'button "Step 3: Review" [disabled] [ref=f1e440]':
+                      - generic [ref=f1e444]: Review
+                  - listitem [ref=f1e446]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f1e447]':
+                      - generic [ref=f1e451]: Processing
+                  - listitem [ref=f1e453]:
+                    - 'button "Step 5: Results" [disabled] [ref=f1e454]':
+                      - generic [ref=f1e458]: Results
+              - generic [ref=f1e460]:
+                - generic [ref=f1e461]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=f1e462] [cursor=pointer]:
+                    - generic [ref=f1e463]:
+                      - paragraph [ref=f1e467]: Drag and drop files
+                      - paragraph [ref=f1e468]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [ref=f1e469]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=f1e472]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=f1e473]:
+                    - text: Paste URLs
+                    - generic [ref=f1e474]:
+                      - textbox "Paste URLs input" [ref=f1e475]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=f1e476]:
+                        - generic: Add URLs
+                - button "Configure 0 items" [disabled] [ref=f1e478]:
+                  - generic: Configure 0 items >
+  - alert [ref=f1e479]
+```
+

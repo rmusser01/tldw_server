@@ -1,0 +1,25 @@
+### Page
+- Page URL: http://127.0.0.1:18782/media
+- Console: 10 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f16e1]:
+  - main [ref=f16e15]:
+    - alert [ref=f16e16]:
+      - generic [ref=f16e17]:
+        - generic [ref=f16e18]:
+          - generic [ref=f16e19]: Unavailable
+          - generic [ref=f16e20]:
+            - heading "Backend readiness check failed" [level=2] [ref=f16e21]
+            - generic [ref=f16e22]: The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing.
+        - group [ref=f16e23]:
+          - generic "Diagnostics" [ref=f16e24] [cursor=pointer]
+        - generic [ref=f16e25]:
+          - button "Retry" [ref=f16e26] [cursor=pointer]
+          - button "Health & diagnostics" [ref=f16e27] [cursor=pointer]
+          - button "Server settings" [ref=f16e28] [cursor=pointer]
+  - alert [ref=f16e14]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T23-03-52-344Z.log#L3-L12
+

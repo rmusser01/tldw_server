@@ -1,0 +1,20 @@
+{
+  "purpose": "targeted-acceptance",
+  "status": "RELEASED",
+  "at": "2026-09-17T22:42:58.694Z",
+  "revision": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+  "runId": "model232-upgrade-20260917",
+  "cells": [
+    "pg-single",
+    "pg-multi"
+  ],
+  "dataPolicy": "existing-profile-upgrade",
+  "originalRunId": "repairs231-250-targeted-20260917",
+  "scope": [
+    232
+  ],
+  "helperSha256": "5e0cc74c2c66a5c01eb7fc2f0d1680cffe018c072a892dd566041cdfac73567f",
+  "reviewSha256": "394ac6012f662a28d250477e8107b1d06b44fe2c6d5159301d46aa75cc3fd4c1",
+  "review": "Independent203tests0skips, causal2failures18controls, lintclean/compiler90unchanged; original model232 error and recovery retained. Product Python source unchanged from a7d3155.",
+  "note": "Existing-profile targeted guidance/Retry acceptance only. No full48matrix release; preserve original profiles and all previous upgrade receipts."
+}

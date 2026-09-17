@@ -1,0 +1,34 @@
+{
+  "observedAt": "2026-09-17T23:05:10.707Z",
+  "purpose": "UAT237 real single API outage and restored normal UI Retry",
+  "stoppedOwnedPid": 91770,
+  "retainedPostgresHolderPids": [
+    18859,
+    18878
+  ],
+  "independentMultiApiPid": 91810,
+  "unauthenticatedApiHealthProbe": 401,
+  "uiRecovery": "auth237-outage-recovered.txt demonstrates Media Inspector and original Rowan item",
+  "processes": [
+    {
+      "file": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789685136710-2f4c1257-863c-45ea-ba7d-ab69c111e7c9.process.private.json",
+      "sha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "action": "backend",
+      "pid": 91770,
+      "startedAt": "2026-09-17T22:45:36.710Z",
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "status": "exited"
+    },
+    {
+      "file": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789686261464-ef9f65a7-bfc0-44f6-a9df-4b9bb5eec125.process.private.json",
+      "sha256": "f292981e33c58057f2df18a4f28b560ec466c679411516ad9f3b2ccbb241218b",
+      "action": "backend",
+      "pid": 97807,
+      "startedAt": "2026-09-17T23:04:21.465Z",
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "status": "started"
+    }
+  ]
+}

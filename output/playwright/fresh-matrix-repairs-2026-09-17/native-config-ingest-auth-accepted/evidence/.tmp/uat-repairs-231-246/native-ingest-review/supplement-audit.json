@@ -1,0 +1,289 @@
+{
+  "at": "2026-09-17T23:03:00.088Z",
+  "purpose": "Supplement only: native233 Results warning and244 literal Open in Media gaps.",
+  "checks": [
+    {
+      "name": "Original REVIEW.md unchanged",
+      "pass": true
+    },
+    {
+      "name": "Original audit.mjs unchanged",
+      "pass": true
+    },
+    {
+      "name": "Original audit.json unchanged",
+      "pass": true
+    },
+    {
+      "name": "Job6 owned by Alice2, saved Media3 expected UUID",
+      "pass": true
+    },
+    {
+      "name": "Two terminal readbacks keep one genuine truncation warning",
+      "pass": true
+    },
+    {
+      "name": "Actual enqueue HTTP200, no admission errors",
+      "pass": true
+    },
+    {
+      "name": "Processing observation precedes completion",
+      "pass": true
+    },
+    {
+      "name": "Native Results region explicitly saved-with-warnings1",
+      "pass": true
+    },
+    {
+      "name": "Warning paragraph appears exactly once",
+      "pass": true
+    },
+    {
+      "name": "No clean-success/failure/cancel claim",
+      "pass": true
+    },
+    {
+      "name": "Catalogue already contains two owned sources before Open",
+      "pass": true
+    },
+    {
+      "name": "Exact enabled Results button actually clicked",
+      "pass": true
+    },
+    {
+      "name": "Click reaches exact Media3 with wizard hidden",
+      "pass": true
+    },
+    {
+      "name": "Both actual detail HTTP200 responses contain exact full fixture",
+      "pass": true
+    },
+    {
+      "name": "First detail follows actual click",
+      "pass": true
+    },
+    {
+      "name": "Settled rendered content paragraphs equal complete source",
+      "pass": true
+    },
+    {
+      "name": "Settled route, selection and catalogue remain correct",
+      "pass": true
+    },
+    {
+      "name": "Saved warning never becomes successful analysis",
+      "pass": true
+    },
+    {
+      "name": "Open and settled observation do not reload or search",
+      "pass": true
+    },
+    {
+      "name": "Released gate, binding and completion agree on upgraded source",
+      "pass": true
+    },
+    {
+      "name": "Binding gate hash matches retained proof",
+      "pass": true
+    },
+    {
+      "name": "Binding completion hash matches retained proof",
+      "pass": true
+    },
+    {
+      "name": "Binding sourceManifest hash matches retained proof",
+      "pass": true
+    },
+    {
+      "name": "Binding pythonReuse hash matches retained proof",
+      "pass": true
+    },
+    {
+      "name": "Both recorded launch receipts bind exact source before ingestion",
+      "pass": true
+    },
+    {
+      "name": "Original profile/init/holder fingerprints unchanged across upgrades",
+      "pass": true
+    }
+  ],
+  "passed": 26,
+  "failed": [],
+  "oldPacketExpected": {
+    "REVIEW.md": "5087e4c38f749f0fb9302d6dcdb772f0936b21b0e5b77e292123131e902867f5",
+    "audit.mjs": "dff52efc261fd7c661fdee5fde0abecdb2b9aaf4ebc4fbdc2bb9933f3a2739a1",
+    "audit.json": "4dd68f60a13902f62b5c9b87e7d0f8c3549d5f3d7e8c426bc599f1724aa8aab6"
+  },
+  "source": {
+    "revision": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+    "upgradeRun": "model232-upgrade-20260917",
+    "originalRun": "repairs231-250-targeted-20260917",
+    "recordedLaunches": [
+      {
+        "action": "backend",
+        "status": "started",
+        "pid": 91810,
+        "startedAt": "2026-09-17T22:45:41.804Z"
+      },
+      {
+        "action": "frontend",
+        "status": "started",
+        "pid": 91833,
+        "startedAt": "2026-09-17T22:45:45.325Z"
+      }
+    ],
+    "limit": "Retained source/launch receipts verified; no live process inspection or full copied-source rehash."
+  },
+  "native": {
+    "jobId": 6,
+    "ownerUserId": 2,
+    "mediaId": 3,
+    "mediaUuid": "3936bff9-39ab-4fcd-8e18-d07a2900259b",
+    "admittedAt": "2026-09-17T22:56:59.063Z",
+    "completedAt": "2026-09-17 22:57:54",
+    "terminalAt": "2026-09-17T22:58:10.865Z",
+    "terminalResponses": [
+      "2026-09-17T22:57:54.114Z",
+      "2026-09-17T22:57:54.620Z"
+    ],
+    "warnings": [
+      "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+    ],
+    "clickStartedAt": "2026-09-17T22:59:01.520Z",
+    "clickReceiptAt": "2026-09-17T22:59:01.871Z",
+    "settledAt": "2026-09-17T22:59:54.143Z",
+    "route": "http://127.0.0.1:18783/media?id=3",
+    "detailResponses": [
+      {
+        "at": "2026-09-17T22:59:01.935Z",
+        "status": 200
+      },
+      {
+        "at": "2026-09-17T22:59:32.072Z",
+        "status": 200
+      }
+    ],
+    "contentLength": 1918,
+    "contentSha256": "9e06d815ac812cacf04550348106a33cb513d98cc0fb3cde175fc1aaec871673",
+    "renderedParagraphCount": 6,
+    "analysisPresent": false
+  },
+  "remainingLimits": [
+    "UAT233 and244 previously missing visible/button gaps are now supplied on PG multi. Existing reviewed controlled tests and prior native owner checks remain separate evidence.",
+    "Original SQLite Bob/admin and deliberate active-filter native permutations were not rerun; exact list-fetch timestamp remains unavailable.",
+    "Native concurrent allocations and quota rejection are not newly tested.",
+    "UAT238 source QA/reanalysis/sole-item Trash dependencies remain outside this supplement."
+  ],
+  "reviewedFiles": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/fixtures/linden-results-public-20260917.txt",
+      "bytes": 1921,
+      "sha256": "76f3a6b3e07009943e5241ee4943c3f459373ae12a900ca22e2b4969440fb876"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/complete.json",
+      "bytes": 554,
+      "sha256": "d2c1a8acc76ce16f24a34bd054ed3dd311646ffbb7f7b0f4a47d096ff73df5a9"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/gate.json",
+      "bytes": 1118,
+      "sha256": "80f85a0325b356ae3512ce863682d340fe3580133af594fa6a67469627fff3f8"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/pg-multi-source-manifest.json",
+      "bytes": 8498042,
+      "sha256": "0842001d4b420105ec2731639213736155687b5a11e05673f8fd9d06bf0605d3"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/python-reuse.json",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/backend-1789685141804-f69a244f-cdd1-4c6d-99b0-9e8a9d1c479b.process.private.json",
+      "bytes": 1214,
+      "sha256": "b06a1313b947fdfcebdefe1414db57f970ad05c6047650e9ded8372af1d83b52"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/binding.private.json",
+      "bytes": 1641,
+      "sha256": "838c5f003b52bc1f00a08d39c41722b2117545015a99326717897dfe0d50f34c"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/frontend-1789685145325-f43dbd75-22cb-4969-ad80-40fcc6f370dd.process.private.json",
+      "bytes": 1328,
+      "sha256": "b41ad9afc0d9c6c742a864b192bc4dc2e34ff9b129d37450105af3e99d2b3848"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/repairs251-254-upgrade2-20260917/pg-multi/binding.private.json",
+      "bytes": 1655,
+      "sha256": "0cfd186271cf22374983d48b70201fc752662556cba6003c8569a8cf582b9c7f"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-ingest-review/REVIEW.md",
+      "bytes": 9593,
+      "sha256": "5087e4c38f749f0fb9302d6dcdb772f0936b21b0e5b77e292123131e902867f5"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-ingest-review/audit.json",
+      "bytes": 17327,
+      "sha256": "4dd68f60a13902f62b5c9b87e7d0f8c3549d5f3d7e8c426bc599f1724aa8aab6"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-ingest-review/audit.mjs",
+      "bytes": 9166,
+      "sha256": "dff52efc261fd7c661fdee5fde0abecdb2b9aaf4ebc4fbdc2bb9933f3a2739a1"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-observed.txt",
+      "bytes": 259214,
+      "sha256": "0631988f3bf7d8a278b48d8a1cac80f0880327d51749322d6db2394caa8ca907"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-provider-options.txt",
+      "bytes": 16644,
+      "sha256": "d5ae3822e057aa9849283b38b6ae97c3d30368376829a10bb8376901dfca22e6"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-resume-snapshot.txt",
+      "bytes": 14968,
+      "sha256": "edde09f5132d2200a3ab71e138e9d115c7bacbc75f5ba6f9e3193159346aacc0"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-review.txt",
+      "bytes": 1419,
+      "sha256": "3d259429bafcf9378bccefb6d9b82490be5b7b93d8d5a4bb91c4ac5225013eed"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-started.txt",
+      "bytes": 3021,
+      "sha256": "2c389a0a95d5a85f1c009066ee0173a629316c6e55bb055348a38588d1bc6229"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-ingest-terminal.txt",
+      "bytes": 290167,
+      "sha256": "2a50607c5be9de7f07efa024f1b159aec3ccb2384b78ef2be298d6bd33400d98"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-open-media-settled.txt",
+      "bytes": 302627,
+      "sha256": "76656d84eee2d861bac525f7cb0709da0737b519792a492c7291a97dbfcb049f"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-open-media.js",
+      "bytes": 491,
+      "sha256": "b952712d2c621930b446bb55caade955abd9e7a124f50beabd2a0e6ab3fd1ba5"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/results-open-media.txt",
+      "bytes": 4939,
+      "sha256": "b014e099fcad299b93a68ec0b4136672e229af93113634cff3107384af6d8dba"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/model232-gate.json",
+      "bytes": 895,
+      "sha256": "8ae1b7beea86c07144febad51591267eb246b533366986ee9a6b4b522e6ad4e3"
+    }
+  ]
+}

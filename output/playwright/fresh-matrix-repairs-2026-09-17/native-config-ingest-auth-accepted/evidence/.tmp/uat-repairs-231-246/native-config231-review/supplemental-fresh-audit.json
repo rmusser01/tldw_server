@@ -1,0 +1,327 @@
+{
+  "task": "TASK13260.173",
+  "uat": "UAT231",
+  "verdict": "CLEAR_BOUNDED_NATIVE_GENERIC_BRANCH_AC3",
+  "observedAt": "2026-09-17T23:15:39.121Z",
+  "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+  "checks": [
+    {
+      "name": "normal-fresh-context-without-injected-state",
+      "passed": true
+    },
+    {
+      "name": "console-observer-before-navigation",
+      "passed": true
+    },
+    {
+      "name": "close-only-fresh-context",
+      "passed": true
+    },
+    {
+      "name": "correct-native-origin-and-credential-gate",
+      "passed": true
+    },
+    {
+      "name": "three-exact-corrected-generic-warnings",
+      "passed": true
+    },
+    {
+      "name": "no-extension-wording-in-any-generic-warning",
+      "passed": true
+    },
+    {
+      "name": "missing-key-warning-also-retained",
+      "passed": true
+    },
+    {
+      "name": "captured-error-and-capabilities-warning-retained",
+      "passed": true
+    },
+    {
+      "name": "honest-observed-console-counts",
+      "passed": true
+    },
+    {
+      "name": "original-generic-branch-count-parity",
+      "passed": true
+    },
+    {
+      "name": "intended-multi-profile-and-source",
+      "passed": true
+    },
+    {
+      "name": "original-profile-hash",
+      "passed": true
+    },
+    {
+      "name": "original-initialization-hash",
+      "passed": true
+    },
+    {
+      "name": "original-holder-hash",
+      "passed": true
+    },
+    {
+      "name": "source-launch-binding:backend",
+      "passed": true
+    },
+    {
+      "name": "source-launch-binding:frontend",
+      "passed": true
+    },
+    {
+      "name": "both-source-process-receipts",
+      "passed": true
+    },
+    {
+      "name": "preparation-binding:gate",
+      "passed": true
+    },
+    {
+      "name": "preparation-binding:completion",
+      "passed": true
+    },
+    {
+      "name": "preparation-binding:sourceManifest",
+      "passed": true
+    },
+    {
+      "name": "preparation-binding:pythonReuse",
+      "passed": true
+    },
+    {
+      "name": "preparation-binding:archive",
+      "passed": true
+    },
+    {
+      "name": "released-preparation",
+      "passed": true
+    },
+    {
+      "name": "copied-source-manifest:apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "passed": true
+    },
+    {
+      "name": "copied-source-manifest:apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts",
+      "passed": true
+    },
+    {
+      "name": "observed-generic-source-warns-and-rejects",
+      "passed": true
+    },
+    {
+      "name": "initial-partial-report-preserved",
+      "passed": true
+    },
+    {
+      "name": "initial-partial-audit-preserved",
+      "passed": true
+    }
+  ],
+  "allChecksPass": true,
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/console231-fresh-context.js",
+      "bytes": 775,
+      "sha256": "baa2e3f56f04fd9e4020547fad201bc55c487203713571695eb288ca39b9beb0",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/console231-fresh-context.txt",
+      "bytes": 2511,
+      "sha256": "83e800532463c0bafe75c8308ce1de3c9b5d26020726a62028a9821bb8cf221f",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-single/setup-console.txt",
+      "bytes": 1554,
+      "sha256": "0175ee523165bf0a1975e4fdc716f9e18b1ae36ec05f9ed7b8bead0f32064c41",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/binding.private.json",
+      "bytes": 1641,
+      "sha256": "838c5f003b52bc1f00a08d39c41722b2117545015a99326717897dfe0d50f34c",
+      "classification": "private-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "bytes": 11348,
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f",
+      "classification": "private-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "bytes": 217,
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9",
+      "classification": "private-hash-only"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "bytes": 1593,
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db",
+      "classification": "private-hash-only"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/backend-1789685141804-f69a244f-cdd1-4c6d-99b0-9e8a9d1c479b.process.private.json",
+      "bytes": 1214,
+      "sha256": "b06a1313b947fdfcebdefe1414db57f970ad05c6047650e9ded8372af1d83b52",
+      "classification": "mutable-process-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/frontend-1789685145325-f43dbd75-22cb-4969-ad80-40fcc6f370dd.process.private.json",
+      "bytes": 1328,
+      "sha256": "b41ad9afc0d9c6c742a864b192bc4dc2e34ff9b129d37450105af3e99d2b3848",
+      "classification": "mutable-process-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/gate.json",
+      "bytes": 1118,
+      "sha256": "80f85a0325b356ae3512ce863682d340fe3580133af594fa6a67469627fff3f8",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/complete.json",
+      "bytes": 554,
+      "sha256": "d2c1a8acc76ce16f24a34bd054ed3dd311646ffbb7f7b0f4a47d096ff73df5a9",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/pg-multi-source-manifest.json",
+      "bytes": 8498042,
+      "sha256": "0842001d4b420105ec2731639213736155687b5a11e05673f8fd9d06bf0605d3",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/python-reuse.json",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/6f6983b0620aae1f0892c6b0d3ae3bebfc105e02.tar",
+      "bytes": 757053440,
+      "sha256": "ca8ea792d6d270ed05e6b449408c02f9f81307439cae317c93bca73e3d220c64",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-multi/apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "bytes": 266606,
+      "sha256": "87cf88431e6293ccd1ebe49355167b509c7ef49ad03831e1106bef3a0d5bb136",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-multi/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts",
+      "bytes": 1889,
+      "sha256": "8b86167dfeb306efda04790181f4efcd5fde2447901297c8866a24e58f501b89",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review-chat/REVIEW.md",
+      "bytes": 4229,
+      "sha256": "76e0d05809a989e54ca9166c96077b06e9227022531d67bf251bd7757dfe7118",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-config231-review/REVIEW.md",
+      "bytes": 2989,
+      "sha256": "fe31cfbb34962e153e8c8f1a6569e0e0eeaf95b142f16edc3b93a44db671133d",
+      "classification": "preserved-prior-assessment"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-config231-review/audit.mjs",
+      "bytes": 4352,
+      "sha256": "253bd8d674cd026a233a401b350c4526be14a131e881b561a7aa6b372ca9ce2a",
+      "classification": "preserved-prior-assessment"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-config231-review/audit.json",
+      "bytes": 4385,
+      "sha256": "04799ed90969ad55d3c6a0973959eb6913a5f6b23a921f0dd9d80a825cbc091f",
+      "classification": "preserved-prior-assessment"
+    },
+    {
+      "path": "backlog/tasks/task-13260.173 - Correct-fresh-WebUI-unconfigured-client-console-guidance.md",
+      "bytes": 3003,
+      "sha256": "0dcee78a66faa92c2beb54bafa2329f7bcb66a9c69c36acd8cf4a2fffe2e0504",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-config231-review/supplemental-fresh-REVIEW.md",
+      "bytes": 4123,
+      "sha256": "e2f3b8bfbe5d7fb7607c32ee5268fe2c5cfaac75d3acdeab4b8d9cec407a49b0",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-config231-review/supplemental-fresh-audit.mjs",
+      "bytes": 8421,
+      "sha256": "42fb35c0a4030889d1810bc102e858f55730fa939d1794961f77bf2c67833f0f",
+      "classification": "safe"
+    }
+  ],
+  "processes": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/backend-1789685141804-f69a244f-cdd1-4c6d-99b0-9e8a9d1c479b.process.private.json",
+      "sha256": "b06a1313b947fdfcebdefe1414db57f970ad05c6047650e9ded8372af1d83b52",
+      "action": "backend",
+      "pid": 91810,
+      "startedAt": "2026-09-17T22:45:41.804Z",
+      "status": "started",
+      "endedAt": null,
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "838c5f003b52bc1f00a08d39c41722b2117545015a99326717897dfe0d50f34c",
+      "port": 18703
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-multi/frontend-1789685145325-f43dbd75-22cb-4969-ad80-40fcc6f370dd.process.private.json",
+      "sha256": "b41ad9afc0d9c6c742a864b192bc4dc2e34ff9b129d37450105af3e99d2b3848",
+      "action": "frontend",
+      "pid": 91833,
+      "startedAt": "2026-09-17T22:45:45.325Z",
+      "status": "started",
+      "endedAt": null,
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "838c5f003b52bc1f00a08d39c41722b2117545015a99326717897dfe0d50f34c",
+      "port": 18783
+    }
+  ],
+  "native": {
+    "at": "2026-09-17T23:12:43.182Z",
+    "observedAt": "2026-09-17T23:12:43.637Z",
+    "url": "http://127.0.0.1:18783/media",
+    "genericWarnings": [
+      {
+        "at": "2026-09-17T23:12:43.513Z",
+        "type": "warning",
+        "text": "tldw server is not configured. Open Settings → tldw server and set the server URL and API key."
+      },
+      {
+        "at": "2026-09-17T23:12:43.513Z",
+        "type": "warning",
+        "text": "tldw server is not configured. Open Settings → tldw server and set the server URL and API key."
+      },
+      {
+        "at": "2026-09-17T23:12:43.544Z",
+        "type": "warning",
+        "text": "tldw server is not configured. Open Settings → tldw server and set the server URL and API key."
+      }
+    ],
+    "typeCounts": {
+      "info": 1,
+      "log": 1,
+      "warning": 5,
+      "error": 1
+    },
+    "totalMessages": 8,
+    "capabilities401Retained": true
+  },
+  "limits": [
+    "Fresh browser context on repaired existing PostgreSQL multi-user runtime",
+    "No new SQLite native installation or clean OS run",
+    "Retained receipt verification, no new live process inspection",
+    "Capabilities401 is separate unresolved behavior",
+    "Counts limited to recorded capture interval",
+    "Prior partial assessment preserved unchanged",
+    "No new tests or runtime actions by reviewer"
+  ]
+}

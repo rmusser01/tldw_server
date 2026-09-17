@@ -1,0 +1,19 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18782/media');
+```
+### Page
+- Page URL: http://127.0.0.1:18782/media
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/browser-evidence/1789686023324-021270f5-373d-4310-8f3e-65aa2eceafc3-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T23-00-23-459Z.log#L1-L3
+
+- generic [active]:
+  - dialog [ref=f14e1]:
+    - generic [ref=f14e2]:
+      - progressbar [ref=f14e3]
+      - status [ref=f14e7]: Loading...
+      - paragraph [ref=f14e8]: Please wait while we get things ready.
+      - generic [ref=f14e9]: Loading...
+  - alert [ref=f14e10]

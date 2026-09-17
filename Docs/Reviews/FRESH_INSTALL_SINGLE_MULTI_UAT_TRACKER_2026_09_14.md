@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 255 findings total:244 verified,10 reviewed implementations awaiting native acceptance (including232),1 newly identified repair (255). UAT241/246/251/253 pass independent native and retention review; [accepted packet](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-stream-media-mcp-accepted/README.md). UAT232 cause-chain correction independently passes203 tests and awaits updated-source native acceptance; [reviewed packet](../../output/playwright/fresh-matrix-repairs-2026-09-17/model232-cause-reviewed/README.md). All48 frozen outcomes remain retained. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
+- **Current repair gate:** 258 findings total: 250 verified, 5 reviewed implementations awaiting native acceptance (232/236/238/239/255), and 3 active repairs (256/257/258). UAT231/233/237/244/245/247 now pass independent native and retention review; [accepted evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-config-ingest-auth-accepted/README.md). UAT256 has a reviewed-candidate identity fix and real SQLite/PostgreSQL coverage; its coverage follow-up is under independent review. UAT257 Knowledge QA and UAT258 unauthenticated capability probing remain open. All 48 frozen outcomes remain retained. No new full UAT before original-scenario acceptance.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2770,3 +2770,52 @@ UAT241/246/251/253 independent native reviews are clear; evidence retention revi
 UAT241/246/251/253 now pass independent native reviews and retained-byte/credential review:186payloads189files12exactgziproundtrips, manifestf8d1c2c9287e456fa71b5eb0ff731301bc42e3f8fa755caabec99cb1f0f04902.246 exact fresh TestBot first turns deliver firstbytes13.382/14.104ms and canonicalBEEP BOOP in bothPGauth modes.253 reads originalMedia1 without reupload;241 fullcontenthandoff persists and actualmulti loading guard is observed.251 distinctfreshprofile saves5packs/23tools, validatesmcp.tools.list and preservesstateafterreload. Original45-secondcause and failedexisting-history attempts remain qualified; no timeout/provider changes or wholematrix acceptance.
 
 232independent final203tests pass, baseline2expectedfailures/18controls, lintclean and fullcompiler90unchanged. Old-source native Retry returnsORBIT-742 and reload5canonicalrows using originalconversation/clientID; new guidance still requiresupdatedsourceacceptance.
+
+## UAT-256 — P1: failed new identical question is mistaken for the earlier answered turn
+
+- **Task:** TASK13260.198. Independent diagnosis confirms answered-tail content matching precedes client-identity checks. A bounded tests-first repair is active; preserve same-tail replay, legacy, attachments and ownership controls. This repair does not add global historical idempotency.
+
+- On6f6983b062, ordinary saved Chat repeats the previous question with a distinct new client-message ID pa_556d-145c-831-c040. A one-request controlled real backend model_not_available400 at22:47:04.251 correctly displays model-selection guidance after232fix.
+- Native Retry same model at22:47:46.273 retains this new clientID and originalconversationcb561345-2d7f-43eb-93e2-ef60d5d3e07f, but actual409 at.363 says This turn already has an answer. Canonical reload22:48:10 retains only5olderrows; the new failed question was not persisted. Existing answered question has older clientIDpa_e8ad-169b-120-f818.
+- chat_service.py matches explicit retry against tail user content before distinguishing the newly supplied client-message ID. Causal regression and minimal correction remain required; no assumption that the earlier answered turn should be overwritten. Preserve acknowledged retry/replay/attachment/legacy controls on actualSQLite/PostgreSQL.
+- Evidence .tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-{failure,error-captured,retry-terminal,after-reload-captured,retry-reloaded}.txt. Helper second-exact-answer wait failed because409; no model generation was dispatched, and laterreload did not interrupt generation.232 guidancepositive is retained but successfulnewsourceRetryacceptance remains open behind256.
+
+## UAT-257 — P1: PostgreSQL Knowledge QA returns no evidence for the owned ready source
+
+- **Task:** TASK13260.199. Read-only causal diagnosis active; no production repair yet.
+
+- Native on6f6983b062, preserved PostgreSQL single profile, original Rowan Media1 fully readable. Knowledge QA reports Documents & Media ready. Normal source-only factual question with configured Llama.cpp and unchanged hybrid/chunk defaults returns empty contexts and no answer; the UI suggests broader keywords. Actual broader keyword Rowan also returns empty contexts. No web fallback, ACL weakening, direct data writes or provider/timeout changes.
+- First request23:07:56.584UTC, response23:10:27.556/body finished23:10:36.980; second response23:11:56.264. Both actualHTTP200 streams report contexts[] and complete/output_emitted=false. The first UI stayed at Verifying citations while waiting; this does not establish that a provider generation ran.
+- Evidence: .tmp/uat-repairs-231-246/native-targeted/pg-single/media238-qa-{submitted,observed,terminal,observed-2,broadened,broadened-observed}.txt. Source-ready label and original canonical content are retained. Diagnosis pending; original SQLite ownership issue030 is not assumed to be the cause. Source-dependent238 acceptance remains pending.
+
+### Targeted acceptance updates, 23:13UTC
+
+-233/244: independent26-check supplement proves visible Saved with warnings(1), one actual truncation warning, no failed source; literal Open in Media selects AliceMedia3 and full1918chars. Existing34-check ingest review proves restricted-role persistence/admission, automatic catalogue update and reciprocal owner denial for245/247. Retention pending; unsuccessful analysis is not reported as analysis success.
+-237: independent34checks/53hashed inputs accept normal disconnected credential guidance, visible reconnect, actual owned API outage and normal Retry recovery to originalRowan. Original API91770 stopped; exact source/profile restarted as97807. Database holders and multi runtime retained. Settled snapshots do not prove zero transient requests; private recovery helper is hash-only.
+-255: scoped round-one code review accepts portable read-only reads and same-service rollback cache guard;36actualSQLite/PostgreSQLpasses/no skips. Native Create/catalog/editor acceptance pending. Reviewer overwrote initialaudit JSON; original bytes unavailable, correction recorded, initial writtenreview/diff/failurelogs and separate finalaudit retained. No initialaudithash-preservation claim.
+-231: fresh ephemeral browser context on existing6f6983b062 multi frontend captures all three corrected generic setup warnings. It also exposes one unauthenticated ingestion-sources capabilities request; that separate observation is being checked against the tracker. Original Alice browser remains untouched. Initial missing-key-only capture was insufficient and its partial review is retained.
+
+## UAT-258 — P3: fresh unconfigured Media bootstrap requests protected ingestion capabilities
+
+- TASK13260.200. Fresh empty browser context on current6f6983b062 PG multi frontend18783/media correctly shows the credential gate, but GET /api/v1/ingestion-sources/capabilities is sent without authentication. It returns401 at23:12:43.578UTC, producing one resource consoleerror and one request warning. No visible runtime overlay is observed.
+- Evidence native-targeted/pg-multi/console231-fresh-context.js/.txt. Context is newly created with no local-storage/session injection and closed after capture; originalAlice session unchanged. Three corrected generic231warnings and the expected missing-key warning are distinct from this request failure.
+- Search found prior TASK12020.20 handled optional capability failures reaching the backend-unreachable modal; this new task addresses dispatch before credentials exist. Diagnose actual auth/readiness lifecycle before implementation; preserve authenticated capabilities and real outage feedback.
+
+-257 diagnostic control23:22:23UTC: separate normal page in the same authenticated single-user browser runs Media Full-text Rowan and returnsHTTP200,total1,originalMedia1. This narrows the mismatch to QA's retrieval path; it does not by itself establish its backend cause. Evidence retrieval257-media-control.js/.txt; active analysis page preserved.
+-238 analysis exploratory default-prompt attempt23:21:11 streamed200 without a readable finalbody, then the UI's nonstream fallback23:21:59 returns502 at23:22:52 (chat service provider unavailable). No analysis saved; original1914chars unchanged. This is recorded as a failed default-analysis attempt, not a successful review. Original row10 acceptance uses exact LIVE_TIER_ANALYSIS_ONE/TWO instructions; that prescribed sequence is now being rerun separately, with the same provider/model and no timeout changes.
+
+
+## Six native repair acceptances — 2026-09-17 23:34 UTC
+
+UAT231, UAT233, UAT237, UAT244, UAT245 and UAT247 are verified and their Backlog tasks are Done. The retained packet has 114 payloads, 117 files and 8 exact gzip payloads; manifest `c4f50b39282f2d6f71d8ac82763357608f7f6d9dffd475b3186fe0433fb95cbf`. [Independent retention review](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-config-ingest-auth-retention-review/REVIEW.md) passed all 25 checks at its recorded metadata checkpoint. A later root rerun verified all retained bytes and secret checks; the sole changed check was the explicitly omitted running tracker/task metadata. The retained original review is unchanged. The audit script is preserved at its original relative layout and must be rerun from `.tmp/uat-repairs-231-246/native-config-ingest-auth-retention-review/`; running its relocated copy failed path resolution without changing any packet payload.
+
+- UAT231: a fresh unconfigured browser exercises the corrected generic Settings warning. The separate protected capability 401 is UAT258.
+- UAT233: actual PostgreSQL terminal results have one truncation warning; visible Results says Saved with warnings (1), retains the full source and opens it in Media. Analysis success is not claimed.
+- UAT237: normal Disconnect/reconnect and an actual owned API outage/Retry preserve useful recovery without redundant disconnected Media-search notifications.
+- UAT244: ingest completion refreshes the catalogue; literal Open in Media selects the full new source.
+- UAT245: actual ordinary-user PostgreSQL uploads pass fresh quota admission; configured limit/error controls remain covered by official fixture tests.
+- UAT247: Alice and Bob uploads receive distinct persisted identities and reciprocal foreign reads return 404. Native concurrency and hard-quota exhaustion are not claimed.
+
+The analysis workflow is continuing from canonical LIVE_TIER_ANALYSIS_ONE on original PostgreSQL Media1. The preceding default-prompt fallback returned 502 and was retained as a failed attempt. Knowledge QA remains unresolved under UAT257; source-dependent UAT238 is not closed.
+
+Checkpoint diff review: 39 retained raw native captures contain their original extra terminal blank line. These are preserved evidence bytes, not source lint defects; no other staged whitespace warnings or product edits are included in this checkpoint.

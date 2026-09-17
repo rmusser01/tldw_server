@@ -1,0 +1,637 @@
+{
+  "task": "TASK13260.179",
+  "uat": "UAT237",
+  "verdict": "CLEAR_BOUNDED_NATIVE_PG_SINGLE_AC1_AC2",
+  "observedAt": "2026-09-17T23:10:05.514Z",
+  "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+  "checks": [
+    {
+      "name": "normal-visible-disconnect",
+      "pass": true
+    },
+    {
+      "name": "normal-disconnected-media-navigation",
+      "pass": true
+    },
+    {
+      "name": "settled-and-repeat-credential-gate",
+      "pass": true
+    },
+    {
+      "name": "settled-no-search-failure-toasts",
+      "pass": true
+    },
+    {
+      "name": "three-failed-helpers-retained",
+      "pass": true
+    },
+    {
+      "name": "first-helper-waited-wrong-logout",
+      "pass": true
+    },
+    {
+      "name": "two-stale-reference-attempts",
+      "pass": true
+    },
+    {
+      "name": "corrected-settings-helper-uses-visible-label",
+      "pass": true
+    },
+    {
+      "name": "core-and-rag-ready-after-reconnection",
+      "pass": true
+    },
+    {
+      "name": "original-item-visible-after-reconnection",
+      "pass": true
+    },
+    {
+      "name": "truthful-outage-with-retry",
+      "pass": true
+    },
+    {
+      "name": "visible-retry-helper-only-normal-ui",
+      "pass": true
+    },
+    {
+      "name": "media-and-original-item-visible-after-retry",
+      "pass": true
+    },
+    {
+      "name": "real-media200-original-item",
+      "pass": true
+    },
+    {
+      "name": "real-rag-health200",
+      "pass": true
+    },
+    {
+      "name": "401-is-reachability-only",
+      "pass": true
+    },
+    {
+      "name": "source-and-profile-spec",
+      "pass": true
+    },
+    {
+      "name": "original-profile-unchanged",
+      "pass": true
+    },
+    {
+      "name": "original-initialization-unchanged",
+      "pass": true
+    },
+    {
+      "name": "original-holder-receipt-unchanged",
+      "pass": true
+    },
+    {
+      "name": "process-binding-91770",
+      "pass": true
+    },
+    {
+      "name": "process-binding-97807",
+      "pass": true
+    },
+    {
+      "name": "owned-api-sigterm-before-restart",
+      "pass": true
+    },
+    {
+      "name": "retry-after-restart",
+      "pass": true
+    },
+    {
+      "name": "proof-retains-independent-services",
+      "pass": true
+    },
+    {
+      "name": "frontend-source-binding",
+      "pass": true
+    },
+    {
+      "name": "preparation-gate-binding",
+      "pass": true
+    },
+    {
+      "name": "preparation-completion-binding",
+      "pass": true
+    },
+    {
+      "name": "preparation-sourceManifest-binding",
+      "pass": true
+    },
+    {
+      "name": "preparation-pythonReuse-binding",
+      "pass": true
+    },
+    {
+      "name": "preparation-archive-binding",
+      "pass": true
+    },
+    {
+      "name": "released-gate-correct-source",
+      "pass": true
+    },
+    {
+      "name": "dependency-reuse-explicit",
+      "pass": true
+    },
+    {
+      "name": "all12-reviewed-files-match-runtime-copy-and-manifest",
+      "pass": true
+    }
+  ],
+  "allChecksPass": true,
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-backend-restart.txt",
+      "bytes": 416,
+      "sha256": "dcabef9b9de6a5a7c76e99b82b892ee0d330922c98eb613174615faa6a03d569",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-disconnect.txt",
+      "bytes": 11963,
+      "sha256": "01b709c347b19224d612cac5c44a26389d0a99bb4c02be4b2ba458136ad3eee4",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-disconnected-media-settled.txt",
+      "bytes": 714,
+      "sha256": "bd83ac10fa1864aa4cb9b3406442adfce39111b5cb25bb777147773f24ccede6",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-disconnected-media.txt",
+      "bytes": 763,
+      "sha256": "92fc06ede6057067a0e9d2b3ca6d0c767618fd6775b332069c4084eb44916150",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-disconnected-observer.txt",
+      "bytes": 2591,
+      "sha256": "359b2892d33d36791b19350ab98d3bceef13dad3a8876f1feb1a152c8dc00d22",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-disconnected-resnapshot.txt",
+      "bytes": 621,
+      "sha256": "f2f3d55f6621da2e3779dfa095a37f733a4a0613b8839e8bb2f069fa7635d75d",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-open-settings.js",
+      "bytes": 281,
+      "sha256": "845f6ce49245f11645ec4ff6a20f4ab78e19b30431e5c66312d77e9faf8a38ef",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-outage-process-proof.json",
+      "bytes": 1512,
+      "sha256": "63167b6fd0aa3b1430d823cb3b5dc8f0e36cb40c2f2c51e58f3ec3bc6ab06d4c",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-outage-recovered.txt",
+      "bytes": 6485,
+      "sha256": "36a5d6d3077c91f92c97bd84ad8642dba7561e023323f79cf627e1f0ca2f2005",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-outage-retry.js",
+      "bytes": 487,
+      "sha256": "40aa6c7f08d50d61e2839f6c2a494e3425cbdd2e970930f83ac81b97b1a1cb29",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-real-outage-media.txt",
+      "bytes": 949,
+      "sha256": "7de43e8acad98ed57c4c677f54d364056f5042582816da6946c168de269c9af5",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-real-outage-settled.txt",
+      "bytes": 1042,
+      "sha256": "34a4bb5d0266df5832ce114bbabb629a8d1f67aeefe3f55ca0bc9a1fb554f2a3",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnect-form-v2.txt",
+      "bytes": 97,
+      "sha256": "bef48317b3863e785f47ce224d139e24f9b2c1ea33aedcad0af3467711e4b591",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnect-form-v3.txt",
+      "bytes": 5898,
+      "sha256": "9c5c6ccbbc4134d96e7da97d1382478038c3e56b744830da99db9901b56789cc",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnect-form.txt",
+      "bytes": 97,
+      "sha256": "c1a6759271cbd90eac58e16c7720948ce8d01f6ca308dba26dfac21557885f52",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnect.private.js",
+      "bytes": 380,
+      "sha256": "3ec9f037d555b955c8a6f7fda7782aee6a5e470aafea2aefa11ccf9b8d8c76b0",
+      "classification": "private-hash-only"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnected-media-settled.txt",
+      "bytes": 9176,
+      "sha256": "9d89e14484ac1b3f2742d833115fd7430dcf6a295f95a0b40da42daeeb254023",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnected-media.txt",
+      "bytes": 508,
+      "sha256": "bcbeee3270520105ed70e167bc7c62391e430c4c9bb9038e940e4b834a87d7cd",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnected-settled.txt",
+      "bytes": 12388,
+      "sha256": "53d51ecd4cde4a274130db7beb475794a80b8062f67b289d40aaf58e247cbc8f",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-reconnected.txt",
+      "bytes": 7072,
+      "sha256": "a79adc26d0c808dc6a6a34bd3121a48c90359e05a979b3cd60217c7be49a240e",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-server-settings.txt",
+      "bytes": 12687,
+      "sha256": "8a1b1eb0057eda757358633312ee2f36a147c8eba5ea13457e2a241feff8814f",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-settings-snapshot.txt",
+      "bytes": 8131,
+      "sha256": "5e48bb78fed719013630ecc79d19bf0339dae17166846064d109b993e70f9f21",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/auth237-settings.txt",
+      "bytes": 162,
+      "sha256": "fa2c086f4dc3e3c8cbb1b21f4bea2330c5bfd2d848e331bba44de55dfb29a3e5",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/binding.private.json",
+      "bytes": 1644,
+      "sha256": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "classification": "private-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "bytes": 11397,
+      "sha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "classification": "private-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "bytes": 217,
+      "sha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "classification": "private-hash-only"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "bytes": 1594,
+      "sha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "classification": "private-hash-only"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789685136710-2f4c1257-863c-45ea-ba7d-ab69c111e7c9.process.private.json",
+      "bytes": 1316,
+      "sha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "classification": "mutable-process-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789686261464-ef9f65a7-bfc0-44f6-a9df-4b9bb5eec125.process.private.json",
+      "bytes": 1218,
+      "sha256": "f292981e33c58057f2df18a4f28b560ec466c679411516ad9f3b2ccbb241218b",
+      "classification": "mutable-process-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/frontend-1789685141496-e82c76cd-d4ff-463e-b13e-feae5684e44f.process.private.json",
+      "bytes": 1333,
+      "sha256": "55d6ba7a9b98283f0ac8a0a7b9ea924fcd70a8add89b01fd00e232e45656148c",
+      "classification": "mutable-process-allowlist"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/gate.json",
+      "bytes": 1118,
+      "sha256": "80f85a0325b356ae3512ce863682d340fe3580133af594fa6a67469627fff3f8",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/complete.json",
+      "bytes": 554,
+      "sha256": "d2c1a8acc76ce16f24a34bd054ed3dd311646ffbb7f7b0f4a47d096ff73df5a9",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/pg-single-source-manifest.json",
+      "bytes": 8498043,
+      "sha256": "d27c1ed455cbc8da979bffd711720258df024f7d88b237fdefab798d9e694e04",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/python-reuse.json",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/6f6983b0620aae1f0892c6b0d3ae3bebfc105e02.tar",
+      "bytes": 757053440,
+      "sha256": "ca8ea792d6d270ed05e6b449408c02f9f81307439cae317c93bca73e3d220c64",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review-media/REVIEW.md",
+      "bytes": 1738,
+      "sha256": "6fc633d980808ebb521d8d42d71e8fc0b543dfff6ac6537c74f1554264f6e585",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review-media/reviewer-manifest.json",
+      "bytes": 2535,
+      "sha256": "31fcb5d6448840134dd46d628aabbebffc70224fd55bab3129fa9cbbef83f6b3",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review-media/source-after.json",
+      "bytes": 2628,
+      "sha256": "9f854b7b25d58b769fbbd7738749e5fdf6a010c8f7cc94cbeb138b701a4d1b51",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "bytes": 73382,
+      "sha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "bytes": 38956,
+      "sha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "bytes": 16247,
+      "sha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "bytes": 87550,
+      "sha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "bytes": 17977,
+      "sha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "bytes": 60276,
+      "sha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "bytes": 9850,
+      "sha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "bytes": 45247,
+      "sha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "bytes": 8241,
+      "sha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "bytes": 12308,
+      "sha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "bytes": 85910,
+      "sha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "bytes": 16010,
+      "sha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "classification": "safe"
+    },
+    {
+      "path": "backlog/tasks/task-13260.179 - Suppress-Media-search-failure-notifications-when-credentials-are-intentionally-disconnected.md",
+      "bytes": 3704,
+      "sha256": "df05bfe96ff1bc25ceb1aa5ed44c085239f44ea6ffe55966d54842ba522fccaa",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-auth237-review/REVIEW.md",
+      "bytes": 5596,
+      "sha256": "933a9891db33820aef850f6dbb723773432ee6d6ef835ae8b38f0668ffe9ff05",
+      "classification": "safe"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-auth237-review/audit.mjs",
+      "bytes": 9873,
+      "sha256": "b895afd526b36258d231ef261fb71b00866f44cb3a26671cd60e8b92dc324523",
+      "classification": "safe"
+    }
+  ],
+  "sourceComparisons": [
+    {
+      "path": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "reviewedSha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "runtimeCopySha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "manifestSha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "reviewedSha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "runtimeCopySha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "manifestSha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "reviewedSha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "runtimeCopySha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "manifestSha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "reviewedSha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "runtimeCopySha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "manifestSha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "reviewedSha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "runtimeCopySha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "manifestSha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "reviewedSha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "runtimeCopySha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "manifestSha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "reviewedSha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "runtimeCopySha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "manifestSha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "reviewedSha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "runtimeCopySha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "manifestSha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "reviewedSha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "runtimeCopySha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "manifestSha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "reviewedSha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "runtimeCopySha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "manifestSha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "reviewedSha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "runtimeCopySha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "manifestSha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "reviewedSha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "runtimeCopySha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "manifestSha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "matches": true
+    }
+  ],
+  "processSnapshots": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789685136710-2f4c1257-863c-45ea-ba7d-ab69c111e7c9.process.private.json",
+      "observedSha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "proofSha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "proofHashMatchesAtReview": true,
+      "pid": 91770,
+      "action": "backend",
+      "status": "exited",
+      "startedAt": "2026-09-17T22:45:36.710Z",
+      "endedAt": "2026-09-17T23:03:54.945Z",
+      "signal": "SIGTERM",
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "port": 18702
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789686261464-ef9f65a7-bfc0-44f6-a9df-4b9bb5eec125.process.private.json",
+      "observedSha256": "f292981e33c58057f2df18a4f28b560ec466c679411516ad9f3b2ccbb241218b",
+      "proofSha256": "f292981e33c58057f2df18a4f28b560ec466c679411516ad9f3b2ccbb241218b",
+      "proofHashMatchesAtReview": true,
+      "pid": 97807,
+      "action": "backend",
+      "status": "started",
+      "startedAt": "2026-09-17T23:04:21.465Z",
+      "endedAt": null,
+      "signal": null,
+      "sourceCommit": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+      "bindingHash": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "port": 18702
+    }
+  ],
+  "selectedEvidence": {
+    "proofObservedAt": "2026-09-17T23:05:10.707Z",
+    "retryAt": "2026-09-17T23:04:40.339Z",
+    "recoveryFinishedAt": "2026-09-17T23:04:40.918Z",
+    "responseSummaries": [
+      {
+        "at": "2026-09-17T23:04:40.583Z",
+        "status": 200,
+        "path": "/api/v1/rag/health"
+      },
+      {
+        "at": "2026-09-17T23:04:40.861Z",
+        "status": 200,
+        "path": "/api/v1/media",
+        "items": [
+          {
+            "id": 1,
+            "type": "document",
+            "title": "rowan-observatory-public-20260917"
+          }
+        ],
+        "total": 1
+      },
+      {
+        "at": "2026-09-17T23:04:40.861Z",
+        "status": 200,
+        "path": "/api/v1/media",
+        "items": [
+          {
+            "id": 1,
+            "type": "document",
+            "title": "rowan-observatory-public-20260917"
+          }
+        ],
+        "total": 1
+      },
+      {
+        "at": "2026-09-17T23:04:40.861Z",
+        "status": 200,
+        "path": "/api/v1/media/capabilities"
+      }
+    ]
+  },
+  "limits": [
+    "Targeted PostgreSQL single-user profile only",
+    "No native SQLite rerun or fresh full matrix",
+    "No live process inspection by reviewer",
+    "Private credential helper hashed only, contents not inspected",
+    "Settled disconnected UI snapshots do not prove every transient event or zero requests",
+    "Process receipt hashes are point-in-time and may change on exit",
+    "Existing isolated data and dependencies reused",
+    "Existing component test review referenced; no tests rerun"
+  ]
+}

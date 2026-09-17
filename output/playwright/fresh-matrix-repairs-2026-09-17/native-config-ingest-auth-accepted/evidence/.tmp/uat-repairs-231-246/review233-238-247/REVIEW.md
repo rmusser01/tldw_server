@@ -1,0 +1,13 @@
+# Independent review: UAT233,238,247
+
+Reviewed against root base84f1d4e251. Seven owned source/test hashes match both frozen author manifests. No actionable issue remains in the reviewed implementation. Original native acceptance remains pending.
+
+The worker accepts only the persisted positive integer owner, creates personal non-admin content scope, and restores the previous scope on all exits. Each existing persistence executor receives its own copied context; concurrent/reused threads cannot retain it after callback exit. Invalid owners fail before content access. The warning fix removes an actual self-extension alias without hiding distinct warnings or failures. Direct authorized persistence still carries org/team scope; Jobs does not trust those fields from payloads.
+
+Sequence maintenance keeps the existing Media-only catalog allowlist. Reasserting the proven ownership dependency serializes ordinary sequence allocation; the rollback-only savepoint releases the lock before later schema DDL. Forward setval survives this inner rollback, while caller row writes remain caller-owned. Actual restricted-role tests demonstrate RLS-hidden owners, called/uncalled high water, reserved cache, rollback allocations, explicit large IDs, interleaved nextval, real error propagation, and existing cross-module bootstrap concurrency. The initial candidate deadlock and its causal correction are retained. The old test's demand to rewind9001 is appropriately replaced with behind-sequence repair plus independent allowlist inventory.
+
+Independent combined run: 165 passed, zero skipped, eight existing warnings,20.11s. This includes the117 sequence/schema/adjacent checks and unchanged48 worker checks; it is not additive to the authors' counts. Exact command and safe log are adjacent. Official disposable PostgreSQL fixtures were mandatory; no held matrix profile, runtime role, provider or native browser was changed.
+
+Author static evidence is bound to these source hashes: sequence Ruff0/Bandit0/compile4; worker Ruff27baseline/current identical with new test0, production/test Bandit0 and compile3. Existing whole-file formatting differences are disclosed in the author packet; no broad reformat or weakened control. PostgreSQL savepoint/sequence behavior was checked against official PostgreSQL and psycopg transaction documentation and actual server proof.
+
+Limits: no new native queued-upload success, exact analysis generation, full UAT, or arbitrary concurrent explicit-ID imports are claimed. Ordinary pool grantees are not schema-maintenance owners; this helper retains the existing constructor's ownership requirements.
