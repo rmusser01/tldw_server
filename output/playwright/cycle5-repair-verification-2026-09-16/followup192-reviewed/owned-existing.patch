@@ -1,0 +1,35 @@
+diff --git a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+index 09c7cb1e0a..7481fddaf1 100644
+--- a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
++++ b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+@@ -37529,7 +37529,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+                 row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                 if not row:
+                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
+-                card_id = int(row[0])
++                card_id = int(row["id"])
+                 self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
+                 # update tags_json mirror
+                 conn.execute(
+@@ -37545,7 +37545,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
+     def _sync_flashcard_keyword_links(self, conn: sqlite3.Connection, card_id: int, tags: list[str]) -> None:
+         # current keyword ids
+         cur_kw_ids = {
+-            r[0] for r in conn.execute(
++            r["keyword_id"] for r in conn.execute(
+                 "SELECT keyword_id FROM flashcard_keywords WHERE card_id = ?", (card_id,)
+             ).fetchall()
+         }
+diff --git a/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py b/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
+index 684d677c59..bb43d67ee6 100644
+--- a/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
++++ b/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
+@@ -219,7 +219,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
+             self.calls.append(sql)
+             sql_upper = sql.strip().upper()
+             if sql_upper.startswith("SELECT ID FROM FLASHCARDS"):
+-                return _Cursor(rows=[(1,)])
++                return _Cursor(rows=[{"id": 1}])
+             if sql_upper.startswith("SELECT KEYWORD_ID FROM FLASHCARD_KEYWORDS"):
+                 return _Cursor(rows=[])
+             if "INSERT INTO FLASHCARD_KEYWORDS" in sql_upper:

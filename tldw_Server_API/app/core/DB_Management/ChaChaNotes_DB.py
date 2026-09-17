@@ -37529,7 +37529,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
                 if not row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
-                card_id = int(row[0])
+                card_id = int(row["id"])
                 self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
                 # update tags_json mirror
                 conn.execute(
@@ -37545,7 +37545,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _sync_flashcard_keyword_links(self, conn: sqlite3.Connection, card_id: int, tags: list[str]) -> None:
         # current keyword ids
         cur_kw_ids = {
-            r[0] for r in conn.execute(
+            r["keyword_id"] for r in conn.execute(
                 "SELECT keyword_id FROM flashcard_keywords WHERE card_id = ?", (card_id,)
             ).fetchall()
         }

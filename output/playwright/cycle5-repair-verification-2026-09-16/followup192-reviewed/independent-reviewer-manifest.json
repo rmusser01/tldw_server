@@ -1,0 +1,18 @@
+{
+  "task": "TASK13260.130",
+  "verdict": "clear",
+  "files": [
+    {
+      "path": ".tmp/uat192-independent-20260917/REVIEW192.md",
+      "sha256": "5c1751398f1ddf7f4f3e5e512fc86df354fc2acba37b809ecb612abfb85e2b66"
+    },
+    {
+      "path": ".tmp/uat192-independent-20260917/source-and-static-verification.json",
+      "sha256": "5da1f7b78a020e03de03a858dfb24d9d15962d9661dda52866500b6e086eabb0"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat192-independent-green.redacted.log",
+      "sha256": "9ab8e9ca2482f326a0456ace973bc76c69754395b7059628f31b38d87fb173e3"
+    }
+  ]
+}

@@ -219,7 +219,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
             self.calls.append(sql)
             sql_upper = sql.strip().upper()
             if sql_upper.startswith("SELECT ID FROM FLASHCARDS"):
-                return _Cursor(rows=[(1,)])
+                return _Cursor(rows=[{"id": 1}])
             if sql_upper.startswith("SELECT KEYWORD_ID FROM FLASHCARD_KEYWORDS"):
                 return _Cursor(rows=[])
             if "INSERT INTO FLASHCARD_KEYWORDS" in sql_upper:

@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-17T02:34:30.610Z",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "snapshot": ".tmp/uat192-repair-20260917/review-snapshot/ChaChaNotes_DB.py",
+      "sha256": "5a7a43c34aaa15d0e328c145f96f5919b0c6c14b6a4147da389a410488d2ea3e"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py",
+      "snapshot": ".tmp/uat192-repair-20260917/review-snapshot/test_chacha_postgres_fts.py",
+      "sha256": "91e412016a3b8bc15c2193fb24f8710484e77b59423d43bbf7146ca6c4ae53b5"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_flashcard_tag_rows_backends.py",
+      "snapshot": ".tmp/uat192-repair-20260917/review-snapshot/test_flashcard_tag_rows_backends.py",
+      "sha256": "605cf5e6be102c9096a5da3f4fdf87525f916c38c3681a24b3e4f6cad05f018c"
+    }
+  ]
+}

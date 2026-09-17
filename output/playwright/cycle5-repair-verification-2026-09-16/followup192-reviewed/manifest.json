@@ -1,0 +1,96 @@
+{
+  "at": "2026-09-17T02:39:06.570Z",
+  "files": [
+    {
+      "file": "PLAN192.md",
+      "source": ".tmp/uat192-repair-20260917/PLAN192.md",
+      "original_sha256": "49408b06bc8df87adb85569fc17fb55f0683d9fe4ad27c53fb7ae0e76b41bf50",
+      "retained_sha256": "49408b06bc8df87adb85569fc17fb55f0683d9fe4ad27c53fb7ae0e76b41bf50",
+      "normalization": "none"
+    },
+    {
+      "file": "IMPLEMENTATION192.md",
+      "source": ".tmp/uat192-repair-20260917/IMPLEMENTATION192.md",
+      "original_sha256": "42960b8a000c51e51a8c3278a66a63654a140e19f62b9fa35d07cfd62d127b7a",
+      "retained_sha256": "42960b8a000c51e51a8c3278a66a63654a140e19f62b9fa35d07cfd62d127b7a",
+      "normalization": "none"
+    },
+    {
+      "file": "causal-red.log",
+      "source": ".tmp/uat192-repair-20260917/causal-red.log",
+      "original_sha256": "8a40bf7a94d3d5ebdf10e96a526651b9d87579b7b52833693218349244035906",
+      "retained_sha256": "f9e9d8413cca13725b1b56c8e348e40705f614d679220cb9e2b44b84b546578f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "causal-red-test.py",
+      "source": ".tmp/uat192-repair-20260917/causal-red-test.py",
+      "original_sha256": "991a2a9a2e1ba044ec34f96236aaec5959f94201e40d4de90aa847a86d286027",
+      "retained_sha256": "991a2a9a2e1ba044ec34f96236aaec5959f94201e40d4de90aa847a86d286027",
+      "normalization": "none"
+    },
+    {
+      "file": "green.log",
+      "source": ".tmp/uat192-repair-20260917/green.log",
+      "original_sha256": "00837e74b1f9a501ea50b9bc9c7f9d11fd71f93563fe1715649f34e736559f9a",
+      "retained_sha256": "00837e74b1f9a501ea50b9bc9c7f9d11fd71f93563fe1715649f34e736559f9a",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat192-repair-20260917/owned-manifest.json",
+      "original_sha256": "218bc1c8b68f9faae39bf289b5bf2276fc8309d5f83ba6d5b8385bc992fead45",
+      "retained_sha256": "218bc1c8b68f9faae39bf289b5bf2276fc8309d5f83ba6d5b8385bc992fead45",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-existing.patch",
+      "source": ".tmp/uat192-repair-20260917/owned-existing.patch",
+      "original_sha256": "25eff5dfa145c40267f397ab8ffb030e3ea65949eb623390b4002f6342f12764",
+      "retained_sha256": "25eff5dfa145c40267f397ab8ffb030e3ea65949eb623390b4002f6342f12764",
+      "normalization": "none"
+    },
+    {
+      "file": "static-summary.json",
+      "source": ".tmp/uat192-repair-20260917/static-summary.json",
+      "original_sha256": "ebf74c6607e971513b1271724ee1b97c34af9bc5073178919f9e887eb22a8646",
+      "retained_sha256": "ebf74c6607e971513b1271724ee1b97c34af9bc5073178919f9e887eb22a8646",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff-new.json",
+      "source": ".tmp/uat192-repair-20260917/ruff-new.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bandit-comparison.json",
+      "source": ".tmp/uat192-repair-20260917/bandit-comparison.json",
+      "original_sha256": "db1c25725d2f64cdcdb80f098829d006d0a93922ebcadcf54f7cd2b3b88b527c",
+      "retained_sha256": "0c425e338ee7a61de153faaf76bc8ca290f4f45caf1fbd57f6ea5f730a0ebaf1",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bandit-tests.json",
+      "source": ".tmp/uat192-repair-20260917/bandit-tests.json",
+      "original_sha256": "5d7afb8b84583b11c4a0c7860ed9b3864f2881f7e7b72b1624e219ca492655ec",
+      "retained_sha256": "db03d23d78b821cff6936a68b81fa498b9c5a25b31c16256715b69bc698e7980",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-REVIEW192.md",
+      "source": ".tmp/uat192-independent-20260917/REVIEW192.md",
+      "original_sha256": "5c1751398f1ddf7f4f3e5e512fc86df354fc2acba37b809ecb612abfb85e2b66",
+      "retained_sha256": "5c1751398f1ddf7f4f3e5e512fc86df354fc2acba37b809ecb612abfb85e2b66",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-reviewer-manifest.json",
+      "source": ".tmp/uat192-independent-20260917/reviewer-manifest.json",
+      "original_sha256": "e229e4159beeaec54d5171d827907839422bc331b3b17ddcb296356718731f85",
+      "retained_sha256": "e229e4159beeaec54d5171d827907839422bc331b3b17ddcb296356718731f85",
+      "normalization": "none"
+    }
+  ]
+}
