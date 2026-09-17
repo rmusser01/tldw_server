@@ -652,6 +652,7 @@ export function useHistorySelection(
           resolveServicePromptScope,
           subscribeToServicePromptConfigChanges
         } = await import("@/services/service-prompts")
+        if (operation.epoch !== epoch.current) return false
         let valid = true
         let capturedOwner: HistoryOwnerV1 | null = null
         const unsubscribe = subscribeToServicePromptConfigChanges(() => {
@@ -678,6 +679,7 @@ export function useHistorySelection(
         if (!valid || operation.epoch !== epoch.current) return false
         const { serverChatMirrorOwnerKey, linkServerChatMirror } =
           await import("@/db/dexie/server-chat-mirror")
+        if (!valid || operation.epoch !== epoch.current) return false
         const mirrorKey = serverChatMirrorOwnerKey({ requestScope })
         if (
           details?.server_scope_key &&
