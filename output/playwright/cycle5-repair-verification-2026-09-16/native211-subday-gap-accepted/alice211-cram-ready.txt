@@ -1,0 +1,230 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=review)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=review
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f35e11]:
+  - generic [ref=f35e12]:
+    - generic [ref=f35e14]:
+      - link "Skip to main content" [ref=f35e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f35e16]:
+        - button "Expand sidebar" [ref=f35e17] [cursor=pointer]
+        - button "New Chat" [ref=f35e21] [cursor=pointer]
+        - generic [ref=f35e24]:
+          - button "Quick Ingest" [ref=f35e25] [cursor=pointer]
+          - button "Chat" [ref=f35e29] [cursor=pointer]
+          - button "Prompts" [ref=f35e32] [cursor=pointer]
+          - button "Characters" [ref=f35e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f35e41] [cursor=pointer]
+          - button "World Books" [ref=f35e45] [cursor=pointer]
+          - button "Notes" [ref=f35e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f35e52] [cursor=pointer]
+          - button "Media" [ref=f35e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f35e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f35e69] [cursor=pointer]
+          - button "Kanban" [ref=f35e75] [cursor=pointer]
+          - button "Watchlists" [ref=f35e77] [cursor=pointer]
+        - generic [ref=f35e82]:
+          - button "Open Notes Dock" [ref=f35e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f35e88] [cursor=pointer]
+          - button "Settings" [ref=f35e91] [cursor=pointer]
+      - main [ref=f35e95]:
+        - generic [ref=f35e96]:
+          - generic [ref=f35e99]:
+            - generic [ref=f35e100]:
+              - button "Expand sidebar" [ref=f35e101] [cursor=pointer]
+              - generic [ref=f35e103]:
+                - img "tldw Assistant" [ref=f35e104]
+                - generic [ref=f35e105]: tldw Assistant
+                - button "Companion Home" [ref=f35e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f35e110] [cursor=pointer]
+            - generic [ref=f35e113]:
+              - button "Search - Open command palette" [ref=f35e114] [cursor=pointer]:
+                - generic [ref=f35e118]: Search
+                - generic [ref=f35e119]: ⌘K
+              - button "Open settings" [ref=f35e120] [cursor=pointer]
+              - generic [ref=f35e132]:
+                - button "Notifications, 0 unread" [ref=f35e133] [cursor=pointer]
+                - status [ref=f35e137]: Notifications are active
+              - button "Switch to light theme" [ref=f35e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f35e145] [cursor=pointer]:
+                - generic [ref=f35e146]: "?"
+          - generic [ref=f35e148]:
+            - generic [ref=f35e150]:
+              - generic [ref=f35e152]:
+                - generic [ref=f35e153]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f35e154]
+              - navigation "Flashcards modes" [ref=f35e155]:
+                - generic [ref=f35e156]: Study
+                - generic [ref=f35e157]: Manage
+                - generic [ref=f35e158]: Import / Export
+                - generic [ref=f35e159]: Templates
+                - generic [ref=f35e160]: Scheduler
+            - generic [ref=f35e163]:
+              - tablist [ref=f35e164]:
+                - generic [ref=f35e166]:
+                  - tab "Study" [selected] [ref=f35e168] [cursor=pointer]
+                  - tab "Manage" [ref=f35e170] [cursor=pointer]
+                  - tab "Import / Export" [ref=f35e172] [cursor=pointer]
+                  - tab "Templates" [ref=f35e174] [cursor=pointer]
+                  - tab "Scheduler" [ref=f35e176] [cursor=pointer]
+                - generic [ref=f35e178]:
+                  - button "Test with Quiz" [disabled] [ref=f35e180]
+                  - button "Keyboard Shortcuts" [ref=f35e181] [cursor=pointer]
+              - tabpanel "Study" [ref=f35e188]:
+                - generic [ref=f35e189]:
+                  - generic [ref=f35e190]:
+                    - generic [ref=f35e191] [cursor=pointer]:
+                      - generic [ref=f35e192]:
+                        - generic: Select deck
+                        - combobox [ref=f35e193]
+                      - img "down" [ref=f35e195]
+                    - radiogroup "segmented control" [ref=f35e198]:
+                      - generic [ref=f35e199]:
+                        - generic [ref=f35e200] [cursor=pointer]:
+                          - radio "Due only"
+                          - generic "Due only" [ref=f35e201]
+                        - generic [ref=f35e202] [cursor=pointer]:
+                          - radio "Cram" [checked]
+                          - generic "Cram" [ref=f35e203]
+                    - radiogroup "segmented control" [ref=f35e204]:
+                      - generic [ref=f35e205]:
+                        - generic [ref=f35e206] [cursor=pointer]:
+                          - radio "Front first" [checked]
+                          - generic "Front first" [ref=f35e207]
+                        - generic [ref=f35e208] [cursor=pointer]:
+                          - radio "Back first"
+                          - generic "Back first" [ref=f35e209]
+                    - generic [ref=f35e1101]:
+                      - textbox "Filter cram by tag (optional)" [ref=f35e1102]: uat211-greeting
+                      - button [ref=f35e1158] [cursor=pointer]:
+                        - img "close-circle" [ref=f35e1159]
+                    - generic [ref=f35e1104]:
+                      - generic [ref=f35e1105]: Update schedule
+                      - switch [checked] [active] [ref=f35e1107] [cursor=pointer]
+                  - region [ref=f35e1086]:
+                    - generic [ref=f35e1087]:
+                      - generic [ref=f35e1093]:
+                        - strong [ref=f35e1095]: Source reviews
+                        - generic [ref=f35e1096]: No source reviews due
+                      - button "Schedule" [ref=f35e1097] [cursor=pointer]
+                  - generic [ref=f35e366]:
+                    - generic [ref=f35e367]:
+                      - generic [ref=f35e368]:
+                        - generic [ref=f35e369]: Reviewed today
+                        - strong [ref=f35e371]: "1"
+                      - generic [ref=f35e372]:
+                        - generic [ref=f35e373]: Retention rate
+                        - strong [ref=f35e375]: 100.0%
+                      - generic [ref=f35e376]:
+                        - generic [ref=f35e377]: Lapse rate
+                        - strong [ref=f35e379]: 0.0%
+                      - generic [ref=f35e380]:
+                        - generic [ref=f35e381]: Avg answer time
+                        - strong [ref=f35e383]: 50.7s
+                      - generic [ref=f35e384]:
+                        - generic [ref=f35e385]: Study streak
+                        - strong [ref=f35e387]: 1 day
+                    - generic [ref=f35e388]:
+                      - strong [ref=f35e390]: Deck progress
+                      - generic [ref=f35e391]:
+                        - generic [ref=f35e392]:
+                          - strong [ref=f35e394]: Alice UAT151 Citrine Deck
+                          - generic [ref=f35e395]:
+                            - generic [ref=f35e396]: "Total: 2"
+                            - generic [ref=f35e397]: "New: 1"
+                            - generic [ref=f35e398]: "Learning: 1"
+                            - generic [ref=f35e399]: "Due: 1"
+                            - generic [ref=f35e400]: "Mature: 0"
+                        - progressbar [ref=f35e401]
+                      - generic [ref=f35e405]:
+                        - generic [ref=f35e406]:
+                          - strong [ref=f35e408]: Alice UAT167 recovery 20260917
+                          - generic [ref=f35e409]:
+                            - generic [ref=f35e410]: "Total: 1"
+                            - generic [ref=f35e411]: "New: 1"
+                            - generic [ref=f35e412]: "Learning: 0"
+                            - generic [ref=f35e413]: "Due: 0"
+                            - generic [ref=f35e414]: "Mature: 0"
+                        - progressbar [ref=f35e415]
+                      - generic [ref=f35e418]:
+                        - generic [ref=f35e419]:
+                          - strong [ref=f35e421]: Alice UAT196 concise recovery 20260917
+                          - generic [ref=f35e422]:
+                            - generic [ref=f35e423]: "Total: 1"
+                            - generic [ref=f35e424]: "New: 1"
+                            - generic [ref=f35e425]: "Learning: 0"
+                            - generic [ref=f35e426]: "Due: 0"
+                            - generic [ref=f35e427]: "Mature: 0"
+                        - progressbar [ref=f35e428]
+                  - status [ref=f35e1162]:
+                    - generic [ref=f35e1163]: "1 card remaining, 0 reviewed, Available now: 1"
+                    - generic [ref=f35e1164]:
+                      - generic [aria-hidden] [ref=f35e1165]: Study queue
+                      - generic [aria-hidden] [ref=f35e1166]: "1"
+                      - generic [aria-hidden] [ref=f35e1167]: card remaining
+                    - generic [aria-hidden] [ref=f35e1169]: 0 reviewed
+                    - generic [aria-hidden] [ref=f35e1171]: "Available now: 1"
+                    - generic [aria-hidden] [ref=f35e1173]: ~1 min left
+                  - generic [ref=f35e1176]:
+                    - generic [ref=f35e1178]:
+                      - generic [ref=f35e1179]: Standard
+                      - generic [ref=f35e1180]: New
+                      - generic [ref=f35e1182]: SM-2+
+                      - generic [ref=f35e1183]: uat211-greeting
+                      - 'link "Note #029a74d1-1de1-4283-99ff-5a816f275fa7" [ref=f35e1185] [cursor=pointer]':
+                        - /url: /notes?source_ref_id=029a74d1-1de1-4283-99ff-5a816f275fa7
+                      - button "Edit card (E)" [ref=f35e1186] [cursor=pointer]:
+                        - generic [ref=f35e1187]: Edit
+                    - generic [ref=f35e1188]:
+                      - heading "Front" [level=5] [ref=f35e1189]
+                      - paragraph [ref=f35e1192]: What greeting did the Helpful AI Assistant use in this UAT conversation?
+                    - button "Need help?" [ref=f35e1195] [cursor=pointer]
+                    - generic [ref=f35e1202]:
+                      - button "Show answer (Space)" [ref=f35e1203] [cursor=pointer]:
+                        - generic [ref=f35e1204]: Show Answer
+                      - generic [ref=f35e1205]:
+                        - generic [ref=f35e1206]: Space Flip
+                        - generic [ref=f35e1207]: E Edit
+                        - button "Compact hints" [ref=f35e1208] [cursor=pointer]
+                  - generic [ref=f35e450]:
+                    - generic [ref=f35e451]: Recent study sessions
+                    - list "Recent study sessions" [ref=f35e455]:
+                      - listitem [ref=f35e456]:
+                        - generic [ref=f35e457]:
+                          - generic [ref=f35e458]:
+                            - strong [ref=f35e460]: Alice UAT151 Citrine Deck
+                            - button "View completed session" [ref=f35e461] [cursor=pointer]
+                          - generic [ref=f35e463]:
+                            - generic [ref=f35e464]: Completed
+                            - generic [ref=f35e465]: Cram review
+                            - generic [ref=f35e466]: 1 card reviewed
+                          - generic [ref=f35e467]: Completed 2026-09-16 23:26
+                      - listitem [ref=f35e468]:
+                        - generic [ref=f35e469]:
+                          - generic [ref=f35e470]:
+                            - strong [ref=f35e472]: Alice UAT151 Citrine Deck
+                            - button "View completed session" [ref=f35e473] [cursor=pointer]
+                          - generic [ref=f35e475]:
+                            - generic [ref=f35e476]: Completed
+                            - generic [ref=f35e477]: Cram review
+                            - generic [ref=f35e478]: 1 card reviewed
+                          - generic [ref=f35e479]: Completed 2026-09-16 19:09
+    - generic: "* *"
+  - alert [ref=f35e10]: Flashcards | tldw
+```

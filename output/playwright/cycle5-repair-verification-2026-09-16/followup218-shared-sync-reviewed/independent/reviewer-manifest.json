@@ -1,0 +1,103 @@
+{
+  "task": "TASK13260.156",
+  "verdict": "clear after resolved CHECK-literal finding",
+  "author_frozen_manifest_sha256": "424ea3879fea2ad3bdcd01ed266b3439e20c5058b87b460707b5b68f5e10f029",
+  "final_independent": {
+    "passed": 176,
+    "skipped": 0,
+    "warnings": 4,
+    "seconds": 43.2
+  },
+  "private_counterexamples": {
+    "red_failed": 2,
+    "green_passed": 2,
+    "skipped": 0,
+    "green_seconds": 1.53
+  },
+  "files": [
+    {
+      "path": ".tmp/uat218-independent-20260917/REVIEW218.md",
+      "sha256": "28917ec5a5e8a7196d149d4a0220025b78bf0222cc9b94c926089d57cc3ef261"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-before-source-hashes.json",
+      "sha256": "424ea3879fea2ad3bdcd01ed266b3439e20c5058b87b460707b5b68f5e10f029"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-after-source-hashes.json",
+      "sha256": "a8b601a855f573e5e8f7b4413a4f9862d370da8e21d4b56ddda43cfa31024786"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/source-attribution.json",
+      "sha256": "bfd5e08bbe8c3a21d88861102b7e3798b23849c07afebd7d4746978cdd52d0e8"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-required-pg176.redacted.log",
+      "sha256": "562391601d9932f1fac426c1f6e24336e6448bb3c6f869bf5bd926275a47e43e"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/uat218-independent-corrected-command.json",
+      "sha256": "9661cd895bc75ba565fb441526e130a76d4adc28391d57277eed8804ecb4a2e6"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-ruff-current.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-bandit-production.json",
+      "sha256": "f99ab41d3e42395746ea455ce1ab5a25706658094e62a7c0298bf26cdd799dd2"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-bandit-tests.json",
+      "sha256": "31493c5eb44a4b865ea59d6bf92522a2664a714c03aa510ad2d4e89fe8d18d31"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/corrected-compile.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/FINDING218-literal-guard.md",
+      "sha256": "f249826fd81f0619bc0ad981861bb4a2674afa1052deefd096833fce6015647c"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/test_operation_literal_whitespace_probe.py",
+      "sha256": "fcdea20de982c26ece9a72701e97d7febcd0ce4db9663a66eeca4223c2f6e53a"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/literal-guard-red.redacted.log",
+      "sha256": "5cb0fd513fc5e6c087cf4eca98279b167785664811dff6dad0862542604c0a93"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/literal-guard-green.redacted.log",
+      "sha256": "1296b4ef30f1336ce906f9359a16cd26ee4f8011dcab46fbd1cce76908d63029"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/operation-literal-embedded-space-RED.json",
+      "sha256": "0cc49b7628b57b9529e39b10b5634077e01b35d7838a4d5f01208bf4c9f90d01"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/operation-literal-trailing-space-RED.json",
+      "sha256": "25ba0bea709c6e0b9f3735af30149ef279327314848c3367c6729afa1c1b55f6"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/operation-literal-embedded-space-GREEN.json",
+      "sha256": "99694b1ae9eb01649a7f4afaa5518cfe2faefbcf21b5cf2a15e603b0ab854d25"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/operation-literal-trailing-space-GREEN.json",
+      "sha256": "dba364259f8a6b0c5037cd082412915b84ddec4ecf9f8278a5bc26cdbec86a9b"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/initial-required-pg174.redacted.log",
+      "sha256": "700c860adb3f26c3dedea144f6364d93d06fea0f61b1d9cdf5e6d79c1afbd9c2"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/before-source-hashes.json",
+      "sha256": "0503e25583006e78db2ef199129b31754c7cc12e54c567f611c9f2d38e30f43b"
+    },
+    {
+      "path": ".tmp/uat218-independent-20260917/after-initial-review-hashes.json",
+      "sha256": "0503e25583006e78db2ef199129b31754c7cc12e54c567f611c9f2d38e30f43b"
+    }
+  ]
+}

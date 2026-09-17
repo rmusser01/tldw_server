@@ -1,0 +1,338 @@
+{
+  "at": "2026-09-17T07:58:03.919Z",
+  "passed": true,
+  "scope": "Running PostgreSQL API; fresh synthetic Alice/Bob sessions, no browser credential access. Test-created characters only. Existing native service role remains privileged; this verifies application ownership.",
+  "aliceId": 5,
+  "bobId": 6,
+  "records": [
+    {
+      "at": "2026-09-17T07:58:03.622Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T07:58:03.638Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "username": "alice"
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.704Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T07:58:03.715Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "username": "bob"
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.732Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/characters/5/restore?expected_version=3",
+      "status": 409,
+      "body": {
+        "detail": "Character card ID 5 not found. (Entity: character_cards, ID: 5)"
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.749Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/characters/999999999/restore?expected_version=3",
+      "status": 409,
+      "body": {
+        "detail": "Character card ID 999999999 not found. (Entity: character_cards, ID: 999999999)"
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.768Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757&deleted_only=true",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "UAT194 private character 20260917 0757",
+            "description": "Synthetic Alice-only UAT194 violet compass updated.",
+            "personality": null,
+            "scenario": null,
+            "system_prompt": null,
+            "post_history_instructions": null,
+            "first_message": "Alice fixture greeting.",
+            "message_example": null,
+            "creator_notes": null,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": null,
+            "character_version": null,
+            "extensions": {},
+            "image_base64": null,
+            "id": 5,
+            "version": 3,
+            "created_at": "2026-09-17T07:56:59.646000Z",
+            "updated_at": "2026-09-17T07:56:59.906000Z",
+            "last_modified": "2026-09-17T07:56:59.906000Z",
+            "image_present": false
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.786Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757&include_deleted=true",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "UAT194 private character 20260917 0757",
+            "description": "Synthetic Bob-only UAT194 amber map.",
+            "personality": null,
+            "scenario": null,
+            "system_prompt": null,
+            "post_history_instructions": null,
+            "first_message": "Bob fixture greeting.",
+            "message_example": null,
+            "creator_notes": null,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": null,
+            "character_version": null,
+            "extensions": {},
+            "image_base64": null,
+            "id": 6,
+            "version": 1,
+            "created_at": "2026-09-17T07:56:59.805000Z",
+            "updated_at": "2026-09-17T07:56:59.805000Z",
+            "last_modified": "2026-09-17T07:56:59.805000Z",
+            "image_present": false
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.815Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/characters/5/restore?expected_version=3",
+      "status": 200,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass updated.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Alice fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 5,
+        "version": 4,
+        "created_at": "2026-09-17T07:56:59.646000Z",
+        "updated_at": "2026-09-17T07:58:03.806000Z",
+        "last_modified": "2026-09-17T07:58:03.806000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.838Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/5",
+      "status": 200,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass updated.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Alice fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 5,
+        "version": 4,
+        "created_at": "2026-09-17T07:56:59.646000Z",
+        "updated_at": "2026-09-17T07:58:03.806000Z",
+        "last_modified": "2026-09-17T07:58:03.806000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.855Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/5",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 5 not found."
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.871Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/6",
+      "status": 200,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Bob-only UAT194 amber map.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Bob fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 6,
+        "version": 1,
+        "created_at": "2026-09-17T07:56:59.805000Z",
+        "updated_at": "2026-09-17T07:56:59.805000Z",
+        "last_modified": "2026-09-17T07:56:59.805000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.888Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "UAT194 private character 20260917 0757",
+            "description": "Synthetic Alice-only UAT194 violet compass updated.",
+            "personality": null,
+            "scenario": null,
+            "system_prompt": null,
+            "post_history_instructions": null,
+            "first_message": "Alice fixture greeting.",
+            "message_example": null,
+            "creator_notes": null,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": null,
+            "character_version": null,
+            "extensions": {},
+            "image_base64": null,
+            "id": 5,
+            "version": 4,
+            "created_at": "2026-09-17T07:56:59.646000Z",
+            "updated_at": "2026-09-17T07:58:03.806000Z",
+            "last_modified": "2026-09-17T07:58:03.806000Z",
+            "image_present": false
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.904Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 2
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:58:03.919Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 3
+        }
+      }
+    }
+  ]
+}

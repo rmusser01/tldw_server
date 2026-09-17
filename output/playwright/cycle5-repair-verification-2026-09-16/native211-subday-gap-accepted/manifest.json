@@ -1,0 +1,222 @@
+{
+  "at": "2026-09-17T08:03:35.822Z",
+  "files": [
+    {
+      "file": "alice211-answer.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-answer.txt",
+      "original_sha256": "f9c3b5edc64aa778552ca4b20d88d161c833f7ebc2ffd2d6bc7e9012d4e27a3c",
+      "retained_sha256": "f9c3b5edc64aa778552ca4b20d88d161c833f7ebc2ffd2d6bc7e9012d4e27a3c",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-citrine-cancel.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-citrine-cancel.txt",
+      "original_sha256": "5bfb57dc2eec96453b8e4e789375cfacea0a6f2f05d252b5f1db48f70a820431",
+      "retained_sha256": "5bfb57dc2eec96453b8e4e789375cfacea0a6f2f05d252b5f1db48f70a820431",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-citrine-editor.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-citrine-editor.txt",
+      "original_sha256": "629a6577c6d20030b6ffa9a9e73e87cecf57c6b6c4f7f75a0a02081cc6d49dcb",
+      "retained_sha256": "629a6577c6d20030b6ffa9a9e73e87cecf57c6b6c4f7f75a0a02081cc6d49dcb",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-cram-filter.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-cram-filter.txt",
+      "original_sha256": "aedab86cb3954b7aad7fead339720cd1f7e728122ea2722989ec17b254e32fdc",
+      "retained_sha256": "5795203a1b9555820e2738ee87d2191557060d3bf82a05e19efe5a63e9d61004",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-cram-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-cram-open.txt",
+      "original_sha256": "04f26647a6ef228158f8b0514f8fc446118bafb089c08f528be025abeb6b2ae4",
+      "retained_sha256": "04f26647a6ef228158f8b0514f8fc446118bafb089c08f528be025abeb6b2ae4",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-cram-ready.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-cram-ready.txt",
+      "original_sha256": "53eed1f7f8f2b31d11204819fc5513032bcbb4592e6faa411c2b2ce8fd351507",
+      "retained_sha256": "78f7ed6b89e005a54febdd8964328015c51750aa3011c43836bdf840e10df7ec",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-cram-schedule.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-cram-schedule.txt",
+      "original_sha256": "497f3a2b44d229b610e532bfa6a83fc2d7e4f357ddb22994d1cb905414a348f0",
+      "retained_sha256": "497f3a2b44d229b610e532bfa6a83fc2d7e4f357ddb22994d1cb905414a348f0",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-editor-cancel.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-editor-cancel.txt",
+      "original_sha256": "1f8bff31c48b200493b163ae0284bb949982f3682f3044ffe41587dbda1144a2",
+      "retained_sha256": "1f8bff31c48b200493b163ae0284bb949982f3682f3044ffe41587dbda1144a2",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-final-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-final-events.txt",
+      "original_sha256": "eef7f89a3c1d432e1448bffd15be73d89c595cc23f6352bcaaa3cecf29e11afe",
+      "retained_sha256": "b8d0514be5091b3805d8b2d2e1e694597ee59d9200d161e8ab4bd27e414f2967",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-flashcards-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-flashcards-open.txt",
+      "original_sha256": "7bac6e7fc6510060bba6f803a43e06b7241337a2924ffe7edbf75101bbc39289",
+      "retained_sha256": "7bac6e7fc6510060bba6f803a43e06b7241337a2924ffe7edbf75101bbc39289",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-flashcards-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-flashcards-settled.txt",
+      "original_sha256": "682109ce3c007fc5c5805bd3e5d992e5e2ae5021e1df11b6d2be9432f7b4c40d",
+      "retained_sha256": "4ce3f0c9aaae80e42b3df5faa05a5acf768c362e39e9f8a9a8579bafc585e62f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-full-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-full-reload.txt",
+      "original_sha256": "c01377d2a76cb067330c31d552cb25204e3705ad83d8d77b1f62b21bfea27a62",
+      "retained_sha256": "c01377d2a76cb067330c31d552cb25204e3705ad83d8d77b1f62b21bfea27a62",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-good-rating.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-good-rating.txt",
+      "original_sha256": "cf69dd000c5f379244b0d0701ca94e35b0138a9af46bfdf6b9d107c3ecc45ba1",
+      "retained_sha256": "cf69dd000c5f379244b0d0701ca94e35b0138a9af46bfdf6b9d107c3ecc45ba1",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-greeting-editor.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-greeting-editor.txt",
+      "original_sha256": "0df9755be603fea800bfb3962427f5a9425bbcbb6e08f25e3185f19a0d964442",
+      "retained_sha256": "0df9755be603fea800bfb3962427f5a9425bbcbb6e08f25e3185f19a0d964442",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-greeting-tag-added.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-greeting-tag-added.txt",
+      "original_sha256": "de92b10df594db64950d52e2b2defde77b9ffbc05ab9658a3b1986778a2dfbe4",
+      "retained_sha256": "de92b10df594db64950d52e2b2defde77b9ffbc05ab9658a3b1986778a2dfbe4",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-greeting-tag-input.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-greeting-tag-input.txt",
+      "original_sha256": "f1b7b35680f382a5d3988c5ab3178d86fb0efd30b3337e9c6e07da0185c76739",
+      "retained_sha256": "5b8d87119f56095aab8c895f9659785fe54d25a4643df35d3c231b5f3ab8479d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-greeting-tag-saved.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-greeting-tag-saved.txt",
+      "original_sha256": "e5d90ffb92b84d7f6072b8546efc92899d182310583fa1c7b3bbb814ced1f957",
+      "retained_sha256": "e5d90ffb92b84d7f6072b8546efc92899d182310583fa1c7b3bbb814ced1f957",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-manage-after-rating.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-manage-after-rating.txt",
+      "original_sha256": "22c5ce54863137c717bb78feec53bc5e256d941ca1527b659cce2a159229519f",
+      "retained_sha256": "22c5ce54863137c717bb78feec53bc5e256d941ca1527b659cce2a159229519f",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-manage-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-manage-open.txt",
+      "original_sha256": "5b6dc91454f95e4a322efb247602467464b514e91cc0c1d2d289af0e6a0b0c44",
+      "retained_sha256": "5b6dc91454f95e4a322efb247602467464b514e91cc0c1d2d289af0e6a0b0c44",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-rating-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-rating-events.txt",
+      "original_sha256": "deb6b65791689d9d8ff83035c401b03a4080c93ad3dc4e0321d46b59640a2fa5",
+      "retained_sha256": "0b07b36cd8d4610010d06af2b6f0262c3f944f35200244a39f1b65b7da38ce7e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-reload-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-reload-events.txt",
+      "original_sha256": "962532522195eee672f868661440e9641f7c5dda8b3e7393163a2b8e5ef9ac39",
+      "retained_sha256": "abc3e7264a2e516ee76088bba50bd1c7ef7a1594c45361463ac79f6075fd26ca",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-reload-settled.txt",
+      "original_sha256": "767f18cb6530028f42c216e31ef2e7753adffd9bf38073a9ceb47c15a0588fb5",
+      "retained_sha256": "2110cc2e7178e2d291cfcb555fe4ba20dcc3bf2a2f083bce156656ec3c43fcc3",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "alice211-reloaded-editor.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-reloaded-editor.txt",
+      "original_sha256": "7440e80d683b488983558b204a2503eed23ca0da3c113b3cad41f4aaca284684",
+      "retained_sha256": "7440e80d683b488983558b204a2503eed23ca0da3c113b3cad41f4aaca284684",
+      "normalization": "none"
+    },
+    {
+      "file": "alice211-study-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice211-study-open.txt",
+      "original_sha256": "4c8bdbebb0897b478e436bfe9e8a3dc5882c2a2a49dd069e7590462b3ea97b34",
+      "retained_sha256": "4c8bdbebb0897b478e436bfe9e8a3dc5882c2a2a49dd069e7590462b3ea97b34",
+      "normalization": "none"
+    },
+    {
+      "file": "ACCEPTANCE211.md",
+      "source": ".tmp/uat211-native-audit-20260917/ACCEPTANCE211.md",
+      "original_sha256": "03411ad6d08bf2be78a35f21c23cc21851e2a345ab35a507603875461dd8308c",
+      "retained_sha256": "03411ad6d08bf2be78a35f21c23cc21851e2a345ab35a507603875461dd8308c",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest.json",
+      "source": ".tmp/uat211-native-audit-20260917/audit-manifest.json",
+      "original_sha256": "9e7ef93eb06ce3ea4e83ff19ab2843d701be5bbe1b738005fc65671aa56edf04",
+      "retained_sha256": "9e7ef93eb06ce3ea4e83ff19ab2843d701be5bbe1b738005fc65671aa56edf04",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-harness-note.md",
+      "source": ".tmp/uat211-native-audit-20260917/audit-harness-note.md",
+      "original_sha256": "545018273cc36a9480d0a8fae8bf6da4e2ba266537efbee65e70a4aada024d10",
+      "retained_sha256": "545018273cc36a9480d0a8fae8bf6da4e2ba266537efbee65e70a4aada024d10",
+      "normalization": "none"
+    },
+    {
+      "file": "audit_inputs.py",
+      "source": ".tmp/uat211-native-audit-20260917/audit_inputs.py",
+      "original_sha256": "969f577432790827d3c2c3c6b02aa32cf60317332102a5920b60f461441911a4",
+      "retained_sha256": "969f577432790827d3c2c3c6b02aa32cf60317332102a5920b60f461441911a4",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest.json",
+      "source": ".tmp/uat211-native-audit-20260917/input-manifest.json",
+      "original_sha256": "25b0e81336344c7722a2516bbc2f0a6e59aea3471e84773cad6fd1bf7065670e",
+      "retained_sha256": "25b0e81336344c7722a2516bbc2f0a6e59aea3471e84773cad6fd1bf7065670e",
+      "normalization": "none"
+    },
+    {
+      "file": "task13260.149.txt",
+      "source": ".tmp/uat211-native-audit-20260917/task13260.149.txt",
+      "original_sha256": "88786a69bca300fffdf3b57f5f3652510283fad5d40687ceb4070fbce81b748d",
+      "retained_sha256": "1de519c58757fffe8c05973b7d19f25d0baff0b85e7ff863c49bc6c908012842",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "verified-facts.json",
+      "source": ".tmp/uat211-native-audit-20260917/verified-facts.json",
+      "original_sha256": "3057fe426184d759a75af1f594fb9bbecb2ef5d76277528a136a2640ee79c4ed",
+      "retained_sha256": "3057fe426184d759a75af1f594fb9bbecb2ef5d76277528a136a2640ee79c4ed",
+      "normalization": "none"
+    }
+  ]
+}

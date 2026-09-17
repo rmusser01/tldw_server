@@ -1,0 +1,175 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Characters | tldw](http://127.0.0.1:18583/characters)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/characters
+- Page Title: Characters | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f37e11]:
+  - generic [ref=f37e14]:
+    - link "Skip to main content" [ref=f37e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f37e16]:
+      - button "Expand sidebar" [ref=f37e17] [cursor=pointer]
+      - button "New Chat" [ref=f37e21] [cursor=pointer]
+      - generic [ref=f37e24]:
+        - button "Quick Ingest" [ref=f37e25] [cursor=pointer]
+        - button "Chat" [ref=f37e29] [cursor=pointer]
+        - button "Prompts" [ref=f37e32] [cursor=pointer]
+        - button "Characters" [ref=f37e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f37e41] [cursor=pointer]
+        - button "World Books" [ref=f37e45] [cursor=pointer]
+        - button "Notes" [ref=f37e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f37e52] [cursor=pointer]
+        - button "Media" [ref=f37e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f37e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f37e69] [cursor=pointer]
+        - button "Kanban" [ref=f37e75] [cursor=pointer]
+        - button "Watchlists" [ref=f37e77] [cursor=pointer]
+      - generic [ref=f37e82]:
+        - button "Open Notes Dock" [ref=f37e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f37e88] [cursor=pointer]
+        - button "Settings" [ref=f37e91] [cursor=pointer]
+    - main [ref=f37e95]:
+      - generic [ref=f37e96]:
+        - generic [ref=f37e99]:
+          - generic [ref=f37e100]:
+            - button "Expand sidebar" [ref=f37e101] [cursor=pointer]
+            - generic [ref=f37e103]:
+              - img "tldw Assistant" [ref=f37e104]
+              - generic [ref=f37e105]: tldw Assistant
+              - button "Companion Home" [ref=f37e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f37e110] [cursor=pointer]
+          - generic [ref=f37e113]:
+            - button "Search - Open command palette" [ref=f37e114] [cursor=pointer]:
+              - generic [ref=f37e118]: Search
+              - generic [ref=f37e119]: ⌘K
+            - button "Open settings" [ref=f37e120] [cursor=pointer]
+            - generic [ref=f37e132]:
+              - button "Notifications, 0 unread" [ref=f37e133] [cursor=pointer]
+              - status [ref=f37e137]: Notifications are active
+            - button "Switch to light theme" [ref=f37e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f37e145] [cursor=pointer]:
+              - generic [ref=f37e146]: "?"
+        - generic [ref=f37e148]:
+          - generic [ref=f37e149]:
+            - heading "Characters" [level=1] [ref=f37e150]
+            - paragraph [ref=f37e151]: Create reusable characters you can pick from the chat header and reuse across conversations.
+          - generic [ref=f37e152]:
+            - link "Skip to characters content" [ref=f37e153] [cursor=pointer]:
+              - /url: "#characters-main-content"
+            - main [ref=f37e154]:
+              - button [aria-hidden] [ref=f37e159] [cursor=pointer]: Upload character
+              - generic [ref=f37e160]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+              - generic [ref=f37e162]:
+                - button "New character" [ref=f37e163] [cursor=pointer]
+                - button "Import character" [ref=f37e165] [cursor=pointer]
+                - generic [ref=f37e170]:
+                  - textbox "Search characters" [ref=f37e171]
+                  - generic [ref=f37e172]: /
+                - radiogroup "View mode" [ref=f37e174]:
+                  - generic [ref=f37e175]:
+                    - generic [ref=f37e176] [cursor=pointer]:
+                      - radio [checked]
+                      - generic "Table view" [ref=f37e177]
+                    - generic [ref=f37e180] [cursor=pointer]:
+                      - radio
+                      - generic "Gallery view" [ref=f37e181]
+                - radiogroup "Character list view" [ref=f37e188]:
+                  - generic [ref=f37e189]:
+                    - generic [ref=f37e190] [cursor=pointer]:
+                      - radio "Active" [checked]
+                      - generic "Active characters" [ref=f37e191]: Active
+                    - generic [ref=f37e192] [cursor=pointer]:
+                      - radio "Trash"
+                      - generic "Recently deleted characters" [ref=f37e193]: Trash
+                - button "Filters" [ref=f37e194] [cursor=pointer]
+                - button "Display options" [ref=f37e199] [cursor=pointer]:
+                  - generic [ref=f37e200]: Display
+              - status [ref=f37e203]: 2 characters found
+              - generic [ref=f37e208]:
+                - table [ref=f37e212]:
+                  - rowgroup [ref=f37e220]:
+                    - row [ref=f37e221]:
+                      - columnheader "Select all on page" [ref=f37e222]:
+                        - checkbox "Select all on page" [ref=f37e225] [cursor=pointer]
+                      - columnheader "Name" [ref=f37e227] [cursor=pointer]
+                      - columnheader "Tags" [ref=f37e238]
+                      - columnheader "Creator" [ref=f37e239] [cursor=pointer]
+                      - columnheader "Activity" [ref=f37e250] [cursor=pointer]
+                      - columnheader "Actions" [ref=f37e261]
+                  - rowgroup [ref=f37e262]:
+                    - row [ref=f37e263]:
+                      - cell "Select UAT194 private character 20260917 0757" [ref=f37e264]:
+                        - checkbox "Select UAT194 private character 20260917 0757" [ref=f37e267] [cursor=pointer]
+                      - cell [ref=f37e269]:
+                        - generic [ref=f37e276]:
+                          - button "Edit name inline for UAT194 private character 20260917 0757" [ref=f37e279]: UAT194 private character 20260917 0757
+                          - button "Edit description inline for UAT194 private character 20260917 0757" [ref=f37e283]: Synthetic Alice-only UAT194 violet compass updated.
+                      - cell [ref=f37e286]
+                      - cell [ref=f37e287]
+                      - cell "Just now Updated Just now" [ref=f37e288]:
+                        - generic [ref=f37e289]:
+                          - generic [ref=f37e290]: Just now
+                          - generic [ref=f37e291]: Updated Just now
+                      - cell [ref=f37e292]:
+                        - generic [ref=f37e293]:
+                          - button "Chat as UAT194 private character 20260917 0757" [ref=f37e294] [cursor=pointer]
+                          - button "Edit character UAT194 private character 20260917 0757" [ref=f37e297] [cursor=pointer]
+                          - button "Delete character UAT194 private character 20260917 0757" [ref=f37e300] [cursor=pointer]
+                          - button "Add UAT194 private character 20260917 0757 to favorites" [ref=f37e304] [cursor=pointer]
+                          - button "More actions for UAT194 private character 20260917 0757" [ref=f37e307] [cursor=pointer]
+                    - row [ref=f37e312]:
+                      - cell "Select Helpful AI Assistant" [ref=f37e313]:
+                        - checkbox "Select Helpful AI Assistant" [ref=f37e316] [cursor=pointer]
+                      - cell [ref=f37e318]:
+                        - generic [ref=f37e325]:
+                          - generic [ref=f37e326]:
+                            - button "Edit name inline for Helpful AI Assistant" [ref=f37e328]: Helpful AI Assistant
+                            - generic [ref=f37e331]: "1"
+                          - button "Edit description inline for Helpful AI Assistant" [ref=f37e335]: A default, friendly assistant created automatically by the system.
+                      - cell [ref=f37e338]:
+                        - generic [ref=f37e339]:
+                          - button "default" [ref=f37e340] [cursor=pointer]
+                          - button "neutral" [ref=f37e342] [cursor=pointer]
+                          - button "Show and filter +1 hidden tags" [ref=f37e344]: "+1"
+                      - cell "System" [ref=f37e345]
+                      - cell "2h ago Updated 2h ago" [ref=f37e347]:
+                        - generic [ref=f37e348]:
+                          - generic [ref=f37e349]: 2h ago
+                          - generic [ref=f37e350]: Updated 2h ago
+                      - cell [ref=f37e351]:
+                        - generic [ref=f37e352]:
+                          - button "Chat as Helpful AI Assistant" [ref=f37e353] [cursor=pointer]
+                          - button "Edit character Helpful AI Assistant" [ref=f37e356] [cursor=pointer]
+                          - button "Delete character Helpful AI Assistant" [ref=f37e359] [cursor=pointer]
+                          - button "Add Helpful AI Assistant to favorites" [ref=f37e363] [cursor=pointer]
+                          - button "More actions for Helpful AI Assistant" [ref=f37e366] [cursor=pointer]
+                - list [ref=f37e371]:
+                  - listitem "Previous Page" [ref=f37e372]:
+                    - button [disabled] [ref=f37e373]:
+                      - img "left" [ref=f37e374]
+                  - listitem "1" [ref=f37e377] [cursor=pointer]
+                  - listitem "Next Page" [ref=f37e379]:
+                    - button [disabled] [ref=f37e380]:
+                      - img "right" [ref=f37e381]
+                  - listitem [ref=f37e384]:
+                    - generic [ref=f37e385]:
+                      - generic [ref=f37e386]:
+                        - generic "10 / page" [ref=f37e387]
+                        - combobox "Page Size" [ref=f37e388]
+                      - img "down" [ref=f37e390]
+  - alert [ref=f37e10]
+```

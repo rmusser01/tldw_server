@@ -1,0 +1,70 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 74,
+      "row": 16
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "import asyncio\nimport json\nfrom contextlib import contextmanager\nfrom uuid import uuid4\n\nimport pytest\n\nfrom tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory\nfrom tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB\nfrom tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, SchemaError\nfrom tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase\nfrom tldw_Server_API.app.core.StudyPacks import generation_service\nfrom tldw_Server_API.app.services import study_pack_jobs_worker as worker\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 18
+          },
+          "location": {
+            "column": 1,
+            "row": 3
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 3
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 3,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 125,
+      "row": 238
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (\n        ensure_postgres_sync_log_contract,\n    )\n",
+          "end_location": {
+            "column": 1,
+            "row": 239
+          },
+          "location": {
+            "column": 1,
+            "row": 238
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 238
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 238,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

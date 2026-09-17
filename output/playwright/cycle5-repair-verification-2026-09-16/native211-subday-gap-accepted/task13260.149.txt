@@ -1,0 +1,33 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.149 - Show-subday-Flashcard-review-gaps-without-rounding-to-zero-days.md
+
+Task TASK-13260.149 - Show subday Flashcard review gaps without rounding to zero days
+==================================================
+
+Status: ◒ In Progress
+Priority: Low
+Created: 2026-09-17 06:39
+Updated: 2026-09-17 07:14
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT211: native disposable scheduled Cram Good preview10min and persisted due-last_reviewed600s pass, but save toast says next review gap:0 days and Manage/editor show Next gap0d. This exposes internal interval_days0 for a learning step as a misleading next-gap label. Separate from191 preview source; scheduler timestamps are correct. Evidence alice-d-good-rating.txt and alice-d-tag-editor.txt in .tmp/uat198-181-native-20260917.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Reproduce subday display mismatch using actual persisted learning timestamps and existing formatter contracts, preserving day-scale cards and unscheduled/new cards.
+- [x] #2 Use existing duration/localization patterns to display an accurate gap without changing scheduling, versions or requests.
+- [ ] #3 Retain causal tests, independent review and applicable checks plus native subday acceptance.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Independent root review clear: fresh96tests/4files pass0skips9.73s; frozen9hashes verified; scoped ESLint0errors28baselinewarnings. Author112adjacent controls and compiler90/90byte-identical inspected. Bandit attempted0findings8unsupportedTSparsers; manual rendering-only security review clear. Causal15RED23controls and source-link assertion baseline proof retained. NativeAC3 pending. Reports .tmp/uat211-repair-20260917/IMPLEMENTATION211.md and .tmp/uat211-root-independent-20260917/REVIEW211.md.

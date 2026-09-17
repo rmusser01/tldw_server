@@ -1,6 +1,8 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint: 218 unique findings — 203 verified, 14 awaiting targeted acceptance, 1 unresolved (218).** Notes ownership, residual graph mapping and Study Pack triggers are independently reviewed and committed. Keyword literal-search criteria and original greeting saves are accepted. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-notes-reviewed.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
+- **Latest checkpoint: 219 unique findings — 206 verified, 12 awaiting targeted acceptance, 1 unresolved (219).** Character isolation, subday review labels and shared PostgreSQL initialization are accepted. New job5 completed generation but its completed-pack response returns500 from timestamp validation, now UAT219. Original job2 now correctly reportsfailed. Notes native API controls pass; browser/graph checks continue. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-219-pack-serialization.json). Full fresh matrix has not restarted.
+
+- **Prior checkpoint: 218 unique findings — 203 verified, 14 awaiting targeted acceptance, 1 unresolved (218).** Notes ownership, residual graph mapping and Study Pack triggers are independently reviewed and committed. Keyword literal-search criteria and original greeting saves are accepted. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-notes-reviewed.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
 
 - **Prior checkpoint: 218 unique findings — 201 verified, 12 awaiting targeted acceptance, 5 unresolved (209, 210, 216, 217, 218).** Alice and Bob Persona catalogues, optional visual fallback, and the singular Character announcement passed native acceptance. Notes isolation and shared PostgreSQL schema repairs remain under review. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-profile-visual-accepted.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
 
@@ -2109,7 +2111,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 - UAT193 ownership diagnosis03:19:24UTC: read-only metadata identifies visible Helpful AI Assistant2 as client_id1; active Alice is user2. The factory ownership check therefore appears to be protecting the boundary. Investigate list/read/default-by-name reuse, preserving authorization. Only system/default content was observed; no private-character leak is claimed. Receipt .tmp/uat193-native-20260917/character-owner-read.json.
 
-## UAT-194 — P1, implemented; targeted acceptance pending — character ownership is unguarded under the configured PostgreSQL bypass role
+## UAT-194 — P1, verified — character ownership is unguarded under the configured PostgreSQL bypass role
+
+- Current status: **verified**. Actual two-account API and browser isolation passes, including same-name separate characters, rejected foreign mutations and owned restore. Initial harness404 expectation failure and409 contract continuation retained. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native194-character-isolation-accepted/README.md). Earlier statements below are historical.
 
 - Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
@@ -2259,7 +2263,9 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Alice disposable-card scheduled Cram now shows Good10min, saves due10min, completes one-card session with singular wording and no false no-match message. Canonical reload and192tag replacement/180delete checks continue; no acceptance closure yet. Original Citrine card was not re-rated.
 - UAT209 expanded fixture diagnosis proves foreign edit/delete/restore and linked organization paths under the privileged service role. A verified restricted-role control passes existing RLS. Three-file application ownership repair is approved; no ordinary-role exposure claim or generic transaction rewrite.
 
-## UAT-211 — P2, implemented; targeted acceptance pending — Subday Flashcard review gaps round to zero days
+## UAT-211 — P2, verified — Subday Flashcard review gaps round to zero days
+
+- Current status: **verified**. Actual scheduled greeting-card Good preview, persisted600s gap, toast, Manage and reopened editor agree on10minutes. Original Citrine staysv2/rep1. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native211-subday-gap-accepted/README.md). Earlier statements below are historical.
 
 - Current checkpoint: implemented-awaiting-acceptance. Independent96/4PASS0skip; native savedsubdaydisplay remains pending.
 
@@ -2317,6 +2323,15 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-218 — P1, unresolved — Media initialization assumes its own shared PostgreSQL sync-log column
+## UAT-218 — P1, verified — Media initialization assumes its own shared PostgreSQL sync-log column
+
+- Current status: **verified**. Both real PostgreSQL initialization orders and SQLite controls pass. Independent176tests plus2reviewcounterexamples pass0skip; custom constraint literals preserved. Commit6d06aae9bd. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup218-shared-sync-reviewed/README.md). Earlier statements below are historical.
 
 - TASK13260.156. Real ChaCha-first thenMedia bootstrap fails creating idx_sync_log_entity_uuid on entity_uuid when existingtable usesentity_id. Official216both-ordersRED retainsfailure beforeworker. Separatefrom216StudyPacktriggers; exactschema/readwritecontract diagnosis underway, nofixturebypass. Bothinitializationorders andSQLite mustpassafterreviewedrepair.
+
+
+## UAT-219 — P1, unresolved — Completed PostgreSQL Study Pack response rejects timestamps
+
+- TASK13260.157. Native API76778 uses committed6d06aae9bd with3668sourcehashes unchanged across startup. Actual Alice job5 accepted202 at08:13:54, progressesrunning, then GET status500. The separate authenticated job catalogue confirms completed. Safe traceback identifies StudyPackSummaryResponse created_at/last_modified receiving PostgreSQL datetime values where strings are required. Original job5 is preserved for repaired readback; no regeneration.
+- Approved bounded schema response normalization matching existing datetime-only validators; retain strings/null and invalid-type rejection. RealPG/SQLite completedjob/detail regression and independent review precede native same-job acceptance. Native evidence is referenced by the current ledger.
+- Automation note: source-selector input was covered by its own visible label; clicking the visible selector worked. This locator timeout is retained and is not counted as a demonstrated product defect.

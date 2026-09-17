@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T07:58:15.912Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "uat218_baseline",
+    "tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "-k",
+    "not helper_does_not_commit",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

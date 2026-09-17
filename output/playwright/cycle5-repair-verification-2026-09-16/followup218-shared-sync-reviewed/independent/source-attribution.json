@@ -1,0 +1,9 @@
+{
+  "five_production_paths_reviewed": true,
+  "chacha_AST_identical_except_get_sync_log_entries": true,
+  "review_correction_paths": [
+    "media_db/schema/features/core_media.py",
+    "tests/DB_Management/test_media_after_chacha_initialization_postgres.py"
+  ],
+  "other_six_paths_unchanged_from_first_release": true
+}

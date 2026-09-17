@@ -1,0 +1,306 @@
+[
+  {
+    "path": "IMPLEMENTATION218.md",
+    "sha256": "157b844e95f17a4f201bae84a37ce4ced8ffc8395a676aa5dea4f70c9530124c"
+  },
+  {
+    "path": "PLAN218.md",
+    "sha256": "f6c408e59ebc175d627c1dc6d913917b749380bf093822434890a311061ba508"
+  },
+  {
+    "path": "bandit-final-production.json",
+    "sha256": "ef551bc5f7726368800453a8bdf10fde45695fcdd95de69e34125c51488cf216"
+  },
+  {
+    "path": "bandit-final-production.log",
+    "sha256": "7c12dff3e64728fad2ae7a0c628481fdc526c85e74ec94856afb34f56bbf3be6"
+  },
+  {
+    "path": "bandit-final-tests.json",
+    "sha256": "6e059c7142958c8aea6e8f2db8568b8212276c85689759e34361b18ce6e4f21f"
+  },
+  {
+    "path": "bandit-final-tests.log",
+    "sha256": "485f1e84b5ef0a77467c8bb908d30837e66877cda254b90fd2416a487cb42c16"
+  },
+  {
+    "path": "bandit-first.json",
+    "sha256": "ba4cf91f3247058ab782e3327ca219e1ce5e794c780dc603ecc864f772cf384e"
+  },
+  {
+    "path": "bandit-reviewed-final-production.json",
+    "sha256": "38bb4edd573295b649710d23d1d0a796442a8c0dfb9fd6ffd5409aaaf8b6407d"
+  },
+  {
+    "path": "bandit-reviewed-final-production.log",
+    "sha256": "e5f2da72ecef39f6bb05e6b20272397c5b626a84c9e4ca514a7558b4c34972f4"
+  },
+  {
+    "path": "bandit-reviewed-final-tests.json",
+    "sha256": "34e74d7cba97991edbdc6b73abfa84fc39522df1b905a1c4aa411a6124961b13"
+  },
+  {
+    "path": "bandit-reviewed-final-tests.log",
+    "sha256": "508eb2a50e73b3f92739c80f9c5eb1caecb3bcf558e01e32ed2ff88d7de0aede"
+  },
+  {
+    "path": "baseline/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "245ee8718d6d7ba118b88e02efb75f473abcc74f28abe2b9ee27034cfd34b025"
+  },
+  {
+    "path": "baseline/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_log_ops.py",
+    "sha256": "d3faf231312b44f7b708acddc5eecfc283f9bcd0be8c4779ff4f70e7de66dc6c"
+  },
+  {
+    "path": "baseline/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py",
+    "sha256": "85b2ccca18b1e7e958171227bcd345d8a9bfa48a19f879ea791a27d87de943bc"
+  },
+  {
+    "path": "baseline/tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py",
+    "sha256": "bf40f9a0d2509b77e8de4581b1abfbd00ce742435f3937392f57530e75f5c090"
+  },
+  {
+    "path": "baseline/tldw_Server_API/app/core/DB_Management/media_db/schema/features/core_media.py",
+    "sha256": "bb4dcc08c5fe6338cb0899ebbb9c68996547b3944d79a4072adc457aa2540ee4"
+  },
+  {
+    "path": "baseline/tldw_Server_API/tests/DB_Management/test_media_db_core_media_schema_ops.py",
+    "sha256": "7f15fe0e7d4ff30886e095e5fa70fdd72c9ff66348a476f5fc72c187e3c3a7e7"
+  },
+  {
+    "path": "baseline/tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+    "sha256": "8e93e5250e3f58bd9db7beeb30fecb65761cf0cc68768c509d749dc953311ade"
+  },
+  {
+    "path": "baseline-manifest.json",
+    "sha256": "c011ebdfc112c5859cd65df69be4e24b35111e1a865fb7b454cf9b1987848c34"
+  },
+  {
+    "path": "contract-red-test.py",
+    "sha256": "1750d262ba62e784b98d3ae8bce3cdab9f40ebad67cb1f07ec7eecf840ebc432"
+  },
+  {
+    "path": "diff-check.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "diff-reviewed-final-check.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "first-release/IMPLEMENTATION218.md",
+    "sha256": "a95bd8c4859f8a29b8bac4ceffc817c5f68d468abd41f4c8371d807d1a05c6ac"
+  },
+  {
+    "path": "first-release/owned-manifest.json",
+    "sha256": "0503e25583006e78db2ef199129b31754c7cc12e54c567f611c9f2d38e30f43b"
+  },
+  {
+    "path": "first-release/owned.patch",
+    "sha256": "9c3bdb86750d1014c3ff220b7ba411f60ed232fe59ddd1e2528a0d93e18bda73"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_log_ops.py",
+    "sha256": "db55acc2aa12822a476cccb935e03b67e12016e3a593ed2b5c796fcddf588cfe"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py",
+    "sha256": "e2ab3e688c0c427eb1202338b96e11b7af5682e44e6d6b66fbd0ea14fec53e79"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py",
+    "sha256": "6831cc8bf2fe03950931b66d429a746f07379e89fd455ea2ef45fd64c78d3a7c"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/schema/features/core_media.py",
+    "sha256": "1f71513ec23982053605ca3ebc62382d064d25486e511fcbf5bc7664610b32aa"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "sha256": "c2d807e4f373b08f3c869bd9dab03d9d617bf26430b2196ffe8051167fa3d0dc"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/tests/DB_Management/test_media_db_core_media_schema_ops.py",
+    "sha256": "581a63b641bd426f3f1f19f436e373e1dd0b92c5ada021933235bd02f9950b04"
+  },
+  {
+    "path": "first-release/review-snapshot/tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+    "sha256": "9ed57f80b348d0ce690c5c5eb4d6f3ad3d36831f01538c83f00ce5de68ef3062"
+  },
+  {
+    "path": "literal-red-test.py",
+    "sha256": "4be7cfc212c6e702e5e5bac6dc833ae68ce5f2a2ddb536618c7e8a5eff9870b9"
+  },
+  {
+    "path": "operation-literal-embedded-space-receipt.json",
+    "sha256": "0cc49b7628b57b9529e39b10b5634077e01b35d7838a4d5f01208bf4c9f90d01"
+  },
+  {
+    "path": "operation-literal-trailing-space-receipt.json",
+    "sha256": "25ba0bea709c6e0b9f3735af30149ef279327314848c3367c6729afa1c1b55f6"
+  },
+  {
+    "path": "owned-manifest.json",
+    "sha256": "424ea3879fea2ad3bdcd01ed266b3439e20c5058b87b460707b5b68f5e10f029"
+  },
+  {
+    "path": "owned.patch",
+    "sha256": "32bbaafcd822c0af4a395940bc1bc655fd2650c8cfa2f0de5e9b846db37d388e"
+  },
+  {
+    "path": "review-literal-guard-red.log",
+    "sha256": "5cb0fd513fc5e6c087cf4eca98279b167785664811dff6dad0862542604c0a93"
+  },
+  {
+    "path": "review-literal-probe.py",
+    "sha256": "fcdea20de982c26ece9a72701e97d7febcd0ce4db9663a66eeca4223c2f6e53a"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_log_ops.py",
+    "sha256": "db55acc2aa12822a476cccb935e03b67e12016e3a593ed2b5c796fcddf588cfe"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py",
+    "sha256": "e2ab3e688c0c427eb1202338b96e11b7af5682e44e6d6b66fbd0ea14fec53e79"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py",
+    "sha256": "6831cc8bf2fe03950931b66d429a746f07379e89fd455ea2ef45fd64c78d3a7c"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/schema/features/core_media.py",
+    "sha256": "4ec951080e50a7ce1c8247ce7ac1ec4d4dd1b1a758636aa6029478d5b06ed0ad"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "sha256": "4be7cfc212c6e702e5e5bac6dc833ae68ce5f2a2ddb536618c7e8a5eff9870b9"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_db_core_media_schema_ops.py",
+    "sha256": "581a63b641bd426f3f1f19f436e373e1dd0b92c5ada021933235bd02f9950b04"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+    "sha256": "9ed57f80b348d0ce690c5c5eb4d6f3ad3d36831f01538c83f00ce5de68ef3062"
+  },
+  {
+    "path": "ruff-final.json",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": "ruff-first.json",
+    "sha256": "03a1525fc756365defd58b31314d5a6daf71999449c39ffd77ecb3977f2f12e6"
+  },
+  {
+    "path": "ruff-reviewed-final.json",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": "uat218-adjacent-first-command.json",
+    "sha256": "834e7c36a9df8ebd9c4d0800a35240cda6e781241292633a3679d7da9d0873de"
+  },
+  {
+    "path": "uat218-adjacent-first.redacted.log",
+    "sha256": "d48c441f23147391cadd4fe3bce70d8cd283343e3624071d4e40a20ed1717258"
+  },
+  {
+    "path": "uat218-contract-red-command.json",
+    "sha256": "3d85f9977936f41d735c6864efd95389dbd5824ccbe657f88a59b98a29e3d505"
+  },
+  {
+    "path": "uat218-contract-red.redacted.log",
+    "sha256": "044388d917f5f8a158cc964af33872377c3d576f55d99448160883ef2d5a02dc"
+  },
+  {
+    "path": "uat218-expanded-green-command.json",
+    "sha256": "f828c870ec18b7ce9808cff932aa5ff8b14f55b9b32657f1babe2a23e823d4ea"
+  },
+  {
+    "path": "uat218-expanded-green.redacted.log",
+    "sha256": "1189148ff026d504d52be4670a49e4d9e06addba9048aa539b3be849b18ec0a7"
+  },
+  {
+    "path": "uat218-final-baseline-red-command.json",
+    "sha256": "9d0f1979a997ee6e820d1d56b564b692fa1953ee3b15737051fc417ec975c175"
+  },
+  {
+    "path": "uat218-final-baseline-red.redacted.log",
+    "sha256": "d09a5577c9fdd3f0fb6c0a2f99b29247d267ddb81c113f972b96686831203510"
+  },
+  {
+    "path": "uat218-final-contract-green-command.json",
+    "sha256": "f7640e5871f4c53d3eb42c30b29f90ea837c4d324853c95687f4c8441bb5e04d"
+  },
+  {
+    "path": "uat218-final-contract-green.redacted.log",
+    "sha256": "ce67b8df9dcc3a1106343e6a83a38bc2f3a11f981eb03622fb11bbed3e2420a8"
+  },
+  {
+    "path": "uat218-first-green-command.json",
+    "sha256": "29cc0b9e25064da2180717e9070820b5480052239aa6697c6e71fe98d435d368"
+  },
+  {
+    "path": "uat218-first-green.redacted.log",
+    "sha256": "3c4d0016d8726c912665b67a44ccbedd20554df1d83be8cb8d48d0036fde63d2"
+  },
+  {
+    "path": "uat218-frozen-baseline-red-command.json",
+    "sha256": "07c528e2c2a224cb2d71c1c48bab8c49592ece8f450508c6452ac0785be02f1e"
+  },
+  {
+    "path": "uat218-frozen-baseline-red.redacted.log",
+    "sha256": "33061e6c5eebaa5f2e0ee19a2a0bff3cebb129f395dc1798a3d9fdc9b8b75cd8"
+  },
+  {
+    "path": "uat218-frozen-green-command.json",
+    "sha256": "768e305ce61606f7b373cac69b961998a285b0c982cb6e5a4bbfb6a0d208fc82"
+  },
+  {
+    "path": "uat218-frozen-green.redacted.log",
+    "sha256": "be6e3aadc8c41ddf377acd7438ded577fc5423d85ad7712f9a367f5b19712dca"
+  },
+  {
+    "path": "uat218-nullability-guard-red-command.json",
+    "sha256": "de4b0f8dc86f5691e2a78500159a7a6066b0a80a0fb88f4b76461d0b4aa39122"
+  },
+  {
+    "path": "uat218-nullability-guard-red.redacted.log",
+    "sha256": "9d9062571d7cfa2b0bc1659922c69a4e7e16f3e9c6d9344e0a2368ae891d134f"
+  },
+  {
+    "path": "uat218-permanent-literal-red-command.json",
+    "sha256": "12cbd24bdfb1cc320b25e2c4f68c66e90fdab0f544f09ee47f5b9f142954c27b"
+  },
+  {
+    "path": "uat218-permanent-literal-red.redacted.log",
+    "sha256": "880045ca766d27f9a63d088a23aeb4d37afbbce05acdb31719981f0b968390e4"
+  },
+  {
+    "path": "uat218-reviewed-final-green-command.json",
+    "sha256": "d5876996f106c61b9cb49124b92f44f0997af20bc7e0cf0e1117e5d8f4d9d4d9"
+  },
+  {
+    "path": "uat218-reviewed-final-green.redacted.log",
+    "sha256": "8e43c2b5669d47b62d71133622d4d5d0d14db1d25a8caea3c939e2f26a6a9ac8"
+  },
+  {
+    "path": "uat218_baseline.py",
+    "sha256": "01c10cd31cc18845df4cc882d6bf8480ed930eaa81909a293e4a0fc1eec2cbfe"
+  },
+  {
+    "path": "verification-reviewed-final.json",
+    "sha256": "320ee9948b45716136ff0c12166d17a3bfb3713df39b0420cf039c257cfefb11"
+  },
+  {
+    "path": "verification.json",
+    "sha256": "7d3a77f530e7b8db64ef03998774c43f9d9732c3cbb04f8d039b7a67f56b32ee"
+  }
+]

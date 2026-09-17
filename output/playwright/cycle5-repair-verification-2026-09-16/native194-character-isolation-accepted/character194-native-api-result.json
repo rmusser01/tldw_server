@@ -1,0 +1,553 @@
+{
+  "at": "2026-09-17T07:56:59.957Z",
+  "passed": false,
+  "scope": "Running PostgreSQL API; fresh synthetic Alice/Bob sessions, no browser credential access. Test-created characters only. Existing native service role remains privileged; this verifies application ownership.",
+  "aliceId": 5,
+  "bobId": 6,
+  "records": [
+    {
+      "at": "2026-09-17T07:56:59.559Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T07:56:59.573Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "username": "alice"
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.617Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T07:56:59.629Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "username": "bob"
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.650Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/characters/",
+      "request": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass.",
+        "first_message": "Alice fixture greeting."
+      },
+      "status": 201,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Alice fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 5,
+        "version": 1,
+        "created_at": "2026-09-17T07:56:59.646000Z",
+        "updated_at": "2026-09-17T07:56:59.646000Z",
+        "last_modified": "2026-09-17T07:56:59.646000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.669Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/5",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 5 not found."
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.690Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/",
+      "status": 200,
+      "body": [
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 3,
+          "version": 1,
+          "created_at": "2026-09-17T04:29:52.275000Z",
+          "updated_at": "2026-09-17T04:29:52.275000Z",
+          "last_modified": "2026-09-17T04:29:52.275000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T07:56:59.707Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757",
+      "status": 200,
+      "body": {
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.725Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/search/?query=UAT194%20private%20character%2020260917%200757",
+      "status": 200,
+      "body": []
+    },
+    {
+      "at": "2026-09-17T07:56:59.742Z",
+      "actor": "Bob",
+      "method": "PUT",
+      "path": "/api/v1/characters/5?expected_version=1",
+      "request": {
+        "description": "Unauthorized synthetic attempt"
+      },
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 5 not found for update."
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.758Z",
+      "actor": "Bob",
+      "method": "DELETE",
+      "path": "/api/v1/characters/5?expected_version=1",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 5 not found for deletion."
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.774Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/5",
+      "status": 200,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Alice fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 5,
+        "version": 1,
+        "created_at": "2026-09-17T07:56:59.646000Z",
+        "updated_at": "2026-09-17T07:56:59.646000Z",
+        "last_modified": "2026-09-17T07:56:59.646000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.791Z",
+      "actor": "Alice",
+      "method": "PUT",
+      "path": "/api/v1/characters/5?expected_version=1",
+      "request": {
+        "description": "Synthetic Alice-only UAT194 violet compass updated."
+      },
+      "status": 200,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Alice-only UAT194 violet compass updated.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Alice fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 5,
+        "version": 2,
+        "created_at": "2026-09-17T07:56:59.646000Z",
+        "updated_at": "2026-09-17T07:56:59.787000Z",
+        "last_modified": "2026-09-17T07:56:59.787000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.809Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/characters/",
+      "request": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Bob-only UAT194 amber map.",
+        "first_message": "Bob fixture greeting."
+      },
+      "status": 201,
+      "body": {
+        "name": "UAT194 private character 20260917 0757",
+        "description": "Synthetic Bob-only UAT194 amber map.",
+        "personality": null,
+        "scenario": null,
+        "system_prompt": null,
+        "post_history_instructions": null,
+        "first_message": "Bob fixture greeting.",
+        "message_example": null,
+        "creator_notes": null,
+        "alternate_greetings": [],
+        "tags": [],
+        "creator": null,
+        "character_version": null,
+        "extensions": {},
+        "image_base64": null,
+        "id": 6,
+        "version": 1,
+        "created_at": "2026-09-17T07:56:59.805000Z",
+        "updated_at": "2026-09-17T07:56:59.805000Z",
+        "last_modified": "2026-09-17T07:56:59.805000Z",
+        "image_present": false
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.825Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/6",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 6 not found."
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.842Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/",
+      "status": 200,
+      "body": [
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 4,
+          "version": 1,
+          "created_at": "2026-09-17T05:30:11.560000Z",
+          "updated_at": "2026-09-17T05:30:11.560000Z",
+          "last_modified": "2026-09-17T05:30:11.560000Z",
+          "image_present": false
+        },
+        {
+          "name": "UAT194 private character 20260917 0757",
+          "description": "Synthetic Alice-only UAT194 violet compass updated.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Alice fixture greeting.",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": null,
+          "character_version": null,
+          "extensions": {},
+          "image_base64": null,
+          "id": 5,
+          "version": 2,
+          "created_at": "2026-09-17T07:56:59.646000Z",
+          "updated_at": "2026-09-17T07:56:59.787000Z",
+          "last_modified": "2026-09-17T07:56:59.787000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T07:56:59.858Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "UAT194 private character 20260917 0757",
+            "description": "Synthetic Alice-only UAT194 violet compass updated.",
+            "personality": null,
+            "scenario": null,
+            "system_prompt": null,
+            "post_history_instructions": null,
+            "first_message": "Alice fixture greeting.",
+            "message_example": null,
+            "creator_notes": null,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": null,
+            "character_version": null,
+            "extensions": {},
+            "image_base64": null,
+            "id": 5,
+            "version": 2,
+            "created_at": "2026-09-17T07:56:59.646000Z",
+            "updated_at": "2026-09-17T07:56:59.787000Z",
+            "last_modified": "2026-09-17T07:56:59.787000Z",
+            "image_present": false
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.874Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/",
+      "status": 200,
+      "body": [
+        {
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "personality": "Supportive, patient, and concise.",
+          "scenario": "General assistance",
+          "system_prompt": "You are a helpful AI assistant.",
+          "post_history_instructions": null,
+          "first_message": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+          "message_example": null,
+          "creator_notes": "This character is automatically generated to provide a reliable default assistant persona.",
+          "alternate_greetings": null,
+          "tags": [
+            "default",
+            "neutral",
+            "assistant"
+          ],
+          "creator": "System",
+          "character_version": "1.0",
+          "extensions": null,
+          "image_base64": null,
+          "id": 3,
+          "version": 1,
+          "created_at": "2026-09-17T04:29:52.275000Z",
+          "updated_at": "2026-09-17T04:29:52.275000Z",
+          "last_modified": "2026-09-17T04:29:52.275000Z",
+          "image_present": false
+        },
+        {
+          "name": "UAT194 private character 20260917 0757",
+          "description": "Synthetic Bob-only UAT194 amber map.",
+          "personality": null,
+          "scenario": null,
+          "system_prompt": null,
+          "post_history_instructions": null,
+          "first_message": "Bob fixture greeting.",
+          "message_example": null,
+          "creator_notes": null,
+          "alternate_greetings": [],
+          "tags": [],
+          "creator": null,
+          "character_version": null,
+          "extensions": {},
+          "image_base64": null,
+          "id": 6,
+          "version": 1,
+          "created_at": "2026-09-17T07:56:59.805000Z",
+          "updated_at": "2026-09-17T07:56:59.805000Z",
+          "last_modified": "2026-09-17T07:56:59.805000Z",
+          "image_present": false
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T07:56:59.892Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/characters/query?query=UAT194%20private%20character%2020260917%200757",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "name": "UAT194 private character 20260917 0757",
+            "description": "Synthetic Bob-only UAT194 amber map.",
+            "personality": null,
+            "scenario": null,
+            "system_prompt": null,
+            "post_history_instructions": null,
+            "first_message": "Bob fixture greeting.",
+            "message_example": null,
+            "creator_notes": null,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": null,
+            "character_version": null,
+            "extensions": {},
+            "image_base64": null,
+            "id": 6,
+            "version": 1,
+            "created_at": "2026-09-17T07:56:59.805000Z",
+            "updated_at": "2026-09-17T07:56:59.805000Z",
+            "last_modified": "2026-09-17T07:56:59.805000Z",
+            "image_present": false
+          }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 25,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 25,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.909Z",
+      "actor": "Alice",
+      "method": "DELETE",
+      "path": "/api/v1/characters/5?expected_version=2",
+      "status": 200,
+      "body": {
+        "message": "Character 'UAT194 private character 20260917 0757' (ID: 5) soft-deleted.",
+        "character_id": 5
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.925Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/characters/5/restore?expected_version=3",
+      "status": 409,
+      "body": {
+        "detail": "Character card ID 5 not found. (Entity: character_cards, ID: 5)"
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.943Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 2
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T07:56:59.957Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 3
+        }
+      }
+    }
+  ]
+}

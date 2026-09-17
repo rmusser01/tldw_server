@@ -1,0 +1,123 @@
+{
+  "original_harness_passed": false,
+  "original_records": 23,
+  "original_stop": "foreign restore expected404, actual409; original evidence remains unchanged",
+  "continuation_passed": true,
+  "continuation_records": 15,
+  "foreign_restore": {
+    "at": "2026-09-17T07:58:03.732Z",
+    "actor": "Bob",
+    "method": "POST",
+    "path": "/api/v1/characters/5/restore?expected_version=3",
+    "status": 409,
+    "body": {
+      "detail": "Character card ID 5 not found. (Entity: character_cards, ID: 5)"
+    }
+  },
+  "nonexistent_restore": {
+    "at": "2026-09-17T07:58:03.749Z",
+    "actor": "Bob",
+    "method": "POST",
+    "path": "/api/v1/characters/999999999/restore?expected_version=3",
+    "status": 409,
+    "body": {
+      "detail": "Character card ID 999999999 not found. (Entity: character_cards, ID: 999999999)"
+    }
+  },
+  "alice_before_restore": {
+    "id": 5,
+    "version": 3
+  },
+  "alice_restored": {
+    "id": 5,
+    "version": 4,
+    "description": "Synthetic Alice-only UAT194 violet compass updated."
+  },
+  "bob_preserved": {
+    "id": 6,
+    "version": 1,
+    "description": "Synthetic Bob-only UAT194 amber map."
+  },
+  "logout_responses": 4,
+  "logout_statuses": [
+    200,
+    200,
+    200,
+    200
+  ],
+  "ui": [
+    {
+      "input": "alice194-characters-events.txt",
+      "capture_at": "2026-09-17T07:59:34.043Z",
+      "identity": {
+        "id": 2,
+        "username": "alice"
+      },
+      "query_at": "2026-09-17T07:58:40.385Z",
+      "status": 200,
+      "items": [
+        {
+          "id": 5,
+          "name": "UAT194 private character 20260917 0757",
+          "description": "Synthetic Alice-only UAT194 violet compass updated.",
+          "version": 4
+        },
+        {
+          "id": 4,
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "input": "bob194-characters-events.txt",
+      "capture_at": "2026-09-17T08:01:40.218Z",
+      "identity": {
+        "id": 3,
+        "username": "bob"
+      },
+      "query_at": "2026-09-17T08:01:05.174Z",
+      "status": 200,
+      "items": [
+        {
+          "id": 6,
+          "name": "UAT194 private character 20260917 0757",
+          "description": "Synthetic Bob-only UAT194 amber map.",
+          "version": 1
+        },
+        {
+          "id": 3,
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "input": "bob194-reload-events.txt",
+      "capture_at": "2026-09-17T08:02:48.242Z",
+      "identity": {
+        "id": 3,
+        "username": "bob"
+      },
+      "query_at": "2026-09-17T08:02:19.682Z",
+      "status": 200,
+      "items": [
+        {
+          "id": 6,
+          "name": "UAT194 private character 20260917 0757",
+          "description": "Synthetic Bob-only UAT194 amber map.",
+          "version": 1
+        },
+        {
+          "id": 3,
+          "name": "Helpful AI Assistant",
+          "description": "A default, friendly assistant created automatically by the system.",
+          "version": 1
+        }
+      ]
+    }
+  ],
+  "assertions": "passed"
+}

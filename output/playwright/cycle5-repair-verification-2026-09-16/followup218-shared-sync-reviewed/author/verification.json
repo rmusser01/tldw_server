@@ -1,0 +1,15 @@
+{
+  "bandit-final-production": {
+    "findings": 0,
+    "parse_errors": 0
+  },
+  "bandit-final-tests": {
+    "findings": 0,
+    "parse_errors": 0
+  },
+  "ruff": 0,
+  "hashes_stable": true,
+  "parsed_files": 8,
+  "trailing_whitespace": 0,
+  "chacha_rest_ast_equal": true
+}

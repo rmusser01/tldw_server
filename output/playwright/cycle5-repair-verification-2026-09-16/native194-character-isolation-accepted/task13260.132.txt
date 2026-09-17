@@ -1,0 +1,39 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.132 - Enforce-PostgreSQL-character-ownership-for-reads-and-updates.md
+
+Task TASK-13260.132 - Enforce PostgreSQL character ownership for reads and updates
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 03:30
+Updated: 2026-09-17 04:27
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT194: actual two-owner shared-PostgreSQL HTTP regressions expose foreign character detail/list/query and allow PUT to transfer ownership under the configured superuser/BYPASSRLS service role. Native read-only metadata confirms that role; no native private-character attack occurred. Existing forced RLS hides foreign rows and rejects owner-changing UPDATE under a verified NOSUPERUSER/NOBYPASSRLS role. This does not prove ordinary-role leakage. Startup currently accepts bypass roles and Notes has an explicit application-predicate precedent; add bounded CharacterStore defense in depth while preserving RLS and factory checks.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [ ] #1 Foreign character list/query/detail and mutation paths cannot expose, modify, delete, restore or transfer another owners character; actual owned operations remain usable.
+- [ ] #2 Shared PostgreSQL two-owner and per-user SQLite controls cover supported paths with zero PG skips, including immutable behavior snapshot authorization and transactions.
+- [ ] #3 Minimal ownership and schema repair passes independent security review and targeted native account-isolation acceptance.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Plan:
+--------------------------------------------------
+Coordinate one reviewed ownership/schema unit with193; preserve factory authorization, establish exact client/tenant contract and causal tests before edits, audit related store paths and migration safety, then validate and reaccept.
+
+Implementation Notes:
+--------------------------------------------------
+Root reviewed ROLE-CONTRACT.md and DESIGN.md2026-09-17. Authorized PG-only owner predicates at character-card/child operations, preserving SQLite sync semantics and immutable factory checks, plus versioned PG67-to68 owner/name uniqueness with catalog guards, transaction rollback and row-preserving reopen tests. CharacterStore/tests may proceed; shared ChaCha/deps edits held until181 frozen review releases. Native role receipt retained in native193-194-role-qualification. Existing combined24 tests8fail16pass and schema/role6 tests4fail2pass, zero skips; restricted-role policy control passes.
+
+Reviewed PostgreSQL CharacterStore and parent-derived exemplar owner predicates integrated df0fbbd73a. Independent242+5 tests pass0skip. Original exposure was under accepted superuser/BYPASSRLS configuration; ordinary forced-RLS controls reject foreign SQL. Native account isolation remains pending. Durable review: followup193-195-character-ownership-reviewed.

@@ -1,0 +1,23 @@
+{
+  "at": "2026-09-17T08:06:32.337Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_media_after_chacha_initialization_postgres.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_core_media_schema_ops.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_sync_log_ops.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_sync_utils.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_media_lifecycle_ops.py",
+    "tldw_Server_API/tests/DB_Management/test_media_postgres_runtime_validation.py",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_shared_sync_schema.py",
+    "tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
