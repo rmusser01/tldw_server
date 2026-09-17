@@ -4,7 +4,7 @@ Date: 2026-09-16. Design tracking: TASK-13261. Implementation tracking: TASK-132
 
 Status: focused specification following the reviewed D1–D6 decisions. This document specifies H1; it does not claim implemented parity. The [review closure](2026-09-16-chatbook-chat-parity-review-closure.md) remains the authority for the full program. The [implementation plan](../../IMPLEMENTATION_PLAN_chatbook_h1_history_selection.md) turns this specification into five deliveries.
 
-Implementation checkpoint, 2026-09-17: the shared contract, native/local owner adapters and mounted selection/review/restore UI have passed their task reviews and required fix reviews. Normal-send integration, safe fork projection, uncertain fork outcomes and final real-browser/owner qualification remain in progress or unstarted; H1 is not complete.
+Implementation checkpoint, 2026-09-17: the shared contract, native/local owner adapters, mounted selection/review/restore UI and ordinary/overlay normal-send admission/settlement have passed their task reviews and required fix reviews. Native tracked-character integration, safe fork projection, uncertain fork outcomes and final real-browser/owner qualification remain in progress or unstarted; H1 is not complete.
 
 ## 1. Outcome and scope
 
@@ -148,6 +148,8 @@ Extend `CharacterChatStreamPersistRequest` with the same versioned admission ref
 
 Preserve existing scope leases and stable-ID retry guards. Public arbitrary message metadata updates cannot create or alter the protected H1 namespace, including through ordinary completion payloads. Existing sync materialization may carry ordinary data, but imported admission-shaped values are not local owner authority.
 
+Keep uncertain admission, accepted-but-unsent input and generated-but-unsaved text in narrow recovery records alongside the originating scoped browser bookmark. These are client observations, not accepted transcript rows or owner receipts. Persist dispatch intent before calling the owner; preserve immutable operation/owner/conversation identity and credential-free result text through navigation. Reopening under the same profile and verified owner can inspect or copy those records without replaying them. Bookmark and legacy-confirmation updates must preserve recovery records; account changes cannot expose or reassign them. Do not create a native mirror or insert a synthetic assistant row merely to retain an uncertain result.
+
 ### Server-owned completion
 
 Extend `ChatCompletionRequest` with the same optional `tldw_history_selection_v1`. In `build_context_and_messages`, freeze validated selected rows into the existing `continuation_runtime` before dispatch. Persist the new current-turn input chain with explicit parents and admission metadata atomically; its final input becomes `assistant_parent_message_id`. Use the selected rows as prior history and preserve downstream system/character/worldbook/prompt composition. Validate the versioned request's current-turn messages as new input, not a second copy of historical rows.
@@ -155,6 +157,10 @@ Extend `ChatCompletionRequest` with the same optional `tldw_history_selection_v1
 Route all resulting assistant/tool/continuation writes through the accepted parent binding, including the existing continuation path that currently initializes its parent to null. Recheck parent authority during settlement. Exclude the new internal selection/admission fields from provider call parameters and public provider extension forwarding.
 
 For an already client-composed inference request, use the existing stateless path: `save_to_db=false`, complete authorized provider messages, and no local/foreign conversation ID or persistence selection IDs. The inference endpoint is not asked to resolve another owner's storage. Independent model selection remains F02.
+
+The current tracked-character browser branch is server-managed and remains separate from the ordinary/overlay client composer. Integrate it with this versioned server-owned completion path using only new current inputs and frozen explicit request values. The existing saved-behavior adapter supplies supported native character context inside owner admission; a mutable card read or legacy timestamp stream cannot substitute for it. The server owns the input/result writes, so the browser must not perform the separate append/settlement used by client-managed inference. Stage3 includes this distinct integration and cannot finish with only its ordinary-chat task complete.
+
+Versioned streaming must acknowledge successful settlement with the canonical saved result ID even when optional legacy stream metadata is disabled. This acknowledgement is emitted only after the owner save succeeds and is bound to the original admitted operation. Provider-supplied admission or result identity fields cannot become owner acknowledgements. A stop marker, successful provider completion or finished stream without that identity is not proof of persistence; retain the known admission and generated text as uncertain. Preserve the metadata flag's behavior for unversioned requests.
 
 ### Active sync and compatibility
 
