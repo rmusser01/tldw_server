@@ -1,0 +1,22 @@
+[
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat227-forward-green.redacted.log",
+    "sha256": "fe8c1234730405bca594cec4d15e6f7b6f0ddf64367e2c628cd9b6ca30dbb232",
+    "summary": "================== 156 passed, 5 warnings in 97.40s (0:01:37) =================="
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat227-reverse-green.redacted.log",
+    "sha256": "a43b7a1974e7e1c9cef026224cfe6d6c64dfff2d743b92441539fab66932608a",
+    "summary": "================== 156 passed, 5 warnings in 96.82s (0:01:36) =================="
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat227-fixture-isolation-red.redacted.log",
+    "sha256": "37428699e607f481cefdfb989a760095d9c35eb3fbc946e566e66ce617b7fd32",
+    "summary": "======================== 4 failed, 5 warnings in 1.10s ========================="
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-final-green.redacted.log",
+    "sha256": "b80769e30c55e3302a83250e0564587be497185fea754e95fecf78378c0c05a8",
+    "summary": "============ 38 failed, 111 passed, 5 warnings in 78.30s (0:01:18) ============="
+  }
+]

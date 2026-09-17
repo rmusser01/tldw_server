@@ -1,6 +1,6 @@
 # Cycle 5 repair and verification plan
 
-Current Stage3 checkpoint (2026-09-17): 227 unique findings — 225 verified, 2 unresolved (225,227). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-227-read-repairs-reviewed.json. Stage4 full matrix remains Not Started. Stage A225/226 pass independent149 required database and65 frontend tests;226 is verified.225 local lifecycle under164/168 and final native acceptance remain;227 test lifecycle is under independent review.
+Current Stage3 checkpoint (2026-09-17): 227 unique findings — 226 verified, 1 unresolved (225). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-227-test-isolation-verified.json. Stage4 full matrix remains Not Started. Stage A225/226 committed043b8cd1dd;227 independently verified.225 local lifecycle/merge-survivor work under164/168 and final native acceptance remain; browser-wrapper166 isolation review corrections are also required.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 

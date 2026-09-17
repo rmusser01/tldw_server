@@ -1,0 +1,22 @@
+{
+  "task": "TASK-13260.167",
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py",
+      "sha256": "2bd5fb7d3d26b540cc56cb458d99381c64be2d449b9d8ccdca383ebaf747a809",
+      "snapshot": ".tmp/uat227-repair-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoint_fixture_isolation.py",
+      "sha256": "fa562459497c8b05cefab9c6a8e29f2b0c9d3fa9afaa8f135a9a32019b3d4e0b",
+      "snapshot": ".tmp/uat227-repair-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoint_fixture_isolation.py"
+    }
+  ],
+  "status": "frozen-for-independent-review",
+  "helperBaselineSha256": "0a471f094b1f459e567fe9ecc6426e997d4563ddeb38936ae05139e9a1c0abde",
+  "originalFailureReceipt": {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-final-green.redacted.log",
+    "sha256": "b80769e30c55e3302a83250e0564587be497185fea754e95fecf78378c0c05a8",
+    "result": "38 failed, 111 passed; existing FakeAPI helper leak"
+  }
+}

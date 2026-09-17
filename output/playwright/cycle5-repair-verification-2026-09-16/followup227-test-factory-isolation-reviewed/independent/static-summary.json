@@ -1,0 +1,11 @@
+{
+  "changedExistingDefinitions": [
+    "_app"
+  ],
+  "compile": 2,
+  "banditCurrent": 1,
+  "banditBaseline": 1,
+  "banditNew": 0,
+  "banditErrors": 0,
+  "initialComparisonNote": "Initial comparison retained source line numbers in Bandit snippets and failed comparison; stripping only line numbers produces identical diagnostic and source snippet."
+}

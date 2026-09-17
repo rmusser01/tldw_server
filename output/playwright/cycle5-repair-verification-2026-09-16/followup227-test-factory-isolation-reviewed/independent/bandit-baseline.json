@@ -1,0 +1,66 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T10:27:27Z",
+  "metrics": {
+    "./.tmp/uat227-repair-20260917/baseline/test_suggestion_endpoints.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 712,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 712,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "47 ) -> AuthPrincipal:\n48     return AuthPrincipal(\n49         kind=\"user\",\n50         user_id=1,\n51         api_key_id=None,\n52         subject=None,\n53         token_type=\"access\",\n54         jti=None,\n55         roles=list(roles),\n56         permissions=list(permissions),\n57         is_admin=is_admin,\n58         org_ids=[],\n59         team_ids=[],\n60     )\n61 \n",
+      "col_offset": 11,
+      "end_col_offset": 5,
+      "filename": "./.tmp/uat227-repair-20260917/baseline/test_suggestion_endpoints.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'access'",
+      "line_number": 48,
+      "line_range": [
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    }
+  ]
+}

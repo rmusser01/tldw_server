@@ -1,0 +1,5 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: B101
+[json]	INFO	JSON output written to file: .tmp/uat227-independent-20260917/bandit-current.json

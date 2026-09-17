@@ -1,0 +1,28 @@
+{
+  "causalRed": {
+    "failed": 4,
+    "seconds": 1.1
+  },
+  "isolationGreen": {
+    "passed": 4,
+    "seconds": 0.92
+  },
+  "forward": {
+    "passed": 156,
+    "skipped": 0,
+    "seconds": 97.4
+  },
+  "reverse": {
+    "passed": 156,
+    "skipped": 0,
+    "seconds": 96.82
+  },
+  "ruff": 0,
+  "format": "both files pass",
+  "compiled": 2,
+  "banditBaseline": 1,
+  "banditCurrent": 1,
+  "banditNew": 0,
+  "banditErrors": 0,
+  "frozen225226Unchanged": 10
+}

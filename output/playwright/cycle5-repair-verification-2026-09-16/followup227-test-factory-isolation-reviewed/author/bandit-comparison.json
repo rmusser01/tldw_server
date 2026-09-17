@@ -1,0 +1,8 @@
+{
+  "baselineFindings": 1,
+  "currentFindings": 1,
+  "newFindings": 0,
+  "parseErrors": 0,
+  "existingFinding": "B106 on test AuthPrincipal token_type=access (enum value, not a credential)",
+  "assertionsExcluded": "B101"
+}
