@@ -41,6 +41,7 @@ import json  # noqa: E402
 import math  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
+import sys  # noqa: E402
 import tempfile  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
@@ -50,6 +51,7 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
 
@@ -105,6 +107,11 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     transform_sqlite_query_for_postgres,
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
+    ClosedChaChaOperationError,
+    ConnectionState,
+    current_connection_state,
+)
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
@@ -476,6 +483,30 @@ class BackendCursorAdapter:
         self.description = None
 
 
+def _owned_database_call(method):
+    """Keep the complete DB command, including transaction decisions, in use."""
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        state = self._connection_state()
+        with state.use() if isinstance(state, ConnectionState) else contextlib.nullcontext():
+            return method(self, *args, **kwargs)
+    return guarded
+
+
+def _owned_wrapper_call(method):
+    """Reject escaped wrappers and retain a checkout through direct commands."""
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        state = self._operation_state
+        if state is not None and current_connection_state(self._db) is not state:
+            raise ClosedChaChaOperationError("The connection belongs to another ChaCha operation")
+        with state.use() if state is not None else contextlib.nullcontext():
+            if state is not None and state.conn is not self._connection:
+                raise ClosedChaChaOperationError("The ChaCha checkout has been returned")
+            return method(self, *args, **kwargs)
+    return guarded
+
+
 class BackendCursorWrapper:
     """Cursor wrapper that routes operations through the configured backend."""
 
@@ -490,6 +521,7 @@ class BackendCursorWrapper:
         self._db = db
         self._connection = connection
         self._backend = backend
+        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
         self._log_errors = log_errors
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
@@ -497,6 +529,7 @@ class BackendCursorWrapper:
         self.lastrowid: int | None = None
         self.description = None
 
+    @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
         backend_options = {} if self._log_errors else {"log_errors": False}
@@ -512,6 +545,7 @@ class BackendCursorWrapper:
         self.description = self._result.description
         return self
 
+    @_owned_wrapper_call
     def executemany(self, query: str, params_list: list[tuple | list | dict]):
         prepared_query, prepared_params_list = self._db._prepare_backend_many_statement(query, params_list)
         self._result = self._backend.execute_many(
@@ -559,7 +593,9 @@ class BackendConnectionWrapper:
         self._db = db
         self._connection = connection
         self._backend = backend
+        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
 
+    @_owned_wrapper_call
     def cursor(self, *, log_errors: bool = True):
         if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.cursor()
@@ -570,14 +606,17 @@ class BackendConnectionWrapper:
             log_errors=log_errors,
         )
 
+    @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
         cursor = self.cursor()
         return cursor.execute(query, params)
 
+    @_owned_wrapper_call
     def executemany(self, query: str, params_list: list[tuple | list | dict]):
         cursor = self.cursor()
         return cursor.executemany(query, params_list)
 
+    @_owned_wrapper_call
     def executescript(self, script: str, *, log_errors: bool = True):
         statements = [stmt.strip() for stmt in script.split(';') if stmt.strip()]
         cursor = self.cursor(log_errors=log_errors)
@@ -585,9 +624,11 @@ class BackendConnectionWrapper:
             cursor.execute(stmt)
         return cursor
 
+    @_owned_wrapper_call
     def commit(self):
         return self._connection.commit()
 
+    @_owned_wrapper_call
     def rollback(self):
         return self._connection.rollback()
 
@@ -627,13 +668,21 @@ class BackendManagedTransaction:
         self._depth = 0
 
     def __enter__(self):
-        self._raw_conn = self._db._get_thread_connection()
-        self._depth = getattr(self._db._local, "tx_depth", 0)
-        self._managed = self._depth == 0
-        self._db._local.tx_depth = self._depth + 1
-        backend = self._db._get_pinned_backend() or self._db.backend
-        self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
-        return self._wrapper
+        self._state = self._db._connection_state()
+        self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
+        self._use.__enter__()
+        self._depth = getattr(self._state, "tx_depth", 0)
+        try:
+            self._raw_conn = self._db._get_thread_connection()
+            self._managed = self._depth == 0
+            self._state.tx_depth = self._depth + 1
+            backend = self._db._get_pinned_backend() or self._db.backend
+            self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
+            return self._wrapper
+        except BaseException:
+            self._state.tx_depth = self._depth
+            self._use.__exit__(*sys.exc_info())
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
@@ -669,9 +718,11 @@ class BackendManagedTransaction:
                             exc_info=True,
                         )
         finally:
-            self._db._local.tx_depth = self._depth
+            self._state.tx_depth = self._depth
             self._wrapper = None
             self._raw_conn = None
+            cleanup_error = sys.exc_info()
+            self._use.__exit__(*(cleanup_error if cleanup_error[0] is not None else (exc_type, exc_val, exc_tb)))
         return False
 
 
@@ -7676,8 +7727,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return str(config.sqlite_path)
         return f"sqlite:{id(backend)}"
 
+    def _connection_state(self) -> Any:
+        """Use an explicit PostgreSQL operation, retaining legacy/SQLite state."""
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            state = current_connection_state(self)
+            if state is not None:
+                return state
+        return self._local
+
     def _get_pinned_backend(self) -> DatabaseBackend | None:
-        return getattr(self._local, "backend_ref", None)
+        return getattr(self._connection_state(), "backend_ref", None)
 
     def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
         key = self._backend_target_key(backend)
@@ -7907,7 +7966,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         For SQLite we maintain a single `sqlite3.Connection` per thread and ensure it
         stays usable (re-opening on failure). For PostgreSQL we borrow a pooled
-        connection and cache it per thread until explicitly released.
+        connection owned by the active operation, or by the legacy thread when
+        no operation was established.
 
         Returns:
             Backend-specific connection handle suitable for use with
@@ -7916,7 +7976,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             CharactersRAGDBError: If acquiring a connection from the backend fails.
         """
-        conn = getattr(self._local, 'conn', None)
+        state = self._connection_state()
+        with getattr(state, 'allocation_lock', contextlib.nullcontext()):
+            return self._get_connection_for_state(state)
+
+    def _get_connection_for_state(self, state: Any) -> Any:
+        conn = getattr(state, 'conn', None)
         backend = self._get_pinned_backend() or self.backend
 
         if backend.backend_type == BackendType.SQLITE:
@@ -7942,11 +8007,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         # Best-effort; ignore if pool doesn't expose the helper
                         pass
                     conn = None
-                    self._local.conn = None
+                    state.conn = None
 
             if conn is None:
                 conn = self._open_new_connection(backend)
-                self._local.conn = conn
+                state.conn = conn
                 logger.debug(
                     'Opened/Reopened SQLite connection to {} for thread {}',
                     self.db_path_str,
@@ -7956,16 +8021,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Non-SQLite backend: reuse connection if still open, otherwise borrow anew.
         if conn is not None and getattr(conn, "closed", False):
+            if getattr(state, "borrowed", False):
+                raise CharactersRAGDBError("The borrowed database connection is closed")
             self._release_connection(conn, backend=backend)
             conn = None
-            self._local.conn = None
-            self._local.backend_ref = None
+            state.conn = None
+            state.backend_ref = None
             backend = self.backend
 
         if conn is None:
             conn = self._open_new_connection(backend)
-            self._local.conn = conn
-            self._local.backend_ref = backend
+            state.conn = conn
+            state.backend_ref = backend
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
                 backend.backend_type.value,
@@ -7973,6 +8040,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         return conn
 
+    @_owned_database_call
     def get_connection(self) -> Any:
         """Return the active connection wrapper for the current thread."""
         raw_conn = self._get_thread_connection()
@@ -7991,6 +8059,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         If a transaction is active and uncommitted on this connection, it attempts a rollback.
         Clears the connection reference from `threading.local` for the current thread.
         """
+        state = self._connection_state()
+        if state is not self._local:
+            state.release()
+            return
         conn = getattr(self._local, 'conn', None)
         if conn is None:
             return
@@ -8158,6 +8230,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             # and should not be closed here to allow continued use of the DB instance.
 
     # --- Query Execution ---
+    @_owned_database_call
     def execute_query(
         self,
         query: str,
@@ -8204,7 +8277,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             status = getattr(getattr(raw_conn, "info", None), "transaction_status", None)
             if (
                 getattr(status, "name", None) == "IDLE"
-                and getattr(self._local, "tx_depth", 0) == 0
+                and getattr(self._connection_state(), "tx_depth", 0) == 0
                 and backend._tx_depth(raw_conn) == 0
             ):
                 # Own only this new read; never settle an existing caller's work.
@@ -8350,6 +8423,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             commit=True,
         )
 
+    @_owned_database_call
     def execute_many(
         self,
         query: str,

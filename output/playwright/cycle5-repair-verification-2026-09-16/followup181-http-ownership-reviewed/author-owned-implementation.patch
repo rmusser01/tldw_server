@@ -1,0 +1,1906 @@
+--- a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
++++ b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+@@ -41,6 +41,7 @@
+ import math  # noqa: E402
+ import re  # noqa: E402
+ import sqlite3  # noqa: E402
++import sys  # noqa: E402
+ import tempfile  # noqa: E402
+ import threading  # noqa: E402
+ import time  # noqa: E402
+@@ -50,6 +51,7 @@
+ from collections.abc import Iterable, Iterator, Mapping, Sequence
+ from configparser import ConfigParser  # noqa: E402
+ from datetime import datetime, timedelta, timezone  # noqa: E402
++from functools import wraps  # noqa: E402
+ from pathlib import Path  # noqa: E402
+ from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+
+@@ -105,6 +107,11 @@
+     transform_sqlite_query_for_postgres,
+ )
+ from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
++    ClosedChaChaOperationError,
++    ConnectionState,
++    current_connection_state,
++)
+ from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
+ from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
+ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
+@@ -476,6 +483,30 @@
+         self.description = None
+
+
++def _owned_database_call(method):
++    """Keep the complete DB command, including transaction decisions, in use."""
++    @wraps(method)
++    def guarded(self, *args, **kwargs):
++        state = self._connection_state()
++        with state.use() if isinstance(state, ConnectionState) else contextlib.nullcontext():
++            return method(self, *args, **kwargs)
++    return guarded
++
++
++def _owned_wrapper_call(method):
++    """Reject escaped wrappers and retain a checkout through direct commands."""
++    @wraps(method)
++    def guarded(self, *args, **kwargs):
++        state = self._operation_state
++        if state is not None and current_connection_state(self._db) is not state:
++            raise ClosedChaChaOperationError("The connection belongs to another ChaCha operation")
++        with state.use() if state is not None else contextlib.nullcontext():
++            if state is not None and state.conn is not self._connection:
++                raise ClosedChaChaOperationError("The ChaCha checkout has been returned")
++            return method(self, *args, **kwargs)
++    return guarded
++
++
+ class BackendCursorWrapper:
+     """Cursor wrapper that routes operations through the configured backend."""
+
+@@ -490,6 +521,7 @@
+         self._db = db
+         self._connection = connection
+         self._backend = backend
++        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+         self._log_errors = log_errors
+         self._result: QueryResult | None = None
+         self._adapter: BackendCursorAdapter | None = None
+@@ -497,6 +529,7 @@
+         self.lastrowid: int | None = None
+         self.description = None
+
++    @_owned_wrapper_call
+     def execute(self, query: str, params: tuple | list | dict | None = None):
+         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+         backend_options = {} if self._log_errors else {"log_errors": False}
+@@ -512,6 +545,7 @@
+         self.description = self._result.description
+         return self
+
++    @_owned_wrapper_call
+     def executemany(self, query: str, params_list: list[tuple | list | dict]):
+         prepared_query, prepared_params_list = self._db._prepare_backend_many_statement(query, params_list)
+         self._result = self._backend.execute_many(
+@@ -559,7 +593,9 @@
+         self._db = db
+         self._connection = connection
+         self._backend = backend
+-
++        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
++
++    @_owned_wrapper_call
+     def cursor(self, *, log_errors: bool = True):
+         if self._backend.backend_type == BackendType.SQLITE:
+             return self._connection.cursor()
+@@ -570,14 +606,17 @@
+             log_errors=log_errors,
+         )
+
++    @_owned_wrapper_call
+     def execute(self, query: str, params: tuple | list | dict | None = None):
+         cursor = self.cursor()
+         return cursor.execute(query, params)
+
++    @_owned_wrapper_call
+     def executemany(self, query: str, params_list: list[tuple | list | dict]):
+         cursor = self.cursor()
+         return cursor.executemany(query, params_list)
+
++    @_owned_wrapper_call
+     def executescript(self, script: str, *, log_errors: bool = True):
+         statements = [stmt.strip() for stmt in script.split(';') if stmt.strip()]
+         cursor = self.cursor(log_errors=log_errors)
+@@ -585,9 +624,11 @@
+             cursor.execute(stmt)
+         return cursor
+
++    @_owned_wrapper_call
+     def commit(self):
+         return self._connection.commit()
+
++    @_owned_wrapper_call
+     def rollback(self):
+         return self._connection.rollback()
+
+@@ -627,13 +668,21 @@
+         self._depth = 0
+
+     def __enter__(self):
+-        self._raw_conn = self._db._get_thread_connection()
+-        self._depth = getattr(self._db._local, "tx_depth", 0)
+-        self._managed = self._depth == 0
+-        self._db._local.tx_depth = self._depth + 1
+-        backend = self._db._get_pinned_backend() or self._db.backend
+-        self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
+-        return self._wrapper
++        self._state = self._db._connection_state()
++        self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
++        self._use.__enter__()
++        self._depth = getattr(self._state, "tx_depth", 0)
++        try:
++            self._raw_conn = self._db._get_thread_connection()
++            self._managed = self._depth == 0
++            self._state.tx_depth = self._depth + 1
++            backend = self._db._get_pinned_backend() or self._db.backend
++            self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
++            return self._wrapper
++        except BaseException:
++            self._state.tx_depth = self._depth
++            self._use.__exit__(*sys.exc_info())
++            raise
+
+     def __exit__(self, exc_type, exc_val, exc_tb):
+         try:
+@@ -669,9 +718,11 @@
+                             exc_info=True,
+                         )
+         finally:
+-            self._db._local.tx_depth = self._depth
++            self._state.tx_depth = self._depth
+             self._wrapper = None
+             self._raw_conn = None
++            cleanup_error = sys.exc_info()
++            self._use.__exit__(*(cleanup_error if cleanup_error[0] is not None else (exc_type, exc_val, exc_tb)))
+         return False
+
+
+@@ -7676,8 +7727,16 @@
+             return str(config.sqlite_path)
+         return f"sqlite:{id(backend)}"
+
++    def _connection_state(self) -> Any:
++        """Use an explicit PostgreSQL operation, retaining legacy/SQLite state."""
++        if self._backend.backend_type == BackendType.POSTGRESQL:
++            state = current_connection_state(self)
++            if state is not None:
++                return state
++        return self._local
++
+     def _get_pinned_backend(self) -> DatabaseBackend | None:
+-        return getattr(self._local, "backend_ref", None)
++        return getattr(self._connection_state(), "backend_ref", None)
+
+     def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
+         key = self._backend_target_key(backend)
+@@ -7907,7 +7966,8 @@
+
+         For SQLite we maintain a single `sqlite3.Connection` per thread and ensure it
+         stays usable (re-opening on failure). For PostgreSQL we borrow a pooled
+-        connection and cache it per thread until explicitly released.
++        connection owned by the active operation, or by the legacy thread when
++        no operation was established.
+
+         Returns:
+             Backend-specific connection handle suitable for use with
+@@ -7916,7 +7976,12 @@
+         Raises:
+             CharactersRAGDBError: If acquiring a connection from the backend fails.
+         """
+-        conn = getattr(self._local, 'conn', None)
++        state = self._connection_state()
++        with getattr(state, 'allocation_lock', contextlib.nullcontext()):
++            return self._get_connection_for_state(state)
++
++    def _get_connection_for_state(self, state: Any) -> Any:
++        conn = getattr(state, 'conn', None)
+         backend = self._get_pinned_backend() or self.backend
+
+         if backend.backend_type == BackendType.SQLITE:
+@@ -7942,11 +8007,11 @@
+                         # Best-effort; ignore if pool doesn't expose the helper
+                         pass
+                     conn = None
+-                    self._local.conn = None
++                    state.conn = None
+
+             if conn is None:
+                 conn = self._open_new_connection(backend)
+-                self._local.conn = conn
++                state.conn = conn
+                 logger.debug(
+                     'Opened/Reopened SQLite connection to {} for thread {}',
+                     self.db_path_str,
+@@ -7956,16 +8021,18 @@
+
+         # Non-SQLite backend: reuse connection if still open, otherwise borrow anew.
+         if conn is not None and getattr(conn, "closed", False):
++            if getattr(state, "borrowed", False):
++                raise CharactersRAGDBError("The borrowed database connection is closed")
+             self._release_connection(conn, backend=backend)
+             conn = None
+-            self._local.conn = None
+-            self._local.backend_ref = None
++            state.conn = None
++            state.backend_ref = None
+             backend = self.backend
+
+         if conn is None:
+             conn = self._open_new_connection(backend)
+-            self._local.conn = conn
+-            self._local.backend_ref = backend
++            state.conn = conn
++            state.backend_ref = backend
+             logger.debug(
+                 'Acquired backend connection ({}) for thread {}',
+                 backend.backend_type.value,
+@@ -7973,6 +8040,7 @@
+             )
+         return conn
+
++    @_owned_database_call
+     def get_connection(self) -> Any:
+         """Return the active connection wrapper for the current thread."""
+         raw_conn = self._get_thread_connection()
+@@ -7991,6 +8059,10 @@
+         If a transaction is active and uncommitted on this connection, it attempts a rollback.
+         Clears the connection reference from `threading.local` for the current thread.
+         """
++        state = self._connection_state()
++        if state is not self._local:
++            state.release()
++            return
+         conn = getattr(self._local, 'conn', None)
+         if conn is None:
+             return
+@@ -8158,6 +8230,7 @@
+             # and should not be closed here to allow continued use of the DB instance.
+
+     # --- Query Execution ---
++    @_owned_database_call
+     def execute_query(
+         self,
+         query: str,
+@@ -8204,7 +8277,7 @@
+             status = getattr(getattr(raw_conn, "info", None), "transaction_status", None)
+             if (
+                 getattr(status, "name", None) == "IDLE"
+-                and getattr(self._local, "tx_depth", 0) == 0
++                and getattr(self._connection_state(), "tx_depth", 0) == 0
+                 and backend._tx_depth(raw_conn) == 0
+             ):
+                 # Own only this new read; never settle an existing caller's work.
+@@ -8350,6 +8423,7 @@
+             commit=True,
+         )
+
++    @_owned_database_call
+     def execute_many(
+         self,
+         query: str,
+--- a/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
++++ b/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
+@@ -23,6 +23,7 @@
+ from tldw_Server_API.app.core.DB_Management import sqlite_policy
+ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+ from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
+     ChaChaRuntimeManager,
+     ChaChaRuntimeUnavailableError,
+@@ -442,6 +443,7 @@
+         logger.debug("ChaChaNotes tuning skipped ({})", type(e).__name__)
+
+
++@chacha_operation(independent=True)
+ def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
+     try:
+         conn = db_instance.get_connection()
+@@ -464,6 +466,7 @@
+         return False
+
+
++@chacha_operation(independent=True)
+ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
+     """Prepare an owner database and seed its bundled content before publication."""
+     db_path: Optional[Path] = None
+@@ -503,7 +506,7 @@
+ async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id: int) -> None:
+     loop = asyncio.get_running_loop()
+     try:
+-        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character, db_instance)
++        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character_owned, db_instance)
+         _track_default_character_future(future)
+         await asyncio.wait_for(
+             asyncio.shield(future),
+@@ -528,6 +531,12 @@
+             "Error ensuring default character ({}); continuing; will retry on next access.",
+             type(e).__name__,
+         )
++
++
++@chacha_operation(independent=True)
++def _ensure_default_character_owned(db_instance: CharactersRAGDB) -> Optional[int]:
++    """Keep executor maintenance independent of the request that scheduled it."""
++    return _ensure_default_character(db_instance)
+
+
+ def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:
+--- a/tldw_Server_API/app/main.py
++++ b/tldw_Server_API/app/main.py
+@@ -2580,6 +2580,7 @@
+
+ # Security middleware (headers + request size limit)
+ from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
+ from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
+ from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
+ from tldw_Server_API.app.core.Security.drain_gate_middleware import DrainGateMiddleware
+@@ -2779,6 +2780,7 @@
+
+ # Request ID context should be available before the drain gate, and the drain gate
+ # should reject work before the LLM budget middleware gets a chance to do heavier setup.
++app.add_middleware(ChaChaOperationMiddleware)
+ app.add_middleware(DrainGateMiddleware)
+ app.add_middleware(RequestIDMiddleware)
+
+--- a/tldw_Server_API/app/core/DB_Management/chacha/operation_scope.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/operation_scope.py
+@@ -0,0 +1,207 @@
++"""Explicit PostgreSQL checkout ownership across a complete HTTP operation.
++
++These scopes own checkouts, not transaction decisions. Returning an owned
++checkout discards unfinished work using the backend pool's existing policy.
++Legacy thread-local and explicitly borrowed connections are never adopted.
++"""
++
++import asyncio
++from collections.abc import Iterator
++from contextlib import contextmanager
++from contextvars import ContextVar
++from dataclasses import dataclass, field
++from threading import RLock, get_ident
++from typing import Any
++
++from loguru import logger
++from starlette.types import ASGIApp, Receive, Scope, Send
++
++
++class ClosedChaChaOperationError(RuntimeError):
++    """An inherited operation no longer admits new commands."""
++
++
++@dataclass
++class ConnectionState:
++    """Captured state for one database within an explicit owner."""
++
++    conn: Any = None
++    backend_ref: Any = None
++    tx_depth: int = 0
++    borrowed: bool = False
++    lock: Any = field(default_factory=RLock)
++    allocation_lock: Any = field(default_factory=RLock)
++    retiring: bool = False
++    _uses: dict[tuple[int, Any], int] = field(default_factory=dict)
++
++    @staticmethod
++    def _execution_key() -> tuple[int, Any]:
++        try:
++            task = asyncio.current_task()
++        except RuntimeError:
++            task = None
++        return get_ident(), task
++
++    def permits_current_use(self) -> bool:
++        """Only already-entered work in this task/thread may finish after close."""
++        with self.lock:
++            return self._uses.get(self._execution_key(), 0) > 0
++
++    @contextmanager
++    def use(self) -> Iterator[None]:
++        """Keep a captured checkout out of the pool until this command finishes."""
++        key = self._execution_key()
++        with self.lock:
++            if self.retiring and not self._uses.get(key):
++                raise ClosedChaChaOperationError("The ChaCha operation has finished")
++            self._uses[key] = self._uses.get(key, 0) + 1
++        failed = False
++        try:
++            yield
++        except BaseException:
++            failed = True
++            raise
++        finally:
++            with self.lock:
++                self._uses[key] -= 1
++                if not self._uses[key]:
++                    del self._uses[key]
++                try:
++                    if self.retiring and not self._uses:
++                        self._return_checkout()
++                except Exception:
++                    if not failed:
++                        raise
++                    logger.error("ChaCha last-use cleanup failed while handling an earlier error")
++
++    def _return_checkout(self) -> None:
++        if self.borrowed or self.conn is None:
++            return
++        connection, backend = self.conn, self.backend_ref
++        self.conn = self.backend_ref = None
++        self.tx_depth = 0
++        backend.get_pool().return_connection(connection)
++
++    def release(self) -> None:
++        """Return an owned checkout at most once, leaving borrowed state intact."""
++        with self.lock:
++            self.retiring = True
++            if not self._uses:
++                self._return_checkout()
++
++
++@dataclass(frozen=True)
++class ExternalConnection:
++    """Explicitly lend an existing connection; its caller retains all decisions."""
++
++    database: Any
++    connection: Any
++    backend: Any
++
++
++class ChaChaOperation:
++    """Capture only this operation's per-database PostgreSQL checkouts."""
++
++    def __init__(self, bindings: tuple[ExternalConnection, ...] = ()) -> None:
++        self._lock = RLock()
++        self._closed = False
++        self._states: dict[Any, ConnectionState] = {}
++        for binding in bindings:
++            if binding.connection is None or binding.backend is None:
++                raise ValueError("External bindings require a connection and backend")
++            if binding.database in self._states:
++                raise ValueError("A database can only have one external binding")
++            # A borrowed outer transaction is never owned by db.transaction(),
++            # including when the caller has not issued its first statement yet.
++            self._states[binding.database] = ConnectionState(
++                conn=binding.connection, backend_ref=binding.backend, tx_depth=1, borrowed=True
++            )
++
++    def state_for(self, database: Any) -> ConnectionState:
++        """Resolve a live state, including after context propagation to a worker."""
++        with self._lock:
++            if not self._closed:
++                return self._states.setdefault(database, ConnectionState())
++            state = self._states.get(database)
++        # Check active use without nesting the owner and state locks.
++        if state is None or not state.permits_current_use():
++            raise ClosedChaChaOperationError("The ChaCha operation has finished")
++        return state
++
++    def close(self) -> None:
++        """Finish once without a success commit or another owner's cleanup."""
++        with self._lock:
++            if self._closed:
++                return
++            self._closed = True
++            states = tuple(self._states.values())
++        first_error = None
++        for state in states:
++            try:
++                state.release()
++            except Exception as exc:  # noqa: BLE001 - finish every captured checkout before propagating
++                # Finish other owned checkouts too; never log connection details.
++                logger.error("ChaCha operation cleanup failed ({})", type(exc).__name__)
++                if first_error is None:
++                    first_error = exc
++        if first_error is not None:
++            raise RuntimeError("ChaCha operation cleanup failed") from first_error
++
++
++_current_operation: ContextVar[ChaChaOperation | None] = ContextVar("chacha_operation", default=None)
++
++
++def current_connection_state(database: Any) -> ConnectionState | None:
++    """Return explicit state, or let legacy callers keep their current behavior."""
++    owner = _current_operation.get()
++    return owner.state_for(database) if owner is not None else None
++
++
++@contextmanager
++def chacha_operation(
++    *, independent: bool = False, bindings: tuple[ExternalConnection, ...] = ()
++) -> Iterator[ChaChaOperation]:
++    """Join the current owner, or explicitly create an independent operation.
++
++    External bindings require a new scope so a nested call cannot replace a live
++    owner's state. Detached tasks must start an independent scope after their
++    inherited owner has finished.
++    """
++    existing = _current_operation.get()
++    if existing is not None and not independent:
++        if bindings:
++            raise ValueError("External bindings require an independent operation")
++        if existing._closed:
++            raise ClosedChaChaOperationError("The ChaCha operation has finished")
++        yield existing
++        return
++    owner = ChaChaOperation(bindings)
++    token = _current_operation.set(owner)
++    failed = False
++    try:
++        yield owner
++    except BaseException:
++        failed = True
++        raise
++    finally:
++        try:
++            owner.close()
++        except Exception:
++            if not failed:
++                raise
++        finally:
++            _current_operation.reset(token)
++
++
++class ChaChaOperationMiddleware:
++    """Own the complete HTTP ASGI response, including stream/background work."""
++
++    def __init__(self, app: ASGIApp) -> None:
++        self.app = app
++
++    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
++        if scope["type"] != "http":
++            await self.app(scope, receive, send)
++            return
++        with chacha_operation(independent=True):
++            await self.app(scope, receive, send)
+--- a/tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py
++++ b/tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py
+@@ -0,0 +1,939 @@
++"""HTTP operation owners must release their own PostgreSQL transactions."""
++
++import asyncio
++import functools
++import inspect
++import threading
++from concurrent.futures import ThreadPoolExecutor
++from contextlib import ExitStack
++from contextvars import ContextVar
++from dataclasses import replace
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import anyio
++import httpx
++import pytest
++from cachetools import LRUCache
++from fastapi import Depends, FastAPI
++
++from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
++from tldw_Server_API.app.api.v1.API_Deps import auth_deps
++from tldw_Server_API.app.api.v1.endpoints import buddies, flashcards, notes
++from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
++from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
++
++pytestmark = pytest.mark.integration
++
++DUE_PATH = "/api/v1/flashcards/source-review-plans/due"
++NOTES_PATH = "/api/v1/notes/"
++_request_path = ContextVar("http_lifecycle_test_path", default=None)
++_inside_endpoint = ContextVar("http_lifecycle_test_inside_endpoint", default=False)
++
++
++@pytest.fixture
++def pg_http(request, pg_database_config, tmp_path, monkeypatch):
++    """Supply the official DB to the real cached dependency, without replacing it."""
++    monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
++    backend = DatabaseBackendFactory.create_backend(pg_database_config)
++    db = CharactersRAGDB(tmp_path / "http.db", client_id="1", backend=backend)
++    note = db.add_note(title="Committed title", content="HTTP lifetime fixture")
++    db.sync_note_folders(note, ["Research"])
++    db.add_character_card({"name": deps.DEFAULT_CHARACTER_NAME, "description": "Existing fixture"})
++    populated = getattr(request, "param", False)
++    if populated:
++        db.create_source_review_plan(
++            title="HTTP due plan",
++            starts_on="2020-01-01",
++            timezone_name="UTC",
++            source_bundle_json={"items": [{"source_type": "note", "source_id": note, "label": "Fixture"}]},
++            schedule=[
++                {"offset_value": 1, "offset_unit": "day", "activity_type": "quiz", "due_at": "2020-01-02T00:00:00Z"}
++            ],
++        )
++    db.close_connection()
++
++    # Isolate process-level cache/settings, retaining real cache lookup, health
++    # checking, runtime admission, default maintenance and the HTTP dependency.
++    owner_dir = tmp_path / "owner"
++    monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda _user_id: owner_dir))
++    cache = LRUCache(maxsize=4)
++    cache[str(owner_dir)] = db
++    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
++    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
++    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
++    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
++    executor = ThreadPoolExecutor(max_workers=1)
++    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
++
++    observations = []
++    original_connection = db._get_thread_connection
++
++    def observe_connection():
++        raw = original_connection()
++        path = _request_path.get()
++        if path is not None and _inside_endpoint.get():
++            observations.append((path, threading.get_ident(), raw))
++        return raw
++
++    monkeypatch.setattr(db, "_get_thread_connection", observe_connection)
++    app = FastAPI()
++    app.add_middleware(ChaChaOperationMiddleware)
++    app.include_router(flashcards.router, prefix="/api/v1")
++    app.include_router(buddies.router, prefix="/api/v1/buddies")
++    app.include_router(notes.router, prefix="/api/v1/notes")
++    user = User(id=1, username="http-owner", email=None, is_active=True)
++    limiter = SimpleNamespace(check_user_rate_limit=AsyncMock(return_value=(True, {})))
++    app.dependency_overrides[deps.get_request_user] = lambda: user
++    app.dependency_overrides[auth_deps.get_request_user] = lambda: user
++    app.dependency_overrides[auth_deps.check_rate_limit] = lambda: None
++    app.dependency_overrides[auth_deps.get_rate_limiter_dep] = lambda: limiter
++
++    def override_rate_dependencies(dependant):
++        for child in dependant.dependencies:
++            if getattr(child.call, "_tldw_rate_limit_resource", None):
++                app.dependency_overrides[child.call] = lambda: None
++            override_rate_dependencies(child)
++
++    for route in app.routes:
++        if hasattr(route, "dependant"):
++            override_rate_dependencies(route.dependant)
++
++    # The dependency's compatibility check imports main.app, but no main app
++    # startup runs. Ensure an unrelated test override cannot replace this seam.
++    from tldw_Server_API.app.main import app as main_app
++
++    monkeypatch.delitem(main_app.dependency_overrides, deps.get_chacha_db_for_user, raising=False)
++
++    @app.middleware("http")
++    async def identify_request(request, call_next):
++        token = _request_path.set(request.url.path)
++        try:
++            return await call_next(request)
++        finally:
++            _request_path.reset(token)
++
++    f = SimpleNamespace(
++        app=app,
++        db=db,
++        backend=backend,
++        config=pg_database_config,
++        tmp_path=tmp_path,
++        note=note,
++        populated=populated,
++        observations=observations,
++    )
++    try:
++        yield f
++    finally:
++        executor.shutdown(wait=True)
++        db.close_all_connections()
++        backend.get_pool().close_all()
++
++
++async def _run(f, operation):
++    """Exercise actual async dependencies and one deterministic AnyIO worker."""
++    # Observe endpoint work separately from the real dependency's health and
++    # default-character workers, without replacing any dependency or handler.
++    for route in f.app.routes:
++        if not hasattr(route, "dependant"):
++            continue
++        original = route.dependant.call
++
++        def instrument(handler):
++            if inspect.iscoroutinefunction(handler):
++
++                @functools.wraps(handler)
++                async def async_body(*args, **kwargs):
++                    token = _inside_endpoint.set(True)
++                    try:
++                        return await handler(*args, **kwargs)
++                    finally:
++                        _inside_endpoint.reset(token)
++
++                return async_body
++
++            @functools.wraps(handler)
++            def sync_body(*args, **kwargs):
++                token = _inside_endpoint.set(True)
++                try:
++                    return handler(*args, **kwargs)
++                finally:
++                    _inside_endpoint.reset(token)
++
++            return sync_body
++
++        route.dependant.call = instrument(original)
++    limiter = anyio.to_thread.current_default_thread_limiter()
++    previous = limiter.total_tokens
++    limiter.total_tokens = 1
++    try:
++        async with httpx.AsyncClient(
++            transport=httpx.ASGITransport(app=f.app, raise_app_exceptions=False), base_url="http://test"
++        ) as client:
++            await operation(client)
++        if deps._chacha_default_char_tasks:
++            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
++    finally:
++        limiter.total_tokens = previous
++
++
++def _states(f, path=None):
++    unique = {
++        raw.info.backend_pid: raw for observed_path, _, raw in f.observations if path is None or observed_path == path
++    }
++    result = []
++    for pid, raw in unique.items():
++        rows = f.backend.execute(
++            "SELECT DISTINCT c.relname FROM pg_locks l JOIN pg_class c ON c.oid=l.relation "
++            "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE l.pid=%s AND n.nspname='public' "
++            "AND c.relkind IN ('r','p') ORDER BY c.relname",
++            (pid,),
++        ).rows
++        result.append(
++            {
++                "pid": pid,
++                "closed": raw.closed,
++                "transaction": raw.info.transaction_status.name,
++                "relations": [row["relname"] for row in rows],
++            }
++        )
++    assert result, "The real request did not reach a database connection"
++    return result
++
++
++def _assert_finished(f, path=None):
++    states = _states(f, path)
++    assert all(row["transaction"] == "IDLE" and not row["relations"] for row in states), states
++
++
++def _replacement(f):
++    from psycopg.conninfo import make_conninfo
++
++    config = f.config
++    replacement_config = replace(
++        config,
++        connection_string=make_conninfo(
++            host=config.pg_host,
++            port=str(config.pg_port),
++            dbname=config.pg_database,
++            user=config.pg_user,
++            password=config.pg_password,
++            options="-c lock_timeout=100ms",
++        ),
++    )
++    backend = DatabaseBackendFactory.create_backend(replacement_config)
++    replacement = None
++    try:
++        replacement = CharactersRAGDB(f.tmp_path / "replacement.db", client_id="1", backend=backend)
++        assert replacement.get_note_by_id(f.note)["content"] == "HTTP lifetime fixture"
++    finally:
++        if replacement is not None:
++            replacement.close_all_connections()
++        backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("pg_http", [False, True], indirect=True, ids=["empty", "populated"])
++def test_real_dependency_http_chain_allows_live_replacement(pg_http):
++    f = pg_http
++
++    async def operation(client):
++        due = await client.get(DUE_PATH)
++        assert due.status_code == 200
++        assert due.json()["total"] == int(f.populated)
++        assert (await client.get("/api/v1/buddies")).json() == {"buddies": []}
++        attachment = await client.get("/api/v1/buddies/attachment")
++        assert attachment.status_code == 200
++        assert attachment.json()["attachment"] is None
++        for path in [
++            "/api/v1/notes/keywords/?include_note_counts=true",
++            "/api/v1/notes/collections?include_keywords=true",
++        ]:
++            assert (await client.get(path)).status_code == 200
++        notes_response = await client.get(NOTES_PATH)
++        assert notes_response.status_code == 200
++        assert notes_response.json()["notes"][0]["title"] == "Committed title"
++        due_threads = {thread for path, thread, _ in f.observations if path == DUE_PATH}
++        buddy_threads = {thread for path, thread, _ in f.observations if path == "/api/v1/buddies"}
++        notes_threads = {thread for path, thread, _ in f.observations if path == NOTES_PATH}
++        assert due_threads == buddy_threads
++        assert due_threads.isdisjoint(notes_threads)
++        states = _states(f)
++        assert all(not row["closed"] for row in states)
++        try:
++            _replacement(f)
++        except CharactersRAGDBError as exc:
++            pytest.fail(f"Live HTTP replacement failed with {type(exc).__name__}; request connection states: {states}")
++        _assert_finished(f)
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("path", [DUE_PATH, "/api/v1/buddies", "/api/v1/buddies/attachment", NOTES_PATH])
++def test_completed_http_read_does_not_retain_a_transaction(pg_http, path):
++    async def operation(client):
++        assert (await client.get(path)).status_code == 200
++        _assert_finished(pg_http, path)
++
++    asyncio.run(_run(pg_http, operation))
++
++
++@pytest.mark.parametrize("mode", ["sync-handoff", "joined-task", "failure", "cancel"])
++def test_http_failure_handoff_and_child_work_release_their_owned_reads(pg_http, mode):
++    f = pg_http
++    entered = asyncio.Event()
++
++    @f.app.get("/probe/read")
++    async def read(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        def perform_read():
++            rows, total = db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
++            assert rows == [] and total == 0
++
++        if mode == "sync-handoff":
++            await anyio.to_thread.run_sync(perform_read)
++        elif mode == "joined-task":
++
++            async def child():
++                await asyncio.sleep(0)
++                perform_read()
++
++            await asyncio.create_task(child())
++        else:
++            perform_read()
++        if mode == "failure":
++            raise RuntimeError("Fixture route failure")
++        if mode == "cancel":
++            entered.set()
++            await asyncio.Event().wait()
++        return {"read": True}
++
++    async def operation(client):
++        if mode == "cancel":
++            pending = asyncio.create_task(client.get("/probe/read"))
++            await asyncio.wait_for(entered.wait(), timeout=5)
++            pending.cancel()
++            with pytest.raises(asyncio.CancelledError):
++                await pending
++        else:
++            response = await client.get("/probe/read")
++            assert response.status_code == (500 if mode == "failure" else 200)
++        _assert_finished(f, "/probe/read")
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("owner", ["implicit", "raw-begin", "chacha", "nested", "external-backend"])
++@pytest.mark.parametrize("commit", [False, True], ids=["rollback", "commit"])
++def test_http_caller_keeps_pending_write_until_explicit_decision(pg_http, owner, commit):
++    f = pg_http
++
++    @f.app.post("/probe/caller")
++    async def caller(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        raw = db._get_thread_connection()
++        with ExitStack() as stack:
++            if owner == "raw-begin":
++                db.get_connection().execute("BEGIN")
++            elif owner == "external-backend":
++                stack.enter_context(db.backend.transaction(connection=raw))
++            elif owner in {"chacha", "nested"}:
++                stack.enter_context(db.transaction())
++                if owner == "nested":
++                    stack.enter_context(db.transaction())
++            db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending title", f.note))
++            # A nested non-HTTP accessor must keep this caller's owner/connection.
++            nested = await deps.get_chacha_db_for_user_id(1)
++            assert nested.get_note_by_id(f.note)["title"] == "Pending title"
++            assert raw.info.transaction_status.name == "INTRANS"
++            assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
++            if commit:
++                raw.commit()
++            else:
++                raw.rollback()
++        return {"decided": True}
++
++    async def operation(client):
++        response = await client.post("/probe/caller")
++        assert response.status_code == 200
++        expected = "Pending title" if commit else "Committed title"
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == expected
++        _assert_finished(f, "/probe/caller")
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("settle_check", [False, True], ids=["no-auto-commit-control", "owned-teardown"])
++def test_http_success_does_not_commit_an_undecided_write(pg_http, settle_check):
++    f = pg_http
++
++    @f.app.post("/probe/undecided")
++    async def undecided(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending title", f.note))
++        assert db.get_note_by_id(f.note)["title"] == "Pending title"
++        return {"accepted": True}
++
++    async def operation(client):
++        assert (await client.post("/probe/undecided")).status_code == 200
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
++        if settle_check:
++            _assert_finished(f, "/probe/undecided")
++
++    asyncio.run(_run(f, operation))
++
++
++def test_another_http_owner_cannot_observe_or_settle_pending_work(pg_http):
++    f = pg_http
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    @f.app.post("/probe/held-write")
++    async def held_write(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        raw = db._get_thread_connection()
++        db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending title", f.note))
++        entered.set()
++        try:
++            await release.wait()
++            assert not raw.closed
++            assert raw.info.transaction_status.name == "INTRANS"
++            assert db.get_note_by_id(f.note)["title"] == "Pending title"
++            return {"pending_preserved": True}
++        finally:
++            raw.rollback()
++
++    async def operation(client):
++        pending = asyncio.create_task(client.post("/probe/held-write"))
++        await asyncio.wait_for(entered.wait(), timeout=5)
++        try:
++            other = await client.get(NOTES_PATH)
++            assert other.status_code == 200
++            title = other.json()["notes"][0]["title"]
++        finally:
++            release.set()
++            first = await pending
++        assert first.status_code == 200
++        assert first.json() == {"pending_preserved": True}
++        assert title == "Committed title", "A different HTTP request observed another owner's uncommitted write"
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("independent_child", [False, True], ids=["closed-owner-rejected", "explicit-new-owner"])
++def test_detached_task_must_not_reuse_finished_http_owner(pg_http, independent_child):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
++        ClosedChaChaOperationError,
++        chacha_operation,
++    )
++
++    f = pg_http
++    release = asyncio.Event()
++    children = []
++    observed = []
++
++    @f.app.get("/probe/detached")
++    async def detach(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
++
++        async def child():
++            await release.wait()
++            if independent_child:
++                with chacha_operation(independent=True):
++                    observed.append(db._get_thread_connection())
++                    db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
++            else:
++                with pytest.raises(ClosedChaChaOperationError):
++                    db.get_note_by_id(f.note)
++
++        children.append(asyncio.create_task(child()))
++        return {"scheduled": True}
++
++    async def operation(client):
++        assert (await client.get("/probe/detached")).status_code == 200
++        release.set()
++        await asyncio.gather(*children)
++        _assert_finished(f, "/probe/detached")
++        assert all(raw.info.transaction_status.name == "IDLE" for raw in observed)
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("bind", [False, True], ids=["legacy-not-adopted", "explicit-external-binding"])
++@pytest.mark.parametrize("commit", [False, True], ids=["rollback", "commit"])
++def test_http_scope_preserves_preexisting_external_write(pg_http, bind, commit):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ExternalConnection, chacha_operation
++
++    f = pg_http
++    raw = f.db._get_thread_connection()
++    f.db.execute_query("UPDATE notes SET title=? WHERE id=?", ("External pending", f.note))
++    assert raw.info.transaction_status.name == "INTRANS"
++
++    @f.app.get("/probe/external")
++    async def external(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        if bind:
++            with chacha_operation(independent=True, bindings=(ExternalConnection(db, raw, f.backend),)):
++                with db.transaction():
++                    assert db._get_thread_connection() is raw
++                    title = db.get_note_by_id(f.note)["title"]
++                db.close_connection()  # A borrowed checkout cannot be returned by this helper.
++                assert not raw.closed and raw.info.transaction_status.name == "INTRANS"
++        else:
++            assert db._get_thread_connection() is not raw
++            title = db.get_note_by_id(f.note)["title"]
++        return {"title": title}
++
++    async def operation(client):
++        response = await client.get("/probe/external")
++        assert response.status_code == 200
++        assert response.json()["title"] == ("External pending" if bind else "Committed title")
++        assert not raw.closed and raw.info.transaction_status.name == "INTRANS"
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
++        (raw.commit if commit else raw.rollback)()
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == (
++            "External pending" if commit else "Committed title"
++        )
++
++    try:
++        asyncio.run(_run(f, operation))
++    finally:
++        raw.rollback()
++        f.db.close_connection()
++
++
++@pytest.mark.parametrize("failure", [False, True], ids=["complete", "background-failure"])
++def test_http_owner_lives_through_stream_and_background_work(pg_http, failure):
++    from starlette.background import BackgroundTask
++    from starlette.responses import StreamingResponse
++
++    f = pg_http
++    raw_connections = []
++    phases = []
++
++    @f.app.get("/probe/stream")
++    async def stream(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        def read(phase):
++            raw = db._get_thread_connection()
++            raw_connections.append(raw)
++            db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
++            assert raw.info.transaction_status.name == "INTRANS"
++            phases.append(phase)
++
++        async def body():
++            read("stream-start")
++            yield b"first "
++            await asyncio.sleep(0)
++            read("stream-end")
++            yield b"last"
++
++        def background():
++            read("background")
++            if failure:
++                raise RuntimeError("Expected background failure")
++
++        return StreamingResponse(body(), background=BackgroundTask(background))
++
++    async def operation(client):
++        response = await client.get("/probe/stream")
++        assert response.status_code == 200 and response.text == "first last"
++        assert phases == ["stream-start", "stream-end", "background"]
++        assert len({id(raw) for raw in raw_connections}) == 1
++        assert raw_connections[0].info.transaction_status.name == "IDLE"
++
++    asyncio.run(_run(f, operation))
++
++
++def test_two_account_databases_have_separate_checkouts_and_visible_notes(pg_http, monkeypatch):
++    from fastapi import Request
++
++    f = pg_http
++    other = CharactersRAGDB(f.tmp_path / "second-owner.db", client_id="2", backend=f.backend)
++    other_note = other.add_note(title="Other owner", content="Private second owner fixture")
++    other.close_connection()
++    owner_dirs = {1: f.tmp_path / "owner", 2: f.tmp_path / "other-owner"}
++    monkeypatch.setattr(
++        deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: owner_dirs[int(user_id)])
++    )
++    deps._chacha_db_instances[str(owner_dirs[2])] = other
++    raw_by_user = {}
++
++    async def identity(request: Request):
++        return User(id=int(request.headers.get("X-Fixture-User", "1")), username="fixture", email=None, is_active=True)
++
++    f.app.dependency_overrides[deps.get_request_user] = identity
++    f.app.dependency_overrides[auth_deps.get_request_user] = identity
++    entered = asyncio.Event()
++    release = asyncio.Event()
++
++    @f.app.get("/probe/account")
++    async def account(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        owner = int(db.client_id)
++        raw_by_user[owner] = db._get_thread_connection()
++        selected = f.note if owner == 1 else other_note
++        note = db.get_note_by_id(selected)
++        if owner == 1:
++            db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Private pending", f.note))
++            entered.set()
++            await release.wait()
++            assert db.get_note_by_id(f.note)["title"] == "Private pending"
++        return {"title": note["title"]}
++
++    async def operation(client):
++        first = asyncio.create_task(client.get("/probe/account", headers={"X-Fixture-User": "1"}))
++        await asyncio.wait_for(entered.wait(), timeout=5)
++        try:
++            second = await client.get("/probe/account", headers={"X-Fixture-User": "2"})
++            assert second.status_code == 200 and second.json() == {"title": "Other owner"}
++            assert raw_by_user[1] is not raw_by_user[2]
++            assert raw_by_user[1].info.transaction_status.name == "INTRANS"
++        finally:
++            release.set()
++            completed = await first
++        assert completed.status_code == 200
++        assert all(raw.info.transaction_status.name == "IDLE" for raw in raw_by_user.values())
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
++
++    asyncio.run(_run(f, operation))
++
++
++def test_request_can_finalize_repeatedly_without_reusing_closed_owner(pg_http):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
++        ClosedChaChaOperationError,
++        chacha_operation,
++    )
++
++    f = pg_http
++
++    @f.app.get("/probe/finish")
++    async def finish(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        with chacha_operation() as owner:
++            db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
++            raw = db._get_thread_connection()
++            owner.close()
++            owner.close()
++            assert raw.info.transaction_status.name == "IDLE"
++            with pytest.raises(ClosedChaChaOperationError):
++                db.get_note_by_id(f.note)
++        return {"finished": True}
++
++    async def operation(client):
++        assert (await client.get("/probe/finish")).json() == {"finished": True}
++        assert (await client.get(NOTES_PATH)).status_code == 200
++        _assert_finished(f)
++
++    asyncio.run(_run(f, operation))
++
++
++def test_real_initializer_and_default_worker_finish_independent_scopes(pg_http, monkeypatch):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_connection_state
++
++    f = pg_http
++    created = []
++    initialization_states = []
++    raw_connections = []
++
++    def construct(*args, **kwargs):
++        db = CharactersRAGDB(*args, **kwargs, backend=f.backend)
++        initialization_states.append(current_connection_state(db))
++        original = db._get_thread_connection
++
++        def observe():
++            raw = original()
++            raw_connections.append(raw)
++            return raw
++
++        monkeypatch.setattr(db, "_get_thread_connection", observe)
++        created.append(db)
++        return db
++
++    monkeypatch.setattr(deps, "CharactersRAGDB", construct)
++    monkeypatch.setattr(deps, "_get_chacha_db_path_for_user", lambda _: f.tmp_path / "published.db")
++    published = deps._create_and_prepare_db(3, "3")
++    assert published is created[0]
++    assert initialization_states[0] is not None
++    assert initialization_states[0].conn is None
++    # PostgreSQL intentionally skips the SQLite-only bundled visual seed.
++    # Exercise the real default-character worker, which does use a checkout.
++    asyncio.run(deps._ensure_default_character_async(published, 3))
++    assert raw_connections, "The real default worker did not perform database work"
++    assert all(raw.info.transaction_status.name == "IDLE" for raw in raw_connections)
++    assert published._get_pinned_backend() is None
++
++
++def test_closed_borrowed_connection_is_not_replaced_or_returned_by_http_scope(pg_http, monkeypatch):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ExternalConnection, chacha_operation
++
++    f = pg_http
++    pool = f.backend.get_pool()
++    raw = pool.get_connection()
++    returned = []
++    original_return = pool.return_connection
++
++    def record(connection):
++        returned.append(connection)
++        return original_return(connection)
++
++    monkeypatch.setattr(pool, "return_connection", record)
++
++    @f.app.get("/probe/closed-borrowed")
++    async def borrowed():
++        with chacha_operation(independent=True, bindings=(ExternalConnection(f.db, raw, f.backend),)):
++            raw.close()  # Only the external owner closes its borrowed connection.
++            with pytest.raises(CharactersRAGDBError, match="borrowed"):
++                f.db.get_connection()
++        assert raw not in returned
++        return {"external_preserved": True}
++
++    async def operation(client):
++        response = await client.get("/probe/closed-borrowed")
++        assert response.status_code == 200
++        assert response.json() == {"external_preserved": True}
++
++    try:
++        asyncio.run(_run(f, operation))
++    finally:
++        original_return(raw)
++
++
++@pytest.mark.parametrize("cancel", [False, True], ids=["response-finishes", "request-cancelled"])
++@pytest.mark.parametrize("surface", ["db", "connection", "cursor"])
++@pytest.mark.parametrize("query_error", [False, True], ids=["success", "backend-error"])
++def test_inflight_detached_worker_cannot_use_a_returned_http_checkout(
++    pg_http, monkeypatch, cancel, surface, query_error
++):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperation
++
++    f = pg_http
++    entered = threading.Event()
++    finalizing = threading.Event()
++    release = threading.Event()
++    returned = threading.Event()
++    query_finished = threading.Event()
++    ready = asyncio.Event()
++    workers = []
++    checkouts = []
++    premature_returns = []
++    worker_context = ContextVar("inflight_fixture_worker", default=False)
++    original_execute = f.backend.execute
++    pool = f.backend.get_pool()
++    original_return = pool.return_connection
++    original_close = ChaChaOperation.close
++
++    def execute(*args, **kwargs):
++        if not worker_context.get():
++            return original_execute(*args, **kwargs)
++        checkouts.append(kwargs["connection"])
++        entered.set()
++        assert release.wait(timeout=5)
++        try:
++            return original_execute(*args, **kwargs)
++        finally:
++            query_finished.set()
++
++    def return_connection(raw):
++        if any(raw is item for item in checkouts):
++            premature_returns.append(not query_finished.is_set())
++            returned.set()
++        return original_return(raw)
++
++    def close(owner):
++        if entered.is_set() and not query_finished.is_set():
++            finalizing.set()
++        return original_close(owner)
++
++    monkeypatch.setattr(f.backend, "execute", execute)
++    monkeypatch.setattr(pool, "return_connection", return_connection)
++    monkeypatch.setattr(ChaChaOperation, "close", close)
++
++    def controller():
++        try:
++            assert finalizing.wait(timeout=5)
++            returned.wait(timeout=0.2)
++        finally:
++            release.set()
++
++    control = threading.Thread(target=controller)
++    control.start()
++
++    @f.app.get("/probe/inflight")
++    async def inflight(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        connection = db.get_connection()
++
++        def worker():
++            token = worker_context.set(True)
++            try:
++                query = (
++                    "SELECT missing_inflight_column FROM notes WHERE id=?"
++                    if query_error
++                    else "SELECT id FROM notes WHERE id=?"
++                )
++                if surface == "db":
++                    return db.execute_query(query, (f.note,)).fetchone()
++                target = connection if surface == "connection" else connection.cursor()
++                return target.execute(query, (f.note,)).fetchone()
++            finally:
++                worker_context.reset(token)
++
++        workers.append(asyncio.create_task(asyncio.to_thread(worker)))
++        assert await asyncio.to_thread(entered.wait, 5)
++        ready.set()
++        if cancel:
++            await asyncio.Event().wait()
++        return {"launched": True}
++
++    async def operation(client):
++        request = asyncio.create_task(client.get("/probe/inflight"))
++        await asyncio.wait_for(ready.wait(), timeout=5)
++        if cancel:
++            request.cancel()
++            with pytest.raises(asyncio.CancelledError):
++                await request
++        else:
++            assert (await request).status_code == 200
++        rows = await asyncio.gather(*workers, return_exceptions=True)
++        if query_error:
++            from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
++
++            assert isinstance(rows[0], (CharactersRAGDBError, DatabaseError))
++        else:
++            assert rows[0]["id"] == f.note
++        assert premature_returns == [False], "The pool received the checkout before its in-flight query finished"
++        assert checkouts[0].info.transaction_status.name == "IDLE"
++
++    try:
++        asyncio.run(_run(f, operation))
++    finally:
++        release.set()
++        control.join(timeout=5)
++
++
++@pytest.mark.parametrize("decision", ["commit", "rollback", "error"])
++def test_inflight_explicit_transaction_retains_checkout_through_its_decision(pg_http, monkeypatch, decision):
++    f = pg_http
++    entered = threading.Event()
++    release = threading.Event()
++    workers = []
++    raw_connections = []
++    returns = []
++    pool = f.backend.get_pool()
++    original_return = pool.return_connection
++
++    def record(raw):
++        if any(raw is item for item in raw_connections):
++            returns.append(raw)
++        return original_return(raw)
++
++    monkeypatch.setattr(pool, "return_connection", record)
++
++    @f.app.post("/probe/inflight-transaction")
++    async def transaction(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        def worker():
++            with db.transaction() as conn:
++                raw_connections.append(conn._connection)
++                conn.execute("UPDATE notes SET title=? WHERE id=?", ("Explicit pending", f.note))
++                entered.set()
++                assert release.wait(timeout=5)
++                if decision == "rollback":
++                    conn.rollback()
++                elif decision == "error":
++                    raise ValueError("Explicit transaction failure")
++
++        workers.append(asyncio.create_task(asyncio.to_thread(worker)))
++        assert await asyncio.to_thread(entered.wait, 5)
++        return {"transaction_running": True}
++
++    async def operation(client):
++        response = await client.post("/probe/inflight-transaction")
++        assert response.status_code == 200
++        assert not returns, "Response completion returned a checkout with an active explicit transaction"
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
++        release.set()
++        result = await asyncio.gather(*workers, return_exceptions=True)
++        assert isinstance(result[0], ValueError) if decision == "error" else result == [None]
++        assert returns == raw_connections
++        assert raw_connections[0].info.transaction_status.name == "IDLE"
++        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == (
++            "Explicit pending" if decision == "commit" else "Committed title"
++        )
++
++    try:
++        asyncio.run(_run(f, operation))
++    finally:
++        release.set()
++
++
++def test_retained_wrapper_cannot_execute_from_a_later_http_owner(pg_http):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ClosedChaChaOperationError
++
++    f = pg_http
++    retained = []
++
++    @f.app.get("/probe/capture-wrapper")
++    async def capture(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        retained.append(db.get_connection())
++        retained.append(retained[0].cursor())
++        return {"captured": True}
++
++    @f.app.get("/probe/reuse-wrapper")
++    async def reuse(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        assert db.get_note_by_id(f.note)["title"] == "Committed title"
++        for wrapper in retained:
++            with pytest.raises(ClosedChaChaOperationError):
++                wrapper.execute("SELECT id FROM notes WHERE id=?", (f.note,))
++        return {"rejected": True}
++
++    async def operation(client):
++        assert (await client.get("/probe/capture-wrapper")).status_code == 200
++        assert (await client.get("/probe/reuse-wrapper")).json() == {"rejected": True}
++
++    asyncio.run(_run(f, operation))
++
++
++@pytest.mark.parametrize("later_request", [False, True], ids=["outside-owner", "later-owner"])
++def test_retained_connection_cannot_rebind_a_new_cursor_after_return(pg_http, monkeypatch, later_request):
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ClosedChaChaOperationError
++
++    f = pg_http
++    retained = []
++
++    @f.app.get("/probe/cursor-source")
++    async def capture(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
++        retained.append(db.get_connection())
++        return {"captured": True}
++
++    @f.app.get("/probe/new-cursor")
++    async def attempt():
++        assert f.db.get_note_by_id(f.note)["title"] == "Committed title"
++        assert f.db.get_connection()._connection is retained[0]._connection
++        with pytest.raises(ClosedChaChaOperationError):
++            retained[0].cursor()
++        return {"rejected": True}
++
++    async def operation(client):
++        assert (await client.get("/probe/cursor-source")).status_code == 200
++        if later_request:
++            await asyncio.sleep(0)
++            if deps._chacha_default_char_tasks:
++                await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
++            pool = f.backend.get_pool()
++            original_get = pool.get_connection
++
++            def prefer_returned_checkout():
++                held = []
++                try:
++                    for _ in range(f.config.pool_size):
++                        raw = original_get()
++                        if raw is retained[0]._connection:
++                            return raw
++                        held.append(raw)
++                    pytest.fail("The original open checkout was not returned to its pool")
++                finally:
++                    for raw in held:
++                        pool.return_connection(raw)
++
++            monkeypatch.setattr(pool, "get_connection", prefer_returned_checkout)
++            assert (await client.get("/probe/new-cursor")).json() == {"rejected": True}
++        else:
++            with pytest.raises(ClosedChaChaOperationError):
++                retained[0].cursor()
++
++    asyncio.run(_run(f, operation))
+--- a/tldw_Server_API/tests/DB_Management/test_chacha_operation_scope.py
++++ b/tldw_Server_API/tests/DB_Management/test_chacha_operation_scope.py
+@@ -0,0 +1,341 @@
++"""Operation lifetime and ownership controls that do not require PostgreSQL."""
++
++import asyncio
++import threading
++from contextvars import copy_context
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
++    ChaChaOperationMiddleware,
++    ClosedChaChaOperationError,
++    ExternalConnection,
++    chacha_operation,
++    current_connection_state,
++)
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++pytestmark = pytest.mark.unit
++
++
++def _checkout(database):
++    state = current_connection_state(database)
++    connection = Mock()
++    pool = Mock()
++    state.conn = connection
++    state.backend_ref = SimpleNamespace(get_pool=lambda: pool)
++    return state, connection, pool
++
++
++@pytest.mark.parametrize("cancel", [False, True])
++def test_repeated_or_cancelled_finalization_returns_each_checkout_once(cancel):
++    db = object()
++    with chacha_operation(independent=True) as owner:
++        state, raw, pool = _checkout(db)
++        with chacha_operation() as nested:
++            assert nested is owner and current_connection_state(db) is state
++        if cancel:
++
++            async def cancelled():
++                with chacha_operation():
++                    raise asyncio.CancelledError()
++
++            with pytest.raises(asyncio.CancelledError):
++                asyncio.run(cancelled())
++        owner.close()
++        owner.close()
++        with pytest.raises(ClosedChaChaOperationError):
++            current_connection_state(db)
++    pool.return_connection.assert_called_once_with(raw)
++    raw.commit.assert_not_called()
++    assert current_connection_state(db) is None
++
++
++@pytest.mark.parametrize("primary", [False, True])
++def test_cleanup_attempts_all_checkouts_and_preserves_primary_exception(primary):
++    one, two = object(), object()
++    expected = ValueError if primary else RuntimeError
++    with pytest.raises(expected, match="primary failure" if primary else "cleanup failed"):
++        with chacha_operation(independent=True):
++            _, first, first_pool = _checkout(one)
++            _, second, second_pool = _checkout(two)
++            first_pool.return_connection.side_effect = RuntimeError("Private pool failure")
++            if primary:
++                raise ValueError("primary failure")
++    first_pool.return_connection.assert_called_once_with(first)
++    second_pool.return_connection.assert_called_once_with(second)
++    assert current_connection_state(one) is None
++
++
++def test_independent_scope_does_not_adopt_an_existing_owner_or_external_binding():
++    db = object()
++    with chacha_operation(independent=True):
++        original, raw, pool = _checkout(db)
++        with chacha_operation(independent=True):
++            assert current_connection_state(db).conn is None
++        assert current_connection_state(db) is original
++        with pytest.raises(ValueError, match="independent"):
++            with chacha_operation(bindings=(ExternalConnection(db, raw, original.backend_ref),)):
++                pass
++        pool.return_connection.assert_not_called()
++    pool.return_connection.assert_called_once_with(raw)
++
++
++@pytest.mark.parametrize("scope_type", ["websocket", "lifespan"])
++def test_non_http_asgi_work_does_not_gain_an_implicit_owner(scope_type):
++    db = object()
++    seen = []
++
++    async def downstream(scope, receive, send):
++        seen.append(current_connection_state(db))
++
++    asyncio.run(ChaChaOperationMiddleware(downstream)({"type": scope_type}, None, None))
++    assert seen == [None]
++
++
++@pytest.mark.parametrize("minimal", [False, True], ids=["normal", "minimal"])
++def test_actual_main_registers_one_operation_middleware_in_both_modes(monkeypatch, minimal):
++    from tldw_Server_API.tests.helpers.app_main_state import (
++        clear_app_main,
++        import_app_main,
++        restore_app_main,
++        snapshot_app_main,
++    )
++
++    monkeypatch.setenv("TEST_MODE", "1")
++    monkeypatch.setenv("MINIMAL_TEST_APP", "1" if minimal else "0")
++    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
++    previous = snapshot_app_main()
++    clear_app_main()
++    try:
++        main = import_app_main()
++        registered = [entry for entry in main.app.user_middleware if entry.cls is ChaChaOperationMiddleware]
++        assert len(registered) == 1
++        assert any(route.path == "/health" for route in main.app.routes)
++    finally:
++        restore_app_main(previous)
++
++
++def test_sqlite_explicit_transaction_retains_legacy_owner_after_operation(tmp_path):
++    db = CharactersRAGDB(tmp_path / "sqlite-owner.db", client_id="1")
++    try:
++        note = db.add_note(title="Committed", content="SQLite control")
++        raw = db.get_connection()
++        raw.execute("BEGIN")
++        with chacha_operation(independent=True):
++            db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending", note))
++            assert db.get_connection() is raw
++        assert raw.in_transaction
++        assert db.get_note_by_id(note)["title"] == "Pending"
++        raw.rollback()
++        assert db.get_note_by_id(note)["title"] == "Committed"
++    finally:
++        db.close_all_connections()
++
++
++def test_inherited_task_and_thread_cannot_adopt_an_active_parent_use_after_close():
++    db = object()
++
++    async def run():
++        with chacha_operation(independent=True) as owner:
++            state, raw, pool = _checkout(db)
++            with state.use():
++                owner.close()
++                assert current_connection_state(db) is state
++                pool.return_connection.assert_not_called()
++
++                def rejected():
++                    with pytest.raises(ClosedChaChaOperationError):
++                        current_connection_state(db)
++
++                async def child():
++                    rejected()
++
++                await asyncio.create_task(child())
++                await asyncio.to_thread(rejected)
++                assert current_connection_state(db) is state
++            pool.return_connection.assert_called_once_with(raw)
++
++    asyncio.run(run())
++
++
++@pytest.mark.parametrize("primary", [False, True])
++def test_deferred_last_use_cleanup_preserves_primary_exception_and_returns_once(primary):
++    db = object()
++    expected = ValueError if primary else RuntimeError
++    with pytest.raises(expected, match="primary" if primary else "pool failure"):
++        with chacha_operation(independent=True) as owner:
++            state, raw, pool = _checkout(db)
++            pool.return_connection.side_effect = RuntimeError("pool failure")
++            with state.use():
++                owner.close()
++                owner.close()
++                pool.return_connection.assert_not_called()
++                if primary:
++                    raise ValueError("primary")
++    pool.return_connection.assert_called_once_with(raw)
++    assert current_connection_state(db) is None
++
++
++@pytest.mark.parametrize("failure_at", ["checkout", "wrapper"])
++def test_failed_transaction_entry_does_not_leave_an_active_checkout_use(failure_at):
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendManagedTransaction
++
++    database = object()
++    with chacha_operation(independent=True):
++        state, raw, pool = _checkout(database)
++
++        def fail():
++            raise RuntimeError("entry failure")
++
++        db = SimpleNamespace(
++            _connection_state=lambda: state,
++            _get_thread_connection=fail if failure_at == "checkout" else lambda: raw,
++            _get_pinned_backend=fail,
++        )
++        transaction = BackendManagedTransaction(db)
++        with pytest.raises(RuntimeError, match="entry failure"):
++            with transaction:
++                pytest.fail("Entry should fail")
++    pool.return_connection.assert_called_once_with(raw)
++
++
++@pytest.mark.parametrize("missing", ["connection", "backend"])
++def test_incomplete_external_binding_fails_before_creating_a_borrowed_checkout(missing):
++    db = object()
++    connection = None if missing == "connection" else object()
++    backend = None if missing == "backend" else object()
++    with pytest.raises(ValueError, match="External"):
++        with chacha_operation(independent=True, bindings=(ExternalConnection(db, connection, backend),)):
++            pass
++
++
++class BoundedOwnerLock:
++    """Keep real RLock semantics; bound an otherwise deadlocked test wait."""
++
++    def __init__(self):
++        self.lock = threading.RLock()
++
++    def __enter__(self):
++        if not self.lock.acquire(timeout=1):
++            raise RuntimeError("owner/state lock order deadlock")
++        return self
++
++    def __exit__(self, *_):
++        self.lock.release()
++
++
++def test_active_connection_acquisition_and_late_closed_owner_lookup_do_not_deadlock(monkeypatch):
++    db = CharactersRAGDB.__new__(CharactersRAGDB)
++    db._backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
++    db._local = threading.local()
++    raw = SimpleNamespace(closed=False)
++    db._backend.get_pool = lambda: SimpleNamespace(return_connection=lambda _: None)
++    active = threading.Event()
++    proceed = threading.Event()
++    holding_state = threading.Event()
++    checking_late_state = threading.Event()
++    errors = []
++    original_acquire = db._get_connection_for_state
++
++    with chacha_operation(independent=True) as owner:
++        state = current_connection_state(db)
++        state.conn, state.backend_ref = raw, db._backend
++        owner._lock = BoundedOwnerLock()
++        original_permits = state.permits_current_use
++
++        def acquire(captured):
++            holding_state.set()  # Pause actual acquisition before its pinned-backend lookup.
++            assert checking_late_state.wait(2)
++            return original_acquire(captured)
++
++        def permits():
++            if threading.current_thread().name == "late-owner-probe":
++                checking_late_state.set()
++            return original_permits()
++
++        monkeypatch.setattr(db, "_get_connection_for_state", acquire)
++        monkeypatch.setattr(state, "permits_current_use", permits)
++
++        def work():
++            try:
++                with state.use():
++                    active.set()
++                    assert proceed.wait(2)
++                    assert db._get_thread_connection() is raw
++            except BaseException as exc:  # noqa: BLE001 - assert worker failures on the parent thread
++                errors.append(f"active:{type(exc).__name__}:{exc}")
++
++        def late():
++            try:
++                current_connection_state(db)
++                errors.append("late lookup unexpectedly admitted")
++            except ClosedChaChaOperationError:
++                pass
++            except BaseException as exc:  # noqa: BLE001 - assert worker failures on the parent thread
++                errors.append(f"late:{type(exc).__name__}:{exc}")
++
++        active_context, late_context = copy_context(), copy_context()
++        worker = threading.Thread(target=lambda: active_context.run(work), name="active-owner-probe")
++        rejected = threading.Thread(target=lambda: late_context.run(late), name="late-owner-probe")
++        worker.start()
++        assert active.wait(2)
++        owner.close()
++        proceed.set()
++        assert holding_state.wait(2)
++        rejected.start()
++        worker.join(3)
++        rejected.join(3)
++        assert not worker.is_alive() and not rejected.is_alive()
++        assert errors == []
++
++
++def test_owner_close_does_not_wait_for_an_active_worker_to_acquire_a_checkout():
++    entered = threading.Event()
++    closing = threading.Event()
++    closed = threading.Event()
++    release = threading.Event()
++    blocked = []
++    returns = []
++    raw = SimpleNamespace(closed=False)
++
++    def acquire():
++        entered.set()
++        assert release.wait(3)
++        return raw
++
++    pool = SimpleNamespace(get_connection=acquire, return_connection=returns.append)
++    db = CharactersRAGDB.__new__(CharactersRAGDB)
++    db._backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL, get_pool=lambda: pool)
++    db._local = threading.local()
++    db._uses_shared_content_backend = False
++    db.client_id = ""  # Fake raw connection has no session/config driver I/O.
++
++    def controller():
++        assert closing.wait(3)
++        blocked.append(not closed.wait(0.3))
++        release.set()
++
++    control = threading.Thread(target=controller)
++    control.start()
++
++    async def run():
++        with chacha_operation(independent=True) as owner:
++            worker = asyncio.create_task(asyncio.to_thread(db.get_connection))
++            assert await asyncio.to_thread(entered.wait, 3)
++            closing.set()
++            owner.close()
++            closed.set()
++            await worker
++
++    try:
++        asyncio.run(run())
++    finally:
++        release.set()
++        control.join(3)
++    assert not control.is_alive()
++    assert returns == [raw]
++    assert blocked == [False], "Owner close waited for the worker's blocked pool acquisition"
+--- a/tldw_Server_API/tests/Chat/test_chacha_notes_db_deps_postgres_health.py
++++ b/tldw_Server_API/tests/Chat/test_chacha_notes_db_deps_postgres_health.py
+@@ -29,18 +29,22 @@
+     assert postgres_chacha.get_connection().execute("SELECT 1").fetchone() is not None
+
+
+-def test_postgres_failed_health_probe_reports_unhealthy_then_cleans_transaction(postgres_chacha):
++def test_independent_health_probe_preserves_callers_failed_transaction(postgres_chacha):
+     connection = postgres_chacha.get_connection()
+     with pytest.raises(DatabaseError):
+         connection.execute("SELECT 1 / 0")
+
+-    assert deps._health_check_instance(postgres_chacha) is False
++    assert deps._health_check_instance(postgres_chacha) is True
++    assert connection._connection.info.transaction_status.name == "INERROR"
++    connection.rollback()
+     assert connection.execute("SELECT 1").fetchone() is not None
+     assert deps._health_check_instance(postgres_chacha) is True
+
+
+ def test_repeated_postgres_cached_dependency_returns_same_healthy_instance(
+-    postgres_chacha, monkeypatch, tmp_path,
++    postgres_chacha,
++    monkeypatch,
++    tmp_path,
+ ):
+     monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", lambda _user: tmp_path)
+     monkeypatch.setattr(deps, "_chacha_db_instances", {str(tmp_path): postgres_chacha})
+@@ -68,3 +72,24 @@
+             raise RuntimeError("rollback caller")
+     row = connection.execute("SELECT COUNT(*) AS count FROM health_pending").fetchone()
+     assert row["count"] == 0
++
++
++def test_failed_owned_health_probe_cleans_its_checkout_before_retry(postgres_chacha, monkeypatch):
++    db = postgres_chacha
++    backend = db.backend
++    original_execute = backend.execute
++    observed = []
++
++    def fail_probe(query, params=None, **kwargs):
++        if query.strip() == "SELECT 1" and kwargs.get("connection") is not None:
++            observed.append(kwargs["connection"])
++            return original_execute("SELECT 1 / 0", params, **kwargs)
++        return original_execute(query, params, **kwargs)
++
++    monkeypatch.setattr(backend, "execute", fail_probe)
++    assert deps._health_check_instance(db) is False
++    assert len(observed) == 1
++    assert not observed[0].closed
++    assert observed[0].info.transaction_status.name == "IDLE"
++    monkeypatch.setattr(backend, "execute", original_execute)
++    assert deps._health_check_instance(db) is True

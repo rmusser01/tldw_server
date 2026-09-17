@@ -2580,6 +2580,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Security middleware (headers + request size limit)
 from tldw_Server_API.app.core.AuthNZ.usage_logging_middleware import UsageLoggingMiddleware
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware
 from tldw_Server_API.app.core.Sandbox.middleware import SandboxArtifactTraversalGuardMiddleware
 from tldw_Server_API.app.core.Security.drain_gate_middleware import DrainGateMiddleware
@@ -2779,6 +2780,7 @@ else:
 
 # Request ID context should be available before the drain gate, and the drain gate
 # should reject work before the LLM budget middleware gets a chance to do heavier setup.
+app.add_middleware(ChaChaOperationMiddleware)
 app.add_middleware(DrainGateMiddleware)
 app.add_middleware(RequestIDMiddleware)
 

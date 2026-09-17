@@ -1,0 +1,9 @@
+{
+  "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "8e853e529624be5d9f25e6a06dea80255f06c8068eada3def3bd1ecf04f851f8",
+  "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": "deab1710097b472b595ccad93f22862e30ffb299a5df39eacae0f9e5cba19bef",
+  "tldw_Server_API/app/main.py": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+  "tldw_Server_API/app/core/DB_Management/chacha/operation_scope.py": "996814cc1aaa0e68b4c09e7639c68f111ce97b5c54c72d7a8f4eaf42524c096d",
+  "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py": "7eab2f1f9a05e2ba029efdde49ea0fdc856d9e8b433ba36d989e79f1de5bf51a",
+  "tldw_Server_API/tests/DB_Management/test_chacha_operation_scope.py": "b5a7a22756880092871cba464c800f1ee6e07553a98047d09a57059573953392",
+  "tldw_Server_API/tests/Chat/test_chacha_notes_db_deps_postgres_health.py": "3ac6d7b210782f6da4f790646f548a4e9cbe2ceebedb66eb2c7fcdc54548475e"
+}

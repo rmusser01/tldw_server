@@ -1,0 +1,27 @@
+{
+  "authorCombined": {
+    "passed": 164,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 117.46,
+    "log": ".tmp/fresh-uat-recovery-20260916/uat181-http-frozen-combined-green.redacted.log"
+  },
+  "lint": {
+    "baseline": 9,
+    "current": 9,
+    "added": 0,
+    "removed": 0,
+    "baselineUsesLogicalPaths": true
+  },
+  "bandit": {
+    "productionFindings": 0,
+    "productionErrors": 0,
+    "testFindings": 0,
+    "testErrors": 0,
+    "testExcluded": [
+      "B101"
+    ]
+  },
+  "snapshotMismatches": [],
+  "independentReview": "4 targeted controls pass; full77 pending"
+}

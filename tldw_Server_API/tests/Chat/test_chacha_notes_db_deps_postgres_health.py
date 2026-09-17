@@ -29,18 +29,22 @@ def test_postgres_health_check_keeps_connection_usable(postgres_chacha):
     assert postgres_chacha.get_connection().execute("SELECT 1").fetchone() is not None
 
 
-def test_postgres_failed_health_probe_reports_unhealthy_then_cleans_transaction(postgres_chacha):
+def test_independent_health_probe_preserves_callers_failed_transaction(postgres_chacha):
     connection = postgres_chacha.get_connection()
     with pytest.raises(DatabaseError):
         connection.execute("SELECT 1 / 0")
 
-    assert deps._health_check_instance(postgres_chacha) is False
+    assert deps._health_check_instance(postgres_chacha) is True
+    assert connection._connection.info.transaction_status.name == "INERROR"
+    connection.rollback()
     assert connection.execute("SELECT 1").fetchone() is not None
     assert deps._health_check_instance(postgres_chacha) is True
 
 
 def test_repeated_postgres_cached_dependency_returns_same_healthy_instance(
-    postgres_chacha, monkeypatch, tmp_path,
+    postgres_chacha,
+    monkeypatch,
+    tmp_path,
 ):
     monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", lambda _user: tmp_path)
     monkeypatch.setattr(deps, "_chacha_db_instances", {str(tmp_path): postgres_chacha})
@@ -68,3 +72,24 @@ def test_postgres_health_probe_does_not_commit_callers_transaction(postgres_chac
             raise RuntimeError("rollback caller")
     row = connection.execute("SELECT COUNT(*) AS count FROM health_pending").fetchone()
     assert row["count"] == 0
+
+
+def test_failed_owned_health_probe_cleans_its_checkout_before_retry(postgres_chacha, monkeypatch):
+    db = postgres_chacha
+    backend = db.backend
+    original_execute = backend.execute
+    observed = []
+
+    def fail_probe(query, params=None, **kwargs):
+        if query.strip() == "SELECT 1" and kwargs.get("connection") is not None:
+            observed.append(kwargs["connection"])
+            return original_execute("SELECT 1 / 0", params, **kwargs)
+        return original_execute(query, params, **kwargs)
+
+    monkeypatch.setattr(backend, "execute", fail_probe)
+    assert deps._health_check_instance(db) is False
+    assert len(observed) == 1
+    assert not observed[0].closed
+    assert observed[0].info.transaction_status.name == "IDLE"
+    monkeypatch.setattr(backend, "execute", original_execute)
+    assert deps._health_check_instance(db) is True

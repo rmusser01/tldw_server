@@ -1,0 +1,29 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=115899195
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 1 item
+
+.tmp/uat181-http-independent-20260917/test_checkout_wait_finalization_probe.py F [100%]
+
+=================================== FAILURES ===================================
+__ test_owner_close_does_not_wait_for_an_active_worker_to_acquire_a_checkout ___
+.tmp/uat181-http-independent-20260917/test_checkout_wait_finalization_probe.py:57: in test_owner_close_does_not_wait_for_an_active_worker_to_acquire_a_checkout
+    assert blocked == [False], "Owner close waited for the worker's blocked pool acquisition"
+E   AssertionError: Owner close waited for the worker's blocked pool acquisition
+E   assert [True] == [False]
+E
+E     At index 0 diff: True != False
+E     Use -v to get more diff
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 20:40:55.363 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 6175223808
+=========================== short test summary info ============================
+FAILED .tmp/uat181-http-independent-20260917/test_checkout_wait_finalization_probe.py::test_owner_close_does_not_wait_for_an_active_worker_to_acquire_a_checkout
+========================= 1 failed, 1 warning in 0.80s =========================
