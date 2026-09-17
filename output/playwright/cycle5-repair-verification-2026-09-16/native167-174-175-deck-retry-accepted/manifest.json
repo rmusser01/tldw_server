@@ -1,0 +1,166 @@
+{
+  "at": "2026-09-17T03:58:35.769Z",
+  "files": [
+    {
+      "file": "monitor.js",
+      "source": ".tmp/uat167-174-175-native-20260917/monitor.js",
+      "original_sha256": "538f6eadd7db99cc5103ecbb6c692563192bb04c6db5fa941e1cbf39e7431f04",
+      "retained_sha256": "538f6eadd7db99cc5103ecbb6c692563192bb04c6db5fa941e1cbf39e7431f04",
+      "normalization": "none"
+    },
+    {
+      "file": "events.js",
+      "source": ".tmp/uat167-174-175-native-20260917/events.js",
+      "original_sha256": "8d7c1ffc7f3f8f552b24a4fc62ce64b14fb09c66e3338db1afee865c2655fb58",
+      "retained_sha256": "8d7c1ffc7f3f8f552b24a4fc62ce64b14fb09c66e3338db1afee865c2655fb58",
+      "normalization": "none"
+    },
+    {
+      "file": "generation-ready.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/generation-ready.txt",
+      "original_sha256": "28d74a29253fd3b7907827754c2f9361fcdb94d7c7bf18223e36132c34a94c32",
+      "retained_sha256": "9f296f62f6a555dcca693e394e621d0508b0067df16d7863d6dc8d6100d53d63",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "generated-ready.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/generated-ready.txt",
+      "original_sha256": "20ac15c0788f4ba1ddea309a0e99902e879c2bd05e95084cccfab968fbd16a86",
+      "retained_sha256": "fbcebe9728ac0d22c4102f6e74bc55809a367dd71c62e5224efc316c470cca16",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "generation-sent.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/generation-sent.txt",
+      "original_sha256": "b5bcab44bb1d0f1b4b710356a963b79e04fd3e5627e44970589549c714f49936",
+      "retained_sha256": "b5bcab44bb1d0f1b4b710356a963b79e04fd3e5627e44970589549c714f49936",
+      "normalization": "none"
+    },
+    {
+      "file": "duplicate-name.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/duplicate-name.txt",
+      "original_sha256": "50b2b67f6e041ae963a3b3ef30632b6d5c6a2c802e17fa852403579d7e020a15",
+      "retained_sha256": "22c00757d74ba16ab623b32dc6259cb3be7376e97b177c7b494fd2a50fef9ed3",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "duplicate-save.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/duplicate-save.txt",
+      "original_sha256": "1ec59c3ceff4d9d0b16628795b722ec007b85f9d1e054f349b43e7d1d91e8d8d",
+      "retained_sha256": "1ec59c3ceff4d9d0b16628795b722ec007b85f9d1e054f349b43e7d1d91e8d8d",
+      "normalization": "none"
+    },
+    {
+      "file": "duplicate-events.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/duplicate-events.txt",
+      "original_sha256": "604b66be878627dbc1277936e794491ec35269d854fe18f188f83ed911aa094e",
+      "retained_sha256": "ef4ea3d466784e45072bc3a798e4e6bd154b767bd663bf539ef671bfbfb58b5d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "duplicate-ready.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/duplicate-ready.txt",
+      "original_sha256": "1733250a6875e58e27223f293d4e5299372cd09095da161e7e82c40667a44df5",
+      "retained_sha256": "50552e002e22a06482dbff3bddee17ae1cddfca71f1e7e0511ec3beffa09ca6e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "duplicate-inline.png",
+      "source": ".tmp/uat167-174-175-native-20260917/duplicate-inline.png",
+      "original_sha256": "fe8f55c0e491745ab8cd43addde1e80915a8782a87255f9d72aa7b8b8058554d",
+      "retained_sha256": "fe8f55c0e491745ab8cd43addde1e80915a8782a87255f9d72aa7b8b8058554d",
+      "normalization": "none"
+    },
+    {
+      "file": "edited-deck-name.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/edited-deck-name.txt",
+      "original_sha256": "7b3463bb06603dd59492f9852e447f4bead81bbba697189ff3f22a8a2a03d5b0",
+      "retained_sha256": "50881e3e48fa4d395f7fe3ecc94aafab1dfe47ca08564ad0205b5522b188fd3c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "edited-retry.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/edited-retry.txt",
+      "original_sha256": "8b8ab6ef53316d4e5fbe8066cea46267d028667027e4adcc9fdb11a0426fc5a7",
+      "retained_sha256": "8b8ab6ef53316d4e5fbe8066cea46267d028667027e4adcc9fdb11a0426fc5a7",
+      "normalization": "none"
+    },
+    {
+      "file": "retry-events.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/retry-events.txt",
+      "original_sha256": "6b545e11f3ede8cc6631bec83846107cb8bf51555097691f600c84871f3ccb63",
+      "retained_sha256": "d6439d8b58fcc084f0ea79496c364c4db96b26a883bf113a28e3f44ae856b2a9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "retry-ready.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/retry-ready.txt",
+      "original_sha256": "497b987a80a6b531c5c1f0cca0a706fa99e96ec03b22a5e4eb4cd460895fea30",
+      "retained_sha256": "5bafe41b4baaf0435416110fdfb22c3c3860e6f963f69e4fa81a9a6e11d51473",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "retry-saved.png",
+      "source": ".tmp/uat167-174-175-native-20260917/retry-saved.png",
+      "original_sha256": "ef76100a37b0597fe1e9f4124d6e90f98b2891577feaea4cc78cc59bf4b0ca92",
+      "retained_sha256": "ef76100a37b0597fe1e9f4124d6e90f98b2891577feaea4cc78cc59bf4b0ca92",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-reload.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/manage-reload.txt",
+      "original_sha256": "24d240f1ba2658d0f4be03257590016fa68e13fe91034a26f49b5f16c288d471",
+      "retained_sha256": "24d240f1ba2658d0f4be03257590016fa68e13fe91034a26f49b5f16c288d471",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-reloaded-ready.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/manage-reloaded-ready.txt",
+      "original_sha256": "932dcc2ea1c955f0bce96a58cf467bda2f7acb4f952cbaad805f70eefb2b08de",
+      "retained_sha256": "ac0632eb35234dff9bf9cbae3f5f27012afaca29900fd6a678b3a2ca943d54d9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "manage-reloaded-settled.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/manage-reloaded-settled.txt",
+      "original_sha256": "2d2edce391ed0081ef0041caf93bb8564e07cd5f202b67fa281420f852f0bfa4",
+      "retained_sha256": "69ed1d44980e228311d51490a8cc0b099f70564aff949327234fafc5f5c79b85",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "manage-reloaded-final-events.txt",
+      "source": ".tmp/uat167-174-175-native-20260917/manage-reloaded-final-events.txt",
+      "original_sha256": "24c83d7362fa7fde08f1eb37373aa0707dc8501a70d0450ef185770dab726b66",
+      "retained_sha256": "d4c15556a3ebf12e28b2949d89171b6c8089670d84a35604d7791857615b96fd",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "deck-card-reloaded.png",
+      "source": ".tmp/uat167-174-175-native-20260917/deck-card-reloaded.png",
+      "original_sha256": "568521885f93a2392f9b2f80f463221195f7ea040da12ed53029cd2f6712fb17",
+      "retained_sha256": "568521885f93a2392f9b2f80f463221195f7ea040da12ed53029cd2f6712fb17",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-initial-timestamp-error.mjs",
+      "source": ".tmp/uat167-174-175-native-20260917/audit-initial-timestamp-error.mjs",
+      "original_sha256": "95740b5cc1480da6eb4eb25413632ed5d1b120b50f4a17bd79960ab1b7fc1f42",
+      "retained_sha256": "95740b5cc1480da6eb4eb25413632ed5d1b120b50f4a17bd79960ab1b7fc1f42",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-acceptance.mjs",
+      "source": ".tmp/uat167-174-175-native-20260917/audit-acceptance.mjs",
+      "original_sha256": "cd3da3dac5fead53bb4db3a8982b660a2705fc5708e5c492a9a0dfb8c817ac00",
+      "retained_sha256": "cd3da3dac5fead53bb4db3a8982b660a2705fc5708e5c492a9a0dfb8c817ac00",
+      "normalization": "none"
+    },
+    {
+      "file": "acceptance-audit.json",
+      "source": ".tmp/uat167-174-175-native-20260917/acceptance-audit.json",
+      "original_sha256": "2fc29b20f93cc07645729be3cb8418392e9dc9b42fd671b155eba02138859cdd",
+      "retained_sha256": "2fc29b20f93cc07645729be3cb8418392e9dc9b42fd671b155eba02138859cdd",
+      "normalization": "none"
+    }
+  ]
+}

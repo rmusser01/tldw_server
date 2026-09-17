@@ -1,5 +1,9 @@
 # Fresh-install UAT: single-user and multi-user
 
+- **Latest reconciliation:197 unique findings —181 verified,10 awaiting native acceptance,6 unresolved (181/193–197).**167/174/175 native acceptance is retained.181 HTTP ownership is committed07e0abf1c4; worker adoption and native replacement remain pending.193/194 ownership/name migration,195 exemplar parameter typing,196 duplicate copy and197 StudyPack counts are being repaired. Final-matrix harness is reopened to enforce a direct non-bypass PostgreSQL runtime role. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-deck-accepted.json).
+
+- **New diagnostic findings:196 unique findings.**195 tracks omitted-filter PostgreSQL exemplar search failure;196 tracks transport detail in otherwise successful duplicate-deck recovery.167/174/175 passed targeted requests and reload; evidence retention/accounting follows. Full fresh UAT remains gated.
+
 - **Latest targeted acceptance:194 unique findings —178 verified,13 awaiting native acceptance,3 unresolved (181/193/194).**166/172 now pass real generation, failed deck-list recovery, single save and normal reload.194 is qualified to the configured bypass role; restricted-role RLS controls pass. Character default/name repair and connection-lifetime review continue. [Acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native166-172-generated-retry-accepted/README.md), [role qualification](../../output/playwright/cycle5-repair-verification-2026-09-16/native193-194-role-qualification/README.md). No full fresh UAT has started.
 
 
@@ -180,10 +184,14 @@
 
 ## UAT-175 — P2: Failed generated-deck save opens a blocking runtime error overlay
 
+- Current status: verified. Actual duplicate409, edited-name Retry deckPOST200/cardPOST200 and ordinary reload pass with the identical generated draft/source. Root machine and visual audit retained. [Native acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native167-174-175-deck-retry-accepted/README.md). UAT196 separately tracks verbose conflict copy; earlier pending statements below are historical.
+
 - The duplicate-deck save displays inline error/retry feedback but also opens a Next Runtime Error overlay. The overlay intercepts normal deck-picker clicks, blocking the recovery suggested by the inline message. Causal reproduction identifies expected HTTP failure logging through console.error with an Error object, which Next forwards to its overlay. The caller catches the rejected promise; no unhandled rejection is observed. This is separate from174's server conflict mapping.
 - Status: implemented, TASK13260.113; native acceptance pending. Only expected HTTP create-deck/card failures use warning logging; rejected promises and unexpected-error diagnostics remain. Independent66 shared controls and11 actual Next/panel tests pass separately; compiler retains90 baseline diagnostics, lint clean. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup175/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
 
 ## UAT-174 — P2: PostgreSQL duplicate-deck creation returns a generic server error
+
+- Current status: verified. Actual duplicate409, edited-name Retry deckPOST200/cardPOST200 and ordinary reload pass with the identical generated draft/source. Root machine and visual audit retained. [Native acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native167-174-175-deck-retry-accepted/README.md). UAT196 separately tracks verbose conflict copy; earlier pending statements below are historical.
 
 - The original167 response failure committed Alice's deck. A later recovered list returns it200, but another POST with that same name returns500 `Failed to create deck`, rather than an actionable conflict. PostgreSQL backend redaction removes the raw uniqueness details that ChaCha's string-based conflict helper expects.
 - Status: implemented, TASK13260.111; native acceptance pending. A payload-free uniqueness category preserves generic diagnostics and maps the real duplicate to409. Independent29 tests pass with zero skips, including privacy, transaction and non-unique500 controls. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
@@ -224,6 +232,8 @@
 - Status: verified, TASK13260.105, commit `1d79053797`. Native PostgreSQL Manage reads return200 with count1/total1 and the original saved source-note card identity. Named-column count/write regressions pass38 PostgreSQL/SQLite controls with zero skips. [Native evidence and independent audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native137-168-178-accepted/README.md).
 
 ## UAT-167 — P1: PostgreSQL generated-card save fails while returning the new deck
+
+- Current status: verified. Actual duplicate409, edited-name Retry deckPOST200/cardPOST200 and ordinary reload pass with the identical generated draft/source. Root machine and visual audit retained. [Native acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native167-174-175-deck-retry-accepted/README.md). UAT196 separately tracks verbose conflict copy; earlier pending statements below are historical.
 
 - Alice's actual Notes handoff and real Gemma generation succeed with one grounded card. Save generated cards then returns HTTP500 from POST /flashcards/decks. Backend response validation rejects PostgreSQL datetime values for created_at and last_modified because the public schema expects strings. The generated draft remains visible; the deck write may already have committed, so a failed response cannot be treated as a rolled-back operation.
 - Status: implemented, TASK13260.104, commit `1d79053797`; native recovery with provenance pending. Datetime values serialize through the existing public string contract; combined167/168 actual PostgreSQL/SQLite checks pass38 with zero skips, independent review and Bandit pass. UAT151/137 acceptance remains pending. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup167/README.md). Original native failure remains in `.tmp/uat151-137-native-20260916/`, pending durable retention.
@@ -2041,3 +2051,20 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 - Actual isolated two-owner PostgreSQL route tests under the configured superuser/BYPASSRLS role return foreign private fixture content through list/query/detail and permit PUT to change description/version/client_id1→2. Native read-only role flags confirm that privilege. Existing forced RLS hides foreign rows and rejects owner-changing UPDATE under a verified NOSUPERUSER/NOBYPASSRLS role; ordinary-role leakage is not established. Startup accepts the bypass role, and the Notes domain documents application predicates for privileged service roles. SQLite per-user controls pass. No native private-character attack or diagnostic database mutation was performed. [Role qualification](../../output/playwright/cycle5-repair-verification-2026-09-16/native193-194-role-qualification/README.md).
 - TASK13260.132 owns the read/write boundary, coordinated with193 in one reviewed character-store/schema unit. Preserve factory checks and SQLite sync semantics, cover foreign mutation/child/deleted paths, and use parameterized current-owner predicates plus versioned tenant-name uniqueness. Causal combined193/194 RED8fail16pass0skip; .tmp/uat193-diagnosis-20260917 retains exact paths/results. Root reviewed the role contract and authorized bounded PG-only CharacterStore ownership plus atomic PG67-to68 owner/name uniqueness. Preserve RLS/factory authorization and SQLite semantics. Shared source edits remain coordinated with181; no native repair acceptance yet.
+
+
+## UAT-195 — P1, open — PostgreSQL exemplar search fails with omitted optional filters
+
+- Actual required-PostgreSQL ownership regressions encounter a separate CharacterStore.search_character_exemplars query error when emotion/scenario are omitted. Driver replay confirms IndeterminateDatatype42P18 at parameter4 for both omitted and supplied filters; each IS NULL placeholder lacks type context. Actual owned-list control succeeds. The earlier explicit-filter positive-control hypothesis was rejected. ExistingTASK16 covered deleted filtering only. No native failure is claimed.
+- TASK13260.133 precedes repair. Preserve filtering, result/count/deleted semantics and SQLite; retain exact driver classification, causal RED and mandatory-PG GREEN, then independent review.
+
+## UAT-196 — P3, open — duplicate deck guidance exposes transport diagnostics
+
+- Actual duplicate generated-card save correctly returns409 and offers usable Retry, but the inline error, toast and last-action summary include Entity: decks, ID and POST /api/v1/flashcards/decks. The preserved draft saves successfully after editing the deck name, establishing174/175 behavior while this separate copy issue remains. Native screenshot .tmp/uat167-174-175-native-20260917/duplicate-inline.png.
+- TASK13260.134 owns concise localized duplicate-name guidance at the actual deck-create conflict boundary. Preserve full diagnostic reporting, draft/source/account-scope guards, unrelated errors and edited-name Retry. No generic message stripping or UI-wide error taxonomy rewrite.
+
+
+## UAT-197 — P1, open — PostgreSQL Study Pack card append reads named counts as tuples
+
+- Actual StudyPack worker success reaches real add_study_pack_cards and raises KeyError0 at before_row[0]; after_row has the same unaliased COUNT(*) row contract. PostgreSQL returns named count, SQLite retains tuple-compatible COUNT(*). Four persistence controls fail; SQLite success/repeats pass. Separate from181 worker checkout lifetime. No native failure is claimed.
+- TASK13260.135 owns exactly these count reads and actual append/duplicate/rollback controls, preserving SQL/transaction semantics. Shared source regions are coordinated with193/194 schema changes. Evidence .tmp/fresh-uat-recovery-20260916/uat181-study-pack-first-red.redacted.log; corrected lease-specific cancellation accounting is a separate181 harness correction.

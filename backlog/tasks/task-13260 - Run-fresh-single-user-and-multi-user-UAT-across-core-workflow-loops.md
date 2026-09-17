@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 03:13'
+updated_date: '2026-09-17 04:02'
 labels:
   - uat
   - testing
@@ -184,6 +184,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 2026-09-16T23:45Z: tracker180findings,163verified/17native-pending/0unresolved implementation defects. Reviewed commits50a86e81eb,c000d45187,f817f4aa96;179/180readycommit with independent28and22 requiredPG/SQLite passes0skip. Retained failure/repair evidence through180 and current180ledger. Next targeted browser acceptance on fixed source;024uses explicit local provider-fault fixture followed by exactconfig restoration. Full fresh SQLite/PostgreSQL single/multi A/B/C remains pending.
 
 2026-09-17 latest targeted checkpoint:192 product findings;176 native-verified. Reviewed189/190 commit2274e64ff9,192 tag fix26c8aab045 and191 scheduler-previewbd8a7ef1c7 await native acceptance.181 request-ownership implementation remains under validation; no full fresh matrix has run. Usage-limit automatic-review interruption resolved by fresh ordinaryUsageAllowed check after user continue; no reset credit used. Existing branch remains codex/fresh-install-uat-fixes, with initial non-latest-dev ancestry limitation documented.
+
+2026-09-17 checkpoint:197unique findings,181verified/10awaitingnative/6unresolved181,193–197. Retained native166/172 and167/174/175 now pass. HTTP ownership repair07e0abf1c4 independently passes77tests plus4counterexamples; author164 pass, zero skips. Worker181 adoption and197countread repair proceed;193/194role-qualified ownership/name migration and195exemplar42P18 underactualPGverification.196FEduplicateguidance29passes,independentreviewpending. Harness125reopened fordirectnonbypassPGloginrole; nofinalfreshmatrixcellsstarted. CurrentnativeAPI63046oldsource/nohotreload; branch remainscodex/fresh-install-uat-fixes. Initialbranchwasnotlatestdev; latestrecordeddev59049includedlater.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

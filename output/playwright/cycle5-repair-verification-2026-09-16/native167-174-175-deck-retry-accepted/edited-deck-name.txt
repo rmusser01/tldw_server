@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await page.getByTestId('flashcards-generate-new-deck-name').fill('Alice UAT167 recovery 20260917');
+```
