@@ -92,17 +92,18 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
   })
 }
 
-/** Recover only a local user paired to an acknowledged saved reply. Text alone is never identity. */
+/** Recover only through an acknowledged reply and its explicit canonical remote parent. */
 const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   current = recoverCorrelatedUsers(current, incoming)
   const claims = new Map<string, string[]>()
-  for (let index = 1; index < incoming.length; index++) {
-    const reply = incoming[index]
-    const user = incoming[index - 1]
+  for (const reply of incoming) {
     const replyId = canonicalId(reply)
-    const userId = canonicalId(user)
-    if (!reply.isBot || (reply.role && reply.role !== "assistant") || user.isBot || (user.role && user.role !== "user") || !replyId || !userId) continue
-    if (reply.parentMessageId && reply.parentMessageId !== userId && reply.parentMessageId !== user.id) continue
+    if (!reply.isBot || (reply.role && reply.role !== "assistant") || !replyId || !reply.parentMessageId) continue
+    const parents = incoming.filter(message => canonicalId(message) === reply.parentMessageId)
+    if (parents.length !== 1) continue
+    const user = parents[0]
+    const userId = canonicalId(user)!
+    if (user.isBot || (user.role && user.role !== "user")) continue
     if (current.some(message => canonicalId(message) === userId || message.id === userId)) continue
     const anchors = current.filter(message => message.isBot && canonicalId(message) === replyId)
     if (anchors.length !== 1 || !anchors[0].parentMessageId) continue

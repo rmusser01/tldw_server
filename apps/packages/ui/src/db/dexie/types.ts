@@ -258,7 +258,15 @@ export type Prompt = {
 };
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
-export type HistoryBookmark = HistoryBookmarkScope & { owner_key: string; conversation_id: string; view: HistoryViewSelectionV1; pending_view_session_id?: string; pending_confirmation?: LegacyHistoryProjectionConfirmV1 };
+export type HistoryBookmark = HistoryBookmarkScope & {
+  owner_key: string;
+  conversation_id: string;
+  view: HistoryViewSelectionV1;
+  pending_view_session_id?: string;
+  // Only explicit false proves no attempt started; missing legacy state is unknown.
+  pending_dispatch_started?: boolean;
+  pending_confirmation?: LegacyHistoryProjectionConfirmV1;
+};
 
 export type UserSettings = {
   history_profile_id?: string;

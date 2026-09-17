@@ -76,6 +76,14 @@ const memory: Record<string, any> = vi.hoisted(() => {
 })
 vi.mock("../schema", () => ({ db: memory }))
 vi.mock("../nickname", () => ({ getAllModelNicknames: vi.fn() }))
+const remote = vi.hoisted(() => ({ capture: vi.fn(), confirm: vi.fn() }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    captureHistorySelection: remote.capture,
+    confirmHistoryProjection: remote.confirm
+  }
+}))
+import * as service from "@/services/chat-history-selection"
 import * as history from "../history-selection"
 import { PageAssistDatabase } from "../chat"
 import { resolveHistorySelection } from "@/utils/history-selection"
@@ -713,4 +721,346 @@ it("loads a historical singular inline image without dropping it", async () => {
   expect(captured.selected_content[0].images).toEqual([
     "data:image/png;base64,YQ=="
   ])
+})
+
+// Real bookmark helpers over the transaction orchestration double above.
+describe("native projection pending resolution", () => {
+  beforeEach(async () => {
+    await history.ensureLocalProfileId()
+  })
+  const owner = () => ({
+    kind: "native" as const,
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://server.test",
+        authMode: "multi-user" as const
+      },
+      userId: "alice"
+    },
+    validate_lease: () => true
+  })
+  const initialView = view({ owner_key: "native-key" })
+  const intent = {
+    version: 1 as const,
+    owner_key: "native-key",
+    conversation_id: "chat",
+    projection_id: "old",
+    source_digest: "old-source",
+    fences: { conversation: "1", history: "1", settings: "1" },
+    source_members: [],
+    ordered_path_ids: [],
+    cursor: { kind: "empty" as const },
+    selection_revision: 1
+  }
+  const prepare = async () => {
+    const native = owner()
+    remote.capture.mockResolvedValue({
+      status: "captured",
+      snapshot: {
+        version: 1,
+        owner_key: "native-key",
+        conversation_id: "chat",
+        fences: intent.fences,
+        nodes: [],
+        source_digest: "old-source",
+        interpretation_status: { kind: "parent_graph_v1" },
+        storage_context_digest: "storage"
+      },
+      rows: [],
+      selected_content: [],
+      view: initialView,
+      purpose: "send",
+      storage_context_digest: "storage"
+    })
+    await service.captureHistorySnapshot(native, initialView, "send")
+    remote.confirm.mockReset()
+    return native
+  }
+  it("allows fresh review after definitive stale-source rejection in the same session", async () => {
+    const native = await prepare()
+    const rejection = Object.assign(new Error("stale source"), {
+      status: 409,
+      details: { detail: { status: "stale_selection", code: "stale_source" } }
+    })
+    remote.confirm.mockRejectedValueOnce(rejection)
+    await expect(
+      service.confirmLegacyHistoryProjection(
+        native,
+        bookmark,
+        intent,
+        initialView
+      )
+    ).rejects.toBe(rejection)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toBeUndefined()
+    const fresh = {
+      ...intent,
+      projection_id: "fresh",
+      source_digest: "fresh-source"
+    }
+    remote.confirm.mockResolvedValueOnce({
+      ...fresh,
+      projection_digest: "digest",
+      created_at: "now"
+    })
+    await service.confirmLegacyHistoryProjection(
+      native,
+      bookmark,
+      fresh,
+      initialView
+    )
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))?.view
+        .interpretation
+    ).toEqual({ kind: "legacy_linear_v1", projection_id: "fresh" })
+  })
+  it.each([
+    new Error("network"),
+    new DOMException("aborted", "AbortError"),
+    Object.assign(new Error("unknown conflict"), {
+      status: 409,
+      details: { detail: { status: "stale_selection", code: "unknown" } }
+    }),
+    Object.assign(new Error("scope"), {
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    }),
+    Object.assign(new Error("server"), {
+      status: 500,
+      details: { detail: { status: "stale_selection", code: "stale_source" } }
+    })
+  ])(
+    "preserves uncertain outcome %s and requires matching replay",
+    async (rejection) => {
+      const native = await prepare()
+      remote.confirm.mockRejectedValueOnce(rejection)
+      await expect(
+        service.confirmLegacyHistoryProjection(
+          native,
+          bookmark,
+          intent,
+          initialView
+        )
+      ).rejects.toBe(rejection)
+      await expect(
+        service.confirmLegacyHistoryProjection(
+          native,
+          bookmark,
+          { ...intent, projection_id: "fresh" },
+          initialView
+        )
+      ).rejects.toMatchObject({ code: "pending_confirmation_conflict" })
+      expect(
+        (await history.loadHistoryBookmark(bookmark, initialView))
+          ?.pending_confirmation
+      ).toEqual(intent)
+      remote.confirm.mockResolvedValueOnce({
+        ...intent,
+        projection_digest: "digest",
+        created_at: "now"
+      })
+      await service.confirmLegacyHistoryProjection(
+        native,
+        bookmark,
+        intent,
+        initialView
+      )
+      expect(remote.confirm).toHaveBeenCalledTimes(2)
+    }
+  )
+  it("resolves a rejected matching replay after reopening without changing its newer cursor", async () => {
+    const native = await prepare()
+    remote.confirm.mockRejectedValueOnce(new Error("network"))
+    await expect(
+      service.confirmLegacyHistoryProjection(
+        native,
+        bookmark,
+        intent,
+        initialView
+      )
+    ).rejects.toThrow("network")
+    const reopened = {
+      ...initialView,
+      view_session_id: "reopened",
+      cursor: { kind: "after_message" as const, message_id: "new" }
+    }
+    await history.saveHistoryBookmark(bookmark, reopened)
+    const rejection = Object.assign(new Error("stale source"), {
+      status: 409,
+      details: { detail: { status: "stale_selection", code: "stale_source" } }
+    })
+    remote.confirm.mockRejectedValueOnce(rejection)
+    await expect(
+      service.confirmLegacyHistoryProjection(native, bookmark, intent, reopened)
+    ).rejects.toBe(rejection)
+    const stored = await history.loadHistoryBookmark(bookmark, initialView)
+    expect(stored?.pending_confirmation).toBeUndefined()
+    expect(stored?.view).toEqual(reopened)
+    const fresh = {
+      ...intent,
+      projection_id: "fresh",
+      source_digest: "fresh-source"
+    }
+    await history.savePendingHistoryConfirmation(bookmark, reopened, fresh)
+    expect(
+      await history.rejectPendingHistoryConfirmation(bookmark, reopened, intent)
+    ).toBe(false)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toEqual(fresh)
+  })
+  it("retains an earlier uncertain intent if a matching replay fails before dispatch", async () => {
+    const native = await prepare()
+    remote.confirm.mockRejectedValueOnce(new Error("network"))
+    await expect(
+      service.confirmLegacyHistoryProjection(
+        native,
+        bookmark,
+        intent,
+        initialView
+      )
+    ).rejects.toThrow("network")
+    let checks = 0
+    native.validate_lease = () => ++checks === 1
+    await expect(
+      service.confirmLegacyHistoryProjection(
+        native,
+        bookmark,
+        intent,
+        initialView
+      )
+    ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+    expect(remote.confirm).toHaveBeenCalledOnce()
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toEqual(intent)
+  })
+  it("does not erase a concurrent replay when the creating attempt fails before dispatch", async () => {
+    const native = await prepare()
+    let releaseCreator!: () => void
+    let creatorSaved!: () => void
+    let replayStarted!: () => void
+    let finishReplay!: (projection: unknown) => void
+    const creatorGate = new Promise<void>((resolve) => {
+      releaseCreator = resolve
+    })
+    const saved = new Promise<void>((resolve) => {
+      creatorSaved = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      replayStarted = resolve
+    })
+    const original = memory.transaction.getMockImplementation()
+    memory.transaction.mockImplementationOnce(async (...args: any[]) => {
+      const result = await original(...args)
+      creatorSaved()
+      await creatorGate
+      return result
+    })
+    const abort = new AbortController()
+    const creator = service.confirmLegacyHistoryProjection(
+      native,
+      bookmark,
+      intent,
+      initialView,
+      abort.signal
+    )
+    const creatorRejected = expect(creator).rejects.toThrow()
+    await saved
+    remote.confirm.mockImplementationOnce(() => {
+      replayStarted()
+      return new Promise((resolve) => {
+        finishReplay = resolve
+      })
+    })
+    const replay = service.confirmLegacyHistoryProjection(
+      native,
+      bookmark,
+      intent,
+      initialView
+    )
+    await started
+    abort.abort()
+    releaseCreator()
+    await creatorRejected
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toEqual(intent)
+    finishReplay({ ...intent, projection_digest: "digest", created_at: "now" })
+    await replay
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toBeUndefined()
+  })
+  it.each(["new", "legacy-unknown"])(
+    "handles pre-dispatch lease failure conservatively for %s pending state",
+    async (kind) => {
+      const native = await prepare()
+      if (kind === "legacy-unknown") {
+        await history.savePendingHistoryConfirmation(
+          bookmark,
+          initialView,
+          intent
+        )
+        const old = await history.loadHistoryBookmark(bookmark, initialView)
+        delete old!.pending_dispatch_started
+        await memory.historySelections.put(old)
+      }
+      let checks = 0
+      native.validate_lease = () => ++checks === 1
+      await expect(
+        service.confirmLegacyHistoryProjection(
+          native,
+          bookmark,
+          intent,
+          initialView
+        )
+      ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+      expect(remote.confirm).not.toHaveBeenCalled()
+      expect(
+        (await history.loadHistoryBookmark(bookmark, initialView))
+          ?.pending_confirmation
+      ).toEqual(kind === "new" ? undefined : intent)
+    }
+  )
+  it("clears only the exact rejected pending identity and keeps a newer cursor", async () => {
+    await history.savePendingHistoryConfirmation(bookmark, initialView, intent)
+    const newer = {
+      ...initialView,
+      view_session_id: "reopened",
+      selection_revision: 2,
+      cursor: { kind: "after_message" as const, message_id: "new" }
+    }
+    await history.saveHistoryBookmark(bookmark, newer)
+    expect(
+      await history.rejectPendingHistoryConfirmation(bookmark, newer, intent)
+    ).toBe(false)
+    expect(
+      await history.rejectPendingHistoryConfirmation(bookmark, initialView, {
+        ...intent,
+        source_digest: "other"
+      })
+    ).toBe(false)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))
+        ?.pending_confirmation
+    ).toEqual(intent)
+    expect(
+      await history.rejectPendingHistoryConfirmation(
+        bookmark,
+        initialView,
+        intent
+      )
+    ).toBe(true)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, initialView))?.view
+    ).toEqual(newer)
+  })
 })

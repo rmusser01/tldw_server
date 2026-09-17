@@ -239,7 +239,8 @@ export const saveHistoryBookmark = async (
       ...(previous?.pending_confirmation
         ? {
             pending_confirmation: previous.pending_confirmation,
-            pending_view_session_id: previous.pending_view_session_id
+            pending_view_session_id: previous.pending_view_session_id,
+            pending_dispatch_started: previous.pending_dispatch_started
           }
         : {})
     })
@@ -249,7 +250,7 @@ export const savePendingHistoryConfirmation = async (
   scope: HistoryBookmarkScope,
   view: HistoryViewSelectionV1,
   confirmation: LegacyHistoryProjectionConfirmV1
-): Promise<void> =>
+): Promise<string> =>
   db.transaction("rw", [db.userSettings, db.historySelections], async () => {
     await assertBookmarkProfile(scope)
     const prior = await db.historySelections.get(bookmarkKey(scope, view))
@@ -259,15 +260,71 @@ export const savePendingHistoryConfirmation = async (
         canonicalHistoryJson(confirmation)
     )
       fail("pending_confirmation_conflict")
+    const origin = prior?.pending_view_session_id ?? view.view_session_id
     await db.historySelections.put({
       ...scope,
       owner_key: view.owner_key,
       conversation_id: view.conversation_id,
       view: prior?.view ?? structuredClone(view),
       pending_confirmation: structuredClone(confirmation),
-      pending_view_session_id:
-        prior?.pending_view_session_id ?? view.view_session_id
+      pending_view_session_id: origin,
+      pending_dispatch_started: prior?.pending_confirmation
+        ? prior.pending_dispatch_started !== false
+        : false
     })
+    return origin
+  })
+const matchesPendingConfirmation = (
+  prior: HistoryBookmark | undefined,
+  view: HistoryViewSelectionV1,
+  confirmation: LegacyHistoryProjectionConfirmV1
+): boolean =>
+  confirmation.owner_key === view.owner_key &&
+  confirmation.conversation_id === view.conversation_id &&
+  confirmation.selection_revision === view.selection_revision &&
+  prior?.pending_view_session_id === view.view_session_id &&
+  !!prior?.pending_confirmation &&
+  canonicalHistoryJson(prior.pending_confirmation) ===
+    canonicalHistoryJson(confirmation)
+
+/** Persist before dispatch so another matching attempt cannot mistake uncertainty for non-dispatch. */
+export const markPendingHistoryConfirmationDispatched = async (
+  scope: HistoryBookmarkScope,
+  view: HistoryViewSelectionV1,
+  confirmation: LegacyHistoryProjectionConfirmV1
+): Promise<void> =>
+  db.transaction("rw", [db.userSettings, db.historySelections], async () => {
+    await assertBookmarkProfile(scope)
+    const prior = await db.historySelections.get(bookmarkKey(scope, view))
+    if (!prior || !matchesPendingConfirmation(prior, view, confirmation))
+      fail("missing_pending_confirmation")
+    await db.historySelections.put({ ...prior, pending_dispatch_started: true })
+  })
+
+/** Resolve a proven non-commit rejection, or an intent proven never dispatched by any attempt. */
+export const rejectPendingHistoryConfirmation = async (
+  scope: HistoryBookmarkScope,
+  view: HistoryViewSelectionV1,
+  confirmation: LegacyHistoryProjectionConfirmV1,
+  options?: { onlyIfUndispatched?: boolean }
+): Promise<boolean> =>
+  db.transaction("rw", [db.userSettings, db.historySelections], async () => {
+    await assertBookmarkProfile(scope)
+    const prior = await db.historySelections.get(bookmarkKey(scope, view))
+    if (
+      !prior ||
+      !matchesPendingConfirmation(prior, view, confirmation) ||
+      (options?.onlyIfUndispatched && prior.pending_dispatch_started !== false)
+    )
+      return false
+    const {
+      pending_confirmation: _intent,
+      pending_view_session_id: _session,
+      pending_dispatch_started: _dispatched,
+      ...accepted
+    } = prior
+    await db.historySelections.put(accepted)
+    return true
   })
 export const acknowledgeHistoryConfirmation = async (
   scope: HistoryBookmarkScope,

@@ -4,7 +4,9 @@ const calls = vi.hoisted(() => ({
   confirm: vi.fn(),
   append: vi.fn(),
   pending: vi.fn(),
-  ack: vi.fn()
+  ack: vi.fn(),
+  reject: vi.fn(),
+  dispatched: vi.fn()
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -16,7 +18,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/db/dexie/history-selection", async (importOriginal) => ({
   ...(await importOriginal<any>()),
   savePendingHistoryConfirmation: calls.pending,
-  acknowledgeHistoryConfirmation: calls.ack
+  acknowledgeHistoryConfirmation: calls.ack,
+  rejectPendingHistoryConfirmation: calls.reject,
+  markPendingHistoryConfirmationDispatched: calls.dispatched
 }))
 vi.mock("@/db/dexie/helpers", () => ({ generateID: () => "new-id" }))
 import * as service from "../chat-history-selection"
@@ -61,6 +65,7 @@ const capture = () => ({
 })
 beforeEach(() => {
   vi.clearAllMocks()
+  calls.pending.mockResolvedValue("view")
   calls.capture.mockResolvedValue(capture())
 })
 describe("history owner service", () => {
@@ -462,4 +467,115 @@ it("retains a proved capability across later non-ready source drift but does not
     service.settleAcceptedAssistant(reopened, reference, result)
   ).rejects.toMatchObject({ code: "unsupported_history_capability" })
   expect(calls.append).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  { messageType: "tool" },
+  { reasoning_time_taken: 0 },
+  { reasoning_time_taken: 12 },
+  { modelName: "model" },
+  { modelImage: "https://image.test/model.png" }
+])(
+  "rejects metadata the generic native route cannot retain: %j",
+  (metadata) => {
+    expect(() =>
+      service.nativeHistoryMessagePayload({
+        id: "reply",
+        history_id: "chat",
+        name: "Assistant",
+        role: "assistant",
+        content: "Reply",
+        createdAt: 1,
+        ...metadata
+      })
+    ).toThrow("unsupported_message_payload")
+  }
+)
+it("clears pending when the lease expires after persistence but before dispatch", async () => {
+  const native = owner()
+  await service.captureHistorySnapshot(native, view, "send")
+  calls.pending.mockImplementationOnce(async () => {
+    native.validate_lease = () => false
+    return "view"
+  })
+  const intent = {
+    version: 1 as const,
+    owner_key: view.owner_key,
+    conversation_id: "chat",
+    projection_id: "p",
+    source_digest: "source",
+    fences: capture().snapshot.fences,
+    source_members: [],
+    ordered_path_ids: [],
+    cursor: view.cursor,
+    selection_revision: 1
+  }
+  await expect(
+    service.confirmLegacyHistoryProjection(
+      native,
+      { profile_id: "profile", client_session_id: "session" },
+      intent,
+      view
+    )
+  ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+  expect(calls.confirm).not.toHaveBeenCalled()
+  expect(calls.reject).toHaveBeenCalledWith(
+    { profile_id: "profile", client_session_id: "session" },
+    view,
+    intent,
+    { onlyIfUndispatched: true }
+  )
+})
+
+it.each(["lease", "parse", "ack"])(
+  "retains pending when post-dispatch %s validation fails",
+  async (failure) => {
+    const native = owner()
+    await service.captureHistorySnapshot(native, view, "send")
+    const intent = {
+      version: 1 as const,
+      owner_key: view.owner_key,
+      conversation_id: "chat",
+      projection_id: "p",
+      source_digest: "source",
+      fences: capture().snapshot.fences,
+      source_members: [],
+      ordered_path_ids: [],
+      cursor: view.cursor,
+      selection_revision: 1
+    }
+    calls.confirm.mockImplementationOnce(async () => {
+      if (failure === "lease") native.validate_lease = () => false
+      return failure === "parse"
+        ? {}
+        : { ...intent, projection_digest: "digest", created_at: "now" }
+    })
+    if (failure === "ack")
+      calls.ack.mockRejectedValueOnce(new Error("storage failed"))
+    await expect(
+      service.confirmLegacyHistoryProjection(
+        native,
+        { profile_id: "profile", client_session_id: "session" },
+        intent,
+        view
+      )
+    ).rejects.toThrow()
+    expect(calls.confirm).toHaveBeenCalledOnce()
+    expect(calls.reject).not.toHaveBeenCalled()
+  }
+)
+it("normalizes absent empty display defaults on the generic native route", () => {
+  expect(
+    service.nativeHistoryMessagePayload({
+      id: "reply",
+      history_id: "chat",
+      name: "Assistant",
+      role: "assistant",
+      content: "Reply",
+      createdAt: 1,
+      messageType: "",
+      modelName: "",
+      modelImage: ""
+    })
+  ).toEqual({ id: "reply", role: "assistant", content: "Reply" })
 })

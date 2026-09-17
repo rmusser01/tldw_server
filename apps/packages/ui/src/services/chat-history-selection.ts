@@ -24,6 +24,8 @@ import {
   confirmLocalHistoryProjection,
   historyDigest,
   savePendingHistoryConfirmation,
+  rejectPendingHistoryConfirmation,
+  markPendingHistoryConfirmationDispatched,
   settleLocalAcceptedAssistant,
   type HistoryOperationOptions,
   type LocalHistoryOwnerV1
@@ -365,7 +367,24 @@ export const finalizeHistorySelection = (
   return freeze(resolved.selection)
 }
 
-/** Retry with the same persisted confirmation ID; the owner resolves a matching replay. */
+// These exact native HistorySelectionError responses precede projection commit.
+// Transport/scope/abort errors and unrecognized responses cannot prove non-commit.
+const isDefinitiveProjectionRejection = (error: unknown): boolean => {
+  const response = error as {
+    status?: number
+    details?: { detail?: { status?: string; code?: string } }
+  } | null
+  const detail = response?.details?.detail
+  return (
+    response?.status === 409 &&
+    detail?.status === "stale_selection" &&
+    ["stale_source", "invalid_projection", "projection_id_conflict"].includes(
+      detail.code ?? ""
+    )
+  )
+}
+
+/** Retry uncertain outcomes with the same persisted confirmation ID. */
 export const confirmLegacyHistoryProjection = async (
   owner: HistoryOwnerV1,
   scope: HistoryBookmarkScope,
@@ -388,13 +407,36 @@ export const confirmLegacyHistoryProjection = async (
   if (owner.kind === "local")
     return confirmLocalHistoryProjection(owner, scope, intent, { signal, view })
   assertNativeBinding(owner, intent)
-  await savePendingHistoryConfirmation(scope, view, intent)
-  assertOwnerLease(owner, { signal })
-  const response = await tldwClient.confirmHistoryProjection(
-    owner.conversation_id,
-    intent,
-    nativeOptions(owner, signal)
+  const pendingView = structuredClone(view)
+  const origin = await savePendingHistoryConfirmation(
+    scope,
+    pendingView,
+    intent
   )
+  const pendingOrigin = { ...pendingView, view_session_id: origin }
+  let dispatched = false
+  let response: unknown
+  try {
+    assertOwnerLease(owner, { signal })
+    const options = nativeOptions(owner, signal)
+    await markPendingHistoryConfirmationDispatched(scope, pendingOrigin, intent)
+    assertOwnerLease(owner, { signal })
+    dispatched = true
+    response = await tldwClient.confirmHistoryProjection(
+      owner.conversation_id,
+      intent,
+      options
+    )
+  } catch (error) {
+    if (dispatched && isDefinitiveProjectionRejection(error)) {
+      await rejectPendingHistoryConfirmation(scope, pendingOrigin, intent)
+    } else if (!dispatched) {
+      await rejectPendingHistoryConfirmation(scope, pendingOrigin, intent, {
+        onlyIfUndispatched: true
+      })
+    }
+    throw error
+  }
   assertOwnerLease(owner, { signal })
   const projection = parse(
     projectionSchema,
@@ -424,6 +466,11 @@ export const nativeHistoryMessagePayload = (
     message.generationInfo ||
     message.clusterId ||
     message.modelId ||
+    // Empty display strings are absent defaults; measured reasoning (including zero) is substantive.
+    message.messageType ||
+    message.modelName ||
+    message.modelImage ||
+    message.reasoning_time_taken != null ||
     (message.metadataExtra && Object.keys(message.metadataExtra).length)
   )
     fail("unsupported_message_payload")

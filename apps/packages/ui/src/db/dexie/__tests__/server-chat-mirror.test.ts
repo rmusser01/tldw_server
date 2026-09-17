@@ -79,17 +79,17 @@ describe("owned server Chat mirror", () => {
     expect(state.messages.get("local-q")?.serverMessageId).toBe(kind === "already-acknowledged" ? "different-server" : undefined)
   })
 
-  it.each([{ images: [] }, { images: [""] }])("recovers an anchored legacy user with images $images and keeps equal-text drafts", async ({ images }) => {
+  it.each([{ images: [] }, { images: [""] }])("recovers an explicitly parented legacy user with images $images and keeps equal-text drafts", async ({ images }) => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("local-q", { ...row("local-q", "alice", "Repeat"), images })
     state.messages.set("local-a", { ...row("local-a", "alice", "Reply", "answer"), role: "assistant" as const, parent_message_id: "local-q" })
     state.messages.set("draft", { ...row("draft", "alice", "Repeat"), images })
-    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const }]
+    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const, parentMessageId: "question" }]
     await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
     expect([...state.messages.values()].map(r => [r.id, r.serverMessageId])).toEqual([
       ["local-q", "question"], ["local-a", "answer"], ["draft", undefined]
     ])
-    expect(state.messages.get("local-a")?.parent_message_id).toBe("local-q")
+    expect(state.messages.get("local-a")?.parent_message_id).toBe("question")
     const current = [
       { ...incoming("local-q", "Repeat"), images, serverMessageId: undefined },
       { ...remote[1], id: "local-a", parentMessageId: "local-q" },
@@ -109,7 +109,7 @@ describe("owned server Chat mirror", () => {
     state.messages.set("local-a", { ...row("local-a", "alice", "Reply", "answer"), role: "assistant" as const, parent_message_id: "local-q" })
     const remote = [
       { ...incoming("question", "Repeat"), images: remoteImages },
-      { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const }
+      { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const, parentMessageId: "question" }
     ]
     await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
     expect(state.messages.get("local-q")).toMatchObject({ serverMessageId: undefined, images: localImages })
@@ -120,7 +120,7 @@ describe("owned server Chat mirror", () => {
     state.messages.set("local-q", row("local-q", "alice", kind === "edited-user" ? "Edited" : "Repeat"))
     state.messages.set("local-a", { ...row("local-a", "alice", "Reply", kind === "wrong-reply" ? "other-answer" : "answer"), role: "assistant" as const, parent_message_id: kind === "missing-parent" ? null : "local-q" })
     if (kind === "already-mirrored") state.messages.set("canonical-q", row("canonical-q", "alice", "Repeat", "question"))
-    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const, ...(kind === "conflicting-parent" ? { parentMessageId: "other-user" } : {}) }]
+    const remote = [incoming("question", "Repeat"), { ...incoming("answer", "Reply"), isBot: true, role: "assistant" as const, parentMessageId: kind === "conflicting-parent" ? "other-user" : "question" }]
     await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: remote })
     expect(state.messages.get("local-q")).toMatchObject({ serverMessageId: undefined, content: kind === "edited-user" ? "Edited" : "Repeat" })
   })
@@ -236,4 +236,62 @@ describe('H1 canonical cursor translation', () => {
     await expect(resolveServerMirrorCursor(request)).rejects.toThrow()
     expect(await resolveServerMirrorCursor({ ...request, cursor: { kind: 'empty' } })).toEqual({ kind: 'empty' })
   })
+})
+
+describe("authoritative parent recovery for H1 cursors", () => {
+  beforeEach(() => {
+    state.histories.clear()
+    state.messages.clear()
+  })
+  it.each(["missing-parent", "explicit-parent-reordered"])(
+    "never chooses the adjacent same-text branch: %s",
+    async (kind) => {
+      const { resolveServerMirrorCursor } =
+        await import("../server-chat-mirror")
+      state.histories.set("alice", history("alice", "A"))
+      state.messages.set("local-u", row("local-u", "alice", "Repeat"))
+      state.messages.set("local-a", {
+        ...row("local-a", "alice", "Reply", "a"),
+        role: "assistant",
+        parent_message_id: "local-u"
+      })
+      const remote = [
+        incoming("u1", "Repeat"),
+        incoming("u2", "Repeat"),
+        {
+          ...incoming("a", "Reply"),
+          role: "assistant" as const,
+          isBot: true,
+          ...(kind === "explicit-parent-reordered"
+            ? { parentMessageId: "u1" }
+            : {})
+        }
+      ]
+      await reconcileServerChatMirror({
+        historyId: "alice",
+        chatId: "chat-1",
+        ownerKey: "A",
+        messages: remote
+      })
+      const translate = () =>
+        resolveServerMirrorCursor({
+          historyId: "alice",
+          chatId: "chat-1",
+          ownerKey: "A",
+          cursor: { kind: "after_message", message_id: "local-u" }
+        })
+      if (kind === "missing-parent") {
+        expect(state.messages.get("local-u")?.serverMessageId).toBeUndefined()
+        await expect(translate()).rejects.toThrow(
+          "missing_canonical_message_id"
+        )
+      } else {
+        expect(await translate()).toEqual({
+          kind: "after_message",
+          message_id: "u1"
+        })
+      }
+      expect(state.messages.get("local-u")?.serverMessageId).not.toBe("u2")
+    }
+  )
 })
