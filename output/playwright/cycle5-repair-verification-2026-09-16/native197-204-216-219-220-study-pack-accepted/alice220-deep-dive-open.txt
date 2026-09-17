@@ -1,0 +1,90 @@
+### Ran Playwright code
+```js
+await page.getByRole('link', { name: 'Deep dive to source' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [](http://127.0.0.1:18583/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+- HTTP status: 404 Not Found
+- Console: 1 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T08-51-21-079Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T08-46-59-765Z.log#L5-L9
+
+- generic [active] [ref=f54e1]:
+  - generic [ref=f54e4]:
+    - link "Skip to main content" [ref=f54e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f54e6]:
+      - button "Expand sidebar" [ref=f54e7] [cursor=pointer]
+      - button "New Chat" [ref=f54e11] [cursor=pointer]
+      - generic [ref=f54e14]:
+        - button "Quick Ingest" [ref=f54e15] [cursor=pointer]
+        - button "Chat" [ref=f54e19] [cursor=pointer]
+        - button "Prompts" [ref=f54e22] [cursor=pointer]
+        - button "Characters" [ref=f54e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f54e31] [cursor=pointer]
+        - button "World Books" [ref=f54e35] [cursor=pointer]
+        - button "Notes" [ref=f54e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f54e42] [cursor=pointer]
+        - button "Media" [ref=f54e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f54e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f54e59] [cursor=pointer]
+        - button "Kanban" [ref=f54e65] [cursor=pointer]
+        - button "Watchlists" [ref=f54e67] [cursor=pointer]
+      - generic [ref=f54e72]:
+        - button "Open Notes Dock" [ref=f54e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f54e78] [cursor=pointer]
+        - button "Settings" [ref=f54e81] [cursor=pointer]
+    - main [ref=f54e85]:
+      - generic [ref=f54e86]:
+        - generic [ref=f54e89]:
+          - generic [ref=f54e90]:
+            - button "Expand sidebar" [ref=f54e91] [cursor=pointer]
+            - generic [ref=f54e93]:
+              - img "tldw Assistant" [ref=f54e94]
+              - generic [ref=f54e95]: tldw Assistant
+              - button "Companion Home" [ref=f54e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f54e100] [cursor=pointer]
+          - generic [ref=f54e103]:
+            - button "Search - Open command palette" [ref=f54e104] [cursor=pointer]:
+              - generic [ref=f54e108]: Search
+              - generic [ref=f54e109]: ⌘K
+            - button "Open settings" [ref=f54e110] [cursor=pointer]
+            - generic [ref=f54e122]:
+              - button "Notifications, 0 unread" [ref=f54e123] [cursor=pointer]
+              - status [ref=f54e127]: Notifications are active
+            - button "Switch to light theme" [ref=f54e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f54e135] [cursor=pointer]:
+              - generic [ref=f54e136]: "?"
+        - generic [ref=f54e139]:
+          - paragraph [ref=f54e140]: "404"
+          - heading "We could not find that route" [level=1] [ref=f54e141]
+          - paragraph [ref=f54e142]: The link may be out of date, moved, or typed incorrectly. Choose a route below to continue.
+          - paragraph [ref=f54e143]:
+            - text: "Route not found:"
+            - code [ref=f54e144]: /notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+          - generic [ref=f54e145]:
+            - button "Open Home" [ref=f54e146] [cursor=pointer]
+            - link "Open Research" [ref=f54e147] [cursor=pointer]:
+              - /url: /research
+            - link "Open Media" [ref=f54e148] [cursor=pointer]:
+              - /url: /media
+            - link "Open Settings" [ref=f54e149] [cursor=pointer]:
+              - /url: /settings
+            - button "Go back" [ref=f54e150] [cursor=pointer]
+  - alert [ref=f54e151]

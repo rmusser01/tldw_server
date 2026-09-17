@@ -1,0 +1,37 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.158 - Serialize-PostgreSQL-flashcard-citation-timestamps-in-assistant-responses.md
+
+Task TASK-13260.158 - Serialize PostgreSQL flashcard citation timestamps in assistant responses
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 08:27
+Updated: 2026-09-17 08:48
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT220: official PostgreSQL GET /flashcards/{card}/assistant with a persisted citation fails response validation at citations and primary_citation timestamp fields; equivalent SQLite control passes. Separate from UAT219 pack summary serialization. Preserve API string contracts, strict invalid-type rejection, ownership and stored data.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Demonstrate the actual PostgreSQL assistant citation failure and passing SQLite controls using official fixtures, including citations and primary_citation.
+- [x] #2 Apply minimal datetime-only response normalization; retain existing string/null behavior, timezone representation, invalid-type rejection, ownership and persistence.
+- [ ] #3 Independent review, required PostgreSQL tests without skips, scoped static/Bandit checks and authenticated native readback pass with retained evidence.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Plan:
+--------------------------------------------------
+Record bounded design and causal regression; normalize only citation timestamps at the response schema boundary; run focused and adjacent PostgreSQL/SQLite controls, independently review and repeat the native cited-card read.
+
+Implementation Notes:
+--------------------------------------------------
+Citation-only schema fix committed7acc8b001a; independent97 PASS0skip, exacthashes stable, Ruff/Bandit/compile clear. Durable followup220-citation-timestamps-reviewed. Actual originaljob5 threecitedcards nowassistant200 withcitation/primarytimestamps; nativeaudit pending. Separate222foreignpackmetadata tracked without weakening220 scope.

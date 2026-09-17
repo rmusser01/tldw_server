@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-17T08:42:05.524Z",
+  "runtimePid": 76778,
+  "source": "6d06aae9bd",
+  "scope": "Full owned-runtime log exact known error fingerprints only; no raw lines, prompts or credentials exported",
+  "counts": {
+    "settingsQueryResultError": 0,
+    "worldBookContextManagerError": 0,
+    "worldBookLoadError": 0
+  },
+  "completionEvidence": "bob213-214-after-send-events.txt",
+  "completion": {
+    "userSave": 201,
+    "completeV2": 200,
+    "persist": 200,
+    "assistantVisible": "READY"
+  }
+}

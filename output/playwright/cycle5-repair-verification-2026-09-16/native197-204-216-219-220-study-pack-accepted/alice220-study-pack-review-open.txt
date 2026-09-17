@@ -1,0 +1,189 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Review 3 ready' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?deckId=10)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?deckId=10
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T08-48-21-910Z.yml)
+
+- generic [active] [ref=f53e11]:
+  - generic [ref=f53e14]:
+    - link "Skip to main content" [ref=f53e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f53e16]:
+      - button "Expand sidebar" [ref=f53e17] [cursor=pointer]
+      - button "New Chat" [ref=f53e21] [cursor=pointer]
+      - generic [ref=f53e24]:
+        - button "Quick Ingest" [ref=f53e25] [cursor=pointer]
+        - button "Chat" [ref=f53e29] [cursor=pointer]
+        - button "Prompts" [ref=f53e32] [cursor=pointer]
+        - button "Characters" [ref=f53e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f53e41] [cursor=pointer]
+        - button "World Books" [ref=f53e45] [cursor=pointer]
+        - button "Notes" [ref=f53e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f53e52] [cursor=pointer]
+        - button "Media" [ref=f53e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f53e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f53e69] [cursor=pointer]
+        - button "Kanban" [ref=f53e75] [cursor=pointer]
+        - button "Watchlists" [ref=f53e77] [cursor=pointer]
+      - generic [ref=f53e82]:
+        - button "Open Notes Dock" [ref=f53e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f53e88] [cursor=pointer]
+        - button "Settings" [ref=f53e91] [cursor=pointer]
+    - main [ref=f53e95]:
+      - generic [ref=f53e96]:
+        - generic [ref=f53e99]:
+          - generic [ref=f53e100]:
+            - button "Expand sidebar" [ref=f53e101] [cursor=pointer]
+            - generic [ref=f53e103]:
+              - img "tldw Assistant" [ref=f53e104]
+              - generic [ref=f53e105]: tldw Assistant
+              - button "Companion Home" [ref=f53e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f53e110] [cursor=pointer]
+          - generic [ref=f53e113]:
+            - button "Search - Open command palette" [ref=f53e114] [cursor=pointer]:
+              - generic [ref=f53e118]: Search
+              - generic [ref=f53e119]: ⌘K
+            - button "Open settings" [ref=f53e120] [cursor=pointer]
+            - generic [ref=f53e132]:
+              - button "Notifications, 0 unread" [ref=f53e133] [cursor=pointer]
+              - status [ref=f53e137]: Notifications are active
+            - button "Switch to light theme" [ref=f53e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f53e145] [cursor=pointer]:
+              - generic [ref=f53e146]: "?"
+        - generic [ref=f53e148]:
+          - generic [ref=f53e150]:
+            - generic [ref=f53e152]:
+              - generic [ref=f53e153]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f53e154]
+            - navigation "Flashcards modes" [ref=f53e155]:
+              - generic [ref=f53e156]: Study
+              - generic [ref=f53e157]: Manage
+              - generic [ref=f53e158]: Import / Export
+              - generic [ref=f53e159]: Templates
+              - generic [ref=f53e160]: Scheduler
+          - generic [ref=f53e163]:
+            - tablist [ref=f53e164]:
+              - generic [ref=f53e166]:
+                - tab "Study" [selected] [ref=f53e168] [cursor=pointer]
+                - tab "Manage" [ref=f53e170] [cursor=pointer]
+                - tab "Import / Export" [ref=f53e172] [cursor=pointer]
+                - tab "Templates" [ref=f53e174] [cursor=pointer]
+                - tab "Scheduler" [ref=f53e176] [cursor=pointer]
+              - generic [ref=f53e178]:
+                - button "Test with Quiz" [ref=f53e180] [cursor=pointer]
+                - button "Keyboard Shortcuts" [ref=f53e181] [cursor=pointer]
+            - tabpanel "Study" [ref=f53e188]:
+              - generic [ref=f53e189]:
+                - generic [ref=f53e190]:
+                  - generic [ref=f53e191] [cursor=pointer]:
+                    - generic [ref=f53e192]:
+                      - generic "Alice UAT216 reviewed worker pack 20260917" [ref=f53e548]
+                      - combobox [ref=f53e193]
+                    - img "down" [ref=f53e195]
+                    - img "close-circle" [ref=f53e550]
+                  - radiogroup "segmented control" [ref=f53e198]:
+                    - generic [ref=f53e199]:
+                      - generic [ref=f53e200] [cursor=pointer]:
+                        - radio "Due only" [checked]
+                        - generic "Due only" [ref=f53e201]
+                      - generic [ref=f53e202] [cursor=pointer]:
+                        - radio "Cram"
+                        - generic "Cram" [ref=f53e203]
+                  - radiogroup "segmented control" [ref=f53e204]:
+                    - generic [ref=f53e205]:
+                      - generic [ref=f53e206] [cursor=pointer]:
+                        - radio "Front first" [checked]
+                        - generic "Front first" [ref=f53e207]
+                      - generic [ref=f53e208] [cursor=pointer]:
+                        - radio "Back first"
+                        - generic "Back first" [ref=f53e209]
+                - region [ref=f53e210]:
+                  - generic [ref=f53e211]:
+                    - generic [ref=f53e217]:
+                      - strong [ref=f53e219]: Source reviews
+                      - generic [ref=f53e220]: No source reviews due
+                    - button "Schedule" [ref=f53e221] [cursor=pointer]
+                - generic [ref=f53e408]:
+                  - generic [ref=f53e553]:
+                    - generic [ref=f53e554]:
+                      - generic [ref=f53e555]: Reviewed today
+                      - strong [ref=f53e557]: "0"
+                    - generic [ref=f53e558]:
+                      - generic [ref=f53e559]: Retention rate
+                      - strong [ref=f53e561]: —
+                    - generic [ref=f53e562]:
+                      - generic [ref=f53e563]: Lapse rate
+                      - strong [ref=f53e565]: —
+                    - generic [ref=f53e566]:
+                      - generic [ref=f53e567]: Avg answer time
+                      - strong [ref=f53e569]: —
+                    - generic [ref=f53e570]:
+                      - generic [ref=f53e571]: Study streak
+                      - strong [ref=f53e573]: 0 days
+                  - generic [ref=f53e574]:
+                    - strong [ref=f53e576]: Deck progress
+                    - generic [ref=f53e577]:
+                      - generic [ref=f53e578]:
+                        - strong [ref=f53e580]: Alice UAT216 reviewed worker pack 20260917
+                        - generic [ref=f53e581]:
+                          - generic [ref=f53e582]: "Total: 3"
+                          - generic [ref=f53e583]: "New: 3"
+                          - generic [ref=f53e584]: "Learning: 0"
+                          - generic [ref=f53e585]: "Due: 0"
+                          - generic [ref=f53e586]: "Mature: 0"
+                      - progressbar [ref=f53e587]
+                - status [ref=f53e590]:
+                  - generic [ref=f53e591]: "3 cards remaining, 0 reviewed, Available now: 3, new: 3, learning: 0, due: 0"
+                  - generic [ref=f53e592]:
+                    - generic [aria-hidden] [ref=f53e593]: Study queue
+                    - generic [aria-hidden] [ref=f53e594]: "3"
+                    - generic [aria-hidden] [ref=f53e595]: cards remaining
+                  - generic [aria-hidden] [ref=f53e597]: 0 reviewed
+                  - generic [aria-hidden] [ref=f53e599]: "Available now: 3"
+                  - generic [aria-hidden] [ref=f53e601]: "new: 3"
+                  - generic [aria-hidden] [ref=f53e603]: "learning: 0"
+                  - generic [aria-hidden] [ref=f53e605]: "due: 0"
+                  - generic [aria-hidden] [ref=f53e607]: ~1 min left
+                  - generic [ref=f53e608]: Alice UAT216 reviewed worker pack 20260917
+                - generic [ref=f53e611]:
+                  - generic [ref=f53e613]:
+                    - generic [ref=f53e614]: Standard
+                    - generic [ref=f53e615]: New
+                    - generic [ref=f53e617]: SM-2+
+                    - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f53e619] [cursor=pointer]':
+                      - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                    - button "Edit card (E)" [ref=f53e620] [cursor=pointer]:
+                      - generic [ref=f53e621]: Edit
+                  - generic [ref=f53e622]:
+                    - heading "Front" [level=5] [ref=f53e623]
+                    - paragraph [ref=f53e626]: What color is the Citrine study marker?
+                  - button "Need help?" [ref=f53e629] [cursor=pointer]
+                  - generic [ref=f53e636]:
+                    - button "Show answer (Space)" [ref=f53e637] [cursor=pointer]:
+                      - generic [ref=f53e638]: Show Answer
+                    - generic [ref=f53e639]:
+                      - generic [ref=f53e640]: Space Flip
+                      - generic [ref=f53e641]: E Edit
+                      - button "Compact hints" [ref=f53e642] [cursor=pointer]
+                - generic [ref=f53e505]:
+                  - generic [ref=f53e506]: Recent study sessions
+                  - heading "No completed study sessions yet." [level=2] [ref=f53e646]
+  - alert [ref=f53e10]

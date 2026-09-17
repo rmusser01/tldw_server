@@ -1,0 +1,15 @@
+{
+  "task": "TASK13260.161",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/StudyPacks/provenance.py",
+      "sha256": "a7f6fbd65cecec7361f76725ac78fd27208ccc2d57f8cec1985af77651f2f745",
+      "snapshot": ".tmp/uat223-repair-20260917/review-snapshot/tldw_Server_API/app/core/StudyPacks/provenance.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/StudyPacks/test_provenance.py",
+      "sha256": "3526f229d4889378fb0bdc5c34c1b90fe64e1f626fe8756a772357e192042d6e",
+      "snapshot": ".tmp/uat223-repair-20260917/review-snapshot/tldw_Server_API/tests/StudyPacks/test_provenance.py"
+    }
+  ]
+}

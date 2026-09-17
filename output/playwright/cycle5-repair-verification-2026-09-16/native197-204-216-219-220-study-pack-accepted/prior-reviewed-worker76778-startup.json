@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-17T08:19:48.707Z",
+  "pid": 76778,
+  "startedAt": "2026-09-17T08:12:33.057Z",
+  "source": "6d06aae9bd",
+  "workerStarts": [
+    {
+      "localTimestamp": "2026-09-17 01:12:42.166",
+      "workerId": "study-pack-worker-76778"
+    }
+  ],
+  "exclusiveEnvOverrides": [
+    {
+      "name": "STUDY_PACK_JOBS_WORKER_ENABLED",
+      "present": false
+    },
+    {
+      "name": "STUDY_PACK_JOBS_WORKER_ID",
+      "present": false
+    }
+  ],
+  "limitations": [
+    "Worker startup lines normalized to fixed safe fields; local log timestamp is America/Los_Angeles. Job completion is separately proven by authenticated job catalogue."
+  ]
+}

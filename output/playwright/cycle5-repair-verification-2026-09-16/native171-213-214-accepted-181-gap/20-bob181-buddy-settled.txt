@@ -1,0 +1,86 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [](http://127.0.0.1:18583/buddy)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/buddy
+- HTTP status: 404 Not Found
+- Console: 1 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f49e11]:
+  - generic [ref=f49e14]:
+    - link "Skip to main content" [ref=f49e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f49e16]:
+      - button "Expand sidebar" [ref=f49e17] [cursor=pointer]
+      - button "New Chat" [ref=f49e21] [cursor=pointer]
+      - generic [ref=f49e24]:
+        - button "Quick Ingest" [ref=f49e25] [cursor=pointer]
+        - button "Chat" [ref=f49e29] [cursor=pointer]
+        - button "Prompts" [ref=f49e32] [cursor=pointer]
+        - button "Characters" [ref=f49e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f49e41] [cursor=pointer]
+        - button "World Books" [ref=f49e45] [cursor=pointer]
+        - button "Notes" [ref=f49e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f49e52] [cursor=pointer]
+        - button "Media" [ref=f49e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f49e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f49e69] [cursor=pointer]
+        - button "Kanban" [ref=f49e75] [cursor=pointer]
+        - button "Watchlists" [ref=f49e77] [cursor=pointer]
+      - generic [ref=f49e82]:
+        - button "Open Notes Dock" [ref=f49e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f49e88] [cursor=pointer]
+        - button "Settings" [ref=f49e91] [cursor=pointer]
+    - main [ref=f49e95]:
+      - generic [ref=f49e96]:
+        - generic [ref=f49e99]:
+          - generic [ref=f49e100]:
+            - button "Expand sidebar" [ref=f49e101] [cursor=pointer]
+            - generic [ref=f49e103]:
+              - img "tldw Assistant" [ref=f49e104]
+              - generic [ref=f49e105]: tldw Assistant
+              - button "Companion Home" [ref=f49e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f49e110] [cursor=pointer]
+          - generic [ref=f49e113]:
+            - button "Search - Open command palette" [ref=f49e114] [cursor=pointer]:
+              - generic [ref=f49e118]: Search
+              - generic [ref=f49e119]: ⌘K
+            - button "Open settings" [ref=f49e120] [cursor=pointer]
+            - generic [ref=f49e132]:
+              - button "Notifications, 0 unread" [ref=f49e133] [cursor=pointer]
+              - status [ref=f49e137]: Notifications are active
+            - button "Switch to light theme" [ref=f49e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f49e145] [cursor=pointer]:
+              - generic [ref=f49e146]: "?"
+        - generic [ref=f49e149]:
+          - paragraph [ref=f49e150]: "404"
+          - heading "We could not find that route" [level=1] [ref=f49e151]
+          - paragraph [ref=f49e152]: The link may be out of date, moved, or typed incorrectly. Choose a route below to continue.
+          - paragraph [ref=f49e153]:
+            - text: "Route not found:"
+            - code [ref=f49e154]: /buddy
+          - generic [ref=f49e155]:
+            - button "Open Home" [ref=f49e156] [cursor=pointer]
+            - link "Open Research" [ref=f49e157] [cursor=pointer]:
+              - /url: /research
+            - link "Open Media" [ref=f49e158] [cursor=pointer]:
+              - /url: /media
+            - link "Open Settings" [ref=f49e159] [cursor=pointer]:
+              - /url: /settings
+            - button "Go back" [ref=f49e160] [cursor=pointer]
+  - alert [ref=f49e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T08-38-52-061Z.log#L4-L5

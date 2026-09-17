@@ -1,0 +1,13 @@
+{
+  "oldPid": 76778,
+  "newPid": 82583,
+  "startedAt": "2026-09-17T08:42:04.267Z",
+  "rows": [
+    {
+      "at": "2026-09-17T08:42:23.125Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": 200
+    }
+  ]
+}

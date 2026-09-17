@@ -1,0 +1,457 @@
+{
+  "native_gates": {
+    "197": "PASS within task-specific scope; independent automation previously retained",
+    "204": "PASS within task-specific scope; independent automation previously retained",
+    "216": "PASS within task-specific scope; independent automation previously retained",
+    "219": "PASS within task-specific scope; independent automation previously retained",
+    "220": "PASS within task-specific scope; independent automation previously retained"
+  },
+  "original_failed_readback": {
+    "passed": false,
+    "records": 15,
+    "failure_boundary": {
+      "at": "2026-09-17T08:44:04.852Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/flashcards/study-packs/2",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "workspace_id": null,
+        "title": "Alice UAT216 reviewed worker pack 20260917",
+        "deck_id": 10,
+        "source_bundle_json": {
+          "items": [
+            {
+              "source_type": "note",
+              "source_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+              "label": "Alice UAT151 Citrine source note",
+              "evidence_text": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+              "locator": {
+                "note_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+              }
+            }
+          ]
+        },
+        "generation_options_json": {
+          "deck_mode": "new",
+          "provider": "llama.cpp",
+          "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+          "repair_attempted": false
+        },
+        "status": "active",
+        "superseded_by_pack_id": null,
+        "created_at": "2026-09-17T08:15:19.439000+00:00",
+        "last_modified": "2026-09-17T08:15:19.439000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 1
+      }
+    }
+  },
+  "bounded_continuation": {
+    "passed": true,
+    "records": 19,
+    "explicitly_excludes": "UAT222 foreign pack metadata defect"
+  },
+  "same_original_job": {
+    "job": {
+      "id": 5,
+      "status": "completed",
+      "domain": "study_packs",
+      "queue": "default",
+      "job_type": "study_pack_generate"
+    },
+    "study_pack": {
+      "id": 2,
+      "workspace_id": null,
+      "title": "Alice UAT216 reviewed worker pack 20260917",
+      "deck_id": 10,
+      "source_bundle_json": {
+        "items": [
+          {
+            "source_type": "note",
+            "source_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "label": "Alice UAT151 Citrine source note",
+            "evidence_text": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "locator": {
+              "note_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+            }
+          }
+        ]
+      },
+      "generation_options_json": {
+        "deck_mode": "new",
+        "provider": "llama.cpp",
+        "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        "repair_attempted": false
+      },
+      "status": "active",
+      "superseded_by_pack_id": null,
+      "created_at": "2026-09-17T08:15:19.439000+00:00",
+      "last_modified": "2026-09-17T08:15:19.439000+00:00",
+      "deleted": false,
+      "client_id": "2",
+      "version": 1
+    },
+    "error": null
+  },
+  "deck": {
+    "id": 10,
+    "name": "Alice UAT216 reviewed worker pack 20260917",
+    "description": null,
+    "workspace_id": null,
+    "parent_deck_id": null,
+    "visibility": "private",
+    "review_prompt_side": "front",
+    "created_at": "2026-09-17T08:15:19.433000+00:00",
+    "last_modified": "2026-09-17T08:15:19.433000+00:00",
+    "deleted": false,
+    "client_id": "2",
+    "version": 1,
+    "scheduler_type": "sm2_plus",
+    "scheduler_settings_json": "{\"fsrs\": {\"enable_fuzz\": false, \"maximum_interval_days\": 36500, \"target_retention\": 0.9}, \"sm2_plus\": {\"easy_bonus\": 1.3, \"easy_interval_days\": 4, \"enable_fuzz\": false, \"graduating_interval_days\": 1, \"interval_modifier\": 1.0, \"leech_threshold\": 8, \"max_interval_days\": 36500, \"new_steps_minutes\": [1, 10], \"relearn_steps_minutes\": [10]}}",
+    "scheduler_settings": {
+      "sm2_plus": {
+        "new_steps_minutes": [
+          1,
+          10
+        ],
+        "relearn_steps_minutes": [
+          10
+        ],
+        "graduating_interval_days": 1,
+        "easy_interval_days": 4,
+        "easy_bonus": 1.3,
+        "interval_modifier": 1,
+        "max_interval_days": 36500,
+        "leech_threshold": 8,
+        "enable_fuzz": false
+      },
+      "fsrs": {
+        "target_retention": 0.9,
+        "maximum_interval_days": 36500,
+        "enable_fuzz": false
+      }
+    }
+  },
+  "cards_and_citations": [
+    {
+      "card": {
+        "uuid": "9ac6501e-a94c-40cd-8dd7-cfed9f5dbd94",
+        "deck_id": 10,
+        "deck_name": "Alice UAT216 reviewed worker pack 20260917",
+        "front": "Citrine study volunteers meet every {{c1::Tuesday at 14:00}}.",
+        "back": "Tuesday at 14:00",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "note",
+        "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": null,
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T08:15:19.436000+00:00",
+        "last_modified": "2026-09-17T08:15:19.449000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 2,
+        "model_type": "cloze",
+        "reverse": false,
+        "scheduler_type": null,
+        "next_intervals": null
+      },
+      "citation": {
+        "id": 3,
+        "flashcard_uuid": "9ac6501e-a94c-40cd-8dd7-cfed9f5dbd94",
+        "source_type": "note",
+        "source_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "citation_text": "Citrine study volunteers meet every Tuesday at 14:00.",
+        "locator": "{\"note_id\": \"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\"}",
+        "ordinal": 0,
+        "created_at": "2026-09-17T08:15:19.449000+00:00",
+        "last_modified": "2026-09-17T08:15:19.449000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 1
+      },
+      "membership_pack_id": 2,
+      "thread": {
+        "id": 4,
+        "context_type": "flashcard",
+        "flashcard_uuid": "9ac6501e-a94c-40cd-8dd7-cfed9f5dbd94",
+        "quiz_attempt_id": null,
+        "question_id": null,
+        "last_message_at": null,
+        "message_count": 0,
+        "deleted": false,
+        "client_id": "2",
+        "version": 1,
+        "created_at": "2026-09-17T08:44:04.762000+00:00",
+        "last_modified": "2026-09-17T08:44:04.762000+00:00"
+      },
+      "message_count": 0
+    },
+    {
+      "card": {
+        "uuid": "04843428-6065-46ca-9051-5690341efa83",
+        "deck_id": 10,
+        "deck_name": "Alice UAT216 reviewed worker pack 20260917",
+        "front": "When do Citrine study volunteers meet?",
+        "back": "Tuesday at 14:00",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "note",
+        "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": null,
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T08:15:19.435000+00:00",
+        "last_modified": "2026-09-17T08:15:19.446000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 2,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": null,
+        "next_intervals": null
+      },
+      "citation": {
+        "id": 2,
+        "flashcard_uuid": "04843428-6065-46ca-9051-5690341efa83",
+        "source_type": "note",
+        "source_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "citation_text": "Citrine study volunteers meet every Tuesday at 14:00.",
+        "locator": "{\"note_id\": \"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\"}",
+        "ordinal": 0,
+        "created_at": "2026-09-17T08:15:19.446000+00:00",
+        "last_modified": "2026-09-17T08:15:19.446000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 1
+      },
+      "membership_pack_id": 2,
+      "thread": {
+        "id": 5,
+        "context_type": "flashcard",
+        "flashcard_uuid": "04843428-6065-46ca-9051-5690341efa83",
+        "quiz_attempt_id": null,
+        "question_id": null,
+        "last_message_at": null,
+        "message_count": 0,
+        "deleted": false,
+        "client_id": "2",
+        "version": 1,
+        "created_at": "2026-09-17T08:44:04.788000+00:00",
+        "last_modified": "2026-09-17T08:44:04.788000+00:00"
+      },
+      "message_count": 0
+    },
+    {
+      "card": {
+        "uuid": "a33c73dc-1f41-472a-b037-f2d6b041b363",
+        "deck_id": 10,
+        "deck_name": "Alice UAT216 reviewed worker pack 20260917",
+        "front": "What color is the Citrine study marker?",
+        "back": "Amber",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "note",
+        "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": null,
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T08:15:19.435000+00:00",
+        "last_modified": "2026-09-17T08:15:19.443000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 2,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": null,
+        "next_intervals": null
+      },
+      "citation": {
+        "id": 1,
+        "flashcard_uuid": "a33c73dc-1f41-472a-b037-f2d6b041b363",
+        "source_type": "note",
+        "source_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "citation_text": "The Citrine study marker is amber.",
+        "locator": "{\"note_id\": \"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\"}",
+        "ordinal": 0,
+        "created_at": "2026-09-17T08:15:19.443000+00:00",
+        "last_modified": "2026-09-17T08:15:19.443000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 1
+      },
+      "membership_pack_id": 2,
+      "thread": {
+        "id": 6,
+        "context_type": "flashcard",
+        "flashcard_uuid": "a33c73dc-1f41-472a-b037-f2d6b041b363",
+        "quiz_attempt_id": null,
+        "question_id": null,
+        "last_message_at": null,
+        "message_count": 0,
+        "deleted": false,
+        "client_id": "2",
+        "version": 1,
+        "created_at": "2026-09-17T08:44:04.813000+00:00",
+        "last_modified": "2026-09-17T08:44:04.813000+00:00"
+      },
+      "message_count": 0
+    }
+  ],
+  "negative_controls": [
+    {
+      "at": "2026-09-17T08:45:02.710Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "username": "bob"
+      }
+    },
+    {
+      "at": "2026-09-17T08:45:02.880Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/flashcards/study-packs/jobs/5",
+      "status": 404,
+      "body": {
+        "detail": "Study-pack job not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:45:02.898Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/flashcards/9ac6501e-a94c-40cd-8dd7-cfed9f5dbd94/assistant",
+      "status": 404,
+      "body": {
+        "detail": "Flashcard not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:45:02.916Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/flashcards?deck_id=10",
+      "status": 200,
+      "body": {
+        "items": [],
+        "count": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    }
+  ],
+  "source_note_observed": {
+    "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+    "version": 1,
+    "client_id": "2",
+    "source_content_matches_bundle": true
+  },
+  "original_card_observed": {
+    "uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+    "version": 2,
+    "repetitions": 1,
+    "client_id": "2",
+    "deleted": false
+  },
+  "ui_assistant_response": {
+    "event": "response",
+    "at": "2026-09-17T08:48:21.027Z",
+    "bodyReadAt": "2026-09-17T08:48:21.036Z",
+    "url": "http://127.0.0.1:18583/api/v1/flashcards/a33c73dc-1f41-472a-b037-f2d6b041b363/assistant",
+    "status": 200,
+    "body": "{\"thread\":{\"id\":6,\"context_type\":\"flashcard\",\"flashcard_uuid\":\"a33c73dc-1f41-472a-b037-f2d6b041b363\",\"quiz_attempt_id\":null,\"question_id\":null,\"last_message_at\":null,\"message_count\":0,\"deleted\":false,\"client_id\":\"2\",\"version\":1,\"created_at\":\"2026-09-17T08:44:04.813000+00:00\",\"last_modified\":\"2026-09-17T08:44:04.813000+00:00\"},\"messages\":[],\"context_snapshot\":{\"context_type\":\"flashcard\",\"flashcard\":{\"uuid\":\"a33c73dc-1f41-472a-b037-f2d6b041b363\",\"deck_id\":10,\"deck_name\":\"Alice UAT216 reviewed worker pack 20260917\",\"front\":\"What color is the Citrine study marker?\",\"back\":\"Amber\",\"notes\":null,\"extra\":null,\"tags\":[],\"source_ref_type\":\"note\",\"source_ref_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"model_type\":\"basic\",\"reverse\":false,\"version\":2}},\"available_actions\":[\"explain\",\"mnemonic\",\"follow_up\",\"fact_check\",\"freeform\"],\"citations\":[{\"id\":1,\"flashcard_uuid\":\"a33c73dc-1f41-472a-b037-f2d6b041b363\",\"source_type\":\"note\",\"source_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"citation_text\":\"The Citrine study marker is amber.\",\"locator\":\"{\\\"note_id\\\": \\\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\\\"}\",\"ordinal\":0,\"created_at\":\"2026-09-17T08:15:19.443000+00:00\",\"last_modified\":\"2026-09-17T08:15:19.443000+00:00\",\"deleted\":false,\"client_id\":\"2\",\"version\":1}],\"primary_citation\":{\"id\":1,\"flashcard_uuid\":\"a33c73dc-1f41-472a-b037-f2d6b041b363\",\"source_type\":\"note\",\"source_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"citation_text\":\"The Citrine study marker is amber.\",\"locator\":\"{\\\"note_id\\\": \\\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\\\"}\",\"ordinal\":0,\"created_at\":\"2026-09-17T08:15:19.443000+00:00\",\"last_modified\":\"2026-09-17T08:15:19.443000+00:00\",\"deleted\":false,\"client_id\":\"2\",\"version\":1},\"deep_dive_target\":{\"source_type\":\"note\",\"source_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"citation_ordinal\":0,\"route_kind\":\"exact_locator\",\"route\":\"/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"available\":true,\"fallback_reason\":null},\"study_pack\":{\"id\":2,\"workspace_id\":null,\"title\":\"Alice UAT216 reviewed worker pack 20260917\",\"deck_id\":10,\"source_bundle_json\":{\"items\":[{\"source_type\":\"note\",\"source_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\",\"label\":\"Alice UAT151 Citrine source note\",\"evidence_text\":\"This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.\",\"locator\":{\"note_id\":\"b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8\"}}]},\"generation_options_json\":{\"deck_mode\":\"new\",\"provider\":\"llama.cpp\",\"model\":\"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\",\"repair_attempted\":false},\"status\":\"active\",\"superseded_by_pack_id\":null,\"created_at\":\"2026-09-17T08:15:19.439000+00:00\",\"last_modified\":\"2026-09-17T08:15:19.439000+00:00\",\"deleted\":false,\"client_id\":\"2\",\"version\":1}}"
+  },
+  "source": {
+    "revision": "7acc8b001a7ca2023b0e62782b481aeb4d8bba01",
+    "captures": [
+      "2026-09-17T08:41:43.089Z",
+      "2026-09-17T08:42:23.204Z"
+    ],
+    "same_3668_source_entries": true,
+    "hashes": {
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c",
+      "tldw_Server_API/app/api/v1/schemas/study_packs.py": "96843579f5f1c87a855dcb7ab4220bd8114c44ab5ce6ae60188c7add0705349a",
+      "tldw_Server_API/app/services/study_pack_jobs_worker.py": "8723ee86e578b05c45bb9a57ce2fd04feaebd6744dc5fc006e144ea0c0cdc78c",
+      "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "cc3f242d2c115a324db2f2ed180256c32408c1cb53a9515e7b795bea4183b107"
+    }
+  },
+  "runtime": {
+    "oldPid": 76778,
+    "newPid": 82583,
+    "startedAt": "2026-09-17T08:42:04.267Z",
+    "rows": [
+      {
+        "at": "2026-09-17T08:42:23.125Z",
+        "oldAlive": true,
+        "newAlive": true,
+        "status": 200
+      }
+    ]
+  },
+  "later_drain": {
+    "at": "2026-09-17T08:51:25.246Z",
+    "knownUatApiAlive": {
+      "56113": false,
+      "76778": false,
+      "82583": true
+    },
+    "scope": "Known owned old/replacement UAT APIs only; no signals sent."
+  },
+  "limits": [
+    "UAT222 foreign pack metadata200 remains a proven failure; no complete Study Pack ownership acceptance.",
+    "UAT223 actual Deep dive to source navigation404 remains separate; citation rendering is accepted, source navigation is not.",
+    "GET assistant creates/returns empty assistant threads; do not claim no database side effects. No generation, rating, source/card/job mutation was issued by this audit.",
+    "Native cold-cache state is not proven; prior official fixture cold/warm controls support204.",
+    "No205 complete UI creation/navigation acceptance or full UAT matrix claim."
+  ]
+}

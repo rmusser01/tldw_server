@@ -1,0 +1,140 @@
+{
+  "disposition": {
+    "UAT171": "native AC3 supported",
+    "UAT181": "AC3 remains open: warmed direct Flashcards/deck reads before replacement not evidenced",
+    "UAT213": "bounded original-scenario native acceptance supported",
+    "UAT214": "bounded original-scenario native acceptance supported"
+  },
+  "source": {
+    "old_revision": "6d06aae9bd03364f1ce68940c41b14f12fb5febe",
+    "new_revision": "7acc8b001a7ca2023b0e62782b481aeb4d8bba01",
+    "backend_files_each": 3668,
+    "each_start_freeze_equal": true,
+    "only_changed_backend_path": [
+      "tldw_Server_API/app/api/v1/schemas/study_packs.py"
+    ],
+    "reviewed213214_production_hashes_match_both": true
+  },
+  "replacement": {
+    "stop": {
+      "signal": "SIGTERM",
+      "oldPid": 76778,
+      "rows": [
+        {
+          "at": "2026-09-17T08:41:43.212Z",
+          "occupied": true,
+          "oldAlive": true
+        },
+        {
+          "at": "2026-09-17T08:41:43.315Z",
+          "occupied": false,
+          "oldAlive": true
+        }
+      ],
+      "note": "Graceful replacement of the profile-owned UAT API; no other process signalled."
+    },
+    "health": {
+      "oldPid": 76778,
+      "newPid": 82583,
+      "startedAt": "2026-09-17T08:42:04.267Z",
+      "rows": [
+        {
+          "at": "2026-09-17T08:42:23.125Z",
+          "oldAlive": true,
+          "newAlive": true,
+          "status": 200
+        }
+      ]
+    },
+    "drain": {
+      "at": "2026-09-17T08:51:25.246Z",
+      "knownUatApiAlive": {
+        "56113": false,
+        "76778": false,
+        "82583": true
+      },
+      "scope": "Known owned old/replacement UAT APIs only; no signals sent."
+    }
+  },
+  "metadata": [
+    {
+      "observedAt": "2026-09-17T08:41:11.888578+00:00",
+      "sessions": 20,
+      "states": [
+        "idle"
+      ],
+      "tableLocks": 0,
+      "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+    },
+    {
+      "observedAt": "2026-09-17T08:42:40.569659+00:00",
+      "sessions": 26,
+      "states": [
+        "idle"
+      ],
+      "tableLocks": 0,
+      "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+    },
+    {
+      "observedAt": "2026-09-17T08:51:24.928672+00:00",
+      "sessions": 19,
+      "states": [
+        "idle"
+      ],
+      "tableLocks": 0,
+      "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+    }
+  ],
+  "notes": {
+    "identity_id": 3,
+    "post_health_responses": [
+      {
+        "at": "2026-09-17T08:42:41.680Z",
+        "path": "/api/v1/notes/keywords/",
+        "status": 200
+      },
+      {
+        "at": "2026-09-17T08:42:41.733Z",
+        "path": "/api/v1/notes/",
+        "status": 200
+      },
+      {
+        "at": "2026-09-17T08:42:41.754Z",
+        "path": "/api/v1/notes/collections",
+        "status": 200
+      }
+    ],
+    "visible_own_notes": true
+  },
+  "chat": {
+    "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+    "user_id": "f1e51423-d829-45a1-be3d-f3669c3247cd",
+    "user_save_at": "2026-09-17T08:40:24.359Z",
+    "completion_status_at": "2026-09-17T08:40:25.053Z",
+    "persist_at": "2026-09-17T08:40:31.063Z",
+    "assistant_id": "pa_4546-7698-d32-84f4",
+    "parent_link_matches": true,
+    "canonical_get_at": "2026-09-17T08:41:08.000Z",
+    "canonical_row_count": 5,
+    "visible_answer": "READY",
+    "stored_content_includes_model_markup": true,
+    "sse_response_body_available": false,
+    "known_fingerprint_receipt": {
+      "settingsQueryResultError": 0,
+      "worldBookContextManagerError": 0,
+      "worldBookLoadError": 0
+    }
+  },
+  "gap": {
+    "warmed_direct_card_deck_responses": 0,
+    "first_post_replacement_card_deck_response": "2026-09-17T08:47:00.445Z",
+    "buddy_receipt_has_only_persona_reads_in_actual_open_window": true
+  },
+  "startup_transient": [
+    {
+      "at": "2026-09-17T08:42:07.074Z",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/research-runs",
+      "status": 500
+    }
+  ]
+}

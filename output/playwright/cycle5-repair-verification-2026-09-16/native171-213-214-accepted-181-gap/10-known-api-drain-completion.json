@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-17T08:51:25.246Z",
+  "knownUatApiAlive": {
+    "56113": false,
+    "76778": false,
+    "82583": true
+  },
+  "scope": "Known owned old/replacement UAT APIs only; no signals sent."
+}

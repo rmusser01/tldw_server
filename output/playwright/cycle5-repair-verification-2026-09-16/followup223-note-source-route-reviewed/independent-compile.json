@@ -1,0 +1,7 @@
+{
+  "compiled": [
+    "tldw_Server_API/app/core/StudyPacks/provenance.py",
+    "tldw_Server_API/tests/StudyPacks/test_provenance.py"
+  ],
+  "writes_bytecode": false
+}

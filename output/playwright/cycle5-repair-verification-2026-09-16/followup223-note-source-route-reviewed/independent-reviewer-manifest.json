@@ -1,0 +1,56 @@
+{
+  "files": [
+    {
+      "path": ".tmp/uat223-independent-20260917/REVIEW223.md",
+      "sha256": "108669f116982eeb9a9cbdfa342858346e2b543c06a3feb7339f08b581085a42"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/after-manifest.json",
+      "sha256": "5118b649f30e2b53fdc4afad3d117371b827b0fe51a1f60fed6fe699baaf8a7e"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/ast-review.json",
+      "sha256": "ba60a6c96c38ca810f38de91d84bd4113f929b4eca3db513932ca43ac07eb343"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/bandit-production.json",
+      "sha256": "73512b92ff3c59c3e1369e6128243f5b512f0dad427c0c0285dc3f3308e08ac3"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/bandit-production.stderr",
+      "sha256": "de5009a7022190c850cbb3e211844211f2d5cc8cfb6ce39f99bba8e505dd6aaf"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/bandit-tests.json",
+      "sha256": "43a9d3cbf5eb3d11eec07fd18fa92bbd91773a297976f5a222faa4fe80015438"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/bandit-tests.stderr",
+      "sha256": "0a8af8371b4da621c52c9b0ea9b3073a3b12dace886e3db93b997d9e8a0752e1"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/before-manifest.json",
+      "sha256": "78abb1accf870c412491c58e8cf4d5cf536b7069f24a904bf163ebb596c42ab3"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/compile.json",
+      "sha256": "201b20d56a4c9e14c2cb17b1eea3c8f77792ba3a1744f2256956017b9d5a413f"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/task223.txt",
+      "sha256": "0d54f93224d8ab4159fcdcfee97c5f14c39fefcc536812764e48a14d3a981ed1"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/uat223-sidebar-independent-command.json",
+      "sha256": "e20431208f817db9092512883e3de99cbf9262dbc2b74b005bb22bbac13a1815"
+    },
+    {
+      "path": ".tmp/uat223-independent-20260917/uat223-sidebar-independent.redacted.log",
+      "sha256": "78cf92d665a8a98589bd499490cb31a4f420862742d2e82c899867821717bee8"
+    }
+  ]
+}

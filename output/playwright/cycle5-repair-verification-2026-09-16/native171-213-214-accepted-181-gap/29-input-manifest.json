@@ -1,0 +1,134 @@
+{
+  "files": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed218-before-restart.json",
+      "sha256": "cb34ddd74a020785832564a7b61f7330380c9968f0759520f27ab32ebeaa8e0d",
+      "bytes": 640168
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed218-after-health.json",
+      "sha256": "cbddaa6d5afdda3c42880fcd8b699852758a93fcdb99e697a1e0f63ce2ca89a3",
+      "bytes": 640168
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed218-replacement-health.json",
+      "sha256": "6c73c38ca0b508c917fe6d859d43093ad62dd62bedfcd6070c76435b55a87978",
+      "bytes": 221
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed220-before-restart.json",
+      "sha256": "46a3d1b6dde372a99c313ddf300a45bceae83c264298dbb87f3dea9c96792dab",
+      "bytes": 640168
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed220-after-health.json",
+      "sha256": "371e0b99eb98eacfdb043fb3e7c6d7a4b48926f914aa6dea87ba3a3b36494863",
+      "bytes": 640168
+    },
+    {
+      "path": ".tmp/uat213-214-root-independent-20260917/source-manifest.json",
+      "sha256": "5c17224c525df6abd51706452f9542f54bf7dd1751e7e7eca3ac1ff39b130a6c",
+      "bytes": 2032
+    },
+    {
+      "path": ".tmp/uat213-214-root-independent-20260917/REVIEW213-214.md",
+      "sha256": "b5f853d1a6843edb0870a27e4c334dc50ba1e8e28d49ab413d7130446bb2f42f",
+      "bytes": 810
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/overlap76778-to220-stop.json",
+      "sha256": "4fdca4b1472a1b42516195bb167ba4332f00038e0aefb55100d43fc2ec90870c",
+      "bytes": 354
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/overlap82583-health.json",
+      "sha256": "ee864cd0bd52659be8dbc8d7612b2c6c920efc6da8274f021ab200886537e758",
+      "bytes": 221
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/known-api-drain-completion.json",
+      "sha256": "37a352dea31521d639872c86871bf159c1d309788d0847ddbe7a4ef973145537",
+      "bytes": 200
+    },
+    {
+      "path": ".tmp/uat181-full-native-20260917/warmed76778-before220-restart.json",
+      "sha256": "6de721cf41fc24a537f6e81439b98f8feb7a54bcb51b52e1de197c15e58dfa79",
+      "bytes": 1478
+    },
+    {
+      "path": ".tmp/uat181-full-native-20260917/overlap82583-after-health.json",
+      "sha256": "632a6ffc71873db931b6648565795772eea849dfb5cf7cb03ae7aa49ea912ae9",
+      "bytes": 1797
+    },
+    {
+      "path": ".tmp/uat181-full-native-20260917/after82583-study-citations.json",
+      "sha256": "88a2ba7d40e251533e91d5ea9cbbf12b54cb29a844ca241c2dc6e58f0500c1cb",
+      "bytes": 1400
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob181-overlap-notes-events.txt",
+      "sha256": "b436bbdb836d4248e18528b235aa6d05ff8e57bab0b9f70b8bfb669c28c008ba",
+      "bytes": 764790
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob213-214-after-send-events.txt",
+      "sha256": "1b4f6c0696bad3d4506abcbe341b184590187fd54067e5de734555206991ba8d",
+      "bytes": 674306
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob181-buddy-events.txt",
+      "sha256": "8ca480eb7af9d902f9f84ed84c2a670c3a60f5cb46a5d29278b0e26b65e6287b",
+      "bytes": 605927
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice219-deck-events.txt",
+      "sha256": "bec77536d8c274fc1565fe7c3a4cd70be4837fd44304c31036d3324f1e4e6a70",
+      "bytes": 805122
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob181-overlap-notes-settled.txt",
+      "sha256": "bfd7c9bf7c98de2187e6032e04871495bc83179f3164fe336509d8fa899469e4",
+      "bytes": 14832
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob213-214-after-send.txt",
+      "sha256": "6e81b0c73d798443c892ace26a9f496c2d4fb70b768b71eb4cadb01facb25310",
+      "bytes": 20236
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob181-buddy-settled.txt",
+      "sha256": "c6d8307a96c45af350a633d0752c6a6df61759e98a9a1bbbf7e1ce27b3b1e52b",
+      "bytes": 4530
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice219-deck-settled.txt",
+      "sha256": "4426a32b1dede240350a91afce47e18c8216209f6200ad4ed0c21dc46e8d5713",
+      "bytes": 17093
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/native213-214-known-error-check.json",
+      "sha256": "2e8dc519ff0d97e2f18859cc0602cdd02357d08f4e879d2b6004deebe99304c5",
+      "bytes": 508
+    },
+    {
+      "path": "backlog/tasks/task-13260.108 - Release-standalone-PostgreSQL-Notes-read-transactions-before-restart-DDL.md",
+      "sha256": "4ac13a2a951f10f7d5313d09ecee3a097bfc902e8230fa1f268d9c764009fca8",
+      "bytes": 2570
+    },
+    {
+      "path": "backlog/tasks/task-13260.118 - Release-PostgreSQL-Flashcards-and-related-standalone-read-transactions-before-restart-DDL.md",
+      "sha256": "058105e7ea10de47484b12fccb83bfd71b3931d014aaabf49304d2b8505ba06a",
+      "bytes": 9281
+    },
+    {
+      "path": "backlog/tasks/task-13260.152 - Read-PostgreSQL-conversation-settings-through-QueryResult-rows.md",
+      "sha256": "281828a1e9da60919b7baf93799f2ea4e8abbe1c9a063b64de8193bda5d7369e",
+      "bytes": 2435
+    },
+    {
+      "path": "backlog/tasks/task-13260.153 - Load-Character-world-books-with-backend-compatible-read-transactions.md",
+      "sha256": "eadd7ec4e72207c3a10671b462e6bbec356f4c31eafe0310b6123c22e56b6f15",
+      "bytes": 2479
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "read_only": true,
+  "input_count": 26,
+  "files": [
+    {
+      "path": ".tmp/uat171-181-213-214-native-audit-20260917/ACCEPTANCE171-181-213-214.md",
+      "sha256": "f139b9e5a73a6a6f84740fe36a7cd50fa2eba3f835877ac94e143d485337a672",
+      "bytes": 5998
+    },
+    {
+      "path": ".tmp/uat171-181-213-214-native-audit-20260917/audit.py",
+      "sha256": "9cdeaa478a4cfc7b1baa071d81cae9198bca8d56992df9029290bf38a34de6f1",
+      "bytes": 7233
+    },
+    {
+      "path": ".tmp/uat171-181-213-214-native-audit-20260917/input-manifest.json",
+      "sha256": "ede73804e1759ebc50dbeeb557a0e5fc0fbe3ecd3d1ab275228583f9faf2dd20",
+      "bytes": 5318
+    },
+    {
+      "path": ".tmp/uat171-181-213-214-native-audit-20260917/verification.json",
+      "sha256": "959f6785c8ab710c5962ecf53ac9e57a789d99d9f6a7b07a2408bc0ec725ad9f",
+      "bytes": 4020
+    }
+  ]
+}

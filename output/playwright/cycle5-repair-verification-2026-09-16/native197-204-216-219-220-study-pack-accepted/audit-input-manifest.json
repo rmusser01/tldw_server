@@ -1,0 +1,89 @@
+{
+  "inputs": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/study-pack-job5-complete-readback-result.json",
+      "bytes": 30876,
+      "sha256": "b157fc2af61478d4320c5b913a56c716616b2b15e675a2420129a449a038fdea"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/study-pack-job5-bounded-continuation-result.json",
+      "bytes": 34229,
+      "sha256": "7e546334abaebbf639818fdacbd4981ec607287ff939f13ab9b32988002aff78"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed220-before-restart.json",
+      "bytes": 640168,
+      "sha256": "46a3d1b6dde372a99c313ddf300a45bceae83c264298dbb87f3dea9c96792dab"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed220-after-health.json",
+      "bytes": 640168,
+      "sha256": "371e0b99eb98eacfdb043fb3e7c6d7a4b48926f914aa6dea87ba3a3b36494863"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/overlap82583-health.json",
+      "bytes": 221,
+      "sha256": "ee864cd0bd52659be8dbc8d7612b2c6c920efc6da8274f021ab200886537e758"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/known-api-drain-completion.json",
+      "bytes": 200,
+      "sha256": "37a352dea31521d639872c86871bf159c1d309788d0847ddbe7a4ef973145537"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice219-deck-settled.txt",
+      "bytes": 17093,
+      "sha256": "4426a32b1dede240350a91afce47e18c8216209f6200ad4ed0c21dc46e8d5713"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-study-pack-review-open.txt",
+      "bytes": 10540,
+      "sha256": "259e99b8dee9a7f74d1cd12f165cff46ea66b4b427be83e3466d22a4ac2e2ec6"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-assistant-open.txt",
+      "bytes": 12443,
+      "sha256": "a9d6388d72f9c1eab1d9f1d543b8f4c360cbfa97481cff77f0f745e475c55ad6"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-assistant-settled.txt",
+      "bytes": 12288,
+      "sha256": "cf1e29f4811fb1d72c2180c17e7765e45cddad185b90a380b86876c2e347652c"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-assistant-events.txt",
+      "bytes": 817815,
+      "sha256": "2f10336a80df1cd70b96e71b461decdc94682cea8e1f68eafcc10eecdc1f8b88"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-open.txt",
+      "bytes": 4923,
+      "sha256": "45c0ffc6d53d4b513fc723f79dd9b3dde6abb4b8a5e3edb6ad49257f77fa6e7f"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-settled.txt",
+      "bytes": 4673,
+      "sha256": "02a72e127282ae7c48e10a3cb6bc9fc974d3d542514874c9df9b980a21207252"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-events.txt",
+      "bytes": 820574,
+      "sha256": "12f8756c29ba31a81b9048f125b1f0aa3e722fc8a8ca260c2209be9cc6e2fd8b"
+    },
+    {
+      "path": "output/playwright/cycle5-repair-verification-2026-09-16/native206-215-worker-terminal-accepted/reviewed-worker76778-startup.json",
+      "bytes": 648,
+      "sha256": "052da5f43e017b097e6127b984b2241d14a74dac689d92f5d68dec6a7e3f43f5"
+    },
+    {
+      "path": "output/playwright/cycle5-repair-verification-2026-09-16/native206-215-worker-terminal-accepted/study-pack-job5-list-native-api-result.json",
+      "bytes": 1559,
+      "sha256": "93a18afaec20faf3a610e01da8949a983a751b7f7f47b02ff0ef4a42bde3e916"
+    },
+    {
+      "path": "output/playwright/cycle5-repair-verification-2026-09-16/native206-215-worker-terminal-accepted/audit-receipt.json",
+      "bytes": 8976,
+      "sha256": "fca2d54dc8fd1b10cb1b408037c9ad60eb5e9280f5d1a47172734f7af13df913"
+    }
+  ]
+}
