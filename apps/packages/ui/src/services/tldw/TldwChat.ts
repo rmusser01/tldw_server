@@ -250,7 +250,69 @@ const buildRequestMessages = (
   )
 }
 
+/** Pure final wire projection shared by preparation and legacy streaming. */
+export const prepareChatCompletionRequest = (
+  messages: ChatMessage[], options: TldwChatOptions, stream = true
+): ChatCompletionRequest => {
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
+      const requestMessages = buildRequestMessages(messages, options)
+      if (requestMessages.length === 0) {
+        throw new Error(
+          "Cannot send chat request without any messages. Add a user message or a system prompt."
+        )
+      }
+
+      const request: ChatCompletionRequest = {
+        messages: requestMessages,
+        model: options.model,
+        routing: options.routing,
+        stream,
+        temperature: options.temperature,
+        logprobs: options.logprobs,
+        top_logprobs:
+          options.logprobs && Number.isFinite(options.topLogprobs)
+            ? options.topLogprobs
+            : undefined,
+        max_tokens: options.maxTokens,
+        top_p: options.topP,
+        frequency_penalty: options.frequencyPenalty,
+        presence_penalty: options.presencePenalty,
+        reasoning_effort: options.reasoningEffort,
+        ...(normalizedTools
+          ? {
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
+              tools: normalizedTools
+            }
+          : {}),
+        save_to_db: options.saveToDb,
+        conversation_id: options.conversationId,
+        history_message_limit: options.historyMessageLimit,
+        history_message_order: options.historyMessageOrder,
+        slash_command_injection_mode: options.slashCommandInjectionMode,
+        api_provider: options.apiProvider,
+        extra_headers: options.extraHeaders,
+        extra_body: options.extraBody,
+        thinking_budget_tokens: options.thinkingBudgetTokens,
+        grammar_mode: options.grammarMode,
+        grammar_id: options.grammarId,
+        grammar_inline: options.grammarInline,
+        grammar_override: options.grammarOverride,
+        response_format: options.jsonMode ? { type: "json_object" } : undefined,
+        research_context: options.researchContext
+      }
+      return request
+}
+
 export interface TldwChatOptions {
+  preparedRequest?: ChatCompletionRequest
   model: string
   routing?: ChatCompletionRequest["routing"]
   temperature?: number
@@ -458,22 +520,6 @@ export class TldwChatService {
 
     try {
       await tldwClient.initialize()
-      const normalizedTools =
-        options.toolChoice === "none"
-          ? undefined
-          : normalizeChatToolsForRequest(options.tools)
-      const toolChoice =
-        normalizedTools &&
-        (options.toolChoice === "auto" || options.toolChoice === "required")
-          ? options.toolChoice
-          : undefined
-      const requestMessages = buildRequestMessages(messages, options)
-      if (requestMessages.length === 0) {
-        throw new Error(
-          "Cannot send chat request without any messages. Add a user message or a system prompt."
-        )
-      }
-
       const cfg = (await tldwClient.getConfig().catch(() => null)) as
         | {
             chatRequestTimeoutMs?: number
@@ -482,44 +528,9 @@ export class TldwChatService {
           }
         | null
 
-      const request: ChatCompletionRequest = {
-        messages: requestMessages,
-        model: options.model,
-        routing: options.routing,
-        stream: true,
-        temperature: options.temperature,
-        logprobs: options.logprobs,
-        top_logprobs:
-          options.logprobs && Number.isFinite(options.topLogprobs)
-            ? options.topLogprobs
-            : undefined,
-        max_tokens: options.maxTokens,
-        top_p: options.topP,
-        frequency_penalty: options.frequencyPenalty,
-        presence_penalty: options.presencePenalty,
-        reasoning_effort: options.reasoningEffort,
-        ...(normalizedTools
-          ? {
-              ...(toolChoice ? { tool_choice: toolChoice } : {}),
-              tools: normalizedTools
-            }
-          : {}),
-        save_to_db: options.saveToDb,
-        conversation_id: options.conversationId,
-        history_message_limit: options.historyMessageLimit,
-        history_message_order: options.historyMessageOrder,
-        slash_command_injection_mode: options.slashCommandInjectionMode,
-        api_provider: options.apiProvider,
-        extra_headers: options.extraHeaders,
-        extra_body: options.extraBody,
-        thinking_budget_tokens: options.thinkingBudgetTokens,
-        grammar_mode: options.grammarMode,
-        grammar_id: options.grammarId,
-        grammar_inline: options.grammarInline,
-        grammar_override: options.grammarOverride,
-        response_format: options.jsonMode ? { type: "json_object" } : undefined,
-        research_context: options.researchContext
-      }
+      const request =
+        options.preparedRequest ??
+        prepareChatCompletionRequest(messages, options)
       captureChatRequestDebugSnapshot({
         endpoint: "/api/v1/chat/completions",
         method: "POST",

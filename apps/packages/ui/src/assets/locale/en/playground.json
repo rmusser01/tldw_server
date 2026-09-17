@@ -1271,6 +1271,18 @@
     "confirmEffect": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives.",
     "confirm": "Confirm selected history",
     "cancel": "Cancel review",
-    "expandDescription": "Opens this selected history in the extension full page. Active streaming stays in this panel."
+    "expandDescription": "Opens this selected history in the extension full page. Active streaming stays in this panel.",
+    "recoveryTitle": "Turn needs review",
+    "recoveryMessage": "The original send outcome is retained separately from history. It will not be sent again automatically.",
+    "inspectRecovery": "Inspect original input and result",
+    "copyRecovery": "Copy recovered text",
+    "dismissRecovery": "Dismiss recovery",
+    "recoveryLoadError": "Could not load retained send outcomes. Refresh history to try again.",
+    "recoveryState": {
+      "dispatching": "Send outcome pending or unknown",
+      "unknown": "User admission outcome unknown",
+      "accepted_unsent": "User input accepted; response not saved",
+      "generated_unsaved": "Generated response needs review"
+    }
   }
 }

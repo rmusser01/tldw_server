@@ -268,3 +268,41 @@ describe("pageAssistModel MCP tools", () => {
     })
   })
 })
+
+it("freezes resolved model options into a stateless prepared body before ambient state changes", async () => {
+  useStoreChatModelSettings.getState().reset()
+  useStoreChatModelSettings.getState().setTemperature(0.23)
+  useStoreMessageOption.setState({
+    serverChatId: "ambient-chat",
+    temporaryChat: false,
+    toolChoice: "none"
+  })
+  const model = await pageAssistModel({
+    model: "tool-model",
+    clientManagedHistory: true
+  })
+  const { HumanMessage } = await import("@/types/messages")
+  const body = model.prepareClientManagedRequest([new HumanMessage("question")])
+  useStoreChatModelSettings.getState().setTemperature(1.9)
+  useStoreMessageOption.setState({ serverChatId: "other-chat" })
+  expect(body).toMatchObject({
+    temperature: 0.23,
+    save_to_db: false,
+    messages: [{ role: "user", content: "question" }]
+  })
+  expect(body.conversation_id).toBeUndefined()
+  expect(body.history_message_limit).toBeUndefined()
+  expect(body.history_message_order).toBeUndefined()
+})
+
+it("rejects ambiguous credential-bearing provider extensions before creating provenance", async () => {
+  const model = await pageAssistModel({
+    model: "tool-model",
+    clientManagedHistory: true,
+    extraBody: '{"api_key":"private-token"}'
+  })
+  const { HumanMessage } = await import("@/types/messages")
+  expect(() =>
+    model.prepareClientManagedRequest([new HumanMessage("question")])
+  ).toThrow("unsupported_history_custom_provider_body")
+})

@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { systemPromptForNonRag } from "~/services/tldw-server";
@@ -126,6 +127,7 @@ type ServerBackedMessage = Message & {
 };
 
 export const useMessage = () => {
+  const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
   const {
     controller: abortController,
@@ -2459,6 +2461,7 @@ export const useMessage = () => {
     };
     serverChatIdOverride?: string | null;
   }) => {
+    const historyOriginIsCurrent = historySelection?.fence();
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -2493,6 +2496,18 @@ export const useMessage = () => {
       (!docs || docs.length === 0) &&
       !messageType &&
       resolvedChatMode === "rag";
+    if (
+      historySelection &&
+      (isRegenerate ||
+        hasExplicitImageBackend ||
+        imageBackendCandidates.length ||
+        uploadedFiles?.length ||
+        docs?.length ||
+        messageType ||
+        resolvedChatMode !== "normal")
+    ) {
+      throw new Error("unsupported_history_action_context");
+    }
     const activeController = controller ?? new AbortController();
     const signal = activeController.signal;
     const releaseActiveController = () =>
@@ -2745,6 +2760,14 @@ export const useMessage = () => {
             draftAssistantKind: selectedAssistant?.kind ?? null,
             draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
+          if (
+            historySelection &&
+            (sendMode === "tracked_character" || sendMode === "tracked_persona")
+          ) {
+            throw new Error(
+              "selected_history_tracked_assistant_requires_versioned_context"
+            );
+          }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
               ? (() => {
@@ -2865,6 +2888,15 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                historySelection: historySelection
+                  ? {
+                      controller: historySelection,
+                      originIsCurrent: historyOriginIsCurrent!,
+                      temporary: temporaryChat
+                    }
+                  : undefined,
+                serverChatId,
+                toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,
                 selectedSystemPrompt: resolvedSelectedSystemPrompt,
@@ -2879,14 +2911,14 @@ export const useMessage = () => {
                 historyId,
                 setHistoryId: setHistoryId as (
                   id: string,
-                  options?: { preserveServerChatId?: boolean },
+                  options?: { preserveServerChatId?: boolean }
                 ) => void,
                 assistantIdentity: {
                   name: effectiveSelectedAssistant.name,
                   avatarUrl:
                     typeof effectiveSelectedAssistant.avatar_url === "string"
                       ? effectiveSelectedAssistant.avatar_url
-                      : undefined,
+                      : undefined
                 },
                 overlaySystemPrompt:
                   effectiveAssistantState.systemPromptSnapshot ?? undefined,
@@ -2894,8 +2926,8 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides,
-              },
+                ...replyOverrides
+              }
             );
           } else {
             await normalChatMode(
@@ -2906,6 +2938,15 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                historySelection: historySelection
+                  ? {
+                      controller: historySelection,
+                      originIsCurrent: historyOriginIsCurrent!,
+                      temporary: temporaryChat
+                    }
+                  : undefined,
+                serverChatId,
+                toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,
                 selectedSystemPrompt: resolvedSelectedSystemPrompt,
@@ -2920,14 +2961,14 @@ export const useMessage = () => {
                 historyId,
                 setHistoryId: setHistoryId as (
                   id: string,
-                  options?: { preserveServerChatId?: boolean },
+                  options?: { preserveServerChatId?: boolean }
                 ) => void,
                 webSearch: resolvedWebSearch,
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides,
-              },
+                ...replyOverrides
+              }
             );
           }
         } else if (resolvedChatMode === "vision") {

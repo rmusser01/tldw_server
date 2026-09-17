@@ -20,6 +20,7 @@ const isValidReasoningEffort = (
 }
 
 type PageAssistModelOptions = {
+  clientManagedHistory?: boolean
   model: string
   toolChoice?: ToolChoice
   tools?: Record<string, unknown>[]
@@ -51,6 +52,7 @@ const parseJsonObject = (value?: string) => {
 }
 
 export const pageAssistModel = async ({
+  clientManagedHistory,
   model,
   toolChoice,
   tools,
@@ -106,7 +108,7 @@ export const pageAssistModel = async ({
   const resolvedConversationId =
     conversationId && conversationId.trim().length > 0
       ? conversationId.trim()
-      : serverChatId ?? undefined
+      : (serverChatId ?? undefined)
   const resolvedSaveToDb =
     typeof saveToDb === "boolean"
       ? saveToDb
@@ -141,8 +143,9 @@ export const pageAssistModel = async ({
     typeof rawProvider === "string" && rawProvider.trim().length > 0
       ? rawProvider.trim()
       : undefined
-  const defaultApiProvider =
-    !explicitProvider ? await getDefaultApiProvider() : null
+  const defaultApiProvider = !explicitProvider
+    ? await getDefaultApiProvider()
+    : null
   const normalizedApiProvider = await resolveApiProviderForModel({
     modelId: model,
     explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
@@ -244,6 +247,7 @@ export const pageAssistModel = async ({
 
   // Default to tldw_server chat model
   return new ChatTldw({
+    clientManagedHistory,
     model,
     temperature: payload.temperature,
     topP: payload.topP,

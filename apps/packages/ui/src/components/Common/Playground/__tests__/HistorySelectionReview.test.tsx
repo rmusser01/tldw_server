@@ -111,3 +111,34 @@ it("reorders included history by keyboard without changing virtual row identity"
     "m2"
   ])
 })
+
+it("shows recoverable text separately with copy and dismiss but no replay action", () => {
+  const selection = {
+    ...controller(),
+    status: "ready",
+    recoveries: [
+      {
+        scope: { profile_id: "p", client_session_id: "old" },
+        turn: {
+          operation_id: "op",
+          state: "generated_unsaved",
+          input_text: "accepted question",
+          result_text: "recover this answer"
+        }
+      }
+    ],
+    dismissRecovery: vi.fn()
+  } as any
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText("recover this answer")).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "Copy recovered text" })
+  ).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
+  expect(selection.dismissRecovery).toHaveBeenCalledWith(
+    selection.recoveries[0]
+  )
+  expect(
+    screen.queryByRole("button", { name: /resend|retry|settle/i })
+  ).toBeNull()
+})

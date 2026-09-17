@@ -3463,5 +3463,35 @@
   },
   "historySelection_expandDescription": {
     "message": "Opens this selected history in the extension full page. Active streaming stays in this panel."
+  },
+  "historySelection_recoveryTitle": {
+    "message": "Turn needs review"
+  },
+  "historySelection_recoveryMessage": {
+    "message": "The original send outcome is retained separately from history. It will not be sent again automatically."
+  },
+  "historySelection_inspectRecovery": {
+    "message": "Inspect original input and result"
+  },
+  "historySelection_copyRecovery": {
+    "message": "Copy recovered text"
+  },
+  "historySelection_dismissRecovery": {
+    "message": "Dismiss recovery"
+  },
+  "historySelection_recoveryLoadError": {
+    "message": "Could not load retained send outcomes. Refresh history to try again."
+  },
+  "historySelection_recoveryState_dispatching": {
+    "message": "Send outcome pending or unknown"
+  },
+  "historySelection_recoveryState_unknown": {
+    "message": "User admission outcome unknown"
+  },
+  "historySelection_recoveryState_accepted_unsent": {
+    "message": "User input accepted; response not saved"
+  },
+  "historySelection_recoveryState_generated_unsaved": {
+    "message": "Generated response needs review"
   }
 }

@@ -6,6 +6,7 @@ import type {
   HistoryInfo,
   Message,
   HistoryBookmark,
+  HistoryTurnRecovery,
   HistoryBookmarkScope
 } from "./types"
 import type {
@@ -232,6 +233,8 @@ export const saveHistoryBookmark = async (
     )
       fail("stale_selection")
     await db.historySelections.put({
+      pending_turns: previous?.pending_turns,
+      history_turn_outcomes: previous?.history_turn_outcomes,
       ...scope,
       owner_key: view.owner_key,
       conversation_id: view.conversation_id,
@@ -262,6 +265,8 @@ export const savePendingHistoryConfirmation = async (
       fail("pending_confirmation_conflict")
     const origin = prior?.pending_view_session_id ?? view.view_session_id
     await db.historySelections.put({
+      pending_turns: prior?.pending_turns,
+      history_turn_outcomes: prior?.history_turn_outcomes,
       ...scope,
       owner_key: view.owner_key,
       conversation_id: view.conversation_id,
@@ -352,6 +357,8 @@ export const acknowledgeHistoryConfirmation = async (
       prior.view.selection_revision === confirmation.selection_revision &&
       prior.view.view_session_id === prior.pending_view_session_id
     await db.historySelections.put({
+      pending_turns: prior?.pending_turns,
+      history_turn_outcomes: prior?.history_turn_outcomes,
       ...scope,
       owner_key: projection.owner_key,
       conversation_id: projection.conversation_id,
@@ -672,6 +679,8 @@ export const confirmLocalHistoryProjection = (
           prior.view.view_session_id === opts.view.view_session_id))
     )
       await db.historySelections.put({
+        pending_turns: prior?.pending_turns,
+        history_turn_outcomes: prior?.history_turn_outcomes,
         ...scope,
         owner_key: owner.owner_key,
         conversation_id: owner.conversation_id,
@@ -851,3 +860,74 @@ export const settleLocalAcceptedAssistant = (
     return result
   })
 }
+
+
+/** Store a credential-free operation intent before dispatch, separate from all ancestry. */
+export const saveHistoryTurnRecovery = async (
+  scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
+): Promise<void> => {
+  // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
+  const detached: HistoryTurnRecovery = structuredClone({
+    operation_id: turn.operation_id, origin_view: turn.origin_view,
+    selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
+    owner_key: turn.owner_key, conversation_id: turn.conversation_id,
+    input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
+    input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
+    ...(turn.admission ? {admission: {
+      version: turn.admission.version, owner_key: turn.admission.owner_key,
+      conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,
+      input_message_revision: turn.admission.input_message_revision, selection_digest: turn.admission.selection_digest
+    }} : {})
+  })
+  await db.transaction("rw", [db.userSettings, db.historySelections], async () => {
+    await assertBookmarkProfile(scope)
+    if (!detached.operation_id || detached.owner_key !== view.owner_key || detached.conversation_id !== view.conversation_id)
+      fail("owner_conversation_mismatch")
+    const previous = await db.historySelections.get(bookmarkKey(scope, view))
+    if (previous?.history_turn_outcomes?.[detached.operation_id]) return
+    if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || !detached.input_id || !detached.assistant_id)
+      fail("invalid_history_operation")
+    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
+      fail("history_operation_conflict")
+    const prior = previous?.pending_turns?.[detached.operation_id]
+    if (prior) {
+      const immutable = (value: HistoryTurnRecovery) => ({
+        origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
+        operation_id: value.operation_id, owner_key: value.owner_key, conversation_id: value.conversation_id,
+        input_id: value.input_id, assistant_id: value.assistant_id, created_at: value.created_at,
+        input_text: value.input_text, input_images: value.input_images
+      })
+      if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
+      if (prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
+      if (prior.admission && !detached.admission) return
+      if (prior.result_text && !detached.result_text) return
+    }
+    await db.historySelections.put({
+      ...(previous ?? {...scope, owner_key: view.owner_key, conversation_id: view.conversation_id, view: structuredClone(view)}),
+      pending_turns: {...previous?.pending_turns, [detached.operation_id]: detached}
+    })
+  })
+}
+
+/** Reopened views discover only the same profile and verified owner/conversation. */
+export const loadHistoryTurnRecoveries = async (
+  scope: HistoryBookmarkScope, owner: {owner_key: string; conversation_id: string}
+): Promise<Array<{scope: HistoryBookmarkScope; turn: HistoryTurnRecovery}>> =>
+  db.transaction("r", [db.userSettings, db.historySelections], async () => {
+    await assertBookmarkProfile(scope)
+    const bookmarks = await db.historySelections.where("owner_key").equals(owner.owner_key).toArray()
+    return bookmarks.filter(record => record.profile_id === scope.profile_id && record.conversation_id === owner.conversation_id)
+      .flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => ({scope: {profile_id: record.profile_id, client_session_id: record.client_session_id}, turn})))
+  })
+
+export const dismissHistoryTurnRecovery = async (
+  scope: HistoryBookmarkScope, owner: {owner_key: string; conversation_id: string}, operationId: string, outcome: "completed" | "dismissed" = "dismissed"
+): Promise<void> =>
+  db.transaction("rw", [db.userSettings, db.historySelections], async () => {
+    await assertBookmarkProfile(scope)
+    const prior = await db.historySelections.get(bookmarkKey(scope, owner))
+    if (!prior?.pending_turns?.[operationId]) return
+    const turns = {...prior.pending_turns}
+    delete turns[operationId]
+    await db.historySelections.put({...prior, pending_turns: turns, history_turn_outcomes: {...prior.history_turn_outcomes, [operationId]: outcome}})
+  })

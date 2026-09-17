@@ -97,6 +97,55 @@ export function HistorySelectionReview({
       className="w-full min-w-0 px-3 py-2"
       aria-label={text("region", "Conversation history selection")}
     >
+      {selection.recoveryError && (
+        <p role="alert">
+          {text(
+            "recoveryLoadError",
+            "Could not load retained send outcomes. Refresh history to try again."
+          )}
+        </p>
+      )}
+      {selection.recoveries?.map((entry) => (
+        <div
+          key={entry.turn.operation_id}
+          className="mb-3 rounded border p-3"
+          role="status"
+        >
+          <p className="font-medium">
+            {text("recoveryTitle", "Turn needs review")}
+          </p>
+          <p>
+            {text(
+              "recoveryMessage",
+              "The original send outcome is retained separately from history. It will not be sent again automatically."
+            )}
+          </p>
+          <p>{text(`recoveryState.${entry.turn.state}`, entry.turn.state)}</p>
+          <details>
+            <summary>
+              {text("inspectRecovery", "Inspect original input and result")}
+            </summary>
+            <pre className="whitespace-pre-wrap break-words">
+              {entry.turn.input_text}
+            </pre>
+            <pre className="whitespace-pre-wrap break-words">
+              {entry.turn.result_text}
+            </pre>
+          </details>
+          <Button
+            onClick={() =>
+              void navigator.clipboard.writeText(
+                entry.turn.result_text || entry.turn.input_text
+              )
+            }
+          >
+            {text("copyRecovery", "Copy recovered text")}
+          </Button>
+          <Button onClick={() => void selection.dismissRecovery(entry)}>
+            {text("dismissRecovery", "Dismiss recovery")}
+          </Button>
+        </div>
+      ))}
       {selection.status === "loading" && (
         <StatePanel
           state="loading"

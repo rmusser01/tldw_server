@@ -11,10 +11,15 @@ import {
 } from "react"
 import {
   ensureLocalProfileId,
+  loadHistoryTurnRecoveries,
+  dismissHistoryTurnRecovery,
   loadHistoryBookmark,
   saveHistoryBookmark
 } from "@/db/dexie/history-selection"
-import type { HistoryBookmarkScope } from "@/db/dexie/types"
+import type {
+  HistoryBookmarkScope,
+  HistoryTurnRecovery
+} from "@/db/dexie/types"
 import {
   captureHistorySnapshot,
   confirmLegacyHistoryProjection,
@@ -746,6 +751,66 @@ export function useHistorySelection(
       return null
     }
   }, [publish])
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const [recoveries, setRecoveries] = useState<
+    Array<{ scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }>
+  >([])
+  const refreshRecovery = useCallback(async () => {
+    const current = live.current
+    if (
+      !current.view ||
+      !current.bookmarkScope ||
+      current.owner?.kind === "unavailable"
+    ) {
+      setRecoveries([])
+      return
+    }
+    const view = current.view
+    try {
+      const entries = await loadHistoryTurnRecoveries(
+        current.bookmarkScope,
+        view
+      )
+      if (sameView(live.current.view, view)) {
+        setRecoveries(entries)
+        setRecoveryError(null)
+      }
+    } catch (error) {
+      if (sameView(live.current.view, view)) setRecoveryError(errorCode(error))
+    }
+  }, [])
+  useEffect(() => {
+    setRecoveries([])
+    setRecoveryError(null)
+    void refreshRecovery()
+  }, [
+    state.view?.owner_key,
+    state.view?.conversation_id,
+    state.view?.view_session_id,
+    state.view?.selection_revision,
+    refreshRecovery
+  ])
+  const dismissRecovery = useCallback(
+    async (entry: {
+      scope: HistoryBookmarkScope
+      turn: HistoryTurnRecovery
+    }) => {
+      const current = live.current
+      if (
+        !current.view ||
+        current.view.owner_key !== entry.turn.owner_key ||
+        current.view.conversation_id !== entry.turn.conversation_id
+      )
+        return
+      await dismissHistoryTurnRecovery(
+        entry.scope,
+        current.view,
+        entry.turn.operation_id
+      )
+      await refreshRecovery()
+    },
+    [refreshRecovery]
+  )
   const reference: HistorySelectionReference | null =
     state.view && state.bookmarkScope
       ? {
@@ -757,6 +822,10 @@ export function useHistorySelection(
       : null
   return {
     ...state,
+    recoveries,
+    recoveryError,
+    refreshRecovery,
+    dismissRecovery,
     reference,
     getReference,
     getStoredReference,

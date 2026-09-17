@@ -21,10 +21,15 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
   details: vi.fn(),
   localOwner: vi.fn(),
-  link: vi.fn()
+  link: vi.fn(),
+  recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
+  dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
 }))
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: () => mocks.profile(),
+  loadHistoryTurnRecoveries: (...args: any[]) => mocks.recoveries(...args),
+  dismissHistoryTurnRecovery: (...args: any[]) =>
+    mocks.dismissRecovery(...args),
   loadHistoryBookmark: async (scope: any, owner: any) =>
     mocks.bookmarks.get(
       JSON.stringify([
@@ -570,4 +575,40 @@ it("surfaces a failed explicit mirror binding after owner capture", async () => 
   })
   expect(result.current.status).toBe("error")
   expect(result.current.error).toBe("mirror_binding_failed")
+})
+
+
+it("restores scoped pending operations from older views without making them selected rows", async () => {
+  const entry: any = {
+    scope: { profile_id: "profile", client_session_id: "old-view" },
+    turn: {
+      operation_id: "op",
+      owner_key: "owner",
+      conversation_id: "chat",
+      state: "unknown",
+      input_text: "pending",
+      result_text: ""
+    }
+  }
+  mocks.recoveries.mockResolvedValue([entry])
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner, null)
+  })
+  await waitFor(() => expect(result.current.recoveries).toEqual([entry]))
+  expect(result.current.capture?.snapshot.nodes.map((row) => row.id)).toEqual([
+    "u",
+    "a",
+    "b"
+  ])
+  mocks.recoveries.mockResolvedValue([])
+  await act(async () => {
+    await result.current.dismissRecovery(entry)
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(
+    entry.scope,
+    expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+    "op"
+  )
+  expect(result.current.recoveries).toEqual([])
 })

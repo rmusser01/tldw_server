@@ -258,15 +258,34 @@ export type Prompt = {
 };
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
-export type HistoryBookmark = HistoryBookmarkScope & {
+/** Recovery text is never a message, selected history, or persisted write capability. */
+export type HistoryTurnRecovery = {
+  operation_id: string;
+  origin_view: HistoryViewSelectionV1;
+  selection_digest: string;
+  request_context_digest: string;
   owner_key: string;
   conversation_id: string;
-  view: HistoryViewSelectionV1;
-  pending_view_session_id?: string;
-  // Only explicit false proves no attempt started; missing legacy state is unknown.
-  pending_dispatch_started?: boolean;
-  pending_confirmation?: LegacyHistoryProjectionConfirmV1;
+  input_id: string;
+  assistant_id: string;
+  created_at: number;
+  input_text: string;
+  input_images: string[];
+  result_text: string;
+  state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
+  admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
 };
+export type HistoryBookmark = HistoryBookmarkScope & {
+  pending_turns?: Record<string, HistoryTurnRecovery>
+  history_turn_outcomes?: Record<string, "completed" | "dismissed">
+  owner_key: string
+  conversation_id: string
+  view: HistoryViewSelectionV1
+  pending_view_session_id?: string
+  // Only explicit false proves no attempt started; missing legacy state is unknown.
+  pending_dispatch_started?: boolean
+  pending_confirmation?: LegacyHistoryProjectionConfirmV1
+}
 
 export type UserSettings = {
   history_profile_id?: string;

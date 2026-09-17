@@ -1064,3 +1064,153 @@ describe("native projection pending resolution", () => {
     ).toEqual(newer)
   })
 })
+
+it("keeps pending sends outside ancestry and restores them across view identities", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: any = {
+    operation_id: "operation",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "question",
+    input_images: [],
+    result_text: "",
+    state: "dispatching",
+    origin_view: origin,
+    selection_digest: "selected",
+    request_context_digest: "prepared"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryBookmark(bookmark, {
+    ...origin,
+    selection_revision: 2
+  })
+  const recovered = await history.loadHistoryTurnRecoveries(
+    { ...bookmark, client_session_id: "reopened" },
+    owner
+  )
+  expect(recovered).toHaveLength(1)
+  expect(recovered[0].turn).toMatchObject({
+    operation_id: "operation",
+    input_text: "question"
+  })
+  const captured = await history.captureLocalHistorySnapshot(
+    owner,
+    origin,
+    "send"
+  )
+  expect(captured.snapshot.nodes).toEqual([])
+  expect(
+    await history.loadHistoryTurnRecoveries(bookmark, {
+      ...owner,
+      owner_key: "other-account"
+    })
+  ).toEqual([])
+  await history.dismissHistoryTurnRecovery(
+    recovered[0].scope,
+    owner,
+    "operation"
+  )
+  expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+})
+
+it("pending turn updates preserve confirmation and reject changed immutable intent", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: any = {
+    operation_id: "operation",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "question",
+    input_images: [],
+    result_text: "",
+    state: "dispatching",
+    origin_view: origin,
+    selection_digest: "selected",
+    request_context_digest: "prepared"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const confirmation: any = {
+    version: 1,
+    projection_id: "projection",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    source_digest: "source",
+    fences: {},
+    source_members: [],
+    ordered_path_ids: [],
+    cursor: { kind: "empty" },
+    selection_revision: 1
+  }
+  await history.savePendingHistoryConfirmation(bookmark, origin, confirmation)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "unknown",
+    result_text: "retained"
+  })
+  expect(
+    (await history.loadHistoryBookmark(bookmark, owner))?.pending_confirmation
+  ).toEqual(confirmation)
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending,
+      input_text: "different"
+    })
+  ).rejects.toThrow("history_operation_conflict")
+  await history.acknowledgeHistoryConfirmation(bookmark, {
+    ...confirmation,
+    projection_digest: "digest",
+    created_at: "today"
+  })
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+      .result_text
+  ).toBe("retained")
+})
+
+it("terminal recovery outcomes fence late callbacks without erasing another operation", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: any = {
+    operation_id: "operation",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "question",
+    input_images: [],
+    result_text: "",
+    state: "dispatching",
+    origin_view: origin,
+    selection_digest: "selected",
+    request_context_digest: "prepared"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    operation_id: "other"
+  })
+  await history.dismissHistoryTurnRecovery(
+    bookmark,
+    owner,
+    "operation",
+    "completed"
+  )
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "unknown",
+    result_text: "late failure"
+  })
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner)).map(
+      (entry) => entry.turn.operation_id
+    )
+  ).toEqual(["other"])
+})

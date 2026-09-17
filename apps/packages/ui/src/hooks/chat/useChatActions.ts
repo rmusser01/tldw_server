@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { TFunction } from "i18next"
@@ -577,6 +578,7 @@ export const useChatActions = ({
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
+  const historySelection = useHistorySelectionContext()
   const [appendFormattingGuidePrompt] = useStorage(
     PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
     false
@@ -973,6 +975,7 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
+    if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
     const scopeSignal = payload?.scopeSignal
     const scopeInvalidatedSignal = payload?.scopeInvalidatedSignal
     const throwIfScopeChanged = () => {
@@ -3119,6 +3122,7 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    const historyOriginIsCurrent = historySelection?.fence()
     const hasVisualIdentityTarget = Boolean(
       selectedCharacter?.id != null ||
         selectedAssistant?.kind === "character" ||
@@ -3279,6 +3283,28 @@ export const useChatActions = ({
     )
 
     try {
+      if (
+        historySelection &&
+        !compareModeActive &&
+        (turnResolvedSendMode === "tracked_character" ||
+          turnResolvedSendMode === "tracked_persona")
+      ) {
+        throw new Error(
+          "selected_history_tracked_assistant_requires_versioned_context"
+        )
+      }
+      if (
+        historySelection &&
+        (isRegenerate ||
+          isContinue ||
+          turnUsesImageMode ||
+          turnContextFiles.length ||
+          docs?.length ||
+          documentContext?.length ||
+          turnShouldUseRag)
+      ) {
+        throw new Error("unsupported_history_action_context")
+      }
       // Pre-stream awaits run inside the try so a failure resets streaming state
       // (and lets the caller drain its queue) instead of stranding the UI.
       if (turnPromptIds.length > 0) {
@@ -3708,7 +3734,16 @@ export const useChatActions = ({
             baseMessages,
             baseHistory,
             signal,
-            scopedNormalModeParams
+            {
+              ...scopedNormalModeParams,
+              historySelection: historySelection
+                ? {
+                    controller: historySelection,
+                    originIsCurrent: historyOriginIsCurrent!,
+                    temporary: temporaryChat
+                  }
+                : undefined
+            }
           )
           return toChatSubmitResult(normalResult)
         } else {
