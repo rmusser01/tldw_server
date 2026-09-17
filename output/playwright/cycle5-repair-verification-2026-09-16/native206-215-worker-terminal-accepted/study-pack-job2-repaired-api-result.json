@@ -1,0 +1,51 @@
+{
+  "at": "2026-09-17T08:13:09.655Z",
+  "scope": "read-only job2 and owned pack via fresh synthetic Alice API session; no browser session access",
+  "records": [
+    {
+      "at": "2026-09-17T08:13:09.601Z",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T08:13:09.616Z",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "username": "alice"
+      }
+    },
+    {
+      "at": "2026-09-17T08:13:09.635Z",
+      "method": "GET",
+      "path": "/api/v1/flashcards/study-packs/jobs/2",
+      "status": 200,
+      "body": {
+        "job": {
+          "id": 2,
+          "status": "failed",
+          "domain": "study_packs",
+          "queue": "default",
+          "job_type": "study_pack_generate"
+        },
+        "study_pack": null,
+        "error": "Study pack generation failed."
+      }
+    },
+    {
+      "at": "2026-09-17T08:13:09.655Z",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 2
+        }
+      }
+    }
+  ]
+}

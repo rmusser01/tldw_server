@@ -1,0 +1,243 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+- Console: 12 errors, 10 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f42e11]:
+  - generic [ref=f42e12]:
+    - generic [ref=f42e14]:
+      - link "Skip to main content" [ref=f42e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f42e16]:
+        - button "Expand sidebar" [ref=f42e17] [cursor=pointer]
+        - button "New Chat" [ref=f42e21] [cursor=pointer]
+        - generic [ref=f42e24]:
+          - button "Quick Ingest" [ref=f42e25] [cursor=pointer]
+          - button "Chat" [ref=f42e29] [cursor=pointer]
+          - button "Prompts" [ref=f42e32] [cursor=pointer]
+          - button "Characters" [ref=f42e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f42e41] [cursor=pointer]
+          - button "World Books" [ref=f42e45] [cursor=pointer]
+          - button "Notes" [ref=f42e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f42e52] [cursor=pointer]
+          - button "Media" [ref=f42e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f42e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f42e69] [cursor=pointer]
+          - button "Kanban" [ref=f42e75] [cursor=pointer]
+          - button "Watchlists" [ref=f42e77] [cursor=pointer]
+        - generic [ref=f42e82]:
+          - button "Open Notes Dock" [ref=f42e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f42e88] [cursor=pointer]
+          - button "Settings" [ref=f42e91] [cursor=pointer]
+      - main [ref=f42e95]:
+        - generic [ref=f42e96]:
+          - generic [ref=f42e99]:
+            - generic [ref=f42e100]:
+              - button "Expand sidebar" [ref=f42e101] [cursor=pointer]
+              - generic [ref=f42e103]:
+                - img "tldw Assistant" [ref=f42e104]
+                - generic [ref=f42e105]: tldw Assistant
+                - button "Companion Home" [ref=f42e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f42e110] [cursor=pointer]
+            - generic [ref=f42e113]:
+              - button "Search - Open command palette" [ref=f42e114] [cursor=pointer]:
+                - generic [ref=f42e118]: Search
+                - generic [ref=f42e119]: ⌘K
+              - button "Open settings" [ref=f42e120] [cursor=pointer]
+              - generic [ref=f42e132]:
+                - button "Notifications, 0 unread" [ref=f42e133] [cursor=pointer]
+                - status [ref=f42e137]: Notifications are active
+              - button "Switch to light theme" [ref=f42e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f42e145] [cursor=pointer]:
+                - generic [ref=f42e146]: "?"
+          - generic [ref=f42e148]:
+            - generic [ref=f42e150]:
+              - generic [ref=f42e152]:
+                - generic [ref=f42e153]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f42e154]
+              - navigation "Flashcards modes" [ref=f42e155]:
+                - generic [ref=f42e156]: Study
+                - generic [ref=f42e157]: Manage
+                - generic [ref=f42e158]: Import / Export
+                - generic [ref=f42e159]: Templates
+                - generic [ref=f42e160]: Scheduler
+            - generic [ref=f42e163]:
+              - tablist [ref=f42e164]:
+                - generic [ref=f42e166]:
+                  - tab "Study" [ref=f42e168] [cursor=pointer]
+                  - tab "Manage" [ref=f42e170] [cursor=pointer]
+                  - tab "Import / Export" [selected] [ref=f42e172] [cursor=pointer]
+                  - tab "Templates" [ref=f42e174] [cursor=pointer]
+                  - tab "Scheduler" [ref=f42e176] [cursor=pointer]
+                - generic [ref=f42e178]:
+                  - button "Test with Quiz" [disabled] [ref=f42e180]
+                  - button "Keyboard Shortcuts" [ref=f42e181] [cursor=pointer]
+              - tabpanel "Import / Export" [ref=f42e188]:
+                - generic [ref=f42e189]:
+                  - generic [ref=f42e190]:
+                    - generic [ref=f42e191]: Task
+                    - radiogroup "Create, import, or export task" [ref=f42e195]:
+                      - generic [ref=f42e196]:
+                        - generic [ref=f42e197] [cursor=pointer]:
+                          - radio "Create cards" [checked]
+                          - generic "Create cards" [ref=f42e198]
+                        - generic [ref=f42e199] [cursor=pointer]:
+                          - radio "Import file"
+                          - generic "Import file" [ref=f42e200]
+                        - generic [ref=f42e201] [cursor=pointer]:
+                          - radio "Export backup"
+                          - generic "Export backup" [ref=f42e202]
+                  - region [ref=f42e203]:
+                    - generic [ref=f42e204]:
+                      - heading "Create and generate" [level=5] [ref=f42e205]
+                      - text: Start new study material from study packs, source text, or images.
+                    - generic [ref=f42e206]:
+                      - generic [ref=f42e207]:
+                        - generic [ref=f42e208]: Study packs
+                        - generic [ref=f42e212]:
+                          - generic [ref=f42e213]:
+                            - strong [ref=f42e215]: Turn media or notes into a review queue.
+                            - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                          - button "Create study pack" [ref=f42e216] [cursor=pointer]
+                      - generic [ref=f42e218]:
+                        - generic [ref=f42e219]: Generate Flashcards
+                        - generic [ref=f42e223]:
+                          - generic [ref=f42e224]: Generate cards from pasted text, review/edit them, then save to a deck.
+                          - textbox "Paste transcript, notes, or study material..." [ref=f42e225]
+                          - generic [ref=f42e226]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                          - generic [ref=f42e227]:
+                            - generic [ref=f42e228]:
+                              - switch "Advanced mix" [ref=f42e229] [cursor=pointer]
+                              - generic [ref=f42e232]: Advanced mix
+                            - generic [ref=f42e234]:
+                              - generic "Number of cards" [ref=f42e236]: "Number of cards :"
+                              - spinbutton [ref=f42e240]: "10"
+                            - generic [ref=f42e242]:
+                              - generic "Card type" [ref=f42e244]: "Card type :"
+                              - generic [ref=f42e248] [cursor=pointer]:
+                                - generic [ref=f42e249]:
+                                  - generic "Basic" [ref=f42e250]
+                                  - combobox [ref=f42e251]
+                                - img "down" [ref=f42e253]
+                            - generic [ref=f42e257]:
+                              - generic "Difficulty" [ref=f42e259]: "Difficulty :"
+                              - generic [ref=f42e263] [cursor=pointer]:
+                                - generic [ref=f42e264]:
+                                  - generic "Mixed" [ref=f42e265]
+                                  - combobox [ref=f42e266]
+                                - img "down" [ref=f42e268]
+                            - generic [ref=f42e272]:
+                              - generic "Deck" [ref=f42e274]: "Deck :"
+                              - generic [ref=f42e278] [cursor=pointer]:
+                                - generic [ref=f42e279]:
+                                  - generic "Alice UAT151 Citrine Deck" [ref=f42e280]
+                                  - combobox [ref=f42e281]
+                                - img "down" [ref=f42e283]
+                            - generic [ref=f42e286]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                            - generic [ref=f42e288]:
+                              - generic "Provider (optional)" [ref=f42e290]: "Provider (optional) :"
+                              - textbox [ref=f42e294]
+                            - generic [ref=f42e296]:
+                              - generic "Model (optional)" [ref=f42e298]: "Model (optional) :"
+                              - textbox [ref=f42e302]
+                          - generic [ref=f42e304]:
+                            - generic "Focus topics (comma-separated)" [ref=f42e306]: "Focus topics (comma-separated) :"
+                            - textbox "exam 1, chapter 3, formulas" [ref=f42e310]
+                          - button "Generate cards" [disabled] [ref=f42e312]
+                      - generic [ref=f42e313]:
+                        - generic [ref=f42e314]: Image Occlusion
+                        - generic [ref=f42e318]:
+                          - generic [ref=f42e319]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                          - generic [ref=f42e320]:
+                            - generic [ref=f42e322]:
+                              - generic "Deck" [ref=f42e324]: "Deck :"
+                              - generic [ref=f42e328] [cursor=pointer]:
+                                - generic [ref=f42e329]:
+                                  - generic "Alice UAT151 Citrine Deck" [ref=f42e330]
+                                  - combobox [ref=f42e331]
+                                - img "down" [ref=f42e333]
+                                - img "close-circle" [ref=f42e337]
+                            - generic [ref=f42e340]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                            - generic [ref=f42e342]:
+                              - generic "Tags" [ref=f42e344]: "Tags :"
+                              - textbox "tag-1, tag-2" [ref=f42e348]
+                          - generic [ref=f42e349]:
+                            - generic [ref=f42e350]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                            - generic [ref=f42e351]:
+                              - generic [ref=f42e352]: Source image
+                              - button "Upload image occlusion source" [ref=f42e353]
+                            - status [ref=f42e354]:
+                              - paragraph [ref=f42e359]: Choose an image to begin authoring occlusions.
+                          - button "Generate occlusion drafts" [ref=f42e360] [cursor=pointer]
+                  - region [ref=f42e362]:
+                    - generic [ref=f42e363]:
+                      - heading "Import and export" [level=5] [ref=f42e364]
+                      - text: Move cards in and out without changing the flashcards route.
+                    - generic [ref=f42e365]:
+                      - generic [ref=f42e366]: Import/export summary
+                      - generic [ref=f42e370]:
+                        - generic [ref=f42e371]:
+                          - strong [ref=f42e373]: Supported formats
+                          - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                        - generic [ref=f42e374]:
+                          - strong [ref=f42e376]: Current import limits
+                          - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                        - generic [ref=f42e377]:
+                          - strong [ref=f42e379]: Last action
+                          - text: No import/export actions yet in this session.
+                    - text: ": : : : : :"
+    - dialog "Create study pack" [ref=f42e381]:
+      - generic [ref=f42e383]:
+        - button "Close" [ref=f42e384] [cursor=pointer]:
+          - img "close" [ref=f42e385]
+        - generic [ref=f42e388]: Create study pack
+      - generic [ref=f42e390]:
+        - status [ref=f42e448]: Creating your study pack.
+        - generic [ref=f42e391]:
+          - strong [ref=f42e393]: Title
+          - textbox "Title" [ref=f42e394]:
+            - /placeholder: Study pack title
+            - text: Alice UAT216 reviewed worker pack 20260917
+        - generic [ref=f42e395]:
+          - generic [ref=f42e396]:
+            - strong [ref=f42e398]: Sources
+            - generic [ref=f42e399]: 1 selected
+          - generic [ref=f42e400]:
+            - generic [ref=f42e401] [cursor=pointer]:
+              - generic [ref=f42e402]:
+                - generic "Note" [ref=f42e434]
+                - combobox "Source Type" [ref=f42e404]
+              - img "down" [ref=f42e406]
+            - textbox "Source ID (advanced/manual)" [ref=f42e409]
+            - textbox "Source Title" [ref=f42e410]:
+              - /placeholder: Optional title
+            - button "Add source" [ref=f42e411] [cursor=pointer]
+          - generic [ref=f42e413]: Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source.
+          - generic [ref=f42e435]:
+            - generic [ref=f42e436]:
+              - generic [ref=f42e437]: note · b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+              - generic [ref=f42e438]: Alice UAT151 Citrine source note
+            - button "Remove" [ref=f42e439] [cursor=pointer]
+      - generic [ref=f42e416]:
+        - button "Cancel" [ref=f42e418] [cursor=pointer]
+        - button "loading Create study pack" [disabled] [ref=f42e449]:
+          - generic:
+            - img "loading"
+          - generic: Create study pack
+  - alert [ref=f42e10]
+```
