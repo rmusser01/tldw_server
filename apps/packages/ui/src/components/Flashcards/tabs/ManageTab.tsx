@@ -2198,7 +2198,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           <Text>
             {selectedCount === 0 ? (
               <span className="text-text-muted">
-                {totalCount} {t("option:flashcards.cards", { defaultValue: "cards" })}
+                {t("option:flashcards.manageCardCount", {
+                  defaultValue: "{count, plural, one {# card} other {# cards}}",
+                  count: totalCount
+                })}
               </span>
             ) : (
               <span className="flex items-center gap-2">

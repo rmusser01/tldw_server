@@ -1,0 +1,37 @@
+[
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx",
+    "expected": "81153fb0d6fecf2771316a6915408d43b37cbfbbab51288e431954a1c0cb0816",
+    "actual": "81153fb0d6fecf2771316a6915408d43b37cbfbbab51288e431954a1c0cb0816",
+    "current_match": true,
+    "snapshot_match": true
+  },
+  {
+    "file": "apps/packages/ui/src/assets/locale/en/option.json",
+    "expected": "6b39025c6a5bd79c4ea20d8ec5f3f31048782373d8a81ee28a52e2435a4df131",
+    "actual": "6b39025c6a5bd79c4ea20d8ec5f3f31048782373d8a81ee28a52e2435a4df131",
+    "current_match": true,
+    "snapshot_match": true
+  },
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx",
+    "expected": "44d7034125b795713898f44fd1f04e48c487c00f4a66ee0981b344b406a311fd",
+    "actual": "44d7034125b795713898f44fd1f04e48c487c00f4a66ee0981b344b406a311fd",
+    "current_match": true,
+    "snapshot_match": true
+  },
+  {
+    "file": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+    "expected": "1ee9663cf71635cb2bdd2504cf4605cce852a0cfd223e49bcee8d69cd7b5dd3d",
+    "actual": "1ee9663cf71635cb2bdd2504cf4605cce852a0cfd223e49bcee8d69cd7b5dd3d",
+    "current_match": true,
+    "snapshot_match": true
+  },
+  {
+    "file": "apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx",
+    "expected": "628304d36367c1cc0c064153d960934fe895bf04c297ee16b29ec4f16d11020b",
+    "actual": "628304d36367c1cc0c064153d960934fe895bf04c297ee16b29ec4f16d11020b",
+    "current_match": true,
+    "snapshot_match": true
+  }
+]

@@ -1,6 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import type React from "react"
+import { createInstance, type i18n } from "i18next"
+import { I18nextProvider } from "react-i18next"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import ICU from "@/i18n/icu-format"
+import option from "@/assets/locale/en/option.json"
+import type { Flashcard } from "@/services/flashcards"
 
 import { ManageTab } from "../ManageTab"
 import {
@@ -23,8 +28,15 @@ const { trackErrorRecoveryTelemetryMock } = vi.hoisted(() => ({
   trackErrorRecoveryTelemetryMock: vi.fn().mockResolvedValue(undefined)
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
+const localization = vi.hoisted(() => ({ real: false }))
+vi.mock("react-i18next", async importOriginal => {
+  const actual = await importOriginal<typeof import("react-i18next")>()
+  return { ...actual,
+  // Existing empty-state tests inspect conditional fallback copy. Count tests
+  // exercise the actual ICU plugin and production English resources instead.
+  useTranslation: (...args: Parameters<typeof actual.useTranslation>) => localization.real
+    ? actual.useTranslation(...args)
+    : ({
     t: (
       key: string,
       defaultValueOrOptions?:
@@ -37,8 +49,8 @@ vi.mock("react-i18next", () => ({
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
     }
-  })
-}))
+  }) }
+})
 
 vi.mock("@/utils/flashcards-shortcut-hint-telemetry", () => ({
   trackFlashcardsShortcutHintTelemetry: trackShortcutHintTelemetryMock
@@ -165,8 +177,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   })
 }
 
-const renderManageTab = (props: Partial<React.ComponentProps<typeof ManageTab>> = {}) =>
-  render(
+const manageElement = (props: Partial<React.ComponentProps<typeof ManageTab>> = {}) => (
     <ManageTab
       onNavigateToImport={() => {}}
       onReviewCard={() => {}}
@@ -174,10 +185,30 @@ const renderManageTab = (props: Partial<React.ComponentProps<typeof ManageTab>> 
       {...props}
     />
   )
+const renderManageTab = (props: Partial<React.ComponentProps<typeof ManageTab>> = {}, instance?: i18n) =>
+  render(instance ? <I18nextProvider i18n={instance}>{manageElement(props)}</I18nextProvider> : manageElement(props))
 
-describe("ManageTab no-card empty state", () => {
+const countCard: Flashcard = {
+  uuid: "count-card", deck_id: 1, front: "Counted question", back: "Counted answer", notes: null, extra: null,
+  is_cloze: false, tags: [], ef: 2.5, interval_days: 0, repetitions: 0, lapses: 0, queue_state: "new",
+  due_at: null, last_reviewed_at: null, last_modified: null, deleted: false, client_id: "test", version: 1,
+  model_type: "basic", reverse: false
+}
+const setCount = (count: number) => vi.mocked(useManageQuery).mockReturnValue({
+  data: { items: Array.from({ length: count }, (_, index) => ({ ...countCard, uuid: `count-card-${index}` })), count, total: count },
+  isFetching: false
+} as ReturnType<typeof useManageQuery>)
+const realEnglish = async () => {
+  localization.real = true
+  const instance = createInstance().use(ICU)
+  await instance.init({ lng: "en", resources: { en: { option } }, interpolation: { escapeValue: false } })
+  return instance
+}
+
+describe("ManageTab count and no-card empty state", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localization.real = false
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
         {
@@ -284,5 +315,37 @@ describe("ManageTab no-card empty state", () => {
     expect(screen.getByTestId("flashcards-manage-search")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-manage-show-workspace-decks")).toBeChecked()
     expect(screen.getByTestId("flashcards-density-toggle")).toBeInTheDocument()
+  })
+
+  it.each([0, 1, 2])("localizes the unselected summary for %i cards through actual ICU", async count => {
+    const instance = await realEnglish()
+    setCount(count)
+    renderManageTab({ initialShowWorkspaceDecks: true }, instance)
+    expect(within(screen.getByTestId("flashcards-manage-selection-summary")).getByText(new RegExp(`^${count} ${count === 1 ? "card" : "cards"}$`, "i"))).toBeVisible()
+  })
+
+  it("updates the localized count and keeps page selection separate from the total", async () => {
+    const instance = await realEnglish()
+    setCount(1)
+    const view = renderManageTab({}, instance)
+    const summary = screen.getByTestId("flashcards-manage-selection-summary")
+    expect(within(summary).getByText("1 card", { exact: true })).toBeVisible()
+    setCount(2)
+    view.rerender(<I18nextProvider i18n={instance}>{manageElement()}</I18nextProvider>)
+    expect(within(summary).getByText("2 cards", { exact: true })).toBeVisible()
+    const selectAll = within(summary).getByRole("checkbox", { name: "Select all on page" })
+    fireEvent.click(selectAll)
+    expect(selectAll).toBeChecked()
+    expect(within(summary).getByText("selected on this page", { exact: true })).toBeVisible()
+    expect(within(summary).queryByText("2 cards", { exact: true })).not.toBeInTheDocument()
+    fireEvent.click(selectAll)
+    expect(selectAll).not.toBeChecked()
+    expect(within(summary).getByText("2 cards", { exact: true })).toBeVisible()
+  })
+
+  it("keeps a genuine first-run summary hidden with production localization", async () => {
+    const instance = await realEnglish()
+    renderManageTab({}, instance)
+    expect(screen.queryByTestId("flashcards-manage-selection-summary")).not.toBeInTheDocument()
   })
 })

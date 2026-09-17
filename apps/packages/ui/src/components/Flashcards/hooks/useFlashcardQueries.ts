@@ -99,7 +99,7 @@ const reportFlashcardMutationError = (message: string, error: unknown) => {
   if (error instanceof Error && "status" in error &&
     typeof error.status === "number" && Number.isInteger(error.status) &&
     error.status >= 400 && error.status <= 599) {
-    // HTTP failures are recoverable by the generation/save UI. Next's Pages Router turns
+    // HTTP failures are recoverable by the Flashcards UI. Next's Pages Router turns
     // console.error(message, Error) into a blocking runtime overlay.
     console.warn(message, error)
     return
@@ -983,7 +983,7 @@ export function useReviewFlashcardMutation() {
     },
     onError: (error, params) => {
       if (params.options?.signal?.aborted) return
-      console.error("Failed to submit flashcard review:", error)
+      reportFlashcardMutationError("Failed to submit flashcard review:", error)
     }
   })
 }
@@ -1031,7 +1031,7 @@ export function useFlashcardAssistantRespondMutation() {
       )
     },
     onError: (error) => {
-      console.error("Failed to respond with flashcard assistant:", error)
+      reportFlashcardMutationError("Failed to respond with flashcard assistant:", error)
     }
   })
 }

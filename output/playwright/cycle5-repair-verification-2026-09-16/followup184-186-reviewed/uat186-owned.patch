@@ -1,0 +1,218 @@
+--- a/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
++++ b/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
+@@ -99,7 +99,7 @@
+   if (error instanceof Error && "status" in error &&
+     typeof error.status === "number" && Number.isInteger(error.status) &&
+     error.status >= 400 && error.status <= 599) {
+-    // HTTP failures are recoverable by the generation/save UI. Next's Pages Router turns
++    // HTTP failures are recoverable by the Flashcards UI. Next's Pages Router turns
+     // console.error(message, Error) into a blocking runtime overlay.
+     console.warn(message, error)
+     return
+@@ -983,7 +983,7 @@
+     },
+     onError: (error, params) => {
+       if (params.options?.signal?.aborted) return
+-      console.error("Failed to submit flashcard review:", error)
++      reportFlashcardMutationError("Failed to submit flashcard review:", error)
+     }
+   })
+ }
+@@ -1031,7 +1031,7 @@
+       )
+     },
+     onError: (error) => {
+-      console.error("Failed to respond with flashcard assistant:", error)
++      reportFlashcardMutationError("Failed to respond with flashcard assistant:", error)
+     }
+   })
+ }
+--- a/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx
++++ b/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx
+@@ -7,18 +7,24 @@
+ import { MemoryRouter } from "react-router-dom"
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+ import { GeneratePanel } from "@/components/Flashcards/tabs/ImportExport/GeneratePanel"
+-import { useCreateDeckMutation, useCreateFlashcardMutation, useGenerateFlashcardsMutation } from "@/components/Flashcards/hooks/useFlashcardQueries"
++import { useCreateDeckMutation, useCreateFlashcardMutation, useGenerateFlashcardsMutation, useFlashcardAssistantQuery, useFlashcardAssistantRespondMutation, useReviewFlashcardMutation, useEndFlashcardReviewSessionMutation } from "@/components/Flashcards/hooks/useFlashcardQueries"
++import { FlashcardStudyAssistantPanel } from "@/components/Flashcards/components/FlashcardStudyAssistantPanel"
++import { useFlashcardReviewRun } from "@/components/Flashcards/hooks/useFlashcardReviewRun"
++import { tldwClient } from "@/services/tldw/TldwApiClient"
++import type { StudyAssistantContextResponse, StudyAssistantRespondResponse } from "@/services/flashcards"
+ import type { ServicePromptSnapshot } from "@/services/service-prompts"
+
+ const boundary = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), fetch: vi.fn() }))
+ const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+ vi.mock("wxt/browser", () => ({ browser: { runtime: { id: null } } }))
+-vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({ get: boundary.get, set: boundary.set, remove: vi.fn() }) }))
++vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({ get: boundary.get, set: boundary.set, remove: vi.fn(), watch: vi.fn(), unwatch: vi.fn() }), safeStorageSerde: { serialize: JSON.stringify, deserialize: JSON.parse } }))
+ vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
+ vi.mock("@/hooks/useAntdMessage", () => ({ useAntdMessage: () => messages }))
+ vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => true }))
+ vi.mock("@/hooks/useServerCapabilities", () => ({ useServerCapabilities: () => ({ capabilities: { hasFlashcards: true }, loading: false }) }))
+ vi.mock("@/services/prompt-studio", () => ({ getLlmProviders: async () => ({ providers: ["local"] }) }))
++vi.mock("@/hooks/useSpeechRecognition", () => ({ useSpeechRecognition: () => ({ supported: false, isListening: false, transcript: "", start: vi.fn(), stop: vi.fn(), resetTranscript: vi.fn() }) }))
++vi.mock("@/hooks/useTTS", () => ({ useTTS: () => ({ speak: vi.fn(), cancel: vi.fn(), isSpeaking: false }) }))
+ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key }) }))
+
+ // Run the installed Pages Router handler unchanged, observing its dispatcher.
+@@ -77,7 +83,7 @@
+   return <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+ }
+
+-describe("generation and saves through the real request and Next Pages error paths", () => {
++describe("Flashcards mutations through the real request and Next Pages error paths", () => {
+   beforeEach(() => {
+     vi.clearAllMocks()
+     boundary.get.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+@@ -227,16 +233,145 @@
+     } finally { observer.restore(); client.clear() }
+   })
+
+-  it.each(["deck", "card", "generation"] as const)("preserves the %s programming error rejection and Next diagnostic", async stage => {
+-    const observer = installNextPagesErrorObserver()
+-    const client = makeClient()
+-    try {
+-      const { result } = renderHook(() => ({ deck: useCreateDeckMutation(), card: useCreateFlashcardMutation(), generation: useGenerateFlashcardsMutation() }), { wrapper: wrapper(client) })
++  it("keeps an assistant HTTP500 inline, retains the question and card, and accepts a successful retry", async () => {
++    const cardUuid = "citrine-card"
++    const question = "When do Citrine volunteers meet?"
++    const answer = "Tuesday at 14:00."
++    const context: StudyAssistantContextResponse = {
++      thread: { id: 7, context_type: "flashcard", flashcard_uuid: cardUuid, quiz_attempt_id: null, question_id: null,
++        last_message_at: null, message_count: 0, deleted: false, client_id: "1", version: 1,
++        created_at: "2026-09-17T00:00:00Z", last_modified: "2026-09-17T00:00:00Z" },
++      messages: [], context_snapshot: { flashcard: { uuid: cardUuid, front: question, back: answer } },
++      available_actions: ["explain", "follow_up"]
++    }
++    const messageBase = { thread_id: 7, action_type: "follow_up" as const, input_modality: "text" as const,
++      structured_payload: {}, context_snapshot: context.context_snapshot, provider: null, model: null,
++      created_at: "2026-09-17T00:01:00Z", client_id: "1" }
++    const successful: StudyAssistantRespondResponse = {
++      thread: { ...context.thread, version: 3, message_count: 2, last_message_at: messageBase.created_at },
++      user_message: { ...messageBase, id: 11, role: "user", content: question },
++      assistant_message: { ...messageBase, id: 12, role: "assistant", content: answer },
++      structured_payload: {}, context_snapshot: context.context_snapshot
++    }
++    let failing = true
++    boundary.fetch.mockImplementation(async (url: string, init: RequestInit) => {
++      const pathname = new URL(url).pathname
++      if (pathname === `/api/v1/flashcards/${cardUuid}/assistant` && init.method === "GET") return response(context)
++      if (pathname === `/api/v1/flashcards/${cardUuid}/assistant/respond` && init.method === "POST") {
++        return failing ? response({ detail: "Internal server error" }, 500) : response(successful)
++      }
++      throw new Error(`Unexpected request: ${init.method} ${pathname}`)
++    })
++    function Assistant() {
++      const query = useFlashcardAssistantQuery(cardUuid)
++      const mutation = useFlashcardAssistantRespondMutation()
++      return <FlashcardStudyAssistantPanel cardUuid={cardUuid} threadVersion={query.data?.thread.version}
++        messages={query.data?.messages ?? []} assistantContext={query.data?.context_snapshot}
++        availableActions={query.data?.available_actions} isLoading={query.isLoading} defaultExpanded
++        isResponding={mutation.isPending} onRespond={request => mutation.mutateAsync({ cardUuid, request })} />
++    }
++    const observer = installNextPagesErrorObserver()
++    const warning = vi.spyOn(console, "warn")
++    const client = makeClient()
++    try {
++      render(<Assistant />, { wrapper: wrapper(client) })
++      await waitFor(() => expect(client.getQueryData(["flashcards:assistant", cardUuid])).toEqual(context))
++      const input = screen.getByRole("textbox", { name: "Ask the study assistant" })
++      fireEvent.change(input, { target: { value: question } })
++      fireEvent.click(screen.getByRole("button", { name: "Ask assistant" }))
++      expect(await screen.findByText("The server returned an error. Please try again or check server logs.")).toBeVisible()
++      expect(input).toHaveValue(question)
++      await waitFor(() => expect(screen.getByRole("button", { name: "Ask assistant" })).toBeEnabled())
++      expect(client.getQueryData(["flashcards:assistant", cardUuid])).toEqual(context)
++      const failedMutation = client.getMutationCache().getAll().find(mutation => mutation.state.status === "error")
++      expect(failedMutation?.state.error).toMatchObject({ status: 500 })
++      expect(observer.unhandled).toEqual([])
++      expect(observer.rejections).toEqual([])
++      expect(observer.errors).toEqual([])
++      expect(warning).toHaveBeenCalledWith("Failed to respond with flashcard assistant:", failedMutation?.state.error)
++
++      failing = false
++      fireEvent.click(screen.getByRole("button", { name: "Ask assistant" }))
++      expect(await screen.findByText(answer)).toBeVisible()
++      expect(input).toHaveValue("")
++      expect(screen.queryByText("The server returned an error. Please try again or check server logs.")).not.toBeInTheDocument()
++      expect(client.getQueryData<StudyAssistantContextResponse>(["flashcards:assistant", cardUuid])?.messages.map(message => message.id)).toEqual([11, 12])
++      const posts = boundary.fetch.mock.calls.filter(([, init]) => init.method === "POST")
++      expect(posts).toHaveLength(2)
++      for (const [url, init] of posts) {
++        expect(url).toBe(`https://source.test/api/v1/flashcards/${cardUuid}/assistant/respond`)
++        expect(new Headers(init.headers).get("Authorization")).toBe(`Bearer test.${btoa(JSON.stringify({ sub: "1" }))}.signature`)
++        expect(JSON.parse(init.body as string)).toEqual({ action: "follow_up", message: question, input_modality: "text", expected_thread_version: 1 })
++      }
++      expect(observer.errors).toEqual([])
++    } finally { observer.restore(); client.clear() }
++  })
++
++  it("preserves a scheduled rating after HTTP500 and retries within the real review run without a Next overlay", async () => {
++    const config = { serverUrl: "https://source.test", authMode: "multi-user" as const, accessToken: `test.${btoa(JSON.stringify({ sub: "1" }))}.signature` }
++    vi.spyOn(tldwClient, "initialize").mockResolvedValue()
++    vi.spyOn(tldwClient, "getConfig").mockResolvedValue(config)
++    vi.spyOn(tldwClient, "ensureConfigForRequest").mockResolvedValue(config)
++    let failing = true
++    boundary.fetch.mockImplementation(async (url: string, init: RequestInit) => {
++      const pathname = new URL(url).pathname
++      if (pathname.endsWith("/auth/me") || pathname.endsWith("/api/auth/session")) return response({ id: 1, is_active: true, authenticated: true, user: { id: 1, is_active: true } })
++      if (pathname === "/api/v1/flashcards/review") return failing ? response({ detail: "Internal server error" }, 500) : response({ review_session_id: 77, interval_days: 1 })
++      if (pathname === "/api/v1/flashcards/review-sessions/end") return response({ id: 77, status: "completed", cards_reviewed: 1 })
++      throw new Error(`Unexpected request: ${init.method} ${pathname}`)
++    })
++    const client = makeClient()
++    const invalidation = vi.spyOn(client, "invalidateQueries")
++    const observer = installNextPagesErrorObserver()
++    const warning = vi.spyOn(console, "warn")
++    const closeError = vi.fn()
++    const context = { review_mode: "due" as const, deck_id: 1, tag_filter: null }
++    const rating = { cardUuid: "citrine-card", rating: 3, answerTimeMs: 250 }
++    const view = renderHook(() => {
++      const review = useReviewFlashcardMutation()
++      const end = useEndFlashcardReviewSessionMutation()
++      return useFlashcardReviewRun({ context, enabled: true, review: review.mutateAsync, end: end.mutateAsync, onCloseError: closeError })
++    }, { wrapper: wrapper(client) })
++    try {
++      let caught: unknown
++      await act(async () => { try { await view.result.current.submit(rating) } catch (error) { caught = error } })
++      expect(caught).toMatchObject({ status: 500 })
++      expect(view.result.current.activeSessionId).toBeNull()
++      expect(invalidation).not.toHaveBeenCalled()
++      expect(observer.unhandled).toEqual([])
++      expect(observer.rejections).toEqual([])
++      expect(observer.errors).toEqual([])
++      expect(warning).toHaveBeenCalledWith("Failed to submit flashcard review:", caught)
++      failing = false
++      await act(async () => { expect(await view.result.current.submit(rating)).toMatchObject({ review_session_id: 77 }) })
++      expect(view.result.current.activeSessionId).toBe(77)
++      expect(invalidation).toHaveBeenCalledTimes(1)
++      const posts = boundary.fetch.mock.calls.filter(([url]) => new URL(url).pathname === "/api/v1/flashcards/review")
++      expect(posts).toHaveLength(2)
++      for (const [, init] of posts) {
++        expect(JSON.parse(init.body as string)).toEqual({ card_uuid: rating.cardUuid, rating: 3, answer_time_ms: 250, review_context: context })
++        expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("1")
++      }
++      expect(observer.errors).toEqual([])
++    } finally {
++      await act(async () => view.unmount())
++      expect(closeError).not.toHaveBeenCalled()
++      observer.restore(); client.clear()
++    }
++  })
++
++  it.each(["deck", "card", "generation", "assistant", "rating"] as const)("preserves the %s programming error rejection and Next diagnostic", async stage => {
++    const observer = installNextPagesErrorObserver()
++    const client = makeClient()
++    try {
++      const { result } = renderHook(() => ({ deck: useCreateDeckMutation(), card: useCreateFlashcardMutation(), generation: useGenerateFlashcardsMutation(), assistant: useFlashcardAssistantRespondMutation(), rating: useReviewFlashcardMutation() }), { wrapper: wrapper(client) })
+       let caught: unknown
+       await act(async () => {
+         try {
+           if (stage === "deck") await result.current.deck.mutateAsync({ name: null as unknown as string })
+           else if (stage === "generation") await result.current.generation.mutateAsync({ get text(): string { throw new TypeError("Invalid source getter") } })
++          else if (stage === "assistant") await result.current.assistant.mutateAsync({ cardUuid: "citrine-card", get request(): never { throw new TypeError("Invalid assistant request getter") } })
++          else if (stage === "rating") await result.current.rating.mutateAsync({ get cardUuid(): never { throw new TypeError("Invalid rating card getter") }, rating: 3 })
+           else await result.current.card.mutateAsync({ get front(): string { throw new TypeError("Invalid draft getter") }, back: "A" })
+         } catch (error) { caught = error }
+       })

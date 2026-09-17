@@ -1,0 +1,204 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:33208) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33209) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33207) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33213) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33210) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33212) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33211) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33214) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:33206) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Flashcards/hooks/__tests__/useCreateDeckMutation.test.tsx (1 test) 11ms
+ ✓ ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardAssistantQueries.test.tsx (2 tests) 120ms
+ ✓ ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardQueries.generate.test.tsx (1 test) 10ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests) 109ms
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > blocks a target change before dispatch instead of sending current credentials to the old target
+Failed to submit flashcard review: Error: The server or authenticated account changed before the request was sent.
+    at createServicePromptScopeChangedError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts:152:17)
+    at resolveCurrentServicePromptConfig (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:512:11)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1425:5)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:933:10) {
+  status: 412,
+  details: {
+    detail: {
+      code: 'request_config_scope_changed',
+      message: 'The server or authenticated account changed before the request was sent.'
+    }
+  }
+}
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > ignores a late failed rating after replacement instead of installing its error
+[tldw:request] POST /api/v1/flashcards/review 500 Old failure
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > does not replay a failed rating write and retains the acknowledged ID for an explicit retry
+[tldw:request] POST /api/v1/flashcards/review 0 Network failed
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > does not replay a failed rating write and retains the acknowledged ID for an explicit retry
+Failed to submit flashcard review: Error: Network failed (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:933:10) {
+  status: 0,
+  headers: undefined,
+  retryAfterMs: undefined
+}
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > allows an explicit retry after a temporary owner-lookup failure
+[tldw:request] GET /api/v1/auth/me 503 Temporarily unavailable
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > requires an explicit new session after the retained session expires, without replaying the rating
+[tldw:request] POST /api/v1/flashcards/review 404 Flashcard review session is not active
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > requires an explicit new session after the retained session expires, without replaying the rating
+Failed to submit flashcard review: Error: Flashcard review session is not active (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:933:10) {
+  status: 404,
+  details: { detail: 'Flashcard review session is not active' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > keeps a valid retained session when only the reviewed card is missing
+[tldw:request] POST /api/v1/flashcards/review 404 Flashcard not found
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > keeps a valid retained session when only the reviewed card is missing
+Failed to submit flashcard review: Error: Flashcard not found (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:933:10) {
+  status: 404,
+  details: { detail: 'Flashcard not found' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through local end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through native end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension rating without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+stderr | ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx > review run with real scope lease, mutations and outbound transport > retires canonical-invalidated work delivered through extension end without changing raw credentials
+Not authenticated. Please log in under Settings → tldw server before continuing.
+
+ ✓ ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardReviewRun.test.tsx (45 tests) 1631ms
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > shows explicit version-conflict guidance when review submission fails with conflict
+[flashcards:error] {
+  code: 'FLASHCARDS_VERSION_CONFLICT',
+  status: 409,
+  operation: 'submitting your review',
+  raw: 'Version mismatch: expected 4, got 5'
+}
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx > ReviewTab create CTA visibility > retries failed review submissions with preserved answer timing
+[flashcards:error] {
+  code: 'FLASHCARDS_NETWORK',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Failed to fetch'
+}
+
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx (25 tests) 3848ms
+     ✓ keeps a visible re-rate action after rating an active review card  576ms
+     ✓ shows deck study dashboard actions from review analytics  570ms
+     ✓ shows the all-deck dashboard before starting an all-deck due review  310ms
+     ✓ offers completion actions for recovery, creation, management, and scheduling  346ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx (15 tests) 7948ms
+     ✓ keeps compact and expanded card controls without deprecated List warnings  347ms
+     ✓ preserves the pending-delete countdown and Undo without deprecated List warnings  2087ms
+     ✓ supports multi-tag filter chips with suggestions  1734ms
+     ✓ hides workspace decks by default and reveals them when the toggle is enabled  715ms
+     ✓ filters decks and card queries to a selected workspace  379ms
+     ✓ resets workspace filters for a non-workspace create handoff  690ms
+     ✓ moves deck scope by patching workspace_id in the update payload  1423ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx (11 tests) 7757ms
+     ✓ keeps review recall first and resets explicit help when the active card changes  387ms
+     ✓ keeps assistant actions collapsed before answer reveal and expands on demand  532ms
+     ✓ submits explain actions immediately  363ms
+     ✓ requires transcript confirmation before submitting fact-check requests  723ms
+     ✓ stops voice capture and clears the transcript when the assistant is collapsed  334ms
+     ✓ plays back assistant replies on demand  323ms
+     ✓ shows assistant errors without blocking review controls  319ms
+     ✓ reloads the latest thread and offers retry actions after a conflict  1113ms
+     ✓ clears the pending request when reloading the latest thread  1659ms
+     ✓ preserves transcript fact-check requests across conflict recovery  1569ms
+     ✓ uses refreshed top-level remediation context after conflict recovery  435ms
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx > ManageTab stage3 undo controls > keeps failed cards selected and warns when bulk tag updates partially fail
+1 bulk tag updates failed in chunk
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx > ManageTab stage3 undo controls > retries failed off-page cards after select-all-across bulk tag partial failure
+1 bulk tag updates failed in chunk
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx > ManageTab stage3 undo controls > keeps off-page retry selections when a visible card is toggled
+1 bulk tag updates failed in chunk
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx > ManageTab stage3 undo controls > clears failed retry selection when workspace scope changes
+1 bulk tag updates failed in chunk
+
+stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx > ManageTab stage3 undo controls > keeps failed cards selected and warns when bulk move partially fails
+1 move updates failed in chunk
+
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.undo-stage3.test.tsx (13 tests) 34512ms
+     ✓ keeps the top bar free of primary CTAs while managing cards  327ms
+     ✓ offers undo for single-card edits  2149ms
+     ✓ shows explicit conflict guidance when an edit hits version mismatch  1908ms
+     ✓ offers undo for move operations  1997ms
+     ✓ applies bulk add tag to selected cards  1965ms
+     ✓ keeps failed cards selected and warns when bulk tag updates partially fail  1933ms
+     ✓ retries failed off-page cards after select-all-across bulk tag partial failure  3270ms
+     ✓ keeps off-page retry selections when a visible card is toggled  6721ms
+     ✓ clears failed retry selection when workspace scope changes  3037ms
+     ✓ applies bulk remove tag to selected cards case-insensitively  3233ms
+     ✓ keeps failed cards selected and warns when bulk move partially fails  6267ms
+     ✓ renders large bulk delete warning with the design-system Alert  1588ms
+
+ Test Files  9 passed (9)
+      Tests  116 passed (116)
+   Start at  18:12:38
+   Duration  37.10s (transform 4.74s, setup 1.93s, import 11.42s, tests 55.95s, environment 4.23s)

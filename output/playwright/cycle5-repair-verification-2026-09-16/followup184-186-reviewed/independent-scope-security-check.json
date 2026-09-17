@@ -1,0 +1,22 @@
+{
+  "manage_only_count_render_changed": true,
+  "hook_only_two_reporters_and_comment_changed": true,
+  "locale_only_new_count_key": true,
+  "generic_cards_label": "Cards",
+  "count_message": "{count, plural, one {# card} other {# cards}}",
+  "author_eslint_current_sources_match": true,
+  "author_eslint_same_semantic_messages": true,
+  "author_eslint_errors": 0,
+  "author_eslint_warnings": 14,
+  "author_tsc_comparison": {
+    "baseline_count": 90,
+    "current_count": 90,
+    "added": [],
+    "removed": []
+  },
+  "bandit": {
+    "findings": 0,
+    "parse_errors": 4,
+    "typescript_security_coverage": false
+  }
+}

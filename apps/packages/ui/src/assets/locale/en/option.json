@@ -1669,6 +1669,7 @@
   "flashcards": {
     "review": "Review",
     "cards": "Cards",
+    "manageCardCount": "{count, plural, one {# card} other {# cards}}",
     "create": "Create",
     "manage": "Manage",
     "importExport": "Import / Export",
