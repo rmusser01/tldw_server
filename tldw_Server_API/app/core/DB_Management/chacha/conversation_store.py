@@ -228,10 +228,12 @@ class ConversationStore:
                     "FROM conversation_settings WHERE conversation_id = %s",
                     (conversation_id,),
                 )
-                row = result.fetchone()
+                row = result.first
                 if not row:
                     return None
-                settings_json, settings_version, last_modified = row
+                settings_json = row["settings_json"]
+                settings_version = row["settings_version"]
+                last_modified = row["last_modified"]
 
             settings = json.loads(settings_json) if settings_json else {}
             return {

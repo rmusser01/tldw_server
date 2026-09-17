@@ -804,32 +804,31 @@ class WorldBookService:
                 return {}
 
         try:
-            with self.db.get_connection() as conn:
-                query = """
-                    SELECT world_book_id, COUNT(*) AS entry_count
-                    FROM world_book_entries
-                """
-                params: list[Any] = []
-                if normalized_ids is not None:
-                    placeholders = ",".join("?" for _ in normalized_ids)
-                    query += f" WHERE world_book_id IN ({placeholders})"  # nosec B608
-                    params.extend(normalized_ids)
-                query += " GROUP BY world_book_id"
+            query = """
+                SELECT world_book_id, COUNT(*) AS entry_count
+                FROM world_book_entries
+            """
+            params: list[Any] = []
+            if normalized_ids is not None:
+                placeholders = ",".join("?" for _ in normalized_ids)
+                query += f" WHERE world_book_id IN ({placeholders})"  # nosec B608
+                params.extend(normalized_ids)
+            query += " GROUP BY world_book_id"
 
-                cursor = conn.execute(query, tuple(params))
-                counts: dict[int, int] = {}
-                for row in cursor.fetchall():
-                    row_dict = dict(row)
-                    try:
-                        world_book_id = int(row_dict.get("world_book_id"))
-                    except (TypeError, ValueError):
-                        continue
-                    counts[world_book_id] = int(row_dict.get("entry_count") or 0)
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            counts: dict[int, int] = {}
+            for row in cursor.fetchall():
+                row_dict = dict(row)
+                try:
+                    world_book_id = int(row_dict.get("world_book_id"))
+                except (TypeError, ValueError):
+                    continue
+                counts[world_book_id] = int(row_dict.get("entry_count") or 0)
 
-                if normalized_ids is not None:
-                    for world_book_id in normalized_ids:
-                        counts.setdefault(world_book_id, 0)
-                return counts
+            if normalized_ids is not None:
+                for world_book_id in normalized_ids:
+                    counts.setdefault(world_book_id, 0)
+            return counts
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching world book entry counts: {e}")
             raise CharactersRAGDBError(f"Error fetching world book entry counts: {e}") from e
@@ -1622,23 +1621,22 @@ class WorldBookService:
             List of world book data with attachment info
         """
         try:
-            with self.db.get_connection() as conn:
-                query = """
-                    SELECT wb.*, cwb.enabled as attachment_enabled, cwb.priority as attachment_priority
-                    FROM world_books wb
-                    JOIN character_world_books cwb ON wb.id = cwb.world_book_id
-                    WHERE cwb.character_id = ? AND wb.deleted = ?
-                """
-                params: list[Any] = [character_id, False]
+            query = """
+                SELECT wb.*, cwb.enabled as attachment_enabled, cwb.priority as attachment_priority
+                FROM world_books wb
+                JOIN character_world_books cwb ON wb.id = cwb.world_book_id
+                WHERE cwb.character_id = ? AND wb.deleted = ?
+            """
+            params: list[Any] = [character_id, False]
 
-                if enabled_only:
-                    query += " AND cwb.enabled = ? AND wb.enabled = ?"
-                    params.extend([True, True])
+            if enabled_only:
+                query += " AND cwb.enabled = ? AND wb.enabled = ?"
+                params.extend([True, True])
 
-                query += " ORDER BY cwb.priority DESC, wb.name"
+            query += " ORDER BY cwb.priority DESC, wb.name"
 
-                cursor = conn.execute(query, tuple(params))
-                return [dict(row) for row in cursor.fetchall()]
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            return [dict(row) for row in cursor.fetchall()]
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error fetching character world books: {e}")
