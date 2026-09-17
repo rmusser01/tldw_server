@@ -1698,14 +1698,52 @@ const PlaygroundContent = () => {
 
   const initializePlayground = React.useCallback(async () => {
     let handoff;
+    let handoffInHash = false;
     let storedHistoryReference;
-    try { handoff = parseHistorySelectionHandoff(location.search || location.hash || ""); storedHistoryReference = historySelection.getStoredReference(); }
+    try {
+      handoff = parseHistorySelectionHandoff(location.search || "");
+      if (!handoff) {
+        handoff = parseHistorySelectionHandoff(extractHashSearch(location.hash).split("#")[0]);
+        handoffInHash = Boolean(handoff);
+      }
+      storedHistoryReference = historySelection.getStoredReference();
+    }
     catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
     if (handoff) {
       const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
       if (loaded && historySelection.getCurrent().capture) {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
+        // The frozen address initializes this writer once. Reload then uses its
+        // own saved address, including the original pending-confirmation pointer.
+        const url = new URL(window.location.href);
+        const initialSearch = handoffInHash ? location.hash : location.search;
+        const initialValue = new URLSearchParams(
+          (initialSearch || "").replace(/^.*\?/, "").split("#")[0],
+        ).get("historySelection");
+        // HashRouter exposes its hash query as location.search. Locate the
+        // matching parameter in the browser URL rather than assuming the same slot.
+        const consumeFromHash = url.searchParams.get("historySelection") !== initialValue;
+        const hashQueryStart = url.hash.indexOf("?");
+        const currentSearch = consumeFromHash
+          ? url.hash.slice(hashQueryStart + 1)
+          : url.search;
+        const fragmentStart = currentSearch.indexOf("#");
+        const trailingFragment = fragmentStart < 0 ? "" : currentSearch.slice(fragmentStart);
+        const params = new URLSearchParams(
+          fragmentStart < 0 ? currentSearch : currentSearch.slice(0, fragmentStart),
+        );
+        // Preserve a different handoff received while this owner was loading.
+        if (params.get("historySelection") === initialValue) {
+          params.delete("historySelection");
+          const query = params.toString();
+          if (consumeFromHash) {
+            url.hash = url.hash.slice(0, hashQueryStart) + (query ? `?${query}` : "") + trailingFragment;
+          } else {
+            url.search = query;
+          }
+          window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+        }
       }
       return;
     }

@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { resolveHistorySelection } from "@/utils/history-selection"
 import { Playground } from "../Playground"
 import {
   decodeSidepanelChatWebUiHandoff,
@@ -10,6 +14,9 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
+
+const h1 = vi.hoisted(() => ({ enabled: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
+const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -118,6 +125,7 @@ const tldwClientState = vi.hoisted(() => ({
 }))
 
 const routerState = vi.hoisted(() => ({
+  hashRouter: false,
   navigate: vi.fn()
 }))
 
@@ -167,8 +175,11 @@ vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
     },
     _ref
   ) {
+    const selection = useHistorySelectionContext()
+    if (h1.enabled) h1.controller = selection
     return (
       <div
+        data-selected-history={h1.enabled ? selection?.capture?.status === "captured" ? selection.capture.selected_content.map(row => row.message).join(" / ") : selection?.status : ""}
         data-testid="playground-chat"
         data-search-query={props.searchQuery || ""}
         data-search-count={props.matchedMessageIndices?.size || 0}
@@ -185,18 +196,15 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value
+  useMessageOption: () => h1.enabled ? { ...messageOptionState.value, ...useStoreMessageOption() } : messageOptionState.value
 }))
 
-vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
-  usePlaygroundSessionPersistence: () => ({
-    restoreSession: vi.fn(async () => false),
-    sessionScopeReady: true,
-    hasPersistedSession: false,
-    persistedHistoryId: null,
-    persistedServerChatId: null
-  })
-}))
+vi.mock("@/hooks/usePlaygroundSessionPersistence", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
+  return { usePlaygroundSessionPersistence: () => h1.enabled ? actual.usePlaygroundSessionPersistence() : ({
+    restoreSession: vi.fn(async () => false), sessionScopeReady: true, hasPersistedSession: false, persistedHistoryId: null, persistedServerChatId: null
+  }) }
+})
 
 vi.mock("@/hooks/playground-session-restore", () => ({
   shouldRestorePersistedPlaygroundSession: () => false
@@ -207,6 +215,9 @@ vi.mock("@/services/app", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  getFullChatData: vi.fn(async (id: string) => ({ historyInfo: { id }, messages: [] })),
+  getSessionFiles: vi.fn(async () => []),
+  formatSelectedHistory: (capture: any) => ({ history: capture.selected_content.map((row: any) => ({ role: "assistant", content: row.message })), messages: capture.selected_content.map((row: any) => ({ id: row.id, message: row.message, isBot: true, name: "Assistant", sources: [] })) }),
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
   getPromptById: vi.fn(async () => null),
@@ -242,11 +253,11 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: []
 }))
 
-vi.mock("@/store/option", () => {
-  const useStoreMessageOption = (
-    selector: (state: typeof storeOptionState.value) => unknown
-  ) => selector(storeOptionState.value)
-  useStoreMessageOption.getState = () => storeOptionState.value
+vi.mock("@/store/option", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/option")>()
+  const useStoreMessageOption = (selector: any = (state: any) => state) => h1.enabled ? actual.useStoreMessageOption(selector) : selector(storeOptionState.value)
+  useStoreMessageOption.getState = () => h1.enabled ? actual.useStoreMessageOption.getState() : storeOptionState.value
+  useStoreMessageOption.setState = actual.useStoreMessageOption.setState
   return { useStoreMessageOption }
 })
 
@@ -306,7 +317,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => routerState.navigate,
-    useLocation: () => ({
+    useLocation: () => routerState.hashRouter && window.location.hash.startsWith("#/") ? { ...(() => { const route = new URL(window.location.hash.slice(1), window.location.origin); return { pathname: route.pathname, search: route.search, hash: route.hash } })(), state: null, key: "hash-location" } : ({
       pathname: window.location.pathname || "/chat",
       search: window.location.search || "",
       hash: window.location.hash || "",
@@ -319,6 +330,8 @@ vi.mock("react-router-dom", async () => {
 describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    h1.enabled = false
+    routerState.hashRouter = false
     storageState.value.clear()
     mobileViewportState.value = false
     desktopViewportState.value = true
@@ -642,5 +655,225 @@ describe("Playground thread search integration", () => {
       "document-draft-1"
     )
     expect(messageOptionState.value.setRagMediaIds).not.toHaveBeenCalled()
+  })
+})
+
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: async () => "profile",
+  getLocalHistoryOwner: async (id: string) => ({
+    kind: "local",
+    profile_id: "profile",
+    owner_key: "local-owner",
+    conversation_id: id
+  }),
+  loadHistoryBookmark: async (scope: any, owner: any) =>
+    h1.bookmarks.get(h1Key(scope, owner)) || null,
+  saveHistoryBookmark: async (scope: any, view: any) =>
+    h1.bookmarks.set(h1Key(scope, view), { ...scope, view })
+}))
+vi.mock("@/db/dexie/chat", () => ({
+  PageAssistDatabase: class {
+    getHistoryInfo = async () => null
+  }
+}))
+vi.mock("@/services/chat-history-selection", () => ({
+  confirmLegacyHistoryProjection: (...args: any[]) => h1.confirm(...args),
+  captureHistorySnapshot: async (owner: any, view: any) => {
+    const bound = { ...view, owner_key: "local-owner" }
+    const snapshot: any = {
+      version: 1,
+      owner_key: "local-owner",
+      conversation_id: owner.conversation_id,
+      source_digest: "source",
+      storage_context_digest: "storage",
+      fences: {},
+      interpretation_status: { kind: "parent_graph_v1" },
+      nodes: ["A", "B"].map((id) => ({
+        id,
+        revision: "1",
+        role: "assistant",
+        parent_id: null,
+        settled: true,
+        preview: owner.conversation_id + " answer " + id
+      }))
+    }
+    const result = resolveHistorySelection(snapshot, bound, "send", "")
+    if (result.status !== "ready") return { ...result, snapshot, view: bound }
+    return {
+      status: "captured",
+      snapshot,
+      view: bound,
+      rows: result.rows,
+      selected_content: result.rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.preview,
+        images: []
+      })),
+      storage_context_digest: "storage",
+      purpose: "send"
+    }
+  }
+}))
+
+describe("Playground H1 URL initialization with the mounted session/controller", () => {
+  beforeEach(() => {
+    routerState.hashRouter = false
+    h1.enabled = true
+    h1.controller = null
+    h1.bookmarks.clear()
+    h1.confirm.mockClear()
+    localStorage.clear()
+    sessionStorage.clear()
+    storageState.value.clear()
+    window.history.replaceState(null, "", "/chat")
+    usePlaygroundSessionStore.getState().clearSession()
+    useStoreMessageOption.setState({
+      historyId: null,
+      serverChatId: null,
+      history: [],
+      messages: [],
+      temporaryChat: false,
+      queuedMessages: [],
+      compareMode: false,
+      compareSelectedModels: [],
+      contextFiles: [],
+      serverChatAssistantId: null,
+      serverChatAssistantKind: null,
+      serverChatCharacterId: null,
+      serverChatMetaLoaded: false
+    })
+  })
+  function seed(pending = false) {
+    const reference = {
+      profile_id: "profile",
+      client_session_id: "frozen-source",
+      owner_key: "local-owner",
+      conversation_id: "chat-one",
+      owner_kind: "local"
+    }
+    const view = {
+      owner_key: reference.owner_key,
+      conversation_id: reference.conversation_id,
+      view_session_id: "source-view",
+      selection_revision: 3,
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "A" }
+    }
+    const record: any = { ...reference, view }
+    if (pending)
+      Object.assign(record, {
+        pending_confirmation: {
+          version: 1,
+          projection_id: "pending-original",
+          selection_revision: 3,
+          ordered_path_ids: ["A"],
+          cursor: view.cursor
+        },
+        pending_view_session_id: "source-view",
+        pending_dispatch_started: true
+      })
+    h1.bookmarks.set(h1Key(reference, view), record)
+    return reference
+  }
+  it.each(["query", "hash", "hash-router"])(
+    "consumes a %s handoff once and restores destination choice, conversation switch and empty reset",
+    async (route) => {
+      routerState.hashRouter = route === "hash-router"
+      const reference = seed()
+      const query =
+        "keep=value&historySelection=" +
+        encodeURIComponent(JSON.stringify(reference))
+      window.history.replaceState(
+        { preserved: true },
+        "",
+        route === "query"
+          ? "/chat?" + query + "#anchor"
+          : "/options.html?outer=value#/chat?" + query + "#anchor"
+      )
+      let page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute(
+          "data-selected-history",
+          "chat-one answer A"
+        )
+      )
+      await act(async () => {
+        await h1.controller!.choose({ kind: "after_message", message_id: "B" })
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute(
+          "data-selected-history",
+          "chat-one answer B"
+        )
+      )
+      expect(window.location.href).not.toContain("historySelection")
+      expect(window.location.href).toContain("keep=value")
+      if (route === "query") expect(window.location.hash).toBe("#anchor")
+      else {
+        expect(window.location.search).toBe("?outer=value")
+        expect(window.location.hash).toContain("#anchor")
+      }
+      expect(window.history.state).toEqual({ preserved: true })
+      await act(async () => {
+        await h1.controller!.loadConversation({ historyId: "chat-two" }, null)
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(h1.controller?.view?.conversation_id).toBe("chat-two")
+      )
+      await act(async () => {
+        h1.controller!.reset()
+        usePlaygroundSessionStore.getState().clearSession()
+        useStoreMessageOption.setState({
+          historyId: null,
+          serverChatId: null,
+          messages: [],
+          history: []
+        })
+      })
+      page.unmount()
+      page = render(<Playground />)
+      await waitFor(() => expect(h1.controller?.status).toBe("idle"))
+      expect(useStoreMessageOption.getState().messages).toEqual([])
+      page.unmount()
+      // A different destination URL still represents a new initialization.
+      window.history.replaceState(null, "", "/chat?" + query)
+      page = render(<Playground />)
+      await waitFor(() =>
+        expect(h1.controller?.view?.conversation_id).toBe("chat-one")
+      )
+      page.unmount()
+    }
+  )
+  it("retains the exact pending origin after consuming its URL and reloading", async () => {
+    const reference = seed(true)
+    window.history.replaceState(
+      null,
+      "",
+      "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference))
+    )
+    let page = render(<Playground />)
+    await waitFor(() => expect(h1.controller?.status).toBe("pending_unknown"))
+    page.unmount()
+    page = render(<Playground />)
+    await waitFor(() =>
+      expect(h1.controller?.pending?.intent.projection_id).toBe(
+        "pending-original"
+      )
+    )
+    expect(window.location.search).toBe("")
+    expect(h1.controller?.pending?.scope.client_session_id).toBe(
+      "frozen-source"
+    )
+    expect(h1.controller?.pending?.view.view_session_id).toBe("source-view")
+    expect(
+      h1.bookmarks.get(h1Key(reference, reference)).pending_dispatch_started
+    ).toBe(true)
+    expect(h1.confirm).not.toHaveBeenCalled()
+    page.unmount()
   })
 })

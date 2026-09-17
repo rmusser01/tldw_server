@@ -146,7 +146,21 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/components/Common/ModelSelect", () => ({
-  ModelSelect: () => <button type="button">Model</button>
+  ModelSelect: React.forwardRef<{ openAndFocus: () => void }>(
+    function MockModelSelect(_props, ref) {
+      const trigger = React.useRef<HTMLButtonElement>(null)
+      React.useImperativeHandle(
+        ref,
+        () => ({ openAndFocus: () => trigger.current?.focus() }),
+        []
+      )
+      return (
+        <button ref={trigger} type="button">
+          Model
+        </button>
+      )
+    }
+  )
 }))
 
 vi.mock("@/components/Common/PromptSelect", () => ({

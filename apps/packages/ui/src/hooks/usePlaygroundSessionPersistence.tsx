@@ -554,7 +554,11 @@ export function usePlaygroundSessionPersistence() {
       tabReference.profile_id === sharedReference.profile_id &&
       tabReference.owner_key === sharedReference.owner_key &&
       tabReference.conversation_id === sharedReference.conversation_id
-    if (tabReference && !matchesShared) {
+    const canReuseSharedSession = matchesShared && isSessionValid(scopeKey) &&
+      (tabReference.owner_kind === "local"
+        ? sessionStore.historyId === tabReference.conversation_id && !sessionStore.serverChatId
+        : sessionStore.serverChatId === tabReference.conversation_id)
+    if (tabReference) {
       const selected = selectionRef.current!
       const loaded = await selected.loadConversation(tabReference.owner_kind === "local"
         ? { historyId: tabReference.conversation_id } : { serverChatId: tabReference.conversation_id }, tabReference)
@@ -564,36 +568,38 @@ export function usePlaygroundSessionPersistence() {
       if (!selected.getCurrent().capture) return "restored"
       setHistoryId(tabReference.owner_kind === "local" ? tabReference.conversation_id : null)
       setServerChatId(tabReference.owner_kind === "native" ? tabReference.conversation_id : null)
-      setQueuedMessages([])
-      setServerChatAssistantKind(null)
-      setServerChatAssistantId(null)
-      setServerChatCharacterId(null)
-      setServerChatPersonaMemoryMode(null)
-      setServerChatMetaLoaded(false)
-      await setSelectedAssistant(null)
-      if (!isCurrentRestore()) return "cancelled"
-      setSystemPrompt("")
-      useStoreMessageOption.getState().setContextFiles([])
-      if (tabReference.owner_kind === "local") {
-        const chatData = await getFullChatData(tabReference.conversation_id)
+      if (!canReuseSharedSession) {
+        setQueuedMessages([])
+        setServerChatAssistantKind(null)
+        setServerChatAssistantId(null)
+        setServerChatCharacterId(null)
+        setServerChatPersonaMemoryMode(null)
+        setServerChatMetaLoaded(false)
+        await setSelectedAssistant(null)
         if (!isCurrentRestore()) return "cancelled"
-        if (chatData) {
-          const prompt = chatData.historyInfo.last_used_prompt
-          setSystemPrompt(prompt?.prompt_content || "")
-          const files = await getSessionFiles(tabReference.conversation_id)
+        setSystemPrompt("")
+        useStoreMessageOption.getState().setContextFiles([])
+        if (tabReference.owner_kind === "local") {
+          const chatData = await getFullChatData(tabReference.conversation_id)
           if (!isCurrentRestore()) return "cancelled"
-          useStoreMessageOption.getState().setContextFiles(files)
-          if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
-          if (selected.getCurrent().capture?.status !== "captured") {
-            setHistory(formatToChatHistory(chatData.messages))
-            setMessages(formatToMessage(chatData.messages))
+          if (chatData) {
+            const prompt = chatData.historyInfo.last_used_prompt
+            setSystemPrompt(prompt?.prompt_content || "")
+            const files = await getSessionFiles(tabReference.conversation_id)
+            if (!isCurrentRestore()) return "cancelled"
+            useStoreMessageOption.getState().setContextFiles(files)
+            if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
+            if (selected.getCurrent().capture?.status !== "captured") {
+              setHistory(formatToChatHistory(chatData.messages))
+              setMessages(formatToMessage(chatData.messages))
+            }
           }
         }
+        initialRestoreSettledRef.current = true
+        return "restored"
       }
-      initialRestoreSettledRef.current = true
-      return "restored"
     }
-    if (!isSessionValid(scopeKey)) {
+    if (!tabReference && !isSessionValid(scopeKey)) {
       clearSession()
       initialRestoreSettledRef.current = true
       return "not-restored"
@@ -624,16 +630,27 @@ export function usePlaygroundSessionPersistence() {
         const chatData = await getFullChatData(savedHistoryId)
         if (!isCurrentRestore()) return "cancelled"
         if (!chatData) {
+          if (tabReference) return "restored"
           // History was deleted, clear session
           clearSession()
           return "not-restored"
         }
 
-        if (selectionRef.current) {
+        if (selectionRef.current && !tabReference) {
           if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
-          if (!selectionRef.current.getCurrent().capture && selectionRef.current.getCurrent().error) return "restored"
+          const current = selectionRef.current.getCurrent()
+          if (!current.capture && current.error) {
+            if (current.error === "unbound_server_mirror") {
+              // Preserve the local read-only locator; binding is a separate explicit action.
+              setHistoryId(savedHistoryId)
+              setServerChatId(null)
+              setHistory(formatToChatHistory(chatData.messages))
+              setMessages(formatToMessage(chatData.messages))
+            }
+            return "restored"
+          }
         }
         // Restore messages and history
         setHistoryId(savedHistoryId)
@@ -658,7 +675,7 @@ export function usePlaygroundSessionPersistence() {
 
       // Restore settings from session store
       if (savedServerChatId && selectionRef.current?.getCurrent().error !== "unbound_server_mirror") {
-        if (!savedHistoryId && selectionRef.current) {
+        if (!savedHistoryId && selectionRef.current && !tabReference) {
           if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
