@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T15:06:56.001Z","childUrl":"http://127.0.0.1:18681/login","childBody":"- heading \"Sign in to tldw\" [level=1]\n- paragraph:\n  - text: http://127.0.0.1:18681\n  - link \"Change server\":\n    - /url: /settings/tldw\n- text: Username\n- textbox \"Username\"\n- text: Password\n- textbox \"Password\"\n- button \"Sign in\"\n- paragraph:\n  - text: Trouble signing in? Server URL and auth mode are configured in\n  - link \"tldw settings\":\n    - /url: /settings/tldw\n  - text: .\n- alert: /login"}
+### Ran Playwright code
+```js
+await (async anchor=>{const p=anchor.__expiryPage;await p.goto("http://127.0.0.1:18681/");await p.getByRole("heading",{name:"Multi-user setup guide",exact:true}).waitFor({timeout:15000});await p.getByRole("button",{name:"Sign in",exact:true}).click();await p.getByRole("heading",{name:"Sign in to tldw",exact:true}).waitFor({timeout:15000});return {at:new Date().toISOString(),childUrl:p.url(),childBody:await p.locator("body").ariaSnapshot()};})(page);
+```
+

@@ -1,0 +1,929 @@
+{
+  "startedAt": "2026-09-17T16:24:47.550Z",
+  "kind": "API corroboration; all fixtures created through native UI; independent normal password login",
+  "checks": [
+    {
+      "who": "alice",
+      "kind": "normal-login-identity",
+      "status": 200,
+      "id": 2,
+      "username": "alice"
+    },
+    {
+      "who": "bob",
+      "kind": "normal-login-identity",
+      "status": 200,
+      "id": 3,
+      "username": "bob"
+    },
+    {
+      "at": "2026-09-17T16:24:47.771Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice SQLite 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "4b06d0b4-51a5-4857-8d83-4082df846767",
+        "created_at": "2026-09-17T15:23:42.383000Z",
+        "last_modified": "2026-09-17T15:23:42.383000Z",
+        "version": 1,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.798Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.834Z",
+      "who": "alice",
+      "method": "PUT",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice SQLite 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n\nALICE OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "4b06d0b4-51a5-4857-8d83-4082df846767",
+        "created_at": "2026-09-17T15:23:42.383000Z",
+        "last_modified": "2026-09-17T16:24:47.825000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.862Z",
+      "who": "bob",
+      "method": "PUT",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 404,
+      "body": {
+        "detail": "Note not found."
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.888Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice SQLite 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n\nALICE OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "4b06d0b4-51a5-4857-8d83-4082df846767",
+        "created_at": "2026-09-17T15:23:42.383000Z",
+        "last_modified": "2026-09-17T16:24:47.825000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.921Z",
+      "who": "alice",
+      "method": "PUT",
+      "route": "/notes/4b06d0b4-51a5-4857-8d83-4082df846767",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice SQLite 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "4b06d0b4-51a5-4857-8d83-4082df846767",
+        "created_at": "2026-09-17T15:23:42.383000Z",
+        "last_modified": "2026-09-17T16:24:47.914000Z",
+        "version": 3,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.934Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chats/af70ef91-059c-44bb-b106-8704f61e8820",
+      "status": 200,
+      "body": {
+        "id": "af70ef91-059c-44bb-b106-8704f61e8820",
+        "scope_type": "global",
+        "workspace_id": null,
+        "character_id": null,
+        "character_name": null,
+        "assistant_kind": null,
+        "assistant_id": null,
+        "assistant_name": null,
+        "persona_memory_mode": null,
+        "title": "Chat with this media: rowan-observatory-public-20260917\n\nRowan Observatory — pub",
+        "rating": null,
+        "state": "in-progress",
+        "topic_label": null,
+        "cluster_id": null,
+        "source": "webui-chat",
+        "external_ref": null,
+        "created_at": "2026-09-17T15:43:46.574000Z",
+        "last_modified": "2026-09-17T15:43:49.237000Z",
+        "message_count": 3,
+        "version": 1,
+        "parent_conversation_id": null,
+        "root_id": "af70ef91-059c-44bb-b106-8704f61e8820",
+        "forked_from_message_id": null,
+        "settings": null,
+        "behavior_snapshot": {
+          "status": "missing",
+          "schema_version": null,
+          "digest": null
+        },
+        "resume_eligible": false,
+        "resume_ineligible_reason": "behavior_snapshot_missing",
+        "settings_version": null,
+        "history_version": 7,
+        "tail": {
+          "message_id": "e4aab5d7-333e-4b44-953e-e1b738114bdb",
+          "message_version": 1
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.952Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chats/af70ef91-059c-44bb-b106-8704f61e8820",
+      "status": 404,
+      "body": {
+        "detail": "Chat session af70ef91-059c-44bb-b106-8704f61e8820 not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.970Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chats/af70ef91-059c-44bb-b106-8704f61e8820/messages?scope_type=global&include_deleted=false&limit=200",
+      "status": 200,
+      "body": {
+        "messages": [
+          {
+            "id": "53df80ee-57eb-4959-9415-70d7796321fe",
+            "conversation_id": "af70ef91-059c-44bb-b106-8704f61e8820",
+            "parent_message_id": null,
+            "sender": "system",
+            "content": "You are a helpful AI assistant.",
+            "timestamp": "2026-09-17T15:43:46.574000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          },
+          {
+            "id": "673079ed-35cb-4035-abe3-31847bc19d94",
+            "conversation_id": "af70ef91-059c-44bb-b106-8704f61e8820",
+            "parent_message_id": null,
+            "sender": "user",
+            "content": "Chat with this media: rowan-observatory-public-20260917\n\nRowan Observatory — public synthetic UAT handbook\n\nThis is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742.\n\nVisitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.\n\nThe Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.\n\nThe observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location.\n\nA visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.\n\nWho directs Rowan Observatory, where is it located, and when do its public tours begin? Answer only from the supplied source.",
+            "timestamp": "2026-09-17T15:43:46.855000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          },
+          {
+            "id": "e4aab5d7-333e-4b44-953e-e1b738114bdb",
+            "conversation_id": "af70ef91-059c-44bb-b106-8704f61e8820",
+            "parent_message_id": null,
+            "sender": "assistant",
+            "content": "Dr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.",
+            "timestamp": "2026-09-17T15:43:49.235000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          }
+        ],
+        "total": 3,
+        "limit": 200,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 200,
+          "offset": 0,
+          "total": 3,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:47.984Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chats/af70ef91-059c-44bb-b106-8704f61e8820/messages?scope_type=global&include_deleted=false&limit=200",
+      "status": 404,
+      "body": {
+        "detail": "Chat session af70ef91-059c-44bb-b106-8704f61e8820 not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.010Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 200,
+      "body": {
+        "title": "Bob Scope Note — BIRCH913",
+        "content": "Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+        "created_at": "2026-09-17T16:19:46.423000Z",
+        "last_modified": "2026-09-17T16:19:46.423000Z",
+        "version": 1,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.037Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.070Z",
+      "who": "bob",
+      "method": "PUT",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 200,
+      "body": {
+        "title": "Bob Scope Note — BIRCH913",
+        "content": "Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.\n\nBOB OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+        "created_at": "2026-09-17T16:19:46.423000Z",
+        "last_modified": "2026-09-17T16:24:48.063000Z",
+        "version": 2,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.098Z",
+      "who": "alice",
+      "method": "PUT",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 404,
+      "body": {
+        "detail": "Note not found."
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.124Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 200,
+      "body": {
+        "title": "Bob Scope Note — BIRCH913",
+        "content": "Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.\n\nBOB OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+        "created_at": "2026-09-17T16:19:46.423000Z",
+        "last_modified": "2026-09-17T16:24:48.063000Z",
+        "version": 2,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.156Z",
+      "who": "bob",
+      "method": "PUT",
+      "route": "/notes/b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+      "status": 200,
+      "body": {
+        "title": "Bob Scope Note — BIRCH913",
+        "content": "Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a",
+        "created_at": "2026-09-17T16:19:46.423000Z",
+        "last_modified": "2026-09-17T16:24:48.150000Z",
+        "version": 3,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.170Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chats/e24e6232-aae1-472e-98c5-3c29906ababf",
+      "status": 200,
+      "body": {
+        "id": "e24e6232-aae1-472e-98c5-3c29906ababf",
+        "scope_type": "global",
+        "workspace_id": null,
+        "character_id": null,
+        "character_name": null,
+        "assistant_kind": null,
+        "assistant_id": null,
+        "assistant_name": null,
+        "persona_memory_mode": null,
+        "title": "Remember my private acceptance-test marker BIRCH-913. Reply exactly BIRCH-913.",
+        "rating": null,
+        "state": "in-progress",
+        "topic_label": null,
+        "cluster_id": null,
+        "source": "webui-chat",
+        "external_ref": null,
+        "created_at": "2026-09-17T16:18:49.746000Z",
+        "last_modified": "2026-09-17T16:18:52.700000Z",
+        "message_count": 3,
+        "version": 1,
+        "parent_conversation_id": null,
+        "root_id": "e24e6232-aae1-472e-98c5-3c29906ababf",
+        "forked_from_message_id": null,
+        "settings": null,
+        "behavior_snapshot": {
+          "status": "missing",
+          "schema_version": null,
+          "digest": null
+        },
+        "resume_eligible": false,
+        "resume_ineligible_reason": "behavior_snapshot_missing",
+        "settings_version": null,
+        "history_version": 7,
+        "tail": {
+          "message_id": "567963e7-f825-44ee-ac97-3f36b7cbc926",
+          "message_version": 1
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.183Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chats/e24e6232-aae1-472e-98c5-3c29906ababf",
+      "status": 404,
+      "body": {
+        "detail": "Chat session e24e6232-aae1-472e-98c5-3c29906ababf not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.197Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chats/e24e6232-aae1-472e-98c5-3c29906ababf/messages?scope_type=global&include_deleted=false&limit=200",
+      "status": 200,
+      "body": {
+        "messages": [
+          {
+            "id": "a6db346e-9cea-479e-97ee-15f7c0e593ec",
+            "conversation_id": "e24e6232-aae1-472e-98c5-3c29906ababf",
+            "parent_message_id": null,
+            "sender": "system",
+            "content": "You are a helpful AI assistant.",
+            "timestamp": "2026-09-17T16:18:49.746000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          },
+          {
+            "id": "7f845bf4-796a-4180-b015-be4d322ee697",
+            "conversation_id": "e24e6232-aae1-472e-98c5-3c29906ababf",
+            "parent_message_id": null,
+            "sender": "user",
+            "content": "Remember my private acceptance-test marker BIRCH-913. Reply exactly BIRCH-913.",
+            "timestamp": "2026-09-17T16:18:50.083000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          },
+          {
+            "id": "567963e7-f825-44ee-ac97-3f36b7cbc926",
+            "conversation_id": "e24e6232-aae1-472e-98c5-3c29906ababf",
+            "parent_message_id": null,
+            "sender": "assistant",
+            "content": "BIRCH-913",
+            "timestamp": "2026-09-17T16:18:52.699000Z",
+            "ranking": null,
+            "has_image": false,
+            "version": 1,
+            "tool_calls": null,
+            "metadata_extra": null
+          }
+        ],
+        "total": 3,
+        "limit": 200,
+        "offset": 0,
+        "pagination": {
+          "mode": "offset",
+          "limit": 200,
+          "offset": 0,
+          "total": 3,
+          "has_more": false,
+          "next_offset": null
+        },
+        "has_more": false,
+        "next_offset": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.211Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chats/e24e6232-aae1-472e-98c5-3c29906ababf/messages?scope_type=global&include_deleted=false&limit=200",
+      "status": 404,
+      "body": {
+        "detail": "Chat session e24e6232-aae1-472e-98c5-3c29906ababf not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.230Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/media/1",
+      "status": 200,
+      "body": {
+        "media_id": 1,
+        "source": {
+          "url": "rowan-observatory-public-20260917.txt",
+          "title": "rowan-observatory-public-20260917",
+          "duration": null,
+          "type": "document"
+        },
+        "processing": {
+          "prompt": "Return exactly the token LIVE_TIER_ANALYSIS_TWO and nothing else. Do not add quotation marks.",
+          "analysis": "LIVE_TIER_ANALYSIS_TWO",
+          "safe_metadata": null,
+          "model": "Imported",
+          "timestamp_option": null,
+          "chunking_status": "completed",
+          "vector_processing_status": 0
+        },
+        "content": {
+          "metadata": {},
+          "text": "Rowan Observatory — public synthetic UAT handbook\n\nThis is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742.\n\nVisitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.\n\nThe Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.\n\nThe observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location.\n\nA visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.",
+          "word_count": 306
+        },
+        "keywords": [],
+        "timestamps": [],
+        "versions": [
+          {
+            "uuid": "616f0723-e34b-4d61-8334-1ea1ca1767b6",
+            "media_id": 1,
+            "version_number": 3,
+            "created_at": "2026-09-17T16:04:26.028000Z",
+            "prompt": "Return exactly the token LIVE_TIER_ANALYSIS_TWO and nothing else. Do not add quotation marks.",
+            "analysis_content": "LIVE_TIER_ANALYSIS_TWO",
+            "safe_metadata": null,
+            "content": null
+          },
+          {
+            "uuid": "53a04457-f776-454c-9629-3d84098b9879",
+            "media_id": 1,
+            "version_number": 2,
+            "created_at": "2026-09-17T16:02:15.982000Z",
+            "prompt": "Return exactly the token \"LIVE_TIER_ANALYSIS_ONE\" and nothing else.",
+            "analysis_content": "&#34;LIVE_TIER_ANALYSIS_ONE&#34;",
+            "safe_metadata": null,
+            "content": null
+          },
+          {
+            "uuid": "fc0ab53e-8a5a-4f1e-825f-b6994b9eef89",
+            "media_id": 1,
+            "version_number": 1,
+            "created_at": "2026-09-17T15:21:57.443000Z",
+            "prompt": null,
+            "analysis_content": null,
+            "safe_metadata": {
+              "title": "rowan-observatory-public-20260917",
+              "author": "Unknown",
+              "chunking_plan": {
+                "mode": "auto",
+                "goal": "balanced",
+                "used_llm": false,
+                "method": "semantic",
+                "max_size": 900,
+                "overlap": 120,
+                "template_name": null,
+                "derived_views": [],
+                "fallback_reason": null,
+                "rationale": "Detected unstructured long text; selected semantic chunking.",
+                "profile": {
+                  "media_type": "document",
+                  "source_name": "rowan-observatory-public-20260917.txt",
+                  "title": null,
+                  "mime_type": null,
+                  "extension": "txt",
+                  "text_length": 1914,
+                  "has_headings": false,
+                  "has_tables": false,
+                  "has_lists": false,
+                  "has_timecodes": true,
+                  "has_speaker_labels": false,
+                  "has_chapters": false,
+                  "language": "en"
+                }
+              }
+            },
+            "content": null
+          }
+        ],
+        "has_original_file": false,
+        "original_file_url": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.243Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/media/ingest/jobs/1",
+      "status": 200,
+      "body": {
+        "id": 1,
+        "uuid": "ac522301-32e8-403a-b098-811b02351281",
+        "status": "completed",
+        "job_type": "media_ingest_item",
+        "owner_user_id": "2",
+        "created_at": "2026-09-17 15:20:55",
+        "started_at": "2026-09-17 15:20:55",
+        "completed_at": "2026-09-17 15:21:57",
+        "cancelled_at": null,
+        "cancellation_reason": null,
+        "progress_percent": 100,
+        "progress_message": "completed",
+        "result": {
+          "status": "Warning",
+          "media_id": 1,
+          "media_uuid": "f260fcff-c95a-4aeb-9352-7dbc72bad022",
+          "error": null,
+          "warnings": [
+            "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit.",
+            "Analysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit."
+          ],
+          "db_message": "Media 'rowan-observatory-public-20260917' added.",
+          "chunking_plan": {
+            "mode": "auto",
+            "goal": "balanced",
+            "used_llm": false,
+            "method": "semantic",
+            "max_size": 900,
+            "overlap": 120,
+            "template_name": null,
+            "derived_views": [],
+            "fallback_reason": null,
+            "rationale": "Detected unstructured long text; selected semantic chunking.",
+            "profile": {
+              "media_type": "document",
+              "source_name": "rowan-observatory-public-20260917.txt",
+              "title": null,
+              "mime_type": null,
+              "extension": "txt",
+              "text_length": 1914,
+              "has_headings": false,
+              "has_tables": false,
+              "has_lists": false,
+              "has_timecodes": true,
+              "has_speaker_labels": false,
+              "has_chapters": false,
+              "language": "en"
+            }
+          }
+        },
+        "error_message": null,
+        "media_type": "document",
+        "source": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-multi/tmp/media_ingest_job_l6depuwl/rowan-observatory-public-20260917.txt",
+        "source_kind": "file",
+        "batch_id": "7867c7b0-9abd-438e-b754-88b4f15458f6",
+        "collection_id": null,
+        "planned_item_id": null,
+        "idempotency_key": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.264Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/flashcards/id/56320d51-cc2f-4049-baed-65a888230112",
+      "status": 200,
+      "body": {
+        "uuid": "56320d51-cc2f-4049-baed-65a888230112",
+        "deck_id": null,
+        "deck_name": null,
+        "front": "Who directs Rowan Observatory, where is it located, and when do public tours begin?",
+        "back": "Dr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.",
+        "notes": "From Chat with this media: rowan-observatory-public-20260917\n\nRowan Observatory — pub",
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "note",
+        "source_ref_id": "6174102e-59d7-4c12-8eb2-0e408ef935aa",
+        "conversation_id": "af70ef91-059c-44bb-b106-8704f61e8820",
+        "message_id": "e4aab5d7-333e-4b44-953e-e1b738114bdb",
+        "ef": 2.35,
+        "interval_days": 14,
+        "repetitions": 3,
+        "lapses": 0,
+        "due_at": "2026-10-01T15:53:40.305Z",
+        "last_reviewed_at": "2026-09-17T15:53:40.305Z",
+        "queue_state": "review",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T15:49:24.252Z",
+        "last_modified": "2026-09-17T15:53:40.305Z",
+        "deleted": false,
+        "client_id": "2",
+        "version": 4,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": null,
+        "next_intervals": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.278Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/flashcards/decks",
+      "status": 200,
+      "body": []
+    },
+    {
+      "at": "2026-09-17T16:24:48.306Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "76f2ad69-fba8-4fc1-a754-5122d37553d6",
+            "scope_type": "global",
+            "workspace_id": null,
+            "character_id": null,
+            "assistant_kind": null,
+            "assistant_id": null,
+            "persona_memory_mode": null,
+            "title": "How many violet keys does Indigo Station store?",
+            "state": "in-progress",
+            "topic_label": null,
+            "bm25_norm": null,
+            "last_modified": "2026-09-17T16:12:00.156000Z",
+            "created_at": "2026-09-17T16:10:47.927000Z",
+            "message_count": 2,
+            "keywords": [
+              "__knowledge_QA__"
+            ],
+            "cluster_id": null,
+            "source": "knowledge_qa",
+            "external_ref": null,
+            "version": 4
+          },
+          {
+            "id": "821dba3b-f13d-48d2-aff6-ec48c3cf80ef",
+            "scope_type": "global",
+            "workspace_id": null,
+            "character_id": null,
+            "assistant_kind": null,
+            "assistant_id": null,
+            "persona_memory_mode": null,
+            "title": "Who directs Rowan Observatory, where is it located, and when do its public tours begin? Give a concise answer with citations.",
+            "state": "in-progress",
+            "topic_label": null,
+            "bm25_norm": null,
+            "last_modified": "2026-09-17T15:31:29.607000Z",
+            "created_at": "2026-09-17T15:31:15.969000Z",
+            "message_count": 2,
+            "keywords": [
+              "__knowledge_QA__"
+            ],
+            "cluster_id": null,
+            "source": "knowledge_qa",
+            "external_ref": null,
+            "version": 4
+          }
+        ],
+        "pagination": {
+          "limit": 50,
+          "offset": 0,
+          "total": 2,
+          "has_more": false
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.324Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/media/1",
+      "status": 200,
+      "body": {
+        "media_id": 1,
+        "source": {
+          "url": "birch-workshop-bob-public-20260917.txt",
+          "title": "birch-workshop-bob-public-20260917",
+          "duration": null,
+          "type": "document"
+        },
+        "processing": {
+          "prompt": null,
+          "analysis": null,
+          "safe_metadata": {
+            "title": "birch-workshop-bob-public-20260917",
+            "author": "Unknown",
+            "chunking_plan": {
+              "mode": "auto",
+              "goal": "balanced",
+              "used_llm": false,
+              "method": "semantic",
+              "max_size": 900,
+              "overlap": 120,
+              "template_name": null,
+              "derived_views": [],
+              "fallback_reason": null,
+              "rationale": "Detected unstructured long text; selected semantic chunking.",
+              "profile": {
+                "media_type": "document",
+                "source_name": "birch-workshop-bob-public-20260917.txt",
+                "title": null,
+                "mime_type": null,
+                "extension": "txt",
+                "text_length": 1906,
+                "has_headings": false,
+                "has_tables": false,
+                "has_lists": false,
+                "has_timecodes": true,
+                "has_speaker_labels": false,
+                "has_chapters": false,
+                "language": "en"
+              }
+            }
+          },
+          "model": "Imported",
+          "timestamp_option": null,
+          "chunking_status": "completed",
+          "vector_processing_status": 0
+        },
+        "content": {
+          "metadata": {},
+          "text": "Birch Workshop — public synthetic UAT handbook\n\nThis is fictional public test material, created for acceptance testing. Birch Workshop is located at Pine Harbor. Its director is Dr. Nia Slate. The observatory opened in 2019. Its main telescope is named Aster. Public tours begin at 18:00 every Friday. The public booking code is BIRCH-913.\n\nVisitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.\n\nThe Aster telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.\n\nThe observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Nia Slate reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Pine Harbor and its surrounding walking paths. These maps are educational examples and do not represent a real location.\n\nA visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code BIRCH-913. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.",
+          "word_count": 306
+        },
+        "keywords": [],
+        "timestamps": [],
+        "versions": [
+          {
+            "uuid": "6132bbbd-4bf9-4c89-957d-2b8e6f7326e2",
+            "media_id": 1,
+            "version_number": 1,
+            "created_at": "2026-09-17T16:23:48.366000Z",
+            "prompt": null,
+            "analysis_content": null,
+            "safe_metadata": {
+              "title": "birch-workshop-bob-public-20260917",
+              "author": "Unknown",
+              "chunking_plan": {
+                "mode": "auto",
+                "goal": "balanced",
+                "used_llm": false,
+                "method": "semantic",
+                "max_size": 900,
+                "overlap": 120,
+                "template_name": null,
+                "derived_views": [],
+                "fallback_reason": null,
+                "rationale": "Detected unstructured long text; selected semantic chunking.",
+                "profile": {
+                  "media_type": "document",
+                  "source_name": "birch-workshop-bob-public-20260917.txt",
+                  "title": null,
+                  "mime_type": null,
+                  "extension": "txt",
+                  "text_length": 1906,
+                  "has_headings": false,
+                  "has_tables": false,
+                  "has_lists": false,
+                  "has_timecodes": true,
+                  "has_speaker_labels": false,
+                  "has_chapters": false,
+                  "language": "en"
+                }
+              }
+            },
+            "content": null
+          }
+        ],
+        "has_original_file": false,
+        "original_file_url": null
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.337Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/media/ingest/jobs/1",
+      "status": 403,
+      "body": {
+        "detail": "Not authorized for this job"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.351Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/flashcards/id/56320d51-cc2f-4049-baed-65a888230112",
+      "status": 404,
+      "body": {
+        "detail": "Flashcard not found"
+      }
+    },
+    {
+      "at": "2026-09-17T16:24:48.365Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/flashcards/decks",
+      "status": 200,
+      "body": []
+    },
+    {
+      "at": "2026-09-17T16:24:48.393Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__",
+      "status": 200,
+      "body": {
+        "items": [],
+        "pagination": {
+          "limit": 50,
+          "offset": 0,
+          "total": 0,
+          "has_more": false
+        }
+      }
+    }
+  ],
+  "completedAt": "2026-09-17T16:24:48.393Z",
+  "completed": true
+}

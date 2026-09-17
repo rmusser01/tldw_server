@@ -1,0 +1,207 @@
+### Page
+- Page URL: http://127.0.0.1:18681/notes?source_ref_id=b6ed11ef-8ac1-4b92-82c2-c5fd1e3bab4a
+- Page Title: Notes | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f29e11]:
+  - generic [ref=f29e14]:
+    - link "Skip to main content" [ref=f29e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f29e16]:
+      - button "Expand sidebar" [ref=f29e17] [cursor=pointer]
+      - button "New Chat" [ref=f29e21] [cursor=pointer]
+      - generic [ref=f29e24]:
+        - button "Quick Ingest" [ref=f29e25] [cursor=pointer]
+        - button "Chat" [ref=f29e29] [cursor=pointer]
+        - button "Prompts" [ref=f29e32] [cursor=pointer]
+        - button "Characters" [ref=f29e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f29e41] [cursor=pointer]
+        - button "World Books" [ref=f29e45] [cursor=pointer]
+        - button "Notes" [ref=f29e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f29e52] [cursor=pointer]
+        - button "Media" [ref=f29e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f29e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f29e69] [cursor=pointer]
+        - button "Kanban" [ref=f29e75] [cursor=pointer]
+        - button "Watchlists" [ref=f29e77] [cursor=pointer]
+      - generic [ref=f29e82]:
+        - button "Open Notes Dock" [ref=f29e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f29e88] [cursor=pointer]
+        - button "Settings" [ref=f29e91] [cursor=pointer]
+    - main [ref=f29e95]:
+      - generic [ref=f29e96]:
+        - generic [ref=f29e99]:
+          - generic [ref=f29e100]:
+            - button "Expand sidebar" [ref=f29e101] [cursor=pointer]
+            - generic [ref=f29e103]:
+              - img "tldw Assistant" [ref=f29e104]
+              - generic [ref=f29e105]: tldw Assistant
+              - button "Companion Home" [ref=f29e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f29e110] [cursor=pointer]
+          - generic [ref=f29e113]:
+            - button "Search - Open command palette" [ref=f29e114] [cursor=pointer]:
+              - generic [ref=f29e118]: Search
+              - generic [ref=f29e119]: ⌘K
+            - button "Open settings" [ref=f29e120] [cursor=pointer]
+            - generic [ref=f29e132]:
+              - button "Notifications, 0 unread" [ref=f29e133] [cursor=pointer]
+              - status [ref=f29e137]: Notifications are active
+            - button "Switch to light theme" [ref=f29e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f29e145] [cursor=pointer]:
+              - generic [ref=f29e146]: "?"
+        - generic [ref=f29e148]:
+          - link "Skip to notes list" [ref=f29e149] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f29e150] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f29e151]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f29e152]:
+            - generic [ref=f29e153]:
+              - generic [ref=f29e154]:
+                - generic [ref=f29e155]:
+                  - generic [ref=f29e156]:
+                    - generic [ref=f29e157]: Notes
+                    - generic [ref=f29e158]: 1 total
+                  - button "New note" [ref=f29e159] [cursor=pointer]
+                - generic [ref=f29e162]:
+                  - generic [ref=f29e163]:
+                    - button "Views" [expanded] [ref=f29e165] [cursor=pointer]
+                    - generic [ref=f29e170]:
+                      - generic [ref=f29e171]:
+                        - button "Notes" [ref=f29e172] [cursor=pointer]
+                        - button "Trash" [ref=f29e174] [cursor=pointer]
+                      - generic [ref=f29e176]:
+                        - button "List" [ref=f29e177] [cursor=pointer]
+                        - button "Timeline" [ref=f29e179] [cursor=pointer]
+                        - button "Inbox" [ref=f29e181] [cursor=pointer]
+                        - button "Collection" [ref=f29e183] [cursor=pointer]
+                        - button "Graph" [ref=f29e185] [cursor=pointer]
+                      - generic [ref=f29e194]:
+                        - button "Organize" [ref=f29e195] [cursor=pointer]
+                        - button "Organize help" [ref=f29e201] [cursor=pointer]:
+                          - img "question-circle" [ref=f29e202]
+                  - generic [ref=f29e206]:
+                    - textbox "Search notes" [ref=f29e213]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f29e215] [cursor=pointer]:
+                      - generic [ref=f29e216]:
+                        - generic "Date modified (newest first)" [ref=f29e217]
+                        - combobox "Sort notes" [ref=f29e218]
+                      - img "down" [ref=f29e220]
+                  - generic [ref=f29e223]:
+                    - button "Filters" [expanded] [ref=f29e225] [cursor=pointer]
+                    - generic [ref=f29e230]:
+                      - generic [ref=f29e231]:
+                        - button "Captured" [ref=f29e232] [cursor=pointer]
+                        - button "Search tips" [ref=f29e234] [cursor=pointer]
+                      - generic [ref=f29e236]:
+                        - generic [ref=f29e237]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f29e239]
+                        - img "down" [ref=f29e241]
+                      - generic [ref=f29e245]:
+                        - button "Browse tags" [ref=f29e246] [cursor=pointer]
+                        - button "Tags help" [ref=f29e248] [cursor=pointer]:
+                          - img "question-circle" [ref=f29e249]
+                      - generic [ref=f29e253]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f29e254]:
+                    - generic [ref=f29e255]: Recent notes
+                    - button "Bob Scope Note — BIRCH913" [ref=f29e257] [cursor=pointer]
+              - generic [ref=f29e259]:
+                - generic [ref=f29e261]:
+                  - generic [ref=f29e262]: Results
+                  - generic [ref=f29e263]:
+                    - button "Import" [ref=f29e264] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f29e266]
+                    - button "Export" [ref=f29e268] [cursor=pointer]
+                - list "Notes" [ref=f29e271]:
+                  - listitem [ref=f29e272]:
+                    - generic [ref=f29e273]:
+                      - checkbox "Select note Bob Scope Note — BIRCH913 for bulk actions" [ref=f29e274]
+                      - button "Pin note Bob Scope Note — BIRCH913" [ref=f29e275] [cursor=pointer]
+                      - button "Open note Bob Scope Note — BIRCH913" [ref=f29e278] [cursor=pointer]:
+                        - generic [ref=f29e279]:
+                          - generic [ref=f29e280]: Bob Scope Note — BIRCH913
+                          - generic [ref=f29e286]: Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.
+                          - generic [ref=f29e287]: 9/17/2026, 9:24:48 AM
+                - generic [ref=f29e289]:
+                  - generic [ref=f29e290]: Showing 1-1 of 1
+                  - list [ref=f29e291]:
+                    - listitem "Previous Page" [ref=f29e292]:
+                      - button [disabled] [ref=f29e293]:
+                        - img "left" [ref=f29e294]
+                    - listitem "1" [ref=f29e297] [cursor=pointer]
+                    - listitem "Next Page" [ref=f29e299]:
+                      - button [disabled] [ref=f29e300]:
+                        - img "right" [ref=f29e301]
+                    - listitem [ref=f29e304]:
+                      - generic [ref=f29e305]:
+                        - generic [ref=f29e306]:
+                          - generic "20 / page" [ref=f29e307]
+                          - combobox "Page Size" [ref=f29e308]
+                        - img "down" [ref=f29e310]
+          - button "Collapse sidebar" [ref=f29e313] [cursor=pointer]
+          - region "Note editor" [ref=f29e317]:
+            - generic [ref=f29e318]:
+              - generic [ref=f29e320]:
+                - heading "Bob Scope Note — BIRCH913" [level=5] [ref=f29e321]
+                - status [ref=f29e322]:
+                  - generic [ref=f29e324]: Saved 6m ago
+              - generic [ref=f29e325]:
+                - button "Save note" [ref=f29e326] [cursor=pointer]:
+                  - generic [ref=f29e332]: Save
+                - button "Save and start another note" [ref=f29e333] [cursor=pointer]:
+                  - generic [ref=f29e338]: Save & new
+                - group "Editor mode" [ref=f29e339]:
+                  - button "Edit" [pressed] [ref=f29e340] [cursor=pointer]
+                  - button "Split" [ref=f29e345] [cursor=pointer]
+                  - button "Preview" [ref=f29e350] [cursor=pointer]
+                - button "Create study pack" [ref=f29e356] [cursor=pointer]
+                - button "More actions" [ref=f29e358] [cursor=pointer]
+            - generic [ref=f29e364]:
+              - generic [ref=f29e365]:
+                - textbox "Note title" [ref=f29e366]:
+                  - /placeholder: Title
+                  - text: Bob Scope Note — BIRCH913
+                - button "Generate title from content" [ref=f29e367] [cursor=pointer]:
+                  - generic [ref=f29e372]: Generate title
+                - button "Keyboard shortcuts" [ref=f29e373] [cursor=pointer]
+              - generic [ref=f29e375]:
+                - generic [ref=f29e376]:
+                  - generic [ref=f29e377]:
+                    - generic: Tags
+                    - combobox "Note tags" [ref=f29e379]
+                  - img "down" [ref=f29e381]
+                - status "Note save status" [ref=f29e384]: All changes saved
+              - generic [ref=f29e386]:
+                - button "Connections" [ref=f29e387] [cursor=pointer]
+                - button "Connections help" [ref=f29e393] [cursor=pointer]:
+                  - img "question-circle" [ref=f29e394]
+              - generic [ref=f29e398]:
+                - group "Input mode" [ref=f29e399]:
+                  - button "Markdown" [ref=f29e400] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f29e402] [cursor=pointer]
+                - generic [ref=f29e404]: Formatting
+                - button "Bold" [ref=f29e405] [cursor=pointer]
+                - button "Italic" [ref=f29e409] [cursor=pointer]
+                - button "Heading" [ref=f29e413] [cursor=pointer]
+                - button "List" [ref=f29e417] [cursor=pointer]
+                - button "Link" [ref=f29e420] [cursor=pointer]
+                - button "Attachment" [ref=f29e425] [cursor=pointer]
+                - button "Code" [ref=f29e429] [cursor=pointer]
+                - generic [ref=f29e436]: Assist
+                - button "Summarize" [ref=f29e437] [cursor=pointer]
+                - button "Expand outline" [ref=f29e443] [cursor=pointer]
+                - button "Suggest tags" [ref=f29e449] [cursor=pointer]
+              - generic [ref=f29e456]:
+                - textbox "Note content" [ref=f29e457]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: Bob owns the fictional Birch Workshop. Its emblem is a silver kite. Its acceptance marker is BIRCH-913. This note belongs only to Bob.
+                - generic [ref=f29e458]: Markdown + LaTeX supported
+              - generic [ref=f29e459]:
+                - text: 23 words · 134 chars · 1 min read
+                - generic [ref=f29e460]: Version 3 · Last saved 9/17/2026, 9:24:48 AM
+                - generic [ref=f29e461]: "Origin: Typed manually"
+  - alert [ref=f29e10]
+```
+

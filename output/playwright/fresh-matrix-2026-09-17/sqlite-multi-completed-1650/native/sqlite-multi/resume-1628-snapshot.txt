@@ -1,0 +1,251 @@
+### Page
+- Page URL: http://127.0.0.1:18681/media?id=1
+- Page Title: Media | tldw
+- Console: 1 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [ref=f28e1]:
+  - generic [ref=f28e4]:
+    - link "Skip to main content" [ref=f28e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f28e6]:
+      - button "Expand sidebar" [ref=f28e7] [cursor=pointer]
+      - button "New Chat" [ref=f28e11] [cursor=pointer]
+      - generic [ref=f28e14]:
+        - button "Quick Ingest" [active] [ref=f28e15] [cursor=pointer]
+        - button "Chat" [ref=f28e19] [cursor=pointer]
+        - button "Prompts" [ref=f28e22] [cursor=pointer]
+        - button "Characters" [ref=f28e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f28e31] [cursor=pointer]
+        - button "World Books" [ref=f28e35] [cursor=pointer]
+        - button "Notes" [ref=f28e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f28e42] [cursor=pointer]
+        - button "Media" [ref=f28e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f28e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f28e59] [cursor=pointer]
+        - button "Kanban" [ref=f28e65] [cursor=pointer]
+        - button "Watchlists" [ref=f28e67] [cursor=pointer]
+      - generic [ref=f28e72]:
+        - button "Open Notes Dock" [ref=f28e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f28e78] [cursor=pointer]
+        - button "Settings" [ref=f28e81] [cursor=pointer]
+    - main [ref=f28e85]:
+      - generic [ref=f28e86]:
+        - generic [ref=f28e89]:
+          - generic [ref=f28e90]:
+            - button "Expand sidebar" [ref=f28e91] [cursor=pointer]
+            - generic [ref=f28e93]:
+              - img "tldw Assistant" [ref=f28e94]
+              - generic [ref=f28e95]: tldw Assistant
+              - button "Companion Home" [ref=f28e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f28e100] [cursor=pointer]
+          - generic [ref=f28e103]:
+            - button "Search - Open command palette" [ref=f28e104] [cursor=pointer]:
+              - generic [ref=f28e108]: Search
+              - generic [ref=f28e109]: ⌘K
+            - button "Open settings" [ref=f28e110] [cursor=pointer]
+            - generic [ref=f28e122]:
+              - button "Notifications, 0 unread" [ref=f28e123] [cursor=pointer]
+              - status [ref=f28e127]: Notifications are active
+            - button "Switch to light theme" [ref=f28e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f28e135] [cursor=pointer]:
+              - generic [ref=f28e136]: "?"
+        - generic [ref=f28e138]:
+          - generic [ref=f28e140]:
+            - generic [ref=f28e267]:
+              - generic [ref=f28e268]:
+                - heading "Media Inspector" [level=1] [ref=f28e269]
+                - generic [ref=f28e270]:
+                  - generic [ref=f28e271]: 0 / 0
+                  - button "Trash" [ref=f28e272] [cursor=pointer]
+                  - button "Bulk" [ref=f28e276] [cursor=pointer]
+              - generic [ref=f28e279]:
+                - button "Show media only" [pressed] [ref=f28e280] [cursor=pointer]:
+                  - generic [ref=f28e281]: Media
+                  - generic [ref=f28e282]: "0"
+                - button "Show notes only" [ref=f28e283] [cursor=pointer]:
+                  - generic [ref=f28e284]: Notes
+                  - generic [ref=f28e285]: "0"
+            - generic [ref=f28e286]:
+              - generic [ref=f28e287]:
+                - generic [ref=f28e288]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f28e290] [cursor=pointer]
+              - generic [ref=f28e293]:
+                - generic [ref=f28e294]:
+                  - textbox "Search media (title/content)" [ref=f28e299]
+                  - button "Search syntax help" [ref=f28e301] [cursor=pointer]: "?"
+                - button "Search" [ref=f28e302] [cursor=pointer]
+                - generic [ref=f28e303]:
+                  - generic [ref=f28e304]:
+                    - generic [ref=f28e305]: Filters
+                    - button "Clear all" [ref=f28e309] [cursor=pointer]
+                  - generic [ref=f28e310]:
+                    - generic [ref=f28e311]: Search mode
+                    - generic [ref=f28e312]:
+                      - button "Full-text search" [pressed] [ref=f28e313] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f28e314] [cursor=pointer]: Metadata
+                  - generic [ref=f28e315]:
+                    - generic [ref=f28e316]: Sort by
+                    - generic [ref=f28e317] [cursor=pointer]:
+                      - generic [ref=f28e318]:
+                        - generic "Relevance" [ref=f28e319]
+                        - combobox [ref=f28e320]
+                      - img "down" [ref=f28e322]
+                  - generic [ref=f28e325]:
+                    - generic [ref=f28e326]: Date range
+                    - generic [ref=f28e327]:
+                      - generic [ref=f28e328]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f28e329]
+                      - generic [ref=f28e330]:
+                        - text: End date
+                        - textbox "End date" [ref=f28e331]
+                  - button "Advanced search" [ref=f28e333] [cursor=pointer]
+                  - generic [ref=f28e337] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f28e338]
+                    - generic [ref=f28e341]: Favorites only
+                  - generic [ref=f28e342]:
+                    - button "Media types" [ref=f28e343] [cursor=pointer]
+                    - generic [ref=f28e349] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f28e350]
+                      - generic [ref=f28e351]: Document
+                  - button "Keywords" [ref=f28e353] [cursor=pointer]
+                  - generic [ref=f28e358]:
+                    - generic [ref=f28e359]: Exclude keywords
+                    - generic [ref=f28e361]:
+                      - generic [ref=f28e362]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f28e364]
+                      - img "down" [ref=f28e366]
+                    - generic [ref=f28e369]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f28e370]: 0 exclude keyword suggestions available
+                - generic [ref=f28e371]:
+                  - generic [ref=f28e372]:
+                    - generic [ref=f28e373]: Collection
+                    - combobox "Collection" [ref=f28e374]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f28e375]: Create collections from bulk selection to organize related items.
+            - generic [ref=f28e376]:
+              - generic [ref=f28e378]:
+                - generic [ref=f28e379]:
+                  - generic [ref=f28e380]:
+                    - generic [ref=f28e381]: Results
+                    - generic [ref=f28e382]: 0 / 0
+                  - generic [ref=f28e383]:
+                    - button "Standard view" [pressed] [ref=f28e384] [cursor=pointer]
+                    - button "Compact view" [ref=f28e390] [cursor=pointer]
+                - generic [ref=f28e394]:
+                  - heading "Get started — ingest your first content" [level=3] [ref=f28e398]
+                  - paragraph [ref=f28e399]: Paste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.
+                  - generic [ref=f28e400]:
+                    - textbox "Paste a YouTube URL..." [ref=f28e401]
+                    - button "Ingest" [ref=f28e402] [cursor=pointer]
+                  - button "Skip for now" [ref=f28e404] [cursor=pointer]
+              - generic [ref=f28e405]:
+                - generic [ref=f28e406]: 0 of 0 results
+                - button "? for shortcuts" [ref=f28e409] [cursor=pointer]:
+                  - generic [ref=f28e410]: "?"
+                  - generic [ref=f28e411]: for shortcuts
+            - button "Library tools" [ref=f28e413] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f28e418] [cursor=pointer]
+          - generic [ref=f28e422]:
+            - generic [ref=f28e424]:
+              - generic [ref=f28e425] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f28e426]
+                - generic [ref=f28e427]: Show chapters/sections panel
+              - generic [ref=f28e428] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f28e429]
+                - generic [ref=f28e430]: Allow generated fallback structure
+              - generic [ref=f28e431]: "Generated sections: 2"
+            - generic [ref=f28e432]:
+              - complementary "Chapters and sections" [ref=f28e433]:
+                - generic [ref=f28e434]:
+                  - generic [ref=f28e435]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f28e440]
+                  - generic [ref=f28e441]: Birch Workshop — public synthetic UAT handbook This is fictional public test material, created f...
+                - tree [ref=f28e442]:
+                  - generic [ref=f28e443]:
+                    - button "1 Birch Workshop — public synthetic UAT handbook This is fictional public test material, created f..." [ref=f28e446] [cursor=pointer]:
+                      - generic [ref=f28e447]: "1"
+                      - generic [ref=f28e448]: Birch Workshop — public synthetic UAT handbook This is fictional public test material, created f...
+                    - button "2 Generated Section 2" [ref=f28e451] [cursor=pointer]:
+                      - generic [ref=f28e452]: "2"
+                      - generic [ref=f28e453]: Generated Section 2
+              - generic [ref=f28e454]:
+                - button "Create study pack" [ref=f28e456] [cursor=pointer]
+                - generic [ref=f28e457]:
+                  - generic [ref=f28e458]: Showing birch-workshop-bob-public-20260917
+                  - generic [ref=f28e460]:
+                    - generic [ref=f28e461]:
+                      - button "Previous" [disabled] [ref=f28e462]
+                      - generic [ref=f28e465]: 0/0
+                      - button "Next" [disabled] [ref=f28e466]
+                    - heading "birch-workshop-bob-public-20260917" [level=3] [ref=f28e469]
+                    - generic [ref=f28e470]:
+                      - button "Chat with this media" [ref=f28e471] [cursor=pointer]
+                      - button "Analyze" [ref=f28e474] [cursor=pointer]
+                      - button "Actions" [ref=f28e478] [cursor=pointer]
+                  - generic [ref=f28e484]:
+                    - generic [ref=f28e485]:
+                      - generic [ref=f28e486]: 306 Words
+                      - generic [ref=f28e490]: 2 min read
+                      - generic "Reading progress" [ref=f28e491]: 0% read
+                      - generic [ref=f28e492]: "Chunking: Completed"
+                      - generic [ref=f28e493]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f28e495] [cursor=pointer]:
+                      - generic [ref=f28e496]: Metadata details
+                      - generic [ref=f28e497]: Show
+                    - generic [ref=f28e499]:
+                      - generic [ref=f28e500]:
+                        - generic: Add keywords...
+                        - combobox [ref=f28e502]
+                      - img "down" [ref=f28e504]
+                    - generic [ref=f28e507]:
+                      - generic [ref=f28e508]:
+                        - button "Content" [ref=f28e509] [cursor=pointer]
+                        - generic [ref=f28e513]:
+                          - generic [ref=f28e514] [cursor=pointer]:
+                            - generic [ref=f28e515]:
+                              - generic "Auto" [ref=f28e516]
+                              - combobox "Display mode" [ref=f28e517]
+                            - img "down" [ref=f28e519]
+                          - group "Text size" [ref=f28e522]:
+                            - button "Text size S" [ref=f28e523] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f28e524] [cursor=pointer]: M
+                            - button "Text size L" [ref=f28e525] [cursor=pointer]: L
+                          - button "Edit content" [ref=f28e526] [cursor=pointer]
+                          - button "Find in content" [ref=f28e529] [cursor=pointer]
+                      - region "Media content" [ref=f28e536]:
+                        - generic [ref=f28e537]:
+                          - paragraph [ref=f28e538]: Birch Workshop — public synthetic UAT handbook
+                          - paragraph [ref=f28e539]: This is fictional public test material, created for acceptance testing. Birch Workshop is located at Pine Harbor. Its director is Dr. Nia Slate. The observatory opened in 2019. Its main telescope is named Aster. Public tours begin at 18:00 every Friday. The public booking code is BIRCH-913.
+                          - paragraph [ref=f28e540]: Visitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.
+                          - paragraph [ref=f28e541]: The Aster telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.
+                          - paragraph [ref=f28e542]: The observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Nia Slate reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Pine Harbor and its surrounding walking paths. These maps are educational examples and do not represent a real location.
+                          - paragraph [ref=f28e543]: A visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code BIRCH-913. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.
+                    - generic [ref=f28e544]:
+                      - generic [ref=f28e545]:
+                        - button "Analysis" [ref=f28e546] [cursor=pointer]
+                        - button "Generate" [ref=f28e551] [cursor=pointer]
+                      - generic [ref=f28e555]: No analysis yet
+                    - generic [ref=f28e557]:
+                      - button "Statistics" [ref=f28e558] [cursor=pointer]
+                      - generic [ref=f28e563]:
+                        - generic [ref=f28e564]:
+                          - generic [ref=f28e565]: Words
+                          - generic [ref=f28e566]: "306"
+                        - generic [ref=f28e567]:
+                          - generic [ref=f28e568]: Characters
+                          - generic [ref=f28e569]: "1906"
+                        - generic [ref=f28e570]:
+                          - generic [ref=f28e571]: Paragraphs
+                          - generic [ref=f28e572]: "6"
+                    - button "Metadata" [ref=f28e574] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f28e579] [cursor=pointer]
+                    - button "Version History" [ref=f28e585] [cursor=pointer]
+                    - generic [ref=f28e594]:
+                      - button "Delete item" [disabled] [ref=f28e595]
+                      - paragraph [ref=f28e599]: Your account does not have permission to delete media.
+  - alert [ref=f28e266]: Media | tldw
+```
+

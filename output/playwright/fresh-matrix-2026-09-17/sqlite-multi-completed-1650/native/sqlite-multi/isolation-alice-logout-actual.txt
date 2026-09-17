@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T16:15:31.082Z","body":"- alert"}
+### Ran Playwright code
+```js
+await (async page=>{await page.goto("http://127.0.0.1:18681/settings/tldw");await page.getByRole("button",{name:"Logout",exact:true}).waitFor({timeout:15000});await page.getByRole("button",{name:"Logout",exact:true}).click();await page.getByRole("button",{name:"Logout",exact:true}).waitFor({state:"hidden",timeout:15000});await page.goto("http://127.0.0.1:18681/login");return {at:new Date().toISOString(),body:await page.locator("body").ariaSnapshot()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18681/login
+- Page Title: Sign in | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T15-50-43-791Z.log#L47-L57
+

@@ -1,0 +1,30 @@
+### Page
+- Page URL: http://127.0.0.1:18681/login
+- Page Title: Sign in | tldw
+### Snapshot
+```yaml
+- generic [ref=f31e1]:
+  - generic [ref=f31e5]:
+    - heading "Sign in to tldw" [level=1] [ref=f31e6]
+    - paragraph [ref=f31e7]:
+      - text: http://127.0.0.1:18681
+      - link "Change server" [ref=f31e8] [cursor=pointer]:
+        - /url: /settings/tldw
+    - generic [ref=f31e9]:
+      - generic [ref=f31e10]:
+        - text: Username
+        - textbox "Username" [active] [ref=f31e11]
+      - generic [ref=f31e12]:
+        - text: Password
+        - textbox "Password" [ref=f31e13]
+      - button "Sign in" [ref=f31e14] [cursor=pointer]
+    - paragraph [ref=f31e15]:
+      - text: Trouble signing in? Server URL and auth mode are configured in
+      - link "tldw settings" [ref=f31e16] [cursor=pointer]:
+        - /url: /settings/tldw
+      - text: .
+  - alert [ref=f31e17]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T16-31-37-340Z.log#L3-L12
+

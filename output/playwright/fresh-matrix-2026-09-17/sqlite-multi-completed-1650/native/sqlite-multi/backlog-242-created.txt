@@ -1,0 +1,33 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.184 - Use-singular-wording-for-one-card-Due-review-completion.md
+
+Task TASK-13260.184 - Use singular wording for one-card Due review completion
+==================================================
+
+Status: ○ To Do
+Priority: Low
+Created: 2026-09-17 16:03
+Labels: uat, frontend
+Parent: TASK-13260
+
+Description:
+--------------------------------------------------
+UAT-242: native SQLite multi-user Study completes one Due card but says 1 cards reviewed this session. Separate from137 remaining count,166 generated cards,184Manage count,188streak and189Cram completion, which were previously repaired.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [ ] #1 Due completion uses 1 card reviewed this session for a count of one and correct plural wording otherwise through existing localization.
+- [ ] #2 Behavioral localization regression and actual one-card Due completion acceptance pass without changing review counts.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Frozen evidence .tmp/uat-next-matrix-20260916/native/sqlite-multi/study-easy-practice.txt complete snapshot. Found by independent mid-native audit. No product changes during frozen matrix.
+

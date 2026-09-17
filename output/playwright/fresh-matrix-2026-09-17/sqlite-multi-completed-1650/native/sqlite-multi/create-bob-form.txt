@@ -1,0 +1,7 @@
+### Result
+"- dialog \"Create user\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Create user * Username\n  - textbox \"* Username\"\n  - text: \"* Email\"\n  - textbox \"* Email\"\n  - text: \"* Password\"\n  - textbox \"* Password\"\n  - img \"eye-invisible\"\n  - text: \"* Role User\"\n  - combobox \"* Role\"\n  - img \"down\"\n  - button \"Cancel\"\n  - button \"loading Create user\":\n    - img \"loading\"\n    - text: Create user"
+### Ran Playwright code
+```js
+await (async page=>{await page.getByRole("button",{name:"Create user",exact:true}).click();return await page.getByRole("dialog",{name:"Create user",exact:true}).ariaSnapshot();})(page);
+```
+

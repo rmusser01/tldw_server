@@ -1,0 +1,117 @@
+{
+  "task": "TASK13260.183",
+  "finding": "UAT241",
+  "frozen_revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "archive_manifest": {
+    "path": ".tmp/uat-next-matrix-20260916/copy-preparation/sqlite-multi-archive-manifest.json",
+    "sha256": "703f3cd208450440ee4ce31ba51526200257f363fc7fa3fb07c4811d4fa9cb36"
+  },
+  "verdict": "Confirmed ID-only handoff; initial loading timing strongly source-supported but not directly captured",
+  "native": {
+    "initial_handoff_at": "2026-09-17T15:34:36.316Z",
+    "initial_draft": "Let's talk about media 1.",
+    "settled_initial_draft_same": true,
+    "ready_source_visible_at": "2026-09-17T15:40:49.938Z",
+    "loaded_handoff_at": "2026-09-17T15:41:09.967Z",
+    "loaded_draft_chars": 1971,
+    "loaded_draft_sha256": "e0ee0a607f0627dcccd8946c3e0cd425d8bad732529ccc988cef0ece2a89b30e",
+    "source_chars": 1914,
+    "source_sha256": "a94b1e966d89b7b94e0cd69dafe9ab1c554dc81accf43e57957276b08294225c",
+    "completion_http_status": 200,
+    "completion_response_at": "2026-09-17T15:43:47.190Z",
+    "visible_answer_facts": [
+      "Dr. Mira Vale",
+      "Cedar Ridge",
+      "18:00 every Friday"
+    ]
+  },
+  "limits": [
+    "No first pre-click detailLoading or matching detail-response timing in the six inputs",
+    "No initial ID-only Send or generated-answer claim",
+    "Completion observer includes response marker, not complete outgoing request body",
+    "No browser/runtime/DB/test or production mutation",
+    "Only designated audit Markdown and JSON written"
+  ],
+  "sources": [
+    {
+      "path": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "sha256": "fb80a3b53ffe0f34ab61a003e40dedd91f57ade52195731390182f3aefcd4200",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sha256": "cd985f0f5f7f3fc02ed2fea2582d4448c5e00a8f3836e8111328ab446275361d",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "sha256": "283c1dc96347037d2dab23408b25ed309a80d790b0f74c8cbfdb4dbceecac706",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/media-chat-handoff.ts",
+      "sha256": "58f1969fb13f0e38b891efa4623cc2e49ca5e25fae1678c19d3037b03e7e4a95",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
+      "sha256": "a656a860faa08d8591f89b05c0fb144d748d35a86ae3c8ca08d57d26a950410a",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "sha256": "0b6dcc0ec5c2a990f95cb1bdf95f6e47d4383f5a5b44759bec164432697d9bfd",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "sha256": "83ead15f7bb731a35b108a1ec9b89386bd5d24279d29095f5bfc80e715aa4bf1",
+      "matches_archive": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/media-chat-handoff.test.ts",
+      "sha256": "a5ca74dff3f92a1b7088ce5ce155170e662f3f70caa0eca31f927a8990b08dc0",
+      "matches_archive": true
+    },
+    {
+      "path": "backlog/tasks/task-13260.3 - Repair-first-source-handoff-and-setup-progress-UX.md",
+      "sha256": "06acbba311e11c2ed4d0f3ff7d32fd422b5d3d76d63bc77a9170fb52544bb731",
+      "matches_archive": true
+    }
+  ],
+  "inputs": [
+    {
+      "path": "media-chat-handoff-actual.txt",
+      "sha256": "bb57a1e13e7fea7b3dd61b8b8de4b694e1376f427d0e5e876de40f5fb536c7b7"
+    },
+    {
+      "path": "media-handoff-settled.txt",
+      "sha256": "927b9c980b3bea8d0c9f55be650fec9c540e15ad9241fb85fe03d2971b746e60"
+    },
+    {
+      "path": "media-handoff-ready.txt",
+      "sha256": "c19e67d84c863343097f3060c849a665e2b61b2a6fcd2fad5969e832c8b17c6f"
+    },
+    {
+      "path": "media-handoff-after-content.txt",
+      "sha256": "fb24316d5dcd30f36a14e8ad26ed1c8a993939235fcfc8a7f50f493eb7aff4a2"
+    },
+    {
+      "path": "source-composer-label-click.txt",
+      "sha256": "7bd1127de8e5550943e718e0bcb9bc8aa6758b29d7b7bf71d020fa370101b3d4"
+    },
+    {
+      "path": "source-chat-result.txt",
+      "sha256": "365a97d68e4dd3d18206d06c11d136ce79dc4628477053b85c32ec58a29117ac"
+    }
+  ],
+  "report": {
+    "path": ".tmp/uat-next-matrix-20260916/audits/sqlite-multi-media241-review.md",
+    "sha256": "c212bbe624634bb03770826932821efc453bfaae3762a127471d4e7a91f7dc3b"
+  }
+}

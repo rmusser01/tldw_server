@@ -1,0 +1,6 @@
+### Error
+TimeoutError: locator.click: Timeout 8000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'Easy: I knew it instantly. Press 4', exact: true })
+
+

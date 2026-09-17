@@ -1,0 +1,45 @@
+{
+  "at": "2026-09-17T15:28:32.494Z",
+  "cell": "sqlite-multi",
+  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "initialized": {
+    "status": "completed",
+    "code": 0
+  },
+  "bootstrap": {
+    "status": "completed",
+    "code": 0
+  },
+  "ports": {
+    "api": 18601,
+    "frontend": 18681
+  },
+  "records": [
+    {
+      "action": "initialize",
+      "pid": 42152,
+      "startedAt": "2026-09-17T14:59:56.620Z",
+      "currentlyOwnedLive": false
+    },
+    {
+      "action": "bootstrap-admin",
+      "pid": 43094,
+      "startedAt": "2026-09-17T15:00:49.752Z",
+      "currentlyOwnedLive": false
+    },
+    {
+      "action": "backend",
+      "pid": 45087,
+      "startedAt": "2026-09-17T15:10:23.101Z",
+      "currentlyOwnedLive": true
+    },
+    {
+      "action": "frontend",
+      "pid": 43230,
+      "startedAt": "2026-09-17T15:01:12.166Z",
+      "currentlyOwnedLive": true
+    }
+  ],
+  "providerSetup": "operator configuration then same-profile restart",
+  "depsReused": true
+}

@@ -1,0 +1,7 @@
+### Result
+"- dialog \"Specific source selector\":\n  - paragraph: Specific source scope\n  - paragraph: Choose exact docs or notes. Leave this empty to search all items inside selected categories.\n  - button \"Use all\"\n  - button \"Documents & Media (2)\"\n  - button \"Notes (3)\"\n  - button \"Reload\"\n  - textbox:\n    - /placeholder: Filter docs by title\n    - text: indigo\n  - text: Source status\n  - combobox \"Source status\":\n    - option \"All statuses\" [selected]\n    - option \"Ready\"\n    - option \"Indexing\"\n    - option \"Error\"\n    - option \"Unavailable\"\n  - text: Recent imports\n  - combobox \"Recent imports\":\n    - option \"All dates\" [selected]\n    - option \"Recent imports\"\n  - text: Workspace scope\n  - combobox \"Workspace scope\":\n    - option \"No workspace scope\" [selected]\n  - button \"Select visible\"\n  - button \"Clear visible\"\n  - button \"Select recent imports\"\n  - list:\n    - listitem:\n      - 'checkbox \"indigo-confidential-synthetic-20260917 ID: 2 • document • completed\"'\n      - text: \"indigo-confidential-synthetic-20260917 ID: 2 • document • completed\""
+### Ran Playwright code
+```js
+await (async page=>{const d=page.getByRole("dialog",{name:"Specific source selector",exact:true});await d.getByRole("textbox").fill("indigo");return await d.ariaSnapshot();})(page);
+```
+

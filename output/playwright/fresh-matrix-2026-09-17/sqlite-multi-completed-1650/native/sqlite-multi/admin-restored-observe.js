@@ -1,0 +1,1 @@
+async page=>{await page.getByRole('region',{name:'Media content',exact:true}).getByText(/Dr. Mira Vale/).first().waitFor({timeout:10000});return {at:new Date().toISOString(),url:page.url(),snapshot:await page.locator('body').ariaSnapshot(),events:(page.__matrixEvents||[]).filter(e=>e.at>page.__adminRestoreAt&&/\/media/.test(e.url||''))};}

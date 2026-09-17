@@ -1,0 +1,304 @@
+{
+  "at": "2026-09-17T16:40:51.176Z",
+  "kind": "Read-only reciprocal populated-deck/card/job checks; independent password login",
+  "checks": [
+    {
+      "who": "alice",
+      "route": "/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "uuid": null,
+        "username": "alice",
+        "email": "alice-sqlite-multi@example.com",
+        "role": "user",
+        "is_active": true,
+        "is_verified": true,
+        "created_at": "2026-09-17T16:40:51.268736",
+        "last_login": null,
+        "storage_quota_mb": 1000,
+        "storage_used_mb": 0,
+        "warning": "deprecated_endpoint",
+        "successor": "/api/v1/users/me/profile"
+      }
+    },
+    {
+      "who": "alice",
+      "route": "/flashcards/decks",
+      "status": 200,
+      "body": [
+        {
+          "id": 1,
+          "name": "Alice Private Deck ORBIT742",
+          "description": null,
+          "workspace_id": null,
+          "parent_deck_id": null,
+          "visibility": "private",
+          "review_prompt_side": "front",
+          "created_at": "2026-09-17T16:39:50.903Z",
+          "last_modified": "2026-09-17T16:39:50.903Z",
+          "deleted": false,
+          "client_id": "2",
+          "version": 1,
+          "scheduler_type": "sm2_plus",
+          "scheduler_settings_json": "{\"fsrs\": {\"enable_fuzz\": false, \"maximum_interval_days\": 36500, \"target_retention\": 0.9}, \"sm2_plus\": {\"easy_bonus\": 1.3, \"easy_interval_days\": 4, \"enable_fuzz\": false, \"graduating_interval_days\": 1, \"interval_modifier\": 1.0, \"leech_threshold\": 8, \"max_interval_days\": 36500, \"new_steps_minutes\": [1, 10], \"relearn_steps_minutes\": [10]}}",
+          "scheduler_settings": {
+            "sm2_plus": {
+              "new_steps_minutes": [
+                1,
+                10
+              ],
+              "relearn_steps_minutes": [
+                10
+              ],
+              "graduating_interval_days": 1,
+              "easy_interval_days": 4,
+              "easy_bonus": 1.3,
+              "interval_modifier": 1,
+              "max_interval_days": 36500,
+              "leech_threshold": 8,
+              "enable_fuzz": false
+            },
+            "fsrs": {
+              "target_retention": 0.9,
+              "maximum_interval_days": 36500,
+              "enable_fuzz": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "who": "alice",
+      "route": "/flashcards/id/81abd812-2c27-47d9-b926-f0134b155b81",
+      "status": 200,
+      "body": {
+        "uuid": "81abd812-2c27-47d9-b926-f0134b155b81",
+        "deck_id": 1,
+        "deck_name": "Alice Private Deck ORBIT742",
+        "front": "What is Rowan Observatory public booking code?",
+        "back": "ORBIT-742.",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "manual",
+        "source_ref_id": null,
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": null,
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T16:39:51.029Z",
+        "last_modified": "2026-09-17T16:39:51.029Z",
+        "deleted": false,
+        "client_id": "2",
+        "version": 1,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": "sm2_plus",
+        "next_intervals": null
+      }
+    },
+    {
+      "who": "alice",
+      "route": "/flashcards/id/0665ebfb-836d-46c3-b573-f22260ed9731",
+      "status": 404,
+      "body": {
+        "detail": "Flashcard not found"
+      }
+    },
+    {
+      "who": "alice",
+      "route": "/media/ingest/jobs/6",
+      "status": 403,
+      "body": {
+        "detail": "Not authorized for this job"
+      }
+    },
+    {
+      "who": "bob",
+      "route": "/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "uuid": null,
+        "username": "bob",
+        "email": "bob-sqlite-multi@example.com",
+        "role": "user",
+        "is_active": true,
+        "is_verified": true,
+        "created_at": "2026-09-17T16:40:51.406362",
+        "last_login": null,
+        "storage_quota_mb": 1000,
+        "storage_used_mb": 0,
+        "warning": "deprecated_endpoint",
+        "successor": "/api/v1/users/me/profile"
+      }
+    },
+    {
+      "who": "bob",
+      "route": "/flashcards/decks",
+      "status": 200,
+      "body": [
+        {
+          "id": 1,
+          "name": "Bob Private Deck BIRCH913",
+          "description": null,
+          "workspace_id": null,
+          "parent_deck_id": null,
+          "visibility": "private",
+          "review_prompt_side": "front",
+          "created_at": "2026-09-17T16:38:02.177Z",
+          "last_modified": "2026-09-17T16:38:02.177Z",
+          "deleted": false,
+          "client_id": "3",
+          "version": 1,
+          "scheduler_type": "sm2_plus",
+          "scheduler_settings_json": "{\"fsrs\": {\"enable_fuzz\": false, \"maximum_interval_days\": 36500, \"target_retention\": 0.9}, \"sm2_plus\": {\"easy_bonus\": 1.3, \"easy_interval_days\": 4, \"enable_fuzz\": false, \"graduating_interval_days\": 1, \"interval_modifier\": 1.0, \"leech_threshold\": 8, \"max_interval_days\": 36500, \"new_steps_minutes\": [1, 10], \"relearn_steps_minutes\": [10]}}",
+          "scheduler_settings": {
+            "sm2_plus": {
+              "new_steps_minutes": [
+                1,
+                10
+              ],
+              "relearn_steps_minutes": [
+                10
+              ],
+              "graduating_interval_days": 1,
+              "easy_interval_days": 4,
+              "easy_bonus": 1.3,
+              "interval_modifier": 1,
+              "max_interval_days": 36500,
+              "leech_threshold": 8,
+              "enable_fuzz": false
+            },
+            "fsrs": {
+              "target_retention": 0.9,
+              "maximum_interval_days": 36500,
+              "enable_fuzz": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "who": "bob",
+      "route": "/flashcards/id/81abd812-2c27-47d9-b926-f0134b155b81",
+      "status": 404,
+      "body": {
+        "detail": "Flashcard not found"
+      }
+    },
+    {
+      "who": "bob",
+      "route": "/flashcards/id/0665ebfb-836d-46c3-b573-f22260ed9731",
+      "status": 200,
+      "body": {
+        "uuid": "0665ebfb-836d-46c3-b573-f22260ed9731",
+        "deck_id": 1,
+        "deck_name": "Bob Private Deck BIRCH913",
+        "front": "What is the Birch Workshop emblem?",
+        "back": "A silver kite. BIRCH-913.",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": null,
+        "tags": [],
+        "source_ref_type": "manual",
+        "source_ref_id": null,
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": null,
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T16:38:02.375Z",
+        "last_modified": "2026-09-17T16:38:02.375Z",
+        "deleted": false,
+        "client_id": "3",
+        "version": 1,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": "sm2_plus",
+        "next_intervals": null
+      }
+    },
+    {
+      "who": "bob",
+      "route": "/media/ingest/jobs/6",
+      "status": 200,
+      "body": {
+        "id": 6,
+        "uuid": "05febce9-1c8d-4b12-a26d-30af792ab484",
+        "status": "completed",
+        "job_type": "media_ingest_item",
+        "owner_user_id": "3",
+        "created_at": "2026-09-17 16:23:46",
+        "started_at": "2026-09-17 16:23:48",
+        "completed_at": "2026-09-17 16:23:48",
+        "cancelled_at": null,
+        "cancellation_reason": null,
+        "progress_percent": 100,
+        "progress_message": "completed",
+        "result": {
+          "status": "Success",
+          "media_id": 1,
+          "media_uuid": "3ebf97d8-3d9a-4a61-b9b3-154365493b2b",
+          "error": null,
+          "warnings": null,
+          "db_message": "Media 'birch-workshop-bob-public-20260917' added.",
+          "chunking_plan": {
+            "mode": "auto",
+            "goal": "balanced",
+            "used_llm": false,
+            "method": "semantic",
+            "max_size": 900,
+            "overlap": 120,
+            "template_name": null,
+            "derived_views": [],
+            "fallback_reason": null,
+            "rationale": "Detected unstructured long text; selected semantic chunking.",
+            "profile": {
+              "media_type": "document",
+              "source_name": "birch-workshop-bob-public-20260917.txt",
+              "title": null,
+              "mime_type": null,
+              "extension": "txt",
+              "text_length": 1906,
+              "has_headings": false,
+              "has_tables": false,
+              "has_lists": false,
+              "has_timecodes": true,
+              "has_speaker_labels": false,
+              "has_chapters": false,
+              "language": "en"
+            }
+          }
+        },
+        "error_message": null,
+        "media_type": "document",
+        "source": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-multi/tmp/media_ingest_job_fm92eyqy/birch-workshop-bob-public-20260917.txt",
+        "source_kind": "file",
+        "batch_id": "ad045ecb-22cd-4431-b62b-398bd85fd78e",
+        "collection_id": null,
+        "planned_item_id": null,
+        "idempotency_key": null
+      }
+    }
+  ],
+  "completed": true,
+  "completedAt": "2026-09-17T16:40:51.479Z"
+}

@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-17T15:26:46.128Z",
+  "selection": "Only flashcard generation access records, no raw log",
+  "lines": [
+    "2026-09-17 08:25:40.947 | INFO     | trace= span= tp= req=91f9f8aa-5527-4e92-afba-dd667ccc7a5a job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP POST /api/v1/flashcards/generate -> 200 in 40829ms"
+  ]
+}

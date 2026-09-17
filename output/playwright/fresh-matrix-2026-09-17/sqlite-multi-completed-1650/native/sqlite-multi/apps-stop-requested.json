@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-17T16:49:49.961Z",
+  "cell": "sqlite-multi",
+  "actions": [
+    {
+      "action": "backend",
+      "pid": 94090,
+      "startedAt": "2026-09-17T16:48:03.842Z",
+      "signal": "SIGTERM"
+    },
+    {
+      "action": "frontend",
+      "pid": 43230,
+      "startedAt": "2026-09-17T15:01:12.166Z",
+      "signal": "SIGTERM"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Fresh-run findings:240 total —230 previously verified,10 new unresolved (231–240).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
+- **Fresh-run findings:244 total —230 previously verified,14 new unresolved (231–244).** The frozen48-row matrix continues with product source unchanged. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
 - **Fresh matrix running:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations; SQLite single-user setup and Chat are underway. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
 
@@ -2530,3 +2530,40 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence native/pg-single/study-rerate-reloaded.txt and auth-outage-recovered.txt. This is a distinct analytics bug from235 stale preview. Repair must verify actual lapse and successful recall metrics on SQLite and PostgreSQL and define legacy-row handling; frozen source remains unchanged.
 
 - UAT237 also reproduced in fresh PG-single: auth-reconnect-form.txt captures the three redundant notices after normal disconnected Media→Open Settings; timing and request count are not inferred. Independent late-native audit a3db52f87d6524149050801a7a721866e0d4e7234d01a8600a6003c04c020301 binds49 inputs. UAT240 independent source diagnosis e7b3c05f7f6bab83c011955b0a05bc6948a525239e814326654d16fbf5092e7b binds12 frozen files and two native captures.
+
+## UAT-241 — P2: Media-to-Chat can lose the source while detail content loads
+
+- Open, TASK13260.183. Fresh SQLite multi-user Alice selects Media1 and immediately uses the enabled Chat with this media action. Settled Chat contains only `Let's talk about media 1.`; waiting in Chat does not recover the source. The action promises full-content handoff. Missing content is directly observed; the loading race is a source-supported diagnosis because the first capture does not instrument the loading flag at the click.
+- Repeating after Media content visibly loads produces the complete1971-character handoff. ViewMediaPage reads `selectedContent || ''`; ContentViewer exposes the action without a content-loading guard. This normal full-content path is distinct from prior013 Home selected-source retrieval.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-multi/media-chat-handoff-actual.txt`, `media-handoff-settled.txt`, `media-handoff-ready.txt`, `media-handoff-after-content.txt`, `source-composer-label-click.txt`. Initial click is a loading race, not a failure after loaded content. The ID-only draft was not sent. Native collapsed-text expansion required clicking inside its label; unsuccessful harness inspections sent no completion. No frozen source changes.
+
+### Frozen SQLite multi-user reproductions and bounded passes
+
+- 234 reproduces: native Biology Generate5 browser500 at30.007s while backend200 takes40.829s. No5draft/deck/Study pass.
+- 235 reproduces: re-rate after Good10days shows Hard6days, while actual server preview and subsequent successful Hard both14days.
+- 240 reproduces on SQLite: Easy/Good/Hard retain scheduler lapses0 but dashboard retention66.7%/lapse33.3%; normal reload persists3reviews and October1due.
+- Natural30-minute expiry accepted after1955.146s: auth/me401→refresh200→Alice2 identity and own Biology Note200, with no password re-entry or synthetic time. Actual source-backed Chat, answer Note/card save and Note→conversation backlink pass. Failed harness locators are retained separately from product findings.
+- Evidence `.tmp/uat-next-matrix-20260916/native/sqlite-multi/expiry-returned.txt`, `source-card-saved-notes.txt`, `reuse-backlink-pirate-entry.txt`, `study-practice-off.txt`, `study-good-rerate.txt`, `study-final-note-entry.txt`. Full matrix remains incomplete; no product fixes applied during this pass.
+
+## UAT-242 — P3: One-card Due completion uses plural wording
+
+- Open, TASK13260.184. Fresh SQLite multi-user Study completes exactly one Due review but says `1 cards reviewed this session`. Actual review/session card count is1; only displayed grammar is wrong.
+- Separate from137 remaining-card count,166 generated count,184Manage,188streak and189Cram completion. Use existing singular/plural localization without changing counts.
+- Evidence `.tmp/uat-next-matrix-20260916/native/sqlite-multi/study-easy-practice.txt`, complete snapshot, found during independent review. No frozen product edit.
+
+## UAT-243 — P2: Newly saved ordinary Chat retains Character setup after account switch
+
+- Open, TASK13260.185. After normal Alice logout and Bob login, Bob sends an ordinary Chat request which returns and saves BIRCH-913 through `/chat/completions`. The settled surface still says Character Chat and Choose a character; Modes reports Character / Scene Off. This is an inconsistent presentation after a real ordinary completion. No cross-account content leak is established.
+- The initial empty Character preference alone is intentional and insufficient to establish a defect. Prior123 accepted existing History/Note/cold saved-chat paths; this is a fresh ordinary-create/account-switch residual. Exact route intent and session metadata at the transition were not captured, so the stale-state cause remains unproven.
+- Native evidence: `native/sqlite-multi/isolation-bob-knowledge-chat.txt`, `isolation-bob-chat-modes.txt`, `isolation-bob-note-save.txt`. Independent frozen-source audit: `.tmp/uat-next-matrix-20260916/audits/sqlite-multi-character-mode-review.md`, SHA256 `ff4317251783573177b197468c19dfe36894982952d92203e34594be080c333f`; eight source/history hashes match the frozen revision. No production changes during this pass.
+
+## UAT-244 — P2: Media catalogue stays empty after successful Quick Ingest handoff
+
+- Open, TASK13260.186. Fresh SQLite multi-user Bob and administrator open their newly saved source through Quick Ingest. Full content loads, but Media continues to show Results0/0 and Get started — ingest your first content. Administrator state remains after closing the wizard, more than30seconds after successful ingest. This is a stale catalogue/empty-state defect; source persistence succeeds. No search-index failure is established.
+- Evidence: `native/sqlite-multi/isolation-bob-source-opened.txt`, `resume-1628-snapshot.txt`, `admin-restore-source.txt`, `admin-delete-entry.txt`. Frozen source remains unchanged; repair must refresh owned results without losing deliberate query/filter state or weakening account boundaries.
+
+- UAT244 independent diagnosis: active wizard omits `tldw:quick-ingest-complete`; Media waits for this event to refetch its disabled/manual catalogue query, while permalink detail loads independently. High-confidence source diagnosis, no causal regression yet. Five captures and14frozen source/history files: audit SHA bb4c457103701b8281cc6b12f33188b3649519e4c3df44fba363b95499ad114a. Immediate backend list readiness was not sampled; restore is not claimed necessary for recovery.
+
+### Retained SQLite multi-user checkpoint
+
+[Evidence packet](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/README.md) and [independent review](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/RETENTION_REVIEW.md):258payloads, two verified gzip roundtrips, all85distinct SQLite-multi row references,15unchanged frozen harness files; known-credential/JWT scan0matches. Manifest SHA bd5462641d65f8c58c7836e553f6073bb12072c9d1a3952b0c6051eae80dcbb4; review f840a3ccb482786c7fb1d737f09c4df97c2f0a38158f350a34dffdc7bce3ead2; checksum index b215af9e43a378f0de1fb86ce22ac4e4485c2e2cc20ec8d718d8ef7e44224254. Two older controller hashes remain historical references, not retained exact controller snapshots. Admin post-restore rootUUID is not independently re-emitted; ID1/title/originalcontent/version1 are confirmed and the ingest receipt establishes the original UUID. No full-matrix signoff.

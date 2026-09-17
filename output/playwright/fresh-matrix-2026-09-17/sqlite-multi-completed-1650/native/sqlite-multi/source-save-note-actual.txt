@@ -1,0 +1,6 @@
+### Error
+TimeoutError: locator.hover: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('article', { name: 'Assistant message 2 of 2', exact: true })
+
+

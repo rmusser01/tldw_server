@@ -1,0 +1,210 @@
+### Ran Playwright code
+```js
+await fileChooser.setFiles(["/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt"])
+```
+### Page
+- Page URL: http://127.0.0.1:18681/chat
+- Page Title: Chat | tldw
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-multi/browser-evidence/1789658321607-052dcab9-6d7d-4fac-8216-7d4b8fe94b12-1.snapshot.txt)
+
+- generic [ref=f8e1]:
+  - generic [ref=f8e4]:
+    - link "Skip to main content" [ref=f8e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f8e6]:
+      - button "Expand sidebar" [ref=f8e7] [cursor=pointer]
+      - button "New Chat" [ref=f8e11] [cursor=pointer]
+      - generic [ref=f8e14]:
+        - button "Quick Ingest" [ref=f8e15] [cursor=pointer]
+        - button "Chat" [ref=f8e19] [cursor=pointer]
+        - button "Prompts" [ref=f8e22] [cursor=pointer]
+        - button "Characters" [ref=f8e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f8e31] [cursor=pointer]
+        - button "World Books" [ref=f8e35] [cursor=pointer]
+        - button "Notes" [ref=f8e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f8e42] [cursor=pointer]
+        - button "Media" [ref=f8e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f8e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f8e59] [cursor=pointer]
+        - button "Kanban" [ref=f8e65] [cursor=pointer]
+        - button "Watchlists" [ref=f8e67] [cursor=pointer]
+      - generic [ref=f8e72]:
+        - button "Open Notes Dock" [ref=f8e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f8e78] [cursor=pointer]
+        - button "Settings" [ref=f8e81] [cursor=pointer]
+    - main [ref=f8e85]:
+      - generic [ref=f8e86]:
+        - generic [ref=f8e89]:
+          - generic [ref=f8e90]:
+            - button "Expand sidebar" [ref=f8e91] [cursor=pointer]
+            - generic [ref=f8e93]:
+              - img "tldw Assistant" [ref=f8e94]
+              - generic [ref=f8e95]: tldw Assistant
+              - button "Companion Home" [ref=f8e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f8e100] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f8e104]: Saved
+          - generic [ref=f8e105]:
+            - button "Search - Open command palette" [ref=f8e106] [cursor=pointer]:
+              - generic [ref=f8e110]: Search
+              - generic [ref=f8e111]: ⌘K
+            - button "New saved chat" [ref=f8e112] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f8e116] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f8e117] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=f8e118]
+            - button "Open settings" [ref=f8e125] [cursor=pointer]
+            - generic [ref=f8e137]:
+              - button "Notifications, 0 unread" [ref=f8e138] [cursor=pointer]
+              - status [ref=f8e142]: Notifications are active
+            - button "Switch to light theme" [ref=f8e143] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f8e150] [cursor=pointer]:
+              - generic [ref=f8e151]: "?"
+        - generic [ref=f8e152]:
+          - heading "Chat" [level=1] [ref=f8e153]
+          - generic [ref=f8e156]:
+            - paragraph [ref=f8e157]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f8e158]:
+              - main [ref=f8e159]:
+                - generic [ref=f8e160]:
+                  - generic [ref=f8e162]:
+                    - generic [ref=f8e163]:
+                      - generic [ref=f8e164]: Standard chat
+                      - generic [ref=f8e165]: Conversation timeline
+                    - generic [ref=f8e166]:
+                      - button "Switch to light theme" [ref=f8e167] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f8e174] [cursor=pointer]:
+                        - generic [ref=f8e180]: Focus
+                      - button "Shortcuts" [ref=f8e181] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f8e185]
+                  - log "Chat messages" [ref=f8e187]:
+                    - generic [ref=f8e193]:
+                      - heading "Start a new chat" [level=2] [ref=f8e198]
+                      - paragraph [ref=f8e199]: Experiment with different models, prompts, and knowledge sources here.
+                      - generic [ref=f8e200]:
+                        - button "Start chatting" [ref=f8e201] [cursor=pointer]
+                        - button "Quick Ingest" [ref=f8e202] [cursor=pointer]
+                      - generic [ref=f8e203]:
+                        - generic [ref=f8e205]:
+                          - generic [ref=f8e206]:
+                            - paragraph [ref=f8e207]: Chat modes
+                            - paragraph [ref=f8e208]: Use a different starting point when the conversation needs structure.
+                          - button "Explore chat modes" [ref=f8e209] [cursor=pointer]
+                        - generic [ref=f8e211]:
+                          - generic [ref=f8e212]:
+                            - generic [ref=f8e213]: Type / for commands like /search or /web
+                            - generic [ref=f8e214]: Set a system prompt to customize AI behavior
+                          - button "Take a quick tour" [ref=f8e215] [cursor=pointer]
+                  - generic [ref=f8e219]:
+                    - generic [ref=f8e220]: Composer
+                    - generic [ref=f8e228]:
+                      - button [aria-hidden] [ref=f8e229]
+                      - button [aria-hidden] [ref=f8e230]
+                      - generic [ref=f8e231]:
+                        - generic [ref=f8e233]:
+                          - button "Hide composer options" [expanded] [ref=f8e234] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [ref=f8e239]
+                          - generic [ref=f8e240]:
+                            - button "Improve prompt" [ref=f8e243] [cursor=pointer]
+                            - generic [ref=f8e248]:
+                              - button "Send message" [ref=f8e249] [cursor=pointer]:
+                                - generic [ref=f8e250]: Send
+                              - button "Open message delivery options" [ref=f8e255] [cursor=pointer]
+                        - generic [ref=f8e260]:
+                          - generic [ref=f8e262]:
+                            - group "Mode and context controls" [ref=f8e263]:
+                              - button "Modes" [ref=f8e264] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f8e271] [cursor=pointer]':
+                                - generic [ref=f8e272]:
+                                  - generic [ref=f8e273]: MCP
+                                  - generic [ref=f8e274]: None
+                              - button "Search & Context" [ref=f8e277] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f8e282] [cursor=pointer]:
+                                - generic [ref=f8e285]: Prompt
+                              - button "Select character or persona" [ref=f8e286] [cursor=pointer]
+                              - button "Role-play setup" [ref=f8e291] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f8e298] [cursor=pointer]
+                            - group "Run input controls" [ref=f8e304]:
+                              - button "OpenUI" [ref=f8e305] [cursor=pointer]
+                              - button "Start dictation" [ref=f8e311] [cursor=pointer]
+                              - generic [ref=f8e315]:
+                                - button "Attach image" [ref=f8e317] [cursor=pointer]
+                                - button "More attachments" [ref=f8e321] [cursor=pointer]
+                              - button "More tools" [ref=f8e324] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f8e327] [cursor=pointer]:
+                                - generic [ref=f8e331]: Chat Settings
+                          - generic "Active context" [ref=f8e332]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f8e334] [cursor=pointer]:
+                              - generic "Provider status" [ref=f8e338]: Healthy
+                            - button "Configure context window size" [ref=f8e340] [cursor=pointer]:
+                              - generic [ref=f8e341]: 0 + ~0 = 0 tokens
+                            - button "Saved" [ref=f8e343] [cursor=pointer]
+                            - button "Advanced controls" [ref=f8e345] [cursor=pointer]
+              - generic [ref=f8e349]:
+                - button "Restore context sidechannel" [ref=f8e350] [cursor=pointer]:
+                  - generic [ref=f8e354]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f8e355]:
+                - button "Restore runtime sidechannel" [ref=f8e356] [cursor=pointer]:
+                  - generic [ref=f8e357]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+      - generic [ref=f8e361]:
+        - dialog "Quick Ingest (1)":
+          - generic [ref=f8e362]:
+            - button "Close" [ref=f8e363] [cursor=pointer]:
+              - generic "Close" [ref=f8e364]:
+                - img "close" [ref=f8e365]
+            - generic [ref=f8e368]: Quick Ingest (1)
+            - generic [ref=f8e370]:
+              - navigation "Ingest wizard progress" [ref=f8e371]:
+                - list [ref=f8e372]:
+                  - listitem [ref=f8e373]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=f8e374]':
+                      - generic [ref=f8e378]: Add
+                  - listitem [ref=f8e380]:
+                    - 'button "Step 2: Configure" [disabled] [ref=f8e381]':
+                      - generic [ref=f8e385]: Configure
+                  - listitem [ref=f8e387]:
+                    - 'button "Step 3: Review" [disabled] [ref=f8e388]':
+                      - generic [ref=f8e392]: Review
+                  - listitem [ref=f8e394]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f8e395]':
+                      - generic [ref=f8e399]: Processing
+                  - listitem [ref=f8e401]:
+                    - 'button "Step 5: Results" [disabled] [ref=f8e402]':
+                      - generic [ref=f8e406]: Results
+              - generic [ref=f8e408]:
+                - generic [ref=f8e409]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=f8e410] [cursor=pointer]:
+                    - generic [ref=f8e411]:
+                      - paragraph [ref=f8e415]: Drag and drop files
+                      - paragraph [ref=f8e416]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [active] [ref=f8e417]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=f8e420]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=f8e421]:
+                    - text: Paste URLs
+                    - generic [ref=f8e422]:
+                      - textbox "Paste URLs input" [ref=f8e423]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=f8e424]:
+                        - generic: Add URLs
+                - generic [ref=f8e428]:
+                  - generic [ref=f8e429]:
+                    - generic [ref=f8e431]:
+                      - text: Queue
+                      - generic [ref=f8e432]: (1 item)
+                    - button "Clear all queued items" [ref=f8e433] [cursor=pointer]:
+                      - generic [ref=f8e434]: Clear all
+                  - generic [ref=f8e436]:
+                    - generic [ref=f8e441]:
+                      - generic [ref=f8e442]: rowan-observatory-public-20260917.txt
+                      - generic [ref=f8e443]:
+                        - generic [ref=f8e444]: 1.9 KB
+                        - generic [ref=f8e445]: Document
+                        - generic [ref=f8e446]: (auto)
+                    - button "Remove this item from queue" [ref=f8e447] [cursor=pointer]
+                - generic [ref=f8e425]:
+                  - button "Use defaults & process" [ref=f8e451] [cursor=pointer]
+                  - button "Configure 1 items" [ref=f8e453] [cursor=pointer]:
+                    - generic [ref=f8e454]: Configure 1 items >
+  - alert [ref=f8e427]

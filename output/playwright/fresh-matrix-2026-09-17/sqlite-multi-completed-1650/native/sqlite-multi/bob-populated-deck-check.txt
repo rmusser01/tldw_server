@@ -1,0 +1,7 @@
+### Error
+TimeoutError: locator.waitFor: Timeout 10000ms exceeded.
+Call log:
+  - waiting for getByRole('option', { name: 'Bob Private Deck BIRCH913', exact: true }) to be visible
+    24 × locator resolved to hidden <div role="option" id=":r91:_list_0" aria-selected="false" aria-label="Bob Private Deck BIRCH913">1</div>
+
+

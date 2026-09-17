@@ -1,0 +1,136 @@
+### Ran Playwright code
+```js
+await fileChooser.setFiles(["/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt"])
+```
+### Page
+- Page URL: http://127.0.0.1:18681/media
+- Page Title: Media | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-multi/browser-evidence/1789663405714-791d1b57-871d-47f1-b3c2-1e84580f567e-1.snapshot.txt)
+
+- generic [ref=f49e1]:
+  - generic [ref=f49e4]:
+    - link "Skip to main content" [ref=f49e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f49e6]:
+      - button "Expand sidebar" [ref=f49e7] [cursor=pointer]
+      - button "New Chat" [ref=f49e11] [cursor=pointer]
+      - generic [ref=f49e14]:
+        - button "Quick Ingest" [ref=f49e15] [cursor=pointer]
+        - button "Chat" [ref=f49e19] [cursor=pointer]
+        - button "Prompts" [ref=f49e22] [cursor=pointer]
+        - button "Characters" [ref=f49e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f49e31] [cursor=pointer]
+        - button "World Books" [ref=f49e35] [cursor=pointer]
+        - button "Notes" [ref=f49e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f49e42] [cursor=pointer]
+        - button "Media" [ref=f49e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f49e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f49e59] [cursor=pointer]
+        - button "Kanban" [ref=f49e65] [cursor=pointer]
+        - button "Watchlists" [ref=f49e67] [cursor=pointer]
+      - generic [ref=f49e72]:
+        - button "Open Notes Dock" [ref=f49e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f49e78] [cursor=pointer]
+        - button "Settings" [ref=f49e81] [cursor=pointer]
+    - main [ref=f49e85]:
+      - generic [ref=f49e86]:
+        - generic [ref=f49e89]:
+          - generic [ref=f49e90]:
+            - button "Expand sidebar" [ref=f49e91] [cursor=pointer]
+            - generic [ref=f49e93]:
+              - img "tldw Assistant" [ref=f49e94]
+              - generic [ref=f49e95]: tldw Assistant
+              - button "Companion Home" [ref=f49e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f49e100] [cursor=pointer]
+          - generic [ref=f49e103]:
+            - button "Search - Open command palette" [ref=f49e104] [cursor=pointer]:
+              - generic [ref=f49e108]: Search
+              - generic [ref=f49e109]: ⌘K
+            - button "Open settings" [ref=f49e110] [cursor=pointer]
+            - generic [ref=f49e122]:
+              - button "Notifications, 0 unread" [ref=f49e123] [cursor=pointer]
+              - status [ref=f49e127]: Notifications are active
+            - button "Switch to light theme" [ref=f49e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f49e135] [cursor=pointer]:
+              - generic [ref=f49e136]: "?"
+        - generic [ref=f49e140]:
+          - heading "Media Inspector" [level=1] [ref=f49e141]
+          - button "Trash" [ref=f49e143] [cursor=pointer]
+          - generic [ref=f49e147]:
+            - generic [ref=f49e148]:
+              - generic [ref=f49e149]:
+                - generic [ref=f49e150]: Results
+                - generic [ref=f49e151]: 0 / 0
+              - generic [ref=f49e152]:
+                - button "Standard view" [pressed] [ref=f49e153] [cursor=pointer]
+                - button "Compact view" [ref=f49e159] [cursor=pointer]
+            - generic [ref=f49e163]:
+              - heading "Get started — ingest your first content" [level=3] [ref=f49e167]
+              - paragraph [ref=f49e168]: Paste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.
+              - generic [ref=f49e169]:
+                - textbox "Paste a YouTube URL..." [ref=f49e170]
+                - button "Ingest" [ref=f49e171] [cursor=pointer]
+              - button "Skip for now" [ref=f49e173] [cursor=pointer]
+      - generic [ref=f49e174]:
+        - dialog "Quick Ingest (1)":
+          - generic [ref=f49e175]:
+            - button "Close" [ref=f49e176] [cursor=pointer]:
+              - generic "Close" [ref=f49e177]:
+                - img "close" [ref=f49e178]
+            - generic [ref=f49e181]: Quick Ingest (1)
+            - generic [ref=f49e183]:
+              - navigation "Ingest wizard progress" [ref=f49e184]:
+                - list [ref=f49e185]:
+                  - listitem [ref=f49e186]:
+                    - 'button "Step 1: Add (current)" [disabled] [ref=f49e187]':
+                      - generic [ref=f49e191]: Add
+                  - listitem [ref=f49e193]:
+                    - 'button "Step 2: Configure" [disabled] [ref=f49e194]':
+                      - generic [ref=f49e198]: Configure
+                  - listitem [ref=f49e200]:
+                    - 'button "Step 3: Review" [disabled] [ref=f49e201]':
+                      - generic [ref=f49e205]: Review
+                  - listitem [ref=f49e207]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f49e208]':
+                      - generic [ref=f49e212]: Processing
+                  - listitem [ref=f49e214]:
+                    - 'button "Step 5: Results" [disabled] [ref=f49e215]':
+                      - generic [ref=f49e219]: Results
+              - generic [ref=f49e221]:
+                - generic [ref=f49e222]:
+                  - button "File upload zone. Drag and drop files or press Enter to browse." [ref=f49e223] [cursor=pointer]:
+                    - generic [ref=f49e224]:
+                      - paragraph [ref=f49e228]: Drag and drop files
+                      - paragraph [ref=f49e229]: Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.
+                      - button "Browse files" [active] [ref=f49e230]
+                  - text: "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: 50 MB."
+                  - generic [ref=f49e233]: Add URLs or files. Stored items appear in Media; analyzed and chunked items become searchable in Knowledge.
+                  - generic [ref=f49e234]:
+                    - text: Paste URLs
+                    - generic [ref=f49e235]:
+                      - textbox "Paste URLs input" [ref=f49e236]:
+                        - /placeholder: https://example.com, https://...
+                      - button "Add URLs to queue" [disabled] [ref=f49e237]:
+                        - generic: Add URLs
+                - generic [ref=f49e238]:
+                  - generic [ref=f49e239]:
+                    - generic [ref=f49e241]:
+                      - text: Queue
+                      - generic [ref=f49e242]: (1 item)
+                    - button "Clear all queued items" [ref=f49e243] [cursor=pointer]:
+                      - generic [ref=f49e244]: Clear all
+                  - generic [ref=f49e246]:
+                    - generic [ref=f49e251]:
+                      - generic [ref=f49e252]: rowan-observatory-public-20260917.txt
+                      - generic [ref=f49e253]:
+                        - generic [ref=f49e254]: 1.9 KB
+                        - generic [ref=f49e255]: Document
+                        - generic [ref=f49e256]: (auto)
+                    - button "Remove this item from queue" [ref=f49e257] [cursor=pointer]
+                - generic [ref=f49e261]:
+                  - button "Use defaults & process" [ref=f49e262] [cursor=pointer]
+                  - button "Configure 1 items" [ref=f49e264] [cursor=pointer]:
+                    - generic [ref=f49e265]: Configure 1 items >
+  - alert [ref=f49e266]

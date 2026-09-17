@@ -1,0 +1,184 @@
+### Page
+- Page URL: http://127.0.0.1:18681/chat
+- Page Title: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub | tldw
+### Snapshot
+```yaml
+- generic [ref=f10e1]:
+  - generic [ref=f10e2]:
+    - generic [ref=f10e4]:
+      - link "Skip to main content" [ref=f10e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f10e6]:
+        - button "Expand sidebar" [ref=f10e7] [cursor=pointer]
+        - button "New Chat" [ref=f10e11] [cursor=pointer]
+        - generic [ref=f10e14]:
+          - button "Quick Ingest" [ref=f10e15] [cursor=pointer]
+          - button "Chat" [ref=f10e19] [cursor=pointer]
+          - button "Prompts" [ref=f10e22] [cursor=pointer]
+          - button "Characters" [ref=f10e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f10e31] [cursor=pointer]
+          - button "World Books" [ref=f10e35] [cursor=pointer]
+          - button "Notes" [ref=f10e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f10e42] [cursor=pointer]
+          - button "Media" [ref=f10e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f10e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f10e59] [cursor=pointer]
+          - button "Kanban" [ref=f10e65] [cursor=pointer]
+          - button "Watchlists" [ref=f10e67] [cursor=pointer]
+        - generic [ref=f10e72]:
+          - button "Open Notes Dock" [ref=f10e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f10e78] [cursor=pointer]
+          - button "Settings" [ref=f10e81] [cursor=pointer]
+      - main [ref=f10e85]:
+        - generic [ref=f10e86]:
+          - generic [ref=f10e89]:
+            - generic [ref=f10e90]:
+              - button "Expand sidebar" [ref=f10e91] [cursor=pointer]
+              - generic [ref=f10e93]:
+                - img "tldw Assistant" [ref=f10e94]
+                - generic [ref=f10e95]: tldw Assistant
+                - button "Companion Home" [ref=f10e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f10e100] [cursor=pointer]
+              - 'button "Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub" [ref=f10e104] [cursor=pointer]'
+              - generic "Saved chat. History is persisted." [ref=f10e106]: Saved
+            - generic [ref=f10e107]:
+              - button "Search - Open command palette" [ref=f10e108] [cursor=pointer]:
+                - generic [ref=f10e112]: Search
+                - generic [ref=f10e113]: ⌘K
+              - button "New saved chat" [ref=f10e114] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f10e118] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f10e119] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f10e120] [cursor=pointer]
+              - button "Open settings" [ref=f10e127] [cursor=pointer]
+              - generic [ref=f10e139]:
+                - button "Notifications, 0 unread" [ref=f10e140] [cursor=pointer]
+                - status [ref=f10e144]: Notifications are active
+              - button "Switch to light theme" [ref=f10e145] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f10e152] [cursor=pointer]:
+                - generic [ref=f10e153]: "?"
+          - generic [ref=f10e154]:
+            - heading "Chat" [level=1] [ref=f10e155]
+            - generic [ref=f10e158]:
+              - paragraph [ref=f10e159]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f10e160]:
+                - main [ref=f10e161]:
+                  - generic [ref=f10e162]:
+                    - generic [ref=f10e164]:
+                      - generic [ref=f10e165]:
+                        - generic [ref=f10e166]: Standard chat
+                        - generic [ref=f10e167]: Conversation timeline
+                      - generic [ref=f10e168]:
+                        - button "Switch to light theme" [ref=f10e169] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f10e176] [cursor=pointer]:
+                          - generic [ref=f10e182]: Focus
+                        - button "Shortcuts" [ref=f10e183] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f10e187]
+                    - log "Chat messages" [ref=f10e189]:
+                      - generic [ref=f10e191]:
+                        - article "System message 1 of 3" [ref=f10e192]:
+                          - generic [ref=f10e198]:
+                            - generic [ref=f10e200]:
+                              - generic [ref=f10e201]: System prompt
+                              - generic [ref=f10e202]: • 8:43 AM
+                            - paragraph [ref=f10e204]: You are a helpful AI assistant.
+                            - generic [ref=f10e205]:
+                              - generic [ref=f10e206]:
+                                - generic [ref=f10e207]: Was this helpful?
+                                - generic [ref=f10e208]:
+                                  - button "Helpful" [ref=f10e209] [cursor=pointer]
+                                  - button "Not helpful" [ref=f10e212] [cursor=pointer]
+                                  - button "More feedback" [ref=f10e215] [cursor=pointer]
+                              - button "More actions" [ref=f10e221] [cursor=pointer]: •••
+                        - article "User message 2 of 3" [ref=f10e222]:
+                          - generic [ref=f10e225]:
+                            - generic [ref=f10e227]:
+                              - generic [ref=f10e228]: You
+                              - generic [ref=f10e229]: • 8:43 AM
+                            - paragraph [ref=f10e231]: "Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — public synthetic UAT handbook This is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742. Visitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path. The Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint. The observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location. A visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions. Who directs Rowan Observatory, where is it located, and when do its public tours begin? Answer only from the supplied source."
+                            - generic [ref=f10e233]:
+                              - button "More actions" [ref=f10e234] [cursor=pointer]: •••
+                              - generic [ref=f10e236]:
+                                - button "Copy to clipboard" [ref=f10e237] [cursor=pointer]
+                                - button "Edit" [ref=f10e242] [cursor=pointer]
+                                - button "More actions" [active] [ref=f10e246] [cursor=pointer]
+                        - article "Assistant message 3 of 3" [ref=f10e254]:
+                          - generic [ref=f10e260]:
+                            - generic [ref=f10e262]:
+                              - generic [ref=f10e263]: Assistant
+                              - generic [ref=f10e264]: • 8:43 AM
+                            - paragraph [ref=f10e267]: Dr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.
+                            - generic [ref=f10e268]:
+                              - generic [ref=f10e269]:
+                                - generic [ref=f10e270]: Was this helpful?
+                                - generic [ref=f10e271]:
+                                  - button "Helpful" [ref=f10e272] [cursor=pointer]
+                                  - button "Not helpful" [ref=f10e275] [cursor=pointer]
+                                  - button "More feedback" [ref=f10e278] [cursor=pointer]
+                              - generic [ref=f10e285]:
+                                - button "Copy to clipboard" [ref=f10e286] [cursor=pointer]
+                                - button "Edit" [ref=f10e291] [cursor=pointer]
+                                - button "Regenerate" [ref=f10e295] [cursor=pointer]
+                                - button "More actions" [ref=f10e300] [cursor=pointer]
+                    - generic [ref=f10e305]:
+                      - generic [ref=f10e306]: Composer
+                      - generic [ref=f10e314]:
+                        - button [aria-hidden] [ref=f10e315]
+                        - button [aria-hidden] [ref=f10e316]
+                        - generic [ref=f10e317]:
+                          - generic [ref=f10e319]:
+                            - button "Hide composer options" [expanded] [ref=f10e320] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f10e325]
+                            - generic [ref=f10e326]:
+                              - button "Improve prompt" [ref=f10e329] [cursor=pointer]
+                              - generic [ref=f10e334]:
+                                - button "Send message" [ref=f10e335] [cursor=pointer]:
+                                  - generic [ref=f10e336]: Send
+                                - button "Open message delivery options" [ref=f10e341] [cursor=pointer]
+                          - generic [ref=f10e346]:
+                            - generic [ref=f10e348]:
+                              - group "Mode and context controls" [ref=f10e349]:
+                                - button "Modes" [ref=f10e350] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f10e357] [cursor=pointer]':
+                                  - generic [ref=f10e358]:
+                                    - generic [ref=f10e359]: MCP
+                                    - generic [ref=f10e360]: None
+                                - button "Search & Context" [ref=f10e363] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f10e368] [cursor=pointer]:
+                                  - generic [ref=f10e371]: Prompt
+                                - button "Select character or persona" [ref=f10e372] [cursor=pointer]
+                                - button "Role-play setup" [ref=f10e377] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f10e384] [cursor=pointer]
+                              - group "Run input controls" [ref=f10e390]:
+                                - button "OpenUI" [ref=f10e391] [cursor=pointer]
+                                - button "Start dictation" [ref=f10e397] [cursor=pointer]
+                                - generic [ref=f10e401]:
+                                  - button "Attach image" [ref=f10e403] [cursor=pointer]
+                                  - button "More attachments" [ref=f10e407] [cursor=pointer]
+                                - button "More tools" [ref=f10e410] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f10e413] [cursor=pointer]:
+                                  - generic [ref=f10e417]: Chat Settings
+                            - generic "Active context" [ref=f10e418]:
+                              - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f10e420] [cursor=pointer]:
+                                - generic "Provider status" [ref=f10e424]: Healthy
+                              - button "Chat 3 messages" [ref=f10e425] [cursor=pointer]:
+                                - generic [ref=f10e426]: Chat
+                                - generic [ref=f10e427]: 3 messages
+                              - button "Configure context window size" [ref=f10e429] [cursor=pointer]:
+                                - generic [ref=f10e430]: 561 + ~0 = 561 tokens
+                              - button "Saved" [ref=f10e432] [cursor=pointer]
+                              - button "Advanced controls" [ref=f10e434] [cursor=pointer]
+                - generic [ref=f10e438]:
+                  - button "Restore context sidechannel" [ref=f10e439] [cursor=pointer]:
+                    - generic [ref=f10e443]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f10e444]:
+                  - button "Restore runtime sidechannel" [ref=f10e445] [cursor=pointer]:
+                    - generic [ref=f10e446]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+    - tooltip [ref=f10e451]:
+      - generic [ref=f10e453]:
+        - button "Delete" [ref=f10e454] [cursor=pointer]
+        - button "Pin" [ref=f10e460] [cursor=pointer]
+  - alert [ref=f10e465]
+```
+

@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T16:51:18.962Z",
+  "cell": "sqlite-multi",
+  "browserClosed": true,
+  "apiAndFrontendPorts": [
+    {
+      "port": 18601,
+      "listening": false,
+      "error": "ECONNREFUSED"
+    },
+    {
+      "port": 18681,
+      "listening": false,
+      "error": "ECONNREFUSED"
+    }
+  ],
+  "ownedAppsExited": true,
+  "dataRetained": true
+}

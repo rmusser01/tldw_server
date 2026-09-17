@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 15:11'
+updated_date: '2026-09-17 17:02'
 labels:
   - uat
   - testing
@@ -204,6 +204,10 @@ Fresh PG-single row9 partially complete: clean Pirate answer note/card provenanc
 Fresh PG-single12 rows now accounted: normal Disconnect/reload/key re-entry/connection test pass; owned API outage14:55:14, port refusal14:55:33, readiness failure UI, same-profile API40346 and Retry14:56:46 restore3 reviews/October1 due with no re-entry. Ingest238 blocks source-dependent4/10/11; Wiki externally denied;234 exact-five-card blocked;236/239 Character fails;235 re-rate preview. Evidence retention next; both fresh multi cells not started. No full acceptance.
 
 PG-single125-payload evidence checkpoint independently retained/reviewed, all48 row paths resolved; manifest5d0f60e143811af5d45cfc575ef6b5753aa6e51d391e6a23d5daaecaa9e09652. New240/.182 Hard analytics identified; total240/230 prior verified/10open. SQLite-multi normal initializer/bootstrap0; native admin1 login, Alice2/Bob3 created roleuser. Alice separate context parked15:07:52 with actual login15:07:07.498/lifetime1800, return after15:37:17.498. Native Model settings requires operator provider; isolated config updated actual9099 model and same API restarted45087. No app-source edits. Bandit N/A evidence-only checkpoint.
+
+2026-09-17 16:51UTC: frozen SQLite multi-user12-row pass concluded with recorded failures and limits. Natural30min expiry/refresh, ordinary Chat Retry, public source/cited QA/loaded handoff, Pirate/TestBot(operator-default), analysis persistence, reciprocal account Back/API ownership, admin own-source Trash/restore, actual API outage/Retry accepted within scope. New241–244 tracked as children183–186; total244=230prior verified+14new unresolved. Generation234 and Study235/240/242 remain failed; exact Wiki external denial, vision/hidden/mixed/early-End limitations explicit. SQLite apps/browser stopped; data retained. PostgreSQL multi-user official fixtures now held, restricted-role preparation in progress. No product edits during frozen matrix; evidence checkpoint and independent review pending.
+
+SQLite multi-user checkpoint retained/reviewed: output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650. All258payloads/2gziproundtrips/sourceparity,85distinctrowreferences,15frozenharnesses pass. Manifest bd5462641d65f8c58c7836e553f6073bb12072c9d1a3952b0c6051eae80dcbb4, review f840a3ccb482786c7fb1d737f09c4df97c2f0a38158f350a34dffdc7bce3ead2. Evidence-only checkpoint; Node syntax checks and git diff --check pass; Bandit not applicable to this docs/JS evidence change, no Python production modified. PostgreSQL multi-user is now initialized with official fixtures/restrictedrole and native setup/ordinary Chat in progress. No full acceptance claim.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

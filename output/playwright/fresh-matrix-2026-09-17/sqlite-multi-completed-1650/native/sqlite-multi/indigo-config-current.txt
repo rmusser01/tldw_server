@@ -1,0 +1,364 @@
+### Page
+- Page URL: http://127.0.0.1:18681/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+```yaml
+- generic [ref=f20e1]:
+  - generic [ref=f20e4]:
+    - link "Skip to main content" [ref=f20e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f20e6]:
+      - button "Expand sidebar" [ref=f20e7] [cursor=pointer]
+      - button "New Chat" [ref=f20e11] [cursor=pointer]
+      - generic [ref=f20e14]:
+        - button "Quick Ingest" [ref=f20e15] [cursor=pointer]
+        - button "Chat" [ref=f20e19] [cursor=pointer]
+        - button "Prompts" [ref=f20e22] [cursor=pointer]
+        - button "Characters" [ref=f20e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f20e31] [cursor=pointer]
+        - button "World Books" [ref=f20e35] [cursor=pointer]
+        - button "Notes" [ref=f20e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f20e42] [cursor=pointer]
+        - button "Media" [ref=f20e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f20e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f20e59] [cursor=pointer]
+        - button "Kanban" [ref=f20e65] [cursor=pointer]
+        - button "Watchlists" [ref=f20e67] [cursor=pointer]
+      - generic [ref=f20e72]:
+        - button "Open Notes Dock" [ref=f20e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f20e78] [cursor=pointer]
+        - button "Settings" [ref=f20e81] [cursor=pointer]
+    - main [ref=f20e85]:
+      - generic [ref=f20e86]:
+        - generic [ref=f20e89]:
+          - generic [ref=f20e90]:
+            - button "Expand sidebar" [ref=f20e91] [cursor=pointer]
+            - generic [ref=f20e93]:
+              - img "tldw Assistant" [ref=f20e94]
+              - generic [ref=f20e95]: tldw Assistant
+              - button "Companion Home" [ref=f20e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f20e100] [cursor=pointer]
+          - generic [ref=f20e103]:
+            - button "Search - Open command palette" [ref=f20e104] [cursor=pointer]:
+              - generic [ref=f20e108]: Search
+              - generic [ref=f20e109]: ⌘K
+            - button "Open settings" [ref=f20e110] [cursor=pointer]
+            - generic [ref=f20e122]:
+              - button "Notifications, 0 unread" [ref=f20e123] [cursor=pointer]
+              - status [ref=f20e127]: Notifications are active
+            - button "Switch to light theme" [ref=f20e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f20e135] [cursor=pointer]:
+              - generic [ref=f20e136]: "?"
+        - generic [ref=f20e138]:
+          - generic [ref=f20e140]:
+            - generic [ref=f20e141]:
+              - generic [ref=f20e142]:
+                - heading "Media Inspector" [level=1] [ref=f20e143]
+                - generic [ref=f20e144]:
+                  - generic [ref=f20e145]: 1 / 1
+                  - button "Trash" [ref=f20e146] [cursor=pointer]
+                  - button "Bulk" [ref=f20e150] [cursor=pointer]
+              - generic [ref=f20e153]:
+                - button "Show media only" [pressed] [ref=f20e154] [cursor=pointer]:
+                  - generic [ref=f20e155]: Media
+                  - generic [ref=f20e156]: "1"
+                - button "Show notes only" [ref=f20e157] [cursor=pointer]:
+                  - generic [ref=f20e158]: Notes
+                  - generic [ref=f20e159]: "0"
+            - generic [ref=f20e161]:
+              - generic [ref=f20e162]:
+                - generic [ref=f20e163]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f20e165] [cursor=pointer]
+              - generic [ref=f20e168]:
+                - generic [ref=f20e169]:
+                  - textbox "Search media (title/content)" [ref=f20e174]
+                  - button "Search syntax help" [ref=f20e176] [cursor=pointer]: "?"
+                - button "Search" [ref=f20e177] [cursor=pointer]
+                - generic [ref=f20e178]:
+                  - generic [ref=f20e179]:
+                    - generic [ref=f20e180]: Filters
+                    - button "Clear all" [ref=f20e184] [cursor=pointer]
+                  - generic [ref=f20e185]:
+                    - generic [ref=f20e186]: Search mode
+                    - generic [ref=f20e187]:
+                      - button "Full-text search" [pressed] [ref=f20e188] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f20e189] [cursor=pointer]: Metadata
+                  - generic [ref=f20e190]:
+                    - generic [ref=f20e191]: Sort by
+                    - generic [ref=f20e192] [cursor=pointer]:
+                      - generic [ref=f20e193]:
+                        - generic "Relevance" [ref=f20e194]
+                        - combobox [ref=f20e195]
+                      - img "down" [ref=f20e197]
+                  - generic [ref=f20e200]:
+                    - generic [ref=f20e201]: Date range
+                    - generic [ref=f20e202]:
+                      - generic [ref=f20e203]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f20e204]
+                      - generic [ref=f20e205]:
+                        - text: End date
+                        - textbox "End date" [ref=f20e206]
+                  - button "Advanced search" [ref=f20e208] [cursor=pointer]
+                  - generic [ref=f20e212] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f20e213]
+                    - generic [ref=f20e216]: Favorites only
+                  - generic [ref=f20e217]:
+                    - button "Media types" [ref=f20e218] [cursor=pointer]
+                    - generic [ref=f20e224] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f20e225]
+                      - generic [ref=f20e226]: Document
+                  - button "Keywords" [ref=f20e228] [cursor=pointer]
+                  - generic [ref=f20e233]:
+                    - generic [ref=f20e234]: Exclude keywords
+                    - generic [ref=f20e236]:
+                      - generic [ref=f20e237]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f20e239]
+                      - img "down" [ref=f20e241]
+                    - generic [ref=f20e244]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f20e245]: 0 exclude keyword suggestions available
+                - generic [ref=f20e246]:
+                  - generic [ref=f20e247]:
+                    - generic [ref=f20e248]: Collection
+                    - combobox "Collection" [ref=f20e249]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f20e250]: Create collections from bulk selection to organize related items.
+            - generic [ref=f20e251]:
+              - generic [ref=f20e253]:
+                - generic [ref=f20e254]:
+                  - generic [ref=f20e255]:
+                    - generic [ref=f20e256]: Results
+                    - generic [ref=f20e257]: 1 / 1
+                  - generic [ref=f20e258]:
+                    - button "Standard view" [pressed] [ref=f20e259] [cursor=pointer]
+                    - button "Compact view" [ref=f20e265] [cursor=pointer]
+                - 'button "Select media: rowan-observatory-public-20260917" [ref=f20e268] [cursor=pointer]':
+                  - generic [ref=f20e269]:
+                    - button "Add to favorites" [ref=f20e274]
+                    - generic [ref=f20e277]:
+                      - generic [ref=f20e278]:
+                        - generic [ref=f20e279]: MEDIA
+                        - generic [ref=f20e280]: document
+                        - generic [ref=f20e281]: 45m ago
+                      - generic [ref=f20e282]: rowan-observatory-public-20260917
+              - generic [ref=f20e283]:
+                - generic [ref=f20e284]:
+                  - generic [ref=f20e285]: 1 of 1 results
+                  - generic [ref=f20e286]:
+                    - generic [ref=f20e287]: "Per page:"
+                    - combobox "Per page:" [ref=f20e288]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f20e290] [cursor=pointer]:
+                  - generic [ref=f20e291]: "?"
+                  - generic [ref=f20e292]: for shortcuts
+            - button "Library tools" [ref=f20e294] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f20e299] [cursor=pointer]
+          - generic [ref=f20e303]:
+            - generic [ref=f20e305]:
+              - generic [ref=f20e306] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f20e307]
+                - generic [ref=f20e308]: Show chapters/sections panel
+              - generic [ref=f20e309] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f20e310]
+                - generic [ref=f20e311]: Allow generated fallback structure
+              - generic [ref=f20e312]: "Generated sections: 2"
+            - generic [ref=f20e313]:
+              - complementary "Chapters and sections" [ref=f20e314]:
+                - generic [ref=f20e315]:
+                  - generic [ref=f20e316]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f20e321]
+                  - generic [ref=f20e322]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                - tree [ref=f20e323]:
+                  - generic [ref=f20e324]:
+                    - button "1 Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create..." [ref=f20e327] [cursor=pointer]:
+                      - generic [ref=f20e328]: "1"
+                      - generic [ref=f20e329]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                    - button "2 Generated Section 2" [ref=f20e332] [cursor=pointer]:
+                      - generic [ref=f20e333]: "2"
+                      - generic [ref=f20e334]: Generated Section 2
+              - generic [ref=f20e335]:
+                - button "Create study pack" [ref=f20e337] [cursor=pointer]
+                - generic [ref=f20e338]:
+                  - generic [ref=f20e339]: Showing rowan-observatory-public-20260917
+                  - generic [ref=f20e341]:
+                    - generic [ref=f20e342]:
+                      - button "Previous" [disabled] [ref=f20e343]
+                      - generic [ref=f20e346]: 1/1
+                      - button "Next" [disabled] [ref=f20e347]
+                    - heading "rowan-observatory-public-20260917" [level=3] [ref=f20e350]
+                    - generic [ref=f20e351]:
+                      - button "Chat with this media" [ref=f20e352] [cursor=pointer]
+                      - button "Analyze" [ref=f20e355] [cursor=pointer]
+                      - button "Actions" [ref=f20e359] [cursor=pointer]
+                  - generic [ref=f20e365]:
+                    - generic [ref=f20e366]:
+                      - generic [ref=f20e367]: 306 Words
+                      - generic [ref=f20e371]: 2 min read
+                      - generic "Reading progress" [ref=f20e372]: 0% read
+                      - generic [ref=f20e373]: "Chunking: Completed"
+                      - generic [ref=f20e374]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f20e376] [cursor=pointer]:
+                      - generic [ref=f20e377]: Metadata details
+                      - generic [ref=f20e378]: Show
+                    - generic [ref=f20e380]:
+                      - generic [ref=f20e381]:
+                        - generic: Add keywords...
+                        - combobox [ref=f20e383]
+                      - img "down" [ref=f20e385]
+                    - generic [ref=f20e388]:
+                      - generic [ref=f20e389]:
+                        - button "Content" [ref=f20e390] [cursor=pointer]
+                        - generic [ref=f20e394]:
+                          - generic [ref=f20e395] [cursor=pointer]:
+                            - generic [ref=f20e396]:
+                              - generic "Auto" [ref=f20e397]
+                              - combobox "Display mode" [ref=f20e398]
+                            - img "down" [ref=f20e400]
+                          - group "Text size" [ref=f20e403]:
+                            - button "Text size S" [ref=f20e404] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f20e405] [cursor=pointer]: M
+                            - button "Text size L" [ref=f20e406] [cursor=pointer]: L
+                          - button "Edit content" [ref=f20e407] [cursor=pointer]
+                          - button "Find in content" [ref=f20e410] [cursor=pointer]
+                      - region "Media content" [ref=f20e417]:
+                        - generic [ref=f20e418]:
+                          - paragraph [ref=f20e606]: Rowan Observatory — public synthetic UAT handbook
+                          - paragraph [ref=f20e607]: This is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742.
+                          - paragraph [ref=f20e608]: Visitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.
+                          - paragraph [ref=f20e609]: The Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.
+                          - paragraph [ref=f20e610]: The observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location.
+                          - paragraph [ref=f20e611]: A visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.
+                    - generic [ref=f20e425]:
+                      - generic [ref=f20e426]:
+                        - button "Analysis" [ref=f20e427] [cursor=pointer]
+                        - generic [ref=f20e431]:
+                          - button "Generate" [ref=f20e432] [cursor=pointer]
+                          - button "Send analysis to chat" [ref=f20e436] [cursor=pointer]
+                          - button "Copy analysis" [ref=f20e440] [cursor=pointer]
+                          - button "Edit analysis" [ref=f20e444] [cursor=pointer]
+                      - generic [ref=f20e448]:
+                        - generic [ref=f20e449]:
+                          - generic [ref=f20e450]: Analysis
+                          - generic [ref=f20e451] [cursor=pointer]:
+                            - generic [ref=f20e452]:
+                              - generic "Analysis" [ref=f20e453]
+                              - combobox "Analysis" [ref=f20e454]
+                            - img "down" [ref=f20e456]
+                        - generic [ref=f20e459]:
+                          - generic [ref=f20e460]:
+                            - generic [ref=f20e461]: Analysis
+                            - button "Copy analysis to clipboard" [ref=f20e463] [cursor=pointer]
+                          - paragraph [ref=f20e612]: LIVE_TIER_ANALYSIS_TWO
+                    - generic [ref=f20e470]:
+                      - button "Statistics" [ref=f20e471] [cursor=pointer]
+                      - generic [ref=f20e476]:
+                        - generic [ref=f20e477]:
+                          - generic [ref=f20e478]: Words
+                          - generic [ref=f20e479]: "306"
+                        - generic [ref=f20e480]:
+                          - generic [ref=f20e481]: Characters
+                          - generic [ref=f20e482]: "1914"
+                        - generic [ref=f20e483]:
+                          - generic [ref=f20e484]: Paragraphs
+                          - generic [ref=f20e485]: "6"
+                    - button "Metadata" [ref=f20e487] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f20e492] [cursor=pointer]
+                    - button "Version History" [ref=f20e498] [cursor=pointer]
+                    - generic [ref=f20e507]:
+                      - button "Delete item" [disabled] [ref=f20e508]
+                      - paragraph [ref=f20e512]: Your account does not have permission to delete media.
+      - generic [ref=f20e513]:
+        - dialog "Quick Ingest (1)":
+          - generic [ref=f20e514]:
+            - button "Close" [ref=f20e515] [cursor=pointer]:
+              - generic "Close" [ref=f20e516]:
+                - img "close" [ref=f20e517]
+            - generic [ref=f20e520]: Quick Ingest (1)
+            - generic [ref=f20e522]:
+              - navigation "Ingest wizard progress" [ref=f20e523]:
+                - list [ref=f20e524]:
+                  - listitem [ref=f20e525]:
+                    - 'button "Step 1: Add (completed)" [ref=f20e613] [cursor=pointer]':
+                      - generic [ref=f20e530]: Add
+                      - generic [ref=f20e616]: 1 items
+                  - listitem [ref=f20e532]:
+                    - 'button "Step 2: Configure (current)" [disabled] [ref=f20e617]':
+                      - generic [ref=f20e537]: Configure
+                  - listitem [ref=f20e539]:
+                    - 'button "Step 3: Review" [disabled] [ref=f20e540]':
+                      - generic [ref=f20e544]: Review
+                  - listitem [ref=f20e546]:
+                    - 'button "Step 4: Processing" [disabled] [ref=f20e547]':
+                      - generic [ref=f20e551]: Processing
+                  - listitem [ref=f20e553]:
+                    - 'button "Step 5: Results" [disabled] [ref=f20e554]':
+                      - generic [ref=f20e558]: Results
+              - generic [ref=f20e618]:
+                - generic [ref=f20e619]:
+                  - generic [ref=f20e620]:
+                    - button "Quick preset" [ref=f20e621] [cursor=pointer]:
+                      - generic [aria-hidden] [ref=f20e622]: ⚡
+                      - generic [ref=f20e623]: Quick
+                      - generic [ref=f20e624]: Process fast, skip analysis
+                    - button "Standard preset (Recommended)" [ref=f20e625] [cursor=pointer]:
+                      - generic [aria-hidden] [ref=f20e626]: ★
+                      - generic [ref=f20e627]: Standard
+                      - generic [ref=f20e628]: (Recommended)
+                      - generic [ref=f20e629]: Analyze + chunk for RAG search
+                    - button "Deep preset" [ref=f20e630] [cursor=pointer]:
+                      - generic [aria-hidden] [ref=f20e631]: 🔬
+                      - generic [ref=f20e632]: Deep
+                      - generic [ref=f20e633]: All options, review before save
+                  - generic [ref=f20e634]: Presets are starting points. Adjust any settings below or in Advanced options to fit this run. Using custom settings (no preset match).
+                - generic [ref=f20e637]:
+                  - generic [ref=f20e638]:
+                    - heading "Ingestion options" [level=5] [ref=f20e639]
+                    - text: Defaults apply only to items added after you change them.
+                  - generic [ref=f20e640]:
+                    - generic [ref=f20e641]:
+                      - generic [ref=f20e642]:
+                        - generic [ref=f20e643]: Analysis
+                        - switch "Ingestion options – analysis" [active] [ref=f20e644] [cursor=pointer]
+                      - paragraph [ref=f20e647]: Generate AI summary and key findings
+                    - generic [ref=f20e648]:
+                      - generic [ref=f20e649]:
+                        - generic [ref=f20e650]: Chunking
+                        - switch "Ingestion options – chunking" [checked] [ref=f20e651] [cursor=pointer]
+                      - paragraph [ref=f20e654]: Split into searchable sections for Knowledge QA
+                    - generic [ref=f20e655]:
+                      - generic [ref=f20e656]:
+                        - generic [ref=f20e657]: Overwrite existing
+                        - switch "Ingestion options – overwrite existing" [ref=f20e658] [cursor=pointer]
+                      - paragraph [ref=f20e661]: Replace content if previously ingested
+                  - generic [ref=f20e663]:
+                    - generic [ref=f20e664]:
+                      - strong [ref=f20e666]: Chunking mode
+                      - radiogroup "Chunking mode" [ref=f20e667]:
+                        - generic [ref=f20e668]:
+                          - generic [ref=f20e669] [cursor=pointer]:
+                            - radio "Auto" [checked]
+                            - generic "Auto" [ref=f20e670]
+                          - generic [ref=f20e671] [cursor=pointer]:
+                            - radio "Manual"
+                            - generic "Manual" [ref=f20e672]
+                    - generic [ref=f20e673]:
+                      - generic [ref=f20e674]:
+                        - generic [ref=f20e675]: Auto chunking goal
+                        - generic [ref=f20e676] [cursor=pointer]:
+                          - generic [ref=f20e677]:
+                            - generic "Balanced" [ref=f20e678]
+                            - combobox "Auto chunking goal" [ref=f20e679]
+                          - img "down" [ref=f20e681]
+                      - generic [ref=f20e684]:
+                        - generic [ref=f20e685]: Use AI to improve chunk boundaries
+                        - switch "Use AI to improve chunk boundaries" [ref=f20e686] [cursor=pointer]
+                  - button "Advanced options" [ref=f20e689] [cursor=pointer]
+                - generic [ref=f20e692]:
+                  - button "Back" [ref=f20e693] [cursor=pointer]
+                  - button "Next" [ref=f20e697] [cursor=pointer]
+  - alert [ref=f20e605]: Media | tldw
+```
+

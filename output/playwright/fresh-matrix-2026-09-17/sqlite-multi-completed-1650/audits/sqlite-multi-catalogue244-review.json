@@ -1,0 +1,204 @@
+{
+  "task": "TASK13260.186",
+  "finding": "UAT244",
+  "created_at": "2026-09-17T16:54:56.135698+00:00",
+  "frozen_revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "scope": "Read-only diagnosis; only these two ignored audit outputs written. No tests/runtime/browser/DB/credentials/product/task actions.",
+  "archive_manifest": {
+    "path": ".tmp/uat-next-matrix-20260916/copy-preparation/sqlite-multi-archive-manifest.json",
+    "sha256": "703f3cd208450440ee4ce31ba51526200257f363fc7fa3fb07c4811d4fa9cb36"
+  },
+  "inputs": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-multi/isolation-bob-source-opened.txt",
+      "sha256": "deca525aa290bacdacf2b1729c1c5cc34917916badcc4e3cf997187466d36152",
+      "capture_at": "2026-09-17T16:25:10.261Z",
+      "timestamp_note": null
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-multi/resume-1628-snapshot.txt",
+      "sha256": "363b644e4ed9a8c857d2afa382a2b38d0f7481c0dda7bb7f3736d520d1cc3a51",
+      "capture_at": null,
+      "timestamp_note": "No embedded capture timestamp in this plain snapshot; filename is not treated as timestamp proof."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-multi/admin-restore-source.txt",
+      "sha256": "b9f4e0cbe87a0375d42ec835c05d1363b27f4e55cff5d845e4933b361b366200",
+      "capture_at": "2026-09-17T16:43:42.063Z",
+      "timestamp_note": null
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-multi/admin-delete-entry.txt",
+      "sha256": "b83928b3232b2617046660df20a67584fd2891c28da41afcb9a84e6ed92e4ec8",
+      "capture_at": "2026-09-17T16:44:14.447Z",
+      "timestamp_note": null
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/native/sqlite-multi/admin-restored-observed.txt",
+      "sha256": "5afba07586d4c0332d6ba9457683e94948e6dfe20b24150f0dd5d812d8e2b49d",
+      "capture_at": "2026-09-17T16:46:41.084Z",
+      "timestamp_note": null
+    }
+  ],
+  "sources": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Layouts/QuickIngestButton.tsx",
+      "sha256": "a1969541ba22cf3e7b1cc1eb6b6b29b60f8bf86fe43f84a2efea8694e77412d7",
+      "archive_sha256": "a1969541ba22cf3e7b1cc1eb6b6b29b60f8bf86fe43f84a2efea8694e77412d7",
+      "controller_commit_sha256": "a1969541ba22cf3e7b1cc1eb6b6b29b60f8bf86fe43f84a2efea8694e77412d7",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "sha256": "a7932db0c59344a193fff343953b4605d437480a5cbd57b6a28091e45d22be0d",
+      "archive_sha256": "a7932db0c59344a193fff343953b4605d437480a5cbd57b6a28091e45d22be0d",
+      "controller_commit_sha256": "a7932db0c59344a193fff343953b4605d437480a5cbd57b6a28091e45d22be0d",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Common/QuickIngest/WizardResultsStep.tsx",
+      "sha256": "119816069d05db3862fdef352789e27e56ce8bc7ba9b8390a300cbd4ff998e79",
+      "archive_sha256": "119816069d05db3862fdef352789e27e56ce8bc7ba9b8390a300cbd4ff998e79",
+      "controller_commit_sha256": "119816069d05db3862fdef352789e27e56ce8bc7ba9b8390a300cbd4ff998e79",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Common/QuickIngest/ResultsPanel.tsx",
+      "sha256": "335311b30cc484036f814773c0f818dea97d8e31c75f2823d25b476a1a8fe5d0",
+      "archive_sha256": "335311b30cc484036f814773c0f818dea97d8e31c75f2823d25b476a1a8fe5d0",
+      "controller_commit_sha256": "335311b30cc484036f814773c0f818dea97d8e31c75f2823d25b476a1a8fe5d0",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Common/QuickIngest/__tests__/ingest-complete-event.test.ts",
+      "sha256": "c891857f102d89b0a00c8ab0e0fdd273a7c61ed4970f39ae66b0d474da99cb0e",
+      "archive_sha256": "c891857f102d89b0a00c8ab0e0fdd273a7c61ed4970f39ae66b0d474da99cb0e",
+      "controller_commit_sha256": "c891857f102d89b0a00c8ab0e0fdd273a7c61ed4970f39ae66b0d474da99cb0e",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Common/QuickIngest/__tests__/WizardResultsStep.navigation.test.tsx",
+      "sha256": "6b8190de04f051d59c4afa0fae354b8534151e00f147facb57ff6723a124ccd5",
+      "archive_sha256": "6b8190de04f051d59c4afa0fae354b8534151e00f147facb57ff6723a124ccd5",
+      "controller_commit_sha256": "6b8190de04f051d59c4afa0fae354b8534151e00f147facb57ff6723a124ccd5",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "archive_sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "controller_commit_sha256": "b9e58148dbac0f55a4da39ea5867da0e752492006ac25e4f3aaf7969a08da734",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "sha256": "316dc3845a374d6e169d74cd1d95e5a96345eac7668edf6c801523721c7d7f86",
+      "archive_sha256": "316dc3845a374d6e169d74cd1d95e5a96345eac7668edf6c801523721c7d7f86",
+      "controller_commit_sha256": "316dc3845a374d6e169d74cd1d95e5a96345eac7668edf6c801523721c7d7f86",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "sha256": "fb80a3b53ffe0f34ab61a003e40dedd91f57ade52195731390182f3aefcd4200",
+      "archive_sha256": "fb80a3b53ffe0f34ab61a003e40dedd91f57ade52195731390182f3aefcd4200",
+      "controller_commit_sha256": "fb80a3b53ffe0f34ab61a003e40dedd91f57ade52195731390182f3aefcd4200",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/apps/packages/ui/src/components/Media/ResultsList.tsx",
+      "sha256": "9062b710187a3232bb94ab4c78fbf3741af6f73bdc0793fb786501538cae54cd",
+      "archive_sha256": "9062b710187a3232bb94ab4c78fbf3741af6f73bdc0793fb786501538cae54cd",
+      "controller_commit_sha256": "9062b710187a3232bb94ab4c78fbf3741af6f73bdc0793fb786501538cae54cd",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/backlog/tasks/task-13260.9 - Repair-ordinary-user-retrieval-of-owned-sources.md",
+      "sha256": "273491be04f02ef362b4efa688a3e76da46c9b37d232d01f78530b8dd2f13978",
+      "archive_sha256": "273491be04f02ef362b4efa688a3e76da46c9b37d232d01f78530b8dd2f13978",
+      "controller_commit_sha256": "273491be04f02ef362b4efa688a3e76da46c9b37d232d01f78530b8dd2f13978",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/backlog/tasks/task-13260.26 - Clear-private-Quick-Ingest-state-at-account-boundaries.md",
+      "sha256": "0378fe80e17b927bd2a657634a459601f7923ed84deb77a0c30f9bd6cb6ad331",
+      "archive_sha256": "0378fe80e17b927bd2a657634a459601f7923ed84deb77a0c30f9bd6cb6ad331",
+      "controller_commit_sha256": "0378fe80e17b927bd2a657634a459601f7923ed84deb77a0c30f9bd6cb6ad331",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/backlog/tasks/task-13260.17 - Repair-Media-reading-recovery-and-source-presentation.md",
+      "sha256": "e9dd5f70c6a2e7dad1f657aa7c19b18fa8c81a3b1a970a6a74178ab55e44d14b",
+      "archive_sha256": "e9dd5f70c6a2e7dad1f657aa7c19b18fa8c81a3b1a970a6a74178ab55e44d14b",
+      "controller_commit_sha256": "e9dd5f70c6a2e7dad1f657aa7c19b18fa8c81a3b1a970a6a74178ab55e44d14b",
+      "all_match": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/sources/sqlite-multi/backlog/tasks/task-13260.25 - Make-Flashcard-source-links-open-their-actual-saved-destinations.md",
+      "sha256": "b075406135063ef1ee7b3205eaf0d8844089d2b4b9865e5bc3dd49494ce45ccd",
+      "archive_sha256": "b075406135063ef1ee7b3205eaf0d8844089d2b4b9865e5bc3dd49494ce45ccd",
+      "controller_commit_sha256": "b075406135063ef1ee7b3205eaf0d8844089d2b4b9865e5bc3dd49494ce45ccd",
+      "all_match": true
+    }
+  ],
+  "observations": [
+    {
+      "at": "2026-09-17T16:23:49.008Z",
+      "fact": "Bob ingest job6 completed, owner_user_id3, result media_id1."
+    },
+    {
+      "at": "2026-09-17T16:25:10.234Z",
+      "fact": "Bob GET media/1 returned200 with1906 characters of source text; enclosing snapshot16:25:10.261 shows catalogue0/0 and first-ingest onboarding."
+    },
+    {
+      "at": "2026-09-17T16:42:49.892Z",
+      "fact": "Admin pre-ingest catalogue returned200, items0/total0."
+    },
+    {
+      "at": "2026-09-17T16:43:41.470Z",
+      "fact": "Admin ingest job7 completed, owner_user_id1, result media_id1."
+    },
+    {
+      "at": "2026-09-17T16:43:42.035Z",
+      "fact": "Admin GET media/1 returned200 with1914 source characters; snapshot16:43:42.063 catalogue0/0."
+    },
+    {
+      "at": "2026-09-17T16:44:14.447Z",
+      "fact": "Admin before-delete snapshot still0/0 and first-ingest onboarding,32.412 seconds after successful detail response. Detail poll16:44:12.077 also200."
+    },
+    {
+      "at": "2026-09-17T16:45:14.733Z",
+      "fact": "Admin delete204; following catalogue GET200 items0/total0."
+    },
+    {
+      "at": "2026-09-17T16:46:02.481Z",
+      "fact": "Admin restore200; normal navigation then makes catalogue requests."
+    },
+    {
+      "at": "2026-09-17T16:46:03.054Z",
+      "fact": "Admin catalogue200 items1/total1; snapshot16:46:41.084 shows1/1."
+    }
+  ],
+  "findings": {
+    "confidence": "High-confidence source-supported missing refresh notification in active wizard path; no causal test or runtime instrumentation performed.",
+    "producer": "QuickIngestButton imports QuickIngestWizardModal, which renders WizardResultsStep. Only legacy ResultsPanel emits tldw:quick-ingest-complete in inspected frozen apps source. Active wizard records recent document metadata but has no completion dispatch.",
+    "consumer": "ViewMediaPage listens for completion and explicitly refetches after1500ms. useMediaSearch query has enabled:false and refetches for mount/search criteria changes; selected permalink ID is not its key/criteria.",
+    "handoff": "handleOpenMedia validates current operation then navigate(media?id) and closes. useMediaNavigationState independently hydrates the detail and selection without a catalogue refetch. ResultsList sees empty results and renders first-ingest onboarding alongside valid detail.",
+    "network_corroboration": "Supplied cumulative admin event list contains no catalogue request after job completion and before delete. This is bounded to retained observation window, not a global absence claim.",
+    "scope": "Current-owner catalogue freshness/display boundary. No cross-account response, persistence failure or backend full-text rejection is established.",
+    "remaining_uncertainty": "Did not execute backend listing immediately after ingest, so source visibility at that instant is not independently proven by a list response. Later restore could affect backend state as well as navigation; source and absent request evidence support refresh omission without requiring restore as a remedy."
+  },
+  "prior_scope": {
+    "UAT030/task13260.9": "Ordinary-user owned source full-text/Knowledge QA retrieval, worker ownership fix. Here detail is200 and no fresh catalogue request occurs.",
+    "UAT082/task13260.26": "Private ingest state and delayed callbacks across authority changes. This report concerns missing same-current-owner catalogue refresh; preserve those authority guards.",
+    "UAT071/task13260.17": "Empty Media must retain Trash after final deletion. Not the same creation-to-catalogue freshness defect.",
+    "UAT081/task13260.25": "Actual historical081 is saved Flashcard source link destination hydration, not empty Trash. Here permalink detail hydration succeeds."
+  },
+  "bounded_followup": [
+    "Causal mounted actual QuickIngestWizardModal completion plus already-empty ViewMediaPage: persisted result causes current-owner catalogue refetch and item/count/onboarding reconciliation, including same-route Open in Media.",
+    "Preserve captured operation authority: no late completion/refetch under replacement account/server; failed/cancelled/process-only results must not announce saved rows; same-account resume and repeated batches need exactly-once current completion behavior.",
+    "Check handoff when Media was not mounted at completion; avoid relying solely on a transient event missed before mount.",
+    "Do not insert a selected detail blindly into arbitrary filtered results; preserve filters/pagination and permalink semantics.",
+    "Use existing explicit refresh ownership; disabled query means a generic query invalidation alone may not refetch."
+  ],
+  "tests_run": false
+}

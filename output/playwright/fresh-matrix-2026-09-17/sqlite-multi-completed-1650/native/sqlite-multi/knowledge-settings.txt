@@ -1,0 +1,9 @@
+### Error
+Error: locator.selectOption: Error: Element is not a <select> element
+Call log:
+  - waiting for getByRole('combobox', { name: 'Answer model', exact: true })
+    - locator resolved to <input aria-label="Answer model" list="knowledge-answer-model-options" value="../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" placeholder="Default: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" class="mt-1 h-9 w-full rounded-md border border-border bg-surface2 px-2 text-sm text-text outline-none placeholder:text-text-muted focus:border-primary"/>
+  - attempting select option action
+    - waiting for element to be visible and enabled
+
+

@@ -1,0 +1,13 @@
+### Result
+{"at":"2026-09-17T15:31:15.903Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nSkip to search\nSources: Documents & Media\nCustom\nWeb\nAI: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nSources ready: 6 of 8\n\nAsk questions about your documents and get AI-powered answers with citations from your knowledge base.\n\nSearching...\nPress / to focus, Cmd+K for new search\nStop\nSearching your selected sources.\nSearching selected sources\n\nSearching documents...\n\nCustom preset timing varies with your settings.\n\nNew Topic\n\nFollow-up input unlocks when the current search completes.\n\nHelp & Documentation\n\nKnowledge | tldw"}
+### Ran Playwright code
+```js
+await (async page=>{const d=page.getByRole("dialog",{name:"RAG Settings",exact:true});await d.getByRole("combobox").selectOption({label:"Full-Text Only"});for(const n of ["Notes","Chats","Characters"])await d.getByRole("checkbox",{name:n,exact:true}).uncheck();await d.getByRole("switch",{name:"Enable Reranking",exact:true}).uncheck();await d.getByRole("slider").nth(1).focus();await d.getByRole("slider").nth(1).press("End");await d.getByRole("button",{name:"Done",exact:true}).click();await page.getByRole("textbox",{name:"Search your knowledge base",exact:true}).fill("Who directs Rowan Observatory, where is it located, and when do its public tours begin? Give a concise answer with citations.");await page.getByRole("button",{name:"Ask",exact:true}).click();return {at:new Date().toISOString(),body:await page.locator("body").innerText()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18681/knowledge
+- Page Title: Knowledge | tldw
+- Console: 3 errors, 4 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T15-01-48-538Z.log#L116-L122
+
