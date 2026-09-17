@@ -1,0 +1,866 @@
+--- a/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
+@@ -247,32 +247,60 @@
+             parsed = parsed.replace(tzinfo=timezone.utc)
+         return parsed.astimezone(timezone.utc).isoformat()
+
+-    def _set_dataset_scope(self, conn: SuggestionConnection, dataset_id: str) -> None:
++    def _set_dataset_scope(
++        self, conn: SuggestionConnection, dataset_id: str, *, allow_unbound_legacy_read: bool = False
++    ) -> None:
+         if self.is_postgres:
+             conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
+-        self._require_dataset_scope(conn, dataset_id)
++        self._require_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
+
+     def _with_dataset_scope(
+         self,
+         dataset_id: str,
+         fn: Callable[[SuggestionConnection], SuggestionReadT],
++        *,
++        allow_unbound_legacy_read: bool = False,
+     ) -> SuggestionReadT:
+         if not self.is_postgres:
+             with self._db.transaction() as conn:
+-                self._set_dataset_scope(conn, dataset_id)
++                self._set_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
+                 return fn(conn)
+         with self._db.transaction() as conn:
+-            self._set_dataset_scope(conn, dataset_id)
++            self._set_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
+             return fn(conn)
+
+-    def _require_dataset_scope(self, conn: SuggestionConnection, dataset_id: str) -> None:
++    def _require_dataset_scope(
++        self, conn: SuggestionConnection, dataset_id: str, *, allow_unbound_legacy_read: bool = False
++    ) -> None:
+         row = conn.execute(
+             "SELECT 1 FROM note_task_scope_authority "
+             "WHERE owner_user_id = ? AND dataset_id = ?",
+             (self.owner_user_id, dataset_id),
+         ).fetchone()
+-        if row is None:
+-            raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++        if row is not None:
++            return
++        if allow_unbound_legacy_read and dataset_id == f"legacy:{self.owner_user_id}":
++            # Read-only legacy access must never create or replace immutable authority.
++            owner_scope = conn.execute(
++                "SELECT 1 FROM note_task_scope_authority WHERE owner_user_id = ?",
++                (self.owner_user_id,),
++            ).fetchone()
++            if owner_scope is None:
++                return
++        raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++
++    def is_dataset_scope_registered(self, *, dataset_id: str) -> bool:
++        """Check cancellation authority without registering an unbound read scope."""
++
++        dataset = self._scope(dataset_id)
++
++        def read(conn: SuggestionConnection) -> bool:
++            return conn.execute(
++                "SELECT 1 FROM note_task_scope_authority WHERE owner_user_id = ? AND dataset_id = ?",
++                (self.owner_user_id, dataset),
++            ).fetchone() is not None
++
++        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
+
+     def _source_byte_expression(self, alias: str = "n") -> str:
+         if alias not in {"n", "note"}:
+@@ -1982,7 +2010,7 @@
+                 next_position=next_position,
+             )
+
+-        return self._with_dataset_scope(dataset, read)
++        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
+
+     def list_suggestion_evidence(
+         self,
+@@ -2081,7 +2109,7 @@
+                 )
+             return tuple(current)
+
+-        return self._with_dataset_scope(dataset, read)
++        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
+
+     def _find_receipt(
+         self,
+@@ -2237,6 +2265,7 @@
+                 source_note_id,
+                 source_fingerprint,
+             ),
++            allow_unbound_legacy_read=True,
+         )
+
+     @staticmethod
+@@ -4761,13 +4790,13 @@
+                 raise NotesGraphSourceTooLargeError("notes_graph_source_too_large")
+             raise ValueError("Notes graph source is unavailable")
+
+-        return self._with_dataset_scope(dataset, read)
++        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
+
+     def ensure_fts_ready(self, *, dataset_id: str) -> None:
+         """Validate owner-dataset Notes FTS structure without running retrieval."""
+
+         dataset = self._scope(dataset_id)
+-        self._with_dataset_scope(dataset, self._ensure_fts_ready)
++        self._with_dataset_scope(dataset, self._ensure_fts_ready, allow_unbound_legacy_read=True)
+
+     def fetch_ranked_candidates(
+         self,
+--- a/tldw_Server_API/app/core/Notes_Graph/suggestion_api.py
++++ b/tldw_Server_API/app/core/Notes_Graph/suggestion_api.py
+@@ -142,6 +142,7 @@
+         worker_ready: Callable[[], bool],
+         feature_ready: Callable[[], bool],
+         cursor_codec: Any,
++        decision_ready: bool = True,
+         resolve_capability: Callable[..., Any] = resolve_generation_capability,
+         clock: Callable[[], datetime] = _default_clock,
+     ) -> None:
+@@ -151,6 +152,7 @@
+         self._admission = admission_service
+         self._cancellation = cancellation_coordinator
+         self._decisions = decision_service
++        self._decision_ready = decision_ready
+         self._worker_ready = worker_ready
+         self._feature_ready = feature_ready
+         self._cursor = cursor_codec
+@@ -240,6 +242,32 @@
+             unavailable_reason = "notes_graph_suggestions_worker_unavailable"
+         elif not capabilities.generation_available:
+             unavailable_reason = capabilities.unavailable_reason or "notes_graph_provider_unavailable"
++        if not self._decision_ready:
++            try:
++                registered = self._store.is_dataset_scope_registered(dataset_id=self._dataset_id)
++            except Exception as exc:
++                raise self._translate(exc) from exc
++            unavailable_reason = unavailable_reason or "notes_graph_sync_not_ready"
++            allowed_actions = tuple(
++                action for action in capabilities.allowed_actions if action == "cancel" and registered
++            )
++            # Bind this additional authority restriction to preflight's existing ETag.
++            revision_facts = {
++                "provider_revision": capabilities.revision,
++                "generation_available": False,
++                "unavailable_reason": unavailable_reason,
++                "allowed_actions": allowed_actions,
++            }
++            revision = "sha256:" + hashlib.sha256(
++                json.dumps(revision_facts, sort_keys=True, separators=(",", ":")).encode()
++            ).hexdigest()
++            return replace(
++                capabilities,
++                generation_available=False,
++                unavailable_reason=unavailable_reason,
++                allowed_actions=allowed_actions,
++                revision=revision,
++            )
+         if unavailable_reason is None:
+             return capabilities
+         return replace(
+@@ -666,6 +694,7 @@
+             owner_user_id=owner_user_id,
+         ),
+         decision_service=decisions or _UnavailableDecisionService(),
++        decision_ready=decisions is not None,
+         worker_ready=lambda: jobs is not None
+         and env_flag_enabled("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED"),
+         feature_ready=NOTES_GRAPH_ENABLED,
+--- a/apps/packages/ui/src/services/note-graph-suggestions.ts
++++ b/apps/packages/ui/src/services/note-graph-suggestions.ts
+@@ -64,7 +64,8 @@
+   "notes_graph_provider_retry_policy_unsupported",
+   "notes_graph_provider_unavailable",
+   "notes_graph_suggestions_disabled",
+-  "notes_graph_suggestions_worker_unavailable"
++  "notes_graph_suggestions_worker_unavailable",
++  "notes_graph_sync_not_ready"
+ ] as const
+
+ const RUN_ERROR_CODES = [
+--- a/apps/packages/ui/src/assets/locale/en/option.json
++++ b/apps/packages/ui/src/assets/locale/en/option.json
+@@ -1479,7 +1479,8 @@
+       "notes_graph_provider_retry_policy_unsupported": "The provider retry policy is unsupported.",
+       "notes_graph_provider_unavailable": "The provider is unavailable.",
+       "notes_graph_suggestions_disabled": "Graph suggestions are disabled.",
+-      "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable."
++      "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable.",
++      "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
+     }
+   },
+   "tts": {
+--- a/apps/packages/ui/src/public/_locales/en/option.json
++++ b/apps/packages/ui/src/public/_locales/en/option.json
+@@ -6322,5 +6322,8 @@
+   },
+   "notesSearch_graphUnavailable_notes_graph_suggestions_worker_unavailable": {
+     "message": "The suggestion worker is unavailable."
++  },
++  "notesSearch_graphUnavailable_notes_graph_sync_not_ready": {
++    "message": "Suggestion decisions are unavailable for this Notes dataset."
+   }
+ }
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_fresh_reads.py
+@@ -0,0 +1,91 @@
++"""Actual suggestion read routes on a fresh inactive-Sync Notes database."""
++
++from types import SimpleNamespace
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++
++from tldw_Server_API.app.api.v1.endpoints import notes_graph_suggestions as endpoint
++from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++from tldw_Server_API.app.core.Notes_Graph import suggestion_api, suggestion_provider
++from tldw_Server_API.app.core.Sync.v2 import notes_link_coordinator, server_origin
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def fresh_suggestions(request, tmp_path, monkeypatch):
++    # Other transport fixtures install a FakeAPI directly on the route module.
++    # This fixture always exercises the real factory, even in a mixed suite.
++    monkeypatch.setattr(endpoint, "build_notes_graph_suggestions_api", suggestion_api.build_notes_graph_suggestions_api)
++    backend = (
++        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++        if request.param == "postgres"
++        else None
++    )
++    db = CharactersRAGDB(tmp_path / "suggestions.db", client_id="1", backend=backend)
++    monkeypatch.setattr(server_origin, "get_active_server_origin_sync_service_for_user", lambda _owner: None)
++    monkeypatch.setattr(notes_link_coordinator, "get_active_server_origin_sync_service_for_user", lambda _owner: None)
++    monkeypatch.setattr(suggestion_provider, "get_default_provider", lambda: None)
++    monkeypatch.setattr(suggestion_provider, "get_default_model_for_provider", lambda _provider: None)
++    monkeypatch.delenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", raising=False)
++    app = FastAPI()
++    app.include_router(endpoint.router, prefix="/api/v1/notes")
++    app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id=1, id_str="1")
++    app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: db
++    app.dependency_overrides[endpoint.try_get_job_manager] = lambda: None
++    app.dependency_overrides[endpoint._require_suggestion_permissions] = lambda: AuthPrincipal(
++        kind="user", user_id=1, roles=["admin"], permissions=[], is_admin=True
++    )
++    for route in app.routes:
++        for dep in getattr(getattr(route, "dependant", None), "dependencies", []):
++            if getattr(dep.call, "_tldw_token_scope", False) or getattr(dep.call, "_tldw_rate_limit_resource", None):
++                app.dependency_overrides[dep.call] = lambda: None
++    try:
++        with chacha_operation(independent=True):
++            note = db.add_note("Synthetic suggestion source", "A short owned fixture note.")
++        with TestClient(app, raise_server_exceptions=False) as client:
++            yield db, client, note, request.param
++    finally:
++        app.dependency_overrides.clear()
++        db.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("registered", [False, True], ids=["fresh", "registered-scope-control"])
++@pytest.mark.parametrize("route", ["capabilities", "list"])
++def test_fresh_suggestion_reads_report_expected_unavailability_instead_of_storage_error(
++    fresh_suggestions, monkeypatch, registered, route
++):
++    db, client, note, _kind = fresh_suggestions
++    dataset = endpoint._dataset_key(owner_user_id="1", dataset_id=None)
++    assert dataset == "legacy:1"
++    if registered:
++        # Established storage fixtures explicitly insert this authority. This
++        # control isolates the factory/store integration gap without schema edits.
++        with chacha_operation(independent=True), db.transaction() as conn:
++            conn.execute("INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)", ("1", dataset))
++    causes = []
++    original = suggestion_api.NotesGraphSuggestionsAPI._translate
++
++    def observe(exc):
++        causes.append((type(exc).__name__, str(exc)))
++        return original(exc)
++
++    monkeypatch.setattr(suggestion_api.NotesGraphSuggestionsAPI, "_translate", staticmethod(observe))
++    suffix = "/capabilities" if route == "capabilities" else "?state=pending%2Caccepting&limit=100"
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions{suffix}")
++    assert response.status_code == 200, {"response": response.json(), "causes": causes}
++    body = response.json()
++    if route == "capabilities":
++        assert body["generation_available"] is False
++        assert body["unavailable_reason"] == "notes_graph_suggestions_worker_unavailable"
++    else:
++        assert body["items"] == [] and body["next_cursor"] is None
++    with chacha_operation(independent=True):
++        assert db.get_note_by_id(note)["version"] == 1
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py
+@@ -0,0 +1,448 @@
++"""Fresh read eligibility and capability authority through real storage/routes."""
++
++from types import SimpleNamespace
++
++import pytest
++
++from tldw_Server_API.app.api.v1.endpoints import notes_graph_suggestions as endpoint
++from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
++    NotesGraphDatasetScopeError,
++    NotesGraphFTSNotReadyError,
++)
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
++from tldw_Server_API.app.core.Notes_Graph import suggestion_provider, suggestion_service
++from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_fresh_reads import (
++    fresh_suggestions as fresh_suggestions,
++)
++from tldw_Server_API.tests.Notes_Graph.unit import test_suggestion_store as stored
++
++pytestmark = pytest.mark.integration
++
++
++def _register(db, owner="1", dataset="legacy:1"):
++    with chacha_operation(independent=True), db.transaction() as conn:
++        conn.execute(
++            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
++            (owner, dataset),
++        )
++
++
++def _counts(db):
++    with chacha_operation(independent=True), db.transaction() as conn:
++        return tuple(
++            conn.execute(query).fetchone()["n"]
++            for query in (
++                "SELECT COUNT(*) AS n FROM note_task_scope_authority",
++                "SELECT COUNT(*) AS n FROM note_graph_suggestion_runs",
++                "SELECT COUNT(*) AS n FROM note_graph_suggestions",
++                "SELECT COUNT(*) AS n FROM note_graph_suggestion_operation_receipts",
++            )
++        )
++
++
++def _ready_provider(monkeypatch):
++    # Resolve actual audited provider capability; never call its transport.
++    monkeypatch.setattr(suggestion_provider, "get_default_provider", lambda: "openai")
++    monkeypatch.setattr(suggestion_provider, "get_default_model_for_provider", lambda _: "fixture-model")
++    monkeypatch.setattr(suggestion_provider, "loaded_config_data", {"openai_api": {"api_key": "synthetic-test-only"}})
++    resolved = suggestion_provider.resolve_generation_capability(provider=None, model=None)
++    assert resolved.capabilities.generation_available
++    return resolved.capabilities
++
++
++@pytest.mark.parametrize(
++    "binding_owner,binding_dataset,requested,allowed",
++    [
++        (None, None, "legacy:1", True),
++        (None, None, "legacy:2", False),
++        (None, None, "arbitrary", False),
++        ("2", "dataset-other", "legacy:1", True),
++        ("1", "dataset-one", "legacy:1", False),
++        ("1", "dataset-one", "dataset-one", True),
++        ("1", "legacy:1", "legacy:1", True),
++    ],
++)
++def test_read_scope_uses_exact_owner_and_preserves_authority(
++    fresh_suggestions, binding_owner, binding_dataset, requested, allowed
++):
++    db, _, note, _ = fresh_suggestions
++    if binding_owner:
++        _register(db, binding_owner, binding_dataset)
++    before = _counts(db)
++    with chacha_operation(independent=True):
++        store = db.note_graph_suggestion_store
++        if allowed:
++            source = store.load_source_note(dataset_id=requested, note_id=note)
++            assert source.note_id == note
++            assert store.ensure_fts_ready(dataset_id=requested) is None
++            fingerprint = content_fingerprint(source.title, source.content)
++            assert (
++                store.list_suggestions(
++                    dataset_id=requested,
++                    source_note_id=note,
++                    source_fingerprint=fingerprint,
++                    states=("pending",),
++                    limit=20,
++                    after=None,
++                ).items
++                == ()
++            )
++            assert (
++                store.list_suggestion_evidence(
++                    dataset_id=requested,
++                    source_note_id=note,
++                    source_fingerprint=fingerprint,
++                    suggestion_ids=("missing",),
++                    limit=6,
++                )
++                == ()
++            )
++            assert (
++                store.get_rejection_set(dataset_id=requested, source_note_id=note, source_fingerprint=fingerprint)
++                is None
++            )
++        else:
++            with pytest.raises(NotesGraphDatasetScopeError):
++                store.load_source_note(dataset_id=requested, note_id=note)
++    assert _counts(db) == before
++
++
++@pytest.mark.parametrize("kind,expected", [("missing", 404), ("foreign", 404), ("deleted", 404), ("oversized", 422)])
++def test_fresh_route_retains_source_safety(fresh_suggestions, kind, expected):
++    db, client, note, _ = fresh_suggestions
++    with chacha_operation(independent=True), db.transaction() as conn:
++        if kind == "foreign":
++            conn.execute("UPDATE notes SET client_id=? WHERE id=?", ("2", note))
++        elif kind == "deleted":
++            conn.execute("UPDATE notes SET deleted=? WHERE id=?", (True, note))
++        elif kind == "oversized":
++            conn.execute("UPDATE notes SET content=? WHERE id=?", ("x" * 1_000_001, note))
++        else:
++            note = "missing-note"
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == expected
++
++
++def test_missing_decision_authority_removes_actions_and_changes_etag(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    base = _ready_provider(monkeypatch)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
++    before = _counts(db)
++    first = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    again = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert first.status_code == 200
++    value = first.json()
++    assert value["generation_available"] is False
++    assert value["unavailable_reason"] == "notes_graph_sync_not_ready"
++    assert value["allowed_actions"] == []
++    assert value["revision"] != base.revision
++    assert first.headers["etag"] == f'"{value["revision"]}"' == again.headers["etag"]
++    assert again.json() == value
++    assert _counts(db) == before
++
++
++def test_readiness_precedence_and_revision_transition(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    _register(db)
++    base = _ready_provider(monkeypatch)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
++    url = f"/api/v1/notes/{note}/graph/suggestions/capabilities"
++    no_decisions = client.get(url).json()
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: None
++    no_worker = client.get(url).json()
++    assert no_worker["unavailable_reason"] == "notes_graph_suggestions_worker_unavailable"
++    assert no_decisions["allowed_actions"] == ["cancel"]
++    assert no_worker["allowed_actions"] == ["cancel"]
++    assert no_worker["revision"] != no_decisions["revision"]
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: SimpleNamespace())
++    canonical_worker = client.get(url).json()
++    assert canonical_worker["unavailable_reason"] == "notes_graph_suggestions_worker_unavailable"
++    assert canonical_worker["revision"] == base.revision
++    assert canonical_worker["allowed_actions"] == list(base.allowed_actions)
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
++    ready = client.get(url).json()
++    assert ready["generation_available"] is True and ready["revision"] == base.revision
++
++
++def test_unbound_reads_do_not_authorize_admission_or_lifecycle_writes(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    _ready_provider(monkeypatch)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++
++    class NoJobs:
++        def __getattr__(self, name):
++            pytest.fail(f"unbound path reached Jobs: {name}")
++
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: NoJobs()
++    before = _counts(db)
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == 200
++    admission = client.post(
++        f"/api/v1/notes/{note}/graph/suggestions/runs",
++        json={},
++        headers={"If-Match": response.headers["etag"], "Idempotency-Key": "unbound-rejected"},
++    )
++    assert admission.status_code == 503
++    with chacha_operation(independent=True):
++        store = db.note_graph_suggestion_store
++        with pytest.raises(NotesGraphDatasetScopeError):
++            store.admit_run(
++                dataset_id="legacy:1",
++                source_note_id=note,
++                source_fingerprint="sha256:" + "a" * 64,
++                provider="openai",
++                model="fixture-model",
++                capability_revision=response.json()["revision"],
++                prompt_contract_version="fixture",
++                idempotency_key="strict-direct",
++                now=stored.NOW,
++            )
++    assert _counts(db) == before
++
++
++def test_populated_legacy_reads_preserve_published_evidence_and_rejections(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    _register(db)
++    monkeypatch.setattr(stored, "DATASET_ID", "legacy:1")
++    note = stored.SOURCE_ID
++    with chacha_operation(independent=True):
++        db.add_note("Source fixture", "source body", note_id=note)
++        target = db.add_note("Target fixture", "source related target body", note_id=stored.TARGET_ID)
++        run = stored._stage_and_activate(db, key="publish", suggestion_id="visible", target_id=target)
++        other = db.add_note("Other fixture", "other target body", note_id=stored.OTHER_ID)
++        rejected = stored._stage_and_activate(db, key="reject", suggestion_id="dismiss", target_id=other)
++        suggestions = db.note_graph_suggestion_store.list_suggestions(
++            dataset_id="legacy:1",
++            source_note_id=note,
++            source_fingerprint=stored._fingerprint(db, note),
++            states=("pending",),
++            limit=20,
++            after=None,
++        ).items
++        suggestion = next(item for item in suggestions if item.id == "dismiss")
++        db.note_graph_suggestion_store.reject_suggestion(
++            dataset_id="legacy:1",
++            suggestion_id=suggestion.id,
++            expected_revision=suggestion.revision,
++            expected_source_fingerprint=suggestion.source_fingerprint,
++            expected_target_fingerprint=suggestion.target_fingerprint,
++            idempotency_key="dismiss",
++            now=stored.NOW,
++        )
++        with db.transaction() as conn:
++            conn.execute("DELETE FROM note_task_scope_authority WHERE owner_user_id=?", ("1",))
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions?state=rejected&limit=20")
++    assert response.status_code == 200
++    value = response.json()
++    assert value["rejection_count"] == 1 and value["rejection_set_revision"] >= 1
++    assert value["items"][0]["state"] == "rejected"
++    assert run.id != rejected.id
++    assert value["items"][0]["evidence"] == []  # Rejection deliberately erases evidence.
++    # Exercise Stage A storage/facade reads here; populated HTTP serialization
++    # has its own UAT226 actual-router regression.
++    from tldw_Server_API.app.core.Notes_Graph.suggestion_api import build_notes_graph_suggestions_api
++
++    with chacha_operation(independent=True):
++        api = build_notes_graph_suggestions_api(note_db=db, owner_user_id="1", dataset_id="legacy:1", jobs=None)
++        pending = api.list_suggestions(note_id=note, states=("pending",), limit=20, cursor=None)
++    assert pending.items[0].suggestion.id == "visible"
++    assert {item.side for item in pending.items[0].evidence} == {"source", "target"}
++    with chacha_operation(independent=True), db.transaction() as conn:
++        conn.execute("UPDATE notes SET content=? WHERE id=?", ("changed target", target))
++    with chacha_operation(independent=True):
++        stale = api.list_suggestions(note_id=note, states=("pending",), limit=20, cursor=None)
++    assert {item.side for item in stale.items[0].evidence} == {"source"}
++
++
++def test_expected_fts_unavailability_is_distinct_from_unexpected_storage_error(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    _register(db)
++    _ready_provider(monkeypatch)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: SimpleNamespace())
++    store_type = type(db.note_graph_suggestion_store)
++
++    def fts_unavailable(*_args, **_kwargs):
++        raise NotesGraphFTSNotReadyError("notes_graph_fts_not_ready")
++
++    monkeypatch.setattr(store_type, "_ensure_fts_ready", fts_unavailable)
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == 200 and response.json()["unavailable_reason"] == "notes_graph_fts_not_ready"
++
++    def storage_error(*_args, **_kwargs):
++        raise RuntimeError("synthetic-private-storage-fault")
++
++    monkeypatch.setattr(store_type, "load_source_note", storage_error)
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == 503 and "synthetic-private" not in response.text
++
++
++@pytest.mark.parametrize("operation", ["reject", "reset", "cancel"])
++def test_unbound_write_helpers_remain_strict(fresh_suggestions, operation):
++    db, _, note, _ = fresh_suggestions
++    before = _counts(db)
++    with chacha_operation(independent=True):
++        store = db.note_graph_suggestion_store
++        common = {"dataset_id": "legacy:1", "idempotency_key": "strict-write", "now": stored.NOW}
++        with pytest.raises(NotesGraphDatasetScopeError):
++            if operation == "reject":
++                store.reject_suggestion(
++                    **common,
++                    suggestion_id="missing",
++                    expected_revision=1,
++                    expected_source_fingerprint="sha256:" + "a" * 64,
++                    expected_target_fingerprint=None,
++                )
++            elif operation == "reset":
++                store.reset_rejections(
++                    **common, source_note_id=note, source_fingerprint="sha256:" + "a" * 64, expected_revision=1
++                )
++            else:
++                store.admit_run_cancellation(
++                    **common, run_id="missing", expected_state="queued", expected_revision=1, reason="user_cancelled"
++                )
++    assert _counts(db) == before
++
++
++def test_unbound_read_preserves_nested_caller_write_and_rollback(fresh_suggestions):
++    db, _, note, kind = fresh_suggestions
++    with chacha_operation(independent=True):
++        original = db.get_note_by_id(note)["title"]
++        with pytest.raises(RuntimeError, match="caller rollback"):
++            with db.transaction() as conn:
++                conn.execute("UPDATE notes SET title=? WHERE id=?", ("pending caller title", note))
++                with db.transaction():
++                    assert (
++                        db.note_graph_suggestion_store.load_source_note(dataset_id="legacy:1", note_id=note).title
++                        == "pending caller title"
++                    )
++                if kind == "postgres":
++                    assert (
++                        conn.execute("SELECT current_setting('app.current_dataset_id', true) AS v").fetchone()["v"]
++                        == "legacy:1"
++                    )
++                raise RuntimeError("caller rollback")
++        assert db.get_note_by_id(note)["title"] == original
++        if kind == "postgres":
++            with db.transaction() as conn:
++                assert conn.execute("SELECT current_setting('app.current_dataset_id', true) AS v").fetchone()["v"] in (
++                    None,
++                    "",
++                )
++
++
++def test_unbound_eligibility_is_rechecked_after_owner_binding(fresh_suggestions):
++    db, _, note, _ = fresh_suggestions
++    with chacha_operation(independent=True):
++        store = db.note_graph_suggestion_store
++        assert store.load_source_note(dataset_id="legacy:1", note_id=note).note_id == note
++        with db.transaction() as conn:
++            conn.execute(
++                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)", ("1", "canonical-one")
++            )
++        with pytest.raises(NotesGraphDatasetScopeError):
++            store.load_source_note(dataset_id="legacy:1", note_id=note)
++        assert store.load_source_note(dataset_id="canonical-one", note_id=note).note_id == note
++
++
++@pytest.mark.parametrize("reason", ["disabled", "provider"])
++def test_missing_decisions_preserve_higher_priority_unavailability(fresh_suggestions, monkeypatch, reason):
++    from tldw_Server_API.app.core.Notes_Graph import graph_service
++
++    db, client, note, _ = fresh_suggestions
++    _register(db)
++    if reason == "disabled":
++        _ready_provider(monkeypatch)
++        monkeypatch.setattr(graph_service, "NOTES_GRAPH_ENABLED", lambda: False)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: SimpleNamespace()
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == 200
++    expected = "notes_graph_suggestions_disabled" if reason == "disabled" else "notes_graph_provider_disallowed"
++    assert response.json()["unavailable_reason"] == expected
++    assert response.json()["allowed_actions"] == ["cancel"]
++
++
++def test_registration_storage_error_is_not_unbound_capability(fresh_suggestions, monkeypatch):
++    db, client, note, _ = fresh_suggestions
++    _register(db)
++
++    def fail(*_args, **_kwargs):
++        raise RuntimeError("synthetic-private-registration-fault")
++
++    monkeypatch.setattr(type(db.note_graph_suggestion_store), "is_dataset_scope_registered", fail, raising=False)
++    response = client.get(f"/api/v1/notes/{note}/graph/suggestions/capabilities")
++    assert response.status_code == 503
++    assert "synthetic-private" not in response.text
++
++
++@pytest.mark.parametrize("dataset", ["legacy:1", "canonical-one"])
++def test_registered_scope_can_cancel_without_decision_coordinator(fresh_suggestions, monkeypatch, dataset):
++    from tldw_Server_API.app.core.Notes_Graph.suggestion_api import build_notes_graph_suggestions_api
++
++    db, _, note, _ = fresh_suggestions
++    _register(db, dataset=dataset)
++    _ready_provider(monkeypatch)
++    calls = []
++
++    class Jobs:
++        def get_job_or_archived_by_uuid(self, job_id, **scope):
++            calls.append(("read", scope))
++            return {
++                "id": 7,
++                "uuid": job_id,
++                "owner_user_id": "1",
++                "domain": "notes",
++                "queue": "graph-suggestions",
++                "job_type": "note_graph_suggestions",
++                "status": "pending",
++            }
++
++        def cancel_job(self, job_id, **scope):
++            calls.append(("cancel", scope))
++            assert job_id == 7
++            return True
++
++    with chacha_operation(independent=True):
++        store = db.note_graph_suggestion_store
++        admitted = store.admit_run(
++            dataset_id=dataset,
++            source_note_id=note,
++            source_fingerprint=stored._fingerprint(db, note),
++            provider="openai",
++            model="fixture-model",
++            capability_revision="cap-v1",
++            prompt_contract_version="prompt-v1",
++            idempotency_key="seed-run",
++            now=stored.NOW,
++        )
++        queued = store.bind_admitted_run(
++            dataset_id=dataset,
++            run_id=admitted.run.id,
++            expected_state="admitting",
++            expected_revision=admitted.run.revision,
++            job_id="scoped-job",
++            completion_token=f"completion-{admitted.run.id}",
++            replay_envelope={"run_id": admitted.run.id, "state": "queued"},
++            now=stored.NOW,
++        )
++        api = build_notes_graph_suggestions_api(note_db=db, owner_user_id="1", dataset_id=dataset, jobs=Jobs())
++        capability = api.get_capabilities(note_id=note, provider=None, model=None)
++        assert capability.allowed_actions == ("cancel",)
++        assert not capability.generation_available
++        result = api.cancel_run(
++            note_id=note, run_id=queued.id, expected_revision=queued.revision, idempotency_key="cancel-scoped"
++        )
++        assert result.accepted is True
++        assert result.cancellation.replay_envelope["state"] == "cancelling"
++        replay = api.cancel_run(
++            note_id=note, run_id=queued.id, expected_revision=queued.revision, idempotency_key="cancel-scoped"
++        )
++        assert replay.accepted is True
++    assert len(calls) == 2
++    assert calls[0] == ("read", {"domain": "notes", "owner_user_id": "1"})
++    assert calls[1][1]["expected_uuid"] == "scoped-job"
+--- /dev/null
++++ b/apps/packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx
+@@ -0,0 +1,112 @@
++// @vitest-environment jsdom
++import { fireEvent, render, screen } from "@testing-library/react"
++import { createInstance } from "i18next"
++import React from "react"
++import { I18nextProvider } from "react-i18next"
++import { describe, expect, it, vi } from "vitest"
++
++import english from "@/assets/locale/en/option.json"
++import { getNotesGraphSuggestionCapabilities } from "@/services/note-graph-suggestions"
++import NotesGraphInspector from "../NotesGraphInspector"
++
++const transport = vi.hoisted(() => ({ request: vi.fn() }))
++vi.mock("@/services/background-proxy", () => ({ bgRequest: transport.request }))
++vi.mock("@/components/Common/confirm-danger", () => ({
++  useConfirmDanger: () => vi.fn()
++}))
++
++const fingerprint = `sha256:${"a".repeat(64)}`
++
++describe("unbound Notes suggestion capabilities", () => {
++  it.each([{ allowed: [] }, { allowed: ["cancel"] }])(
++    "parses and discloses missing decisions with supported actions %j",
++    async ({ allowed }) => {
++      transport.request.mockResolvedValue({
++        ok: true,
++        status: 200,
++        headers: { ETag: `"${fingerprint}"` },
++        data: {
++          provider: "openai",
++          model: "fixture-model",
++          endpoint_origin_revision: fingerprint,
++          data_boundary: "remote",
++          disclosure_external: true,
++          outbound_data_categories: ["selected_note_excerpts"],
++          generation_available: false,
++          unavailable_reason: "notes_graph_sync_not_ready",
++          limits: {
++            max_candidates: 30,
++            max_relationships: 5,
++            max_tags: 5,
++            max_new_tags: 2,
++            max_tag_catalog: 100,
++            max_estimated_input_tokens: 24000,
++            max_output_tokens: 2000,
++            provider_timeout_seconds: 120,
++            response_candidates: 1
++          },
++          allowed_actions: allowed,
++          revision: fingerprint
++        }
++      })
++      const capabilities = await getNotesGraphSuggestionCapabilities({
++        noteId: "source"
++      })
++      expect(capabilities.allowed_actions).toEqual(allowed)
++      const i18n = createInstance()
++      await i18n.init({
++        lng: "en",
++        fallbackLng: "en",
++        defaultNS: "option",
++        resources: { en: { option: english } }
++      })
++      const suggestion = {
++        id: "suggestion-1",
++        run_id: "run-1",
++        kind: "related_note",
++        state: "pending",
++        revision: 1,
++        source_note_id: "source",
++        target_note_id: "target",
++        target_title: "Synthetic target",
++        source_fingerprint: fingerprint,
++        target_fingerprint: fingerprint,
++        match_strength: "strong",
++        rationale: "Synthetic reason",
++        evidence: []
++      }
++      render(
++        <I18nextProvider i18n={i18n}>
++          <NotesGraphInspector
++            graph={{
++              nodes: [{ id: "note:source", type: "note", label: "Source" }],
++              edges: []
++            } as never}
++            selectedNodeId="note:source"
++            suggestionsAuthorized
++            isOnline
++            controller={{
++              capabilities,
++              suggestions: [suggestion],
++              activeRun: { id: "run-1", state: "queued", cancellation_available: true },
++              capabilitiesQuery: {},
++              suggestionsQuery: {},
++              mutations: {}
++            } as never}
++            onSelectNode={vi.fn()}
++            onAnnounce={vi.fn()}
++            onDecideSuggestion={vi.fn()}
++          />
++        </I18nextProvider>
++      )
++      fireEvent.click(screen.getByRole("tab", { name: "Suggestions" }))
++      expect(screen.getByText("Suggestion decisions are unavailable for this Notes dataset.")).toBeVisible()
++      expect(screen.getByRole("button", { name: /regenerate/i })).toBeDisabled()
++      expect(screen.getByRole("button", { name: /^accept/i })).toBeDisabled()
++      expect(screen.getByRole("button", { name: /^reject/i })).toBeDisabled()
++      const cancel = screen.getByRole("button", { name: /cancel generation/i })
++      if (allowed.includes("cancel")) expect(cancel).toBeEnabled()
++      else expect(cancel).toBeDisabled()
++    }
++  )
++})

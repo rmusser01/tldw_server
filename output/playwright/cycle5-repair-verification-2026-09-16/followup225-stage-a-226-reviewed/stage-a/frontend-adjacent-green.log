@@ -1,0 +1,20 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:95461) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:95462) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:95463) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:95459) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/services/tldw/__tests__/note-graph-suggestions.test.ts (24 tests) 23ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/useNotesGraphSuggestions.test.tsx (23 tests) 121ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx (2 tests) 158ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphInspector.suggestions.test.tsx (16 tests) 550ms
+
+ Test Files  4 passed (4)
+      Tests  65 passed (65)
+   Start at  03:00:24
+   Duration  1.13s (transform 393ms, setup 386ms, import 513ms, tests 852ms, environment 921ms)

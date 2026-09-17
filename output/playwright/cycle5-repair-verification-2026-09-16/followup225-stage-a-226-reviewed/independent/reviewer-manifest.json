@@ -1,0 +1,77 @@
+{
+  "verdict": "CLEAR bounded Stage A225 and UAT226; Stage B225 and UAT227 separate",
+  "files": [
+    {
+      "path": ".tmp/uat225-226-independent-20260917/REVIEW225-STAGE-A-226.md",
+      "sha256": "6ab5c2a6cc21090e1e4397066fcedce2cd7eb8d3ee812c38b2b60b72d63e10d0"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/ast-compile.json",
+      "sha256": "6cf3b03bced8e8d1fb3ab4a9bd8e28bd82573a4ee9b3532b507e4114b1964e62"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/backend-command.json",
+      "sha256": "31eb7569b5546fc9a935ad57ccc156646d9c2af15071e102370cb46871ab5439"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/backend.redacted.log",
+      "sha256": "65b8830d86126671a7eed3996410103c50bde35ca49476fc09872175ad89ecdc"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/bandit-production.json",
+      "sha256": "4e7d5a51d60b22fc2b57f548fd2c098e94f57a9fde0a53387ee307a819e9cf21"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/bandit-production.log",
+      "sha256": "9eb6f2416f8567a37a62b5ea190c9c561a029e41fb932838e4d927a8be1f79b3"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/bandit-tests.json",
+      "sha256": "a89bfda0b0452e9798ad7914f9d9a155958ab9d2001675bf18f2eb92cbb8dc8b"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/bandit-tests.log",
+      "sha256": "de82d39a9f5fc1534459f41652a88a2d7d0ac7fa040130ad47332f088c29dded"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/causal-inputs.json",
+      "sha256": "a56b553378bf7611f5e99a784cae0b27c3e3fdeeecfb29345590fee999965bf9"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/compiler-comparison.json",
+      "sha256": "1443811508152d5b620410f7d82da5cb02748f87a5f4089377d7021c74e51ad5"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/eslint-scoped.json",
+      "sha256": "7585a72919eec270902c92aa4536926655b55c29f428be74f94170b3e3dcb40f"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/eslint.json",
+      "sha256": "add155be61cf78398d41d17c98e772131f474acd561136e7c930647dfe024759"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/frontend.log",
+      "sha256": "9e621f57b8d63d593f40d10dadadb0f6a5c6a41c7a02b76cd0d65d56b435e20f"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/source-after.json",
+      "sha256": "41c541d78ef2fb9c6f6d14f61918a3dfdbb935fceaeeb9a404914f779aecaccf"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/source-before.json",
+      "sha256": "215433560ab284778208272480069c3ac4353a5a25fe31b1375e64e1a5c9e168"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/tsc-current.txt",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "path": ".tmp/uat225-226-independent-20260917/verification.json",
+      "sha256": "6d16aba269c4c1bfd6d51752e6bf587d5c39cf5ec60456bf4d52771b35cc28cf"
+    }
+  ]
+}

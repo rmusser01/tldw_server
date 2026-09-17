@@ -1,0 +1,14 @@
+{
+  "changedFunctions": [
+    "list_suggestions"
+  ],
+  "schemaUnchanged": true,
+  "evidenceFields": [
+    "side",
+    "note_id",
+    "field",
+    "start_offset",
+    "end_offset",
+    "text"
+  ]
+}

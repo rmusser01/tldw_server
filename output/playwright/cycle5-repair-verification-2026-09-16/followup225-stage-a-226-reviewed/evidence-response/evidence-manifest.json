@@ -1,0 +1,81 @@
+{
+  "excludes": "private raw logs and credentials/configuration",
+  "artifacts": [
+    {
+      "path": ".tmp/uat226-repair-20260917/owned-manifest.json",
+      "sha256": "42ab50d7f67898f1e8ff94883bd94ccb4f40f8aeadb8ecd13abd6d7513a11b7b"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/owned.patch",
+      "sha256": "c41c820163b653b3cd949314d5ce3ed0b5a35d107dc654c004637c57c8e99f25"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/verification-final.json",
+      "sha256": "120dc0dda6fcff237cbf0fe1f05713b5686e0f6597e5c07ecd16fb66ea913e4a"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/ast-scope.json",
+      "sha256": "da5fd77ac2ecd6faad7f5dccea3a850dce9c1d18b5e8b2f4ce4a689cfe8ffa99"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/PLAN226.md",
+      "sha256": "e12af6d6c0556f793bd5004f1cf93170ce749ac37036f2454a943dfd84666da6"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/IMPLEMENTATION226.md",
+      "sha256": "7a6df0b09d31e89e33058fb00bc2896ac3ae71143d5b09a74e2212a126233d9a"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/ruff-current.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/bandit-production.json",
+      "sha256": "dc2e4d393cbedc00fa31abf6155b7314341803af1f9281e7bc971c8bf054680a"
+    },
+    {
+      "path": ".tmp/uat226-repair-20260917/bandit-tests.json",
+      "sha256": "40b2bc9a8e89ad0f492ef77f34165f34a43dca772fe29acfacaf887dc80fdb22"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-isolated-final-green.redacted.log",
+      "sha256": "2abd1cc76395e88ce2694c79b079e28996df4b31bf87d56ba37f7d14f6d8b87c"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-isolated-final-green-command.json",
+      "sha256": "046ffb128cfc8806eea493f8d892235df36885fedab55e6094a8edfac05c5865"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat226-evidence-red.redacted.log",
+      "sha256": "5be3b302fad42c91f973120369e8104d4ea9d343b855bec1061ed706f1c1adba"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat226-evidence-red-command.json",
+      "sha256": "4a061e497fcf9451f52f666c695f7d80431951e62fedb9fef1a0bb456bd088f3"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat226-evidence-clean-red.redacted.log",
+      "sha256": "36026ccfc8486b0251a4e396c74526b19acde8a27b809b29b8af34eb9d59fa28"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat226-evidence-clean-red-command.json",
+      "sha256": "e0e7563b5875129c2e97fc67e5c122cc0532cc3f22616eb8f4e43977c4cc0f98"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-stage-a-pending-diagnosis.redacted.log",
+      "sha256": "51978f0216175332857e5cf3f1f11dd0e03a4d5063fcf9e75c831cac588c67e6"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-stage-a-pending-diagnosis-command.json",
+      "sha256": "cce26a41021567991ff60b4e306a17a0898d89195259ad5bc82c4e621831ef40"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-final-green.redacted.log",
+      "sha256": "b80769e30c55e3302a83250e0564587be497185fea754e95fecf78378c0c05a8"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-226-final-green-command.json",
+      "sha256": "7e863127de7ef5be375ea543db0cd02a9299ec8c6d727df1765a682c068ce9b1"
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "at": "2026-09-17T09:57:14.908925+00:00",
+  "kind": "read-only design source observation, not an implementation freeze",
+  "task": "TASK13260.164",
+  "limits": "Stage A owned source may change concurrently; no tests executed for this follow-up. Original causal RED is independently retained.",
+  "files": [
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/FULL-LIFECYCLE-DESIGN225.md",
+      "sha256": "72841cf40e56bb72e7737beee4bcce8501ff84ca5c8b07958388af792234c2d6"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/PLAN225-full-legacy-lifecycle.md",
+      "sha256": "5da6d54c8a1e9d8b4b980029da10f59cb81064c279e47c4d58a1877fa18e1ce3"
+    },
+    {
+      "path": ".tmp/uat225-native-20260917/admin-scope-metadata.json",
+      "sha256": "2373d4b1536e235004a2dee760f0c01f65ece26426f003981885e6ae1f1d0aa5"
+    },
+    {
+      "path": "Docs/superpowers/specs/2026-08-26-notes-second-brain-graph-suggestions-design.md",
+      "sha256": "ee658b6983aa6bf8ec74330edee9f2a6e8fd14ffa00ce5156f4607554ec6bbaf"
+    },
+    {
+      "path": "backlog/tasks/task-13138 - Implement-first-class-Notes-graph-workspace-and-reviewable-AI-suggestions.md",
+      "sha256": "e85b15f0982899e85d340d5992cf8d8c339a7394bff2f304da4135169b7a4f28"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py",
+      "sha256": "5ffce21cdd013e4f13daa18fdad1546a6fc532aff7ecc3b0952dbb819ca7dce0"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notes_graph.py",
+      "sha256": "9f009055a4869eb1e90f223b47085eee5b9442e1ffde26e9070fdd4b77e89cc5"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_service.py",
+      "sha256": "3c709e80028fea40be3a85a35f26c9914e67b3512eea615d98077a49cf7c6b73"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py",
+      "sha256": "f0bce89b277e75a7718937156b274750f739214f22d3b5dfc8bac0f894e0d865"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_jobs.py",
+      "sha256": "b33245e91b65a388a901b664166e4e07013a441961032524ea5f79a0d2b1ecc3"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py",
+      "sha256": "97213633a9e7de4042c8a56060514bee1627d3752ea99a34eddea10c9c1d4fa3"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "sha256": "c61be419fc0a60f4736ac02c8b4793366bc4698b11a48079c1bc3f8c71a7675f"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_link_store.py",
+      "sha256": "5b0dd81d828073aef988b50a34c5e770e1c7efb35a5a95eca2a0efdb541e35a0"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py",
+      "sha256": "3d148d968d1482b7cba10c3fc1b9233355c3e1692181de4776a832155d8e2ca3"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "d1cfb0b2fe7aae3b1763f7a26cdb3f2b2ae2bbf685b97854e686f6960e4fb652"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/task_store.py",
+      "sha256": "13828f19833cd40d964756e0bbaad776bcf49b62f4e9114e0cca325eb076b38a"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/moodboard_sync_store.py",
+      "sha256": "f90a7af5c524d324d29086cdb3faeb944ef9027144e4fa52ee0dea0be5fa9937"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "63b3ccd15b9ce19bd1d964821eb0d33b4f191ff1a329cd83356e8481a6423d97"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/profile.py",
+      "sha256": "7276813d86f0e597e3014765d1fea746070d4af1be586de4689ca1399b9b6cd9"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/service.py",
+      "sha256": "914d871b3fe298fb213456b1644e220e0f336b7cd9ae8109b208f7a02779e498"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/factory.py",
+      "sha256": "3078b5f7ebf0380fb3d1efc3a5b9e8ef0598f4f2b96d2880db3ea8be3cd639dc"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py",
+      "sha256": "62e0157e0325fa9a966511a0c05d5ee0160a638fbd8d139dd839a2198b949e16"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py",
+      "sha256": "f3dc27e75f14d45a7da18b3a0e83decb357db038ec06f49978ec2f4fb91cb05c"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/server_origin.py",
+      "sha256": "a36e46b44212f64f1f77a1ead7549e0f695c9cfbb87876501646a572e1491137"
+    }
+  ]
+}

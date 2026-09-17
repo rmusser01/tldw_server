@@ -1,0 +1,34 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:95040) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx (2 tests | 2 failed) 5ms
+     × parses and discloses missing decisions with supported actions {"allowed":[]} 4ms
+     × parses and discloses missing decisions with supported actions {"allowed":["cancel"]} 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx > unbound Notes suggestion capabilities > parses and discloses missing decisions with supported actions {"allowed":[]}
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx > unbound Notes suggestion capabilities > parses and discloses missing decisions with supported actions {"allowed":["cancel"]}
+NotesGraphSuggestionClientError: The Notes graph server returned an invalid response.
+ ❯ invalidResponse ../packages/ui/src/services/note-graph-suggestions.ts:378:3
+    376|
+    377| const invalidResponse = (): NotesGraphSuggestionClientError =>
+    378|   new NotesGraphSuggestionClientError(502, "notes_graph_invalid_respon…
+       |   ^
+    379|
+    380| const invalidRequest = (): NotesGraphSuggestionClientError =>
+ ❯ parseResponse ../packages/ui/src/services/note-graph-suggestions.ts:454:30
+ ❯ parseResponseAs ../packages/ui/src/services/note-graph-suggestions.ts:461:3
+ ❯ normalizeCapabilities ../packages/ui/src/services/note-graph-suggestions.ts:674:22
+ ❯ Module.getNotesGraphSuggestionCapabilities ../packages/ui/src/services/note-graph-suggestions.ts:713:10
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphSuggestions.unbound.test.tsx:52:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  02:56:43
+   Duration  508ms (transform 84ms, setup 78ms, import 132ms, tests 5ms, environment 205ms)

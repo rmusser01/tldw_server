@@ -1,0 +1,17 @@
+{
+  "task": "TASK13260.165",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py",
+      "sha256": "4e5d909d37e4acc70dac4c3f22df64a6c13706294f12e4cab7bdad41340de7d1",
+      "snapshot": ".tmp/uat226-repair-20260917/review-snapshot/tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_evidence_response.py",
+      "sha256": "171354abf56c337ec98b67c939180d2e3badb527317dd8a4945ce7a73d43e445",
+      "snapshot": ".tmp/uat226-repair-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_evidence_response.py"
+    }
+  ],
+  "status": "frozen-for-independent-review",
+  "combinedVerification": "uat225-226-isolated-final-green: 149 passed, 0 skipped, 85.22s"
+}

@@ -1,0 +1,38 @@
+{
+  "combinedBackend": {
+    "passed": 149,
+    "skipped": 0,
+    "seconds": 85.22,
+    "log": ".tmp/fresh-uat-recovery-20260916/uat225-226-isolated-final-green.redacted.log"
+  },
+  "ownedHashAndSnapshotMatches": 8,
+  "adjacentBackend": {
+    "passed": 193,
+    "skipped": 0,
+    "seconds": 80.47
+  },
+  "frontend": {
+    "passed": 65,
+    "suites": 4,
+    "skipped": 0
+  },
+  "compiler": {
+    "baseline": 90,
+    "current": 90,
+    "added": 0,
+    "removed": 0
+  },
+  "eslint": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "publicEnglishUnavailableParity": 10,
+  "bandit-production.json": {
+    "findings": 0,
+    "errors": 0
+  },
+  "bandit-tests-final.json": {
+    "findings": 0,
+    "errors": 0
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "at": "2026-09-17T10:00:22.601Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_store.py",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_api.py",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_capabilities.py",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_cancellation.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_acceptance.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_lifecycle.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_retrieval_backends.py",
+    "tldw_Server_API/tests/Notes_Graph/evaluation/test_suggestion_privacy_observability_contract.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

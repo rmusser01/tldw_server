@@ -1,0 +1,33 @@
+{
+  "functions": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "changed": [
+        "NoteGraphSuggestionStore._require_dataset_scope",
+        "NoteGraphSuggestionStore._set_dataset_scope",
+        "NoteGraphSuggestionStore._with_dataset_scope",
+        "NoteGraphSuggestionStore.ensure_fts_ready",
+        "NoteGraphSuggestionStore.get_rejection_set",
+        "NoteGraphSuggestionStore.is_dataset_scope_registered",
+        "NoteGraphSuggestionStore.list_suggestion_evidence",
+        "NoteGraphSuggestionStore.list_suggestions",
+        "NoteGraphSuggestionStore.load_source_note"
+      ]
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_api.py",
+      "changed": [
+        "NotesGraphSuggestionsAPI.__init__",
+        "NotesGraphSuggestionsAPI.get_capabilities",
+        "build_notes_graph_suggestions_api"
+      ]
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py",
+      "changed": [
+        "list_suggestions"
+      ]
+    }
+  ],
+  "compiledPythonFiles": 6
+}

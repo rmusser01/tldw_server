@@ -1,0 +1,40 @@
+{
+  "at": "2026-09-17T10:01:50.086Z",
+  "files": [
+    {
+      "file": "original-read-diagnosis.md",
+      "source": ".tmp/uat225-diagnosis-20260917/DESIGN225.md",
+      "original_sha256": "3784220c311e965a57b520df9c14f6004a981514e2d2df30e98f6c74adeb04bb",
+      "retained_sha256": "3784220c311e965a57b520df9c14f6004a981514e2d2df30e98f6c74adeb04bb",
+      "normalization": "none"
+    },
+    {
+      "file": "read-stage-independent-design-review.md",
+      "source": ".tmp/uat225-independent-design-20260917/REVIEW225-DESIGN.md",
+      "original_sha256": "92bd1daa4706250103b3d238c831788fe4fe11fd3e4c8bdbf2b739c5d51c6729",
+      "retained_sha256": "92bd1daa4706250103b3d238c831788fe4fe11fd3e4c8bdbf2b739c5d51c6729",
+      "normalization": "none"
+    },
+    {
+      "file": "local-lifecycle-design.md",
+      "source": ".tmp/uat225-diagnosis-20260917/FULL-LIFECYCLE-DESIGN225.md",
+      "original_sha256": "72841cf40e56bb72e7737beee4bcce8501ff84ca5c8b07958388af792234c2d6",
+      "retained_sha256": "72841cf40e56bb72e7737beee4bcce8501ff84ca5c8b07958388af792234c2d6",
+      "normalization": "none"
+    },
+    {
+      "file": "initial-lifecycle-plan.md",
+      "source": ".tmp/uat225-diagnosis-20260917/PLAN225-full-legacy-lifecycle.md",
+      "original_sha256": "5da6d54c8a1e9d8b4b980029da10f59cb81064c279e47c4d58a1877fa18e1ce3",
+      "retained_sha256": "5da6d54c8a1e9d8b4b980029da10f59cb81064c279e47c4d58a1877fa18e1ce3",
+      "normalization": "none"
+    },
+    {
+      "file": "design-observation-manifest.json",
+      "source": ".tmp/uat225-diagnosis-20260917/full-lifecycle-design-manifest.json",
+      "original_sha256": "f7641a0f842b005eb3ddb99cac560d2c4be848d82d357a1a6714e5757bc5f53c",
+      "retained_sha256": "f7641a0f842b005eb3ddb99cac560d2c4be848d82d357a1a6714e5757bc5f53c",
+      "normalization": "none"
+    }
+  ]
+}

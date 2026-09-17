@@ -1,0 +1,40 @@
+{
+  "task": "TASK13260.163",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "sha256": "c61be419fc0a60f4736ac02c8b4793366bc4698b11a48079c1bc3f8c71a7675f",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_api.py",
+      "sha256": "dfe63a5cdb952722e99a2901c30a337c9164b930f827d6140a90ed7b75585b74",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_api.py"
+    },
+    {
+      "path": "apps/packages/ui/src/services/note-graph-suggestions.ts",
+      "sha256": "3d1cf6becffd0f9b29a5c4e485721b0de843524a3b411d5de7fbc39964030fa2",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/apps/packages/ui/src/services/note-graph-suggestions.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "45dab4d26eef53c199a20fe525efdd0f5d4db2c28a13f7c365393ba36e645a60",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/apps/packages/ui/src/assets/locale/en/option.json"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_fresh_reads.py",
+      "sha256": "5dbd32595a4f835230945d9fe20dd9f21f5f04fa2e12ae193e3397a61784d0f3",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_fresh_reads.py"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/note-graph-suggestions.test.ts",
+      "sha256": "25809a5bb1deb7a9cc3e2ab6883aa68c5f0136c4c88931a96fa65d46100108b6",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/apps/packages/ui/src/services/tldw/__tests__/note-graph-suggestions.test.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/public/_locales/en/option.json",
+      "sha256": "ab984a7c6e9edcd492ca8c9f0c6e742f44c99df50b80d6900976a194af20bc9b",
+      "snapshot": ".tmp/uat225-stage-a-20260917/baseline/apps/packages/ui/src/public/_locales/en/option.json"
+    }
+  ]
+}
