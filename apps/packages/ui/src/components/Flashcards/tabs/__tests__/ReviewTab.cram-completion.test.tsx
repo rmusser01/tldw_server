@@ -315,6 +315,34 @@ describe("ReviewTab cram completion", () => {
     )
   })
 
+  it.each([
+    [1, true, "1 card reviewed this session"],
+    [1, false, "1 card reviewed this session"],
+    [2, true, "2 cards reviewed this session"],
+    [2, false, "2 cards reviewed this session"]
+  ])("renders Due completion for %i reviews (English resource=%s)", async (count, resources, expected) => {
+    const template = vi.mocked(useReviewQuery)().data!
+    const cards = Array.from({ length: count as number }, (_, index) => ({
+      ...template, uuid: `due-completion-${index}`, front: `Due card ${index + 1}`
+    }))
+    let index = 0
+    vi.mocked(useReviewQuery).mockImplementation(() => ({
+      data: cards[index] ?? null
+    }) as ReturnType<typeof useReviewQuery>)
+    reviewMutateAsync.mockImplementation(async () => {
+      const card = cards[index++]
+      return { uuid: card.uuid, review_session_id: 77, interval_days: 1 }
+    })
+    const i18n = await makeI18n(resources as boolean)
+    render(<I18nextProvider i18n={i18n}><ReviewTab
+      onNavigateToCreate={vi.fn()} onNavigateToImport={vi.fn()}
+      reviewDeckId={1} onReviewDeckChange={vi.fn()} isActive
+    /></I18nextProvider>)
+    for (const card of cards) await rate(card.front)
+    expect(await screen.findByText(expected as string)).toBeInTheDocument()
+    expect(reviewMutateAsync).toHaveBeenCalledTimes(count as number)
+  })
+
   it.each([true, false])("renders singular completion with real ICU (English resource=%s)", async resources => {
     await mountQueue({ resources, tag: "" })
     await rate("Card 1")

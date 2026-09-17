@@ -1,0 +1,5 @@
+{
+  "scope": ".tmp/uat-repairs-231-246/quota245",
+  "findings": [],
+  "limits": "Pattern scan of retained sanitized artifacts; raw runner private logs are not copied."
+}

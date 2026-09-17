@@ -1,0 +1,13 @@
+{"code":1,"signal":null,"redactedLog":"/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/fresh-uat-recovery-20260916/quota245-red-boundary.redacted.log"}
+2026-09-17 11:11:55.569 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Audit.unified_audit_service:shutdown_audit_service:3978 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ/conftest.py:587: DeprecationWarning: Global shutdown is deprecated. Use: from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+  await shutdown_audit_service()
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+================= 1 failed, 3 deselected, 4 warnings in 7.76s ==================
+

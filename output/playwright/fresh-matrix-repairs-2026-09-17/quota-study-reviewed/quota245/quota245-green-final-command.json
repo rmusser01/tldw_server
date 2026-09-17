@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-17T18:16:48.190Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_pg_storage_quotas_schema.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py",
+    "tldw_Server_API/tests/AuthNZ/integration/test_database_runtime_selection.py",
+    "tldw_Server_API/tests/Admin/test_admin_storage_quotas.py",
+    "tldw_Server_API/tests/Billing/test_storage_quota_guard.py",
+    "-q",
+    "-rs"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

@@ -1,0 +1,180 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=437466556
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 4 items / 3 deselected / 1 selected
+
+tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py F [100%]2026-09-17 11:11:55.598 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-17 11:11:55.598 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 11:11:55.602 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 11:11:55.607 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 11:11:55.610 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 11:11:55.615 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-17 11:11:55.617 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-17 11:11:55.619 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-17 11:11:55.619 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-17 11:11:55.619 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-17 11:11:55.619 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-17 11:11:55.630 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-17 11:11:55.630 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 11:11:55.630 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-17 11:11:55.630 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:55.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3/1/workflows/workflows_scheduler.db
+2026-09-17 11:11:55.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-17 11:11:55.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.632 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+
+
+=================================== FAILURES ===================================
+_ test_normal_fresh_and_repeated_bootstrap_creates_storage_quotas[multi_user] __
+tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py:203: in test_normal_fresh_and_repeated_bootstrap_creates_storage_quotas
+    assert result.get('ok') is True, result
+E   AssertionError: {'error': 'ProfileUserWriteRejected', 'frames': [['run', 36], ['fetchval', 575], ['_guard', 499], ['_guard_sql', 265], ['_classify_sql', 499]], 'ok': False, 'stage': 'restricted_role_and_parent_seed'}
+E   assert False is True
+E    +  where False = <built-in method get of dict object at 0x12959f300>('ok')
+E    +    where <built-in method get of dict object at 0x12959f300> = {'error': 'ProfileUserWriteRejected', 'frames': [['run', 36], ['fetchval', 575], ['_guard', 499], ['_guard_sql', 265], ['_classify_sql', 499]], 'ok': False, 'stage': 'restricted_role_and_parent_seed'}.get
+---------------------------- Captured stderr setup -----------------------------
+2026-09-17 11:11:48.051 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:48.051 | DEBUG    | tldw_Server_API.app.core.DB_Management.db_path_utils:get_user_base_directory:534 - Created user directory: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3/1
+2026-09-17 11:11:48.052 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:48.052 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:48.052 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:48.068 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-17 11:11:48.068 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 11:11:48.095 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:<module>:356 - Using LRUCache for ChaChaNotes DB instances (maxsize=20).
+2026-09-17 11:11:48.095 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:48.095 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-17 11:11:48.105 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-17 11:11:48.105 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 11:11:48.105 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-17 11:11:48.158 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-17 11:11:48.158 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-17 11:11:48.158 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-17 11:11:48.169 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:1131 - Logging configured (Loguru + stdlib interception)
+2026-09-17 11:11:48.183 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 11:11:48.184 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.csrf_protection:add_csrf_protection:522 - CSRF Protection explicitly disabled via CSRF_ENABLED setting
+2026-09-17 11:11:48.188 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2622 - TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)
+2026-09-17 11:11:48.188 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2826 - Docs mounted at /docs-static from /Users/macbook-dev/Documents/GitHub/tldw_server2/Docs
+2026-09-17 11:11:48.189 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_groups.content:iter_content_router_specs:214 - Skipping audio router imports in pytest (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)
+2026-09-17 11:11:48.202 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/monitoring.py:141: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @router.on_event("startup")
+2026-09-17 11:11:48.240 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: research
+2026-09-17 11:11:48.402 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "ResponseFormatJsonSchemaSpec" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-17 11:11:48.444 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-17 11:11:48.444 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-17 11:11:48.494 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create:exponential_backoff:1166 - ExponentialBackoff decorator configured with max_retries=3, base_delay=1s.
+2026-09-17 11:11:48.646 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-17 11:11:48.989 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:49.089 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "register" in "CharacterExemplarLabels" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-17 11:11:49.320 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:49.609 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/UserProfiles/command_service.py:11: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+2026-09-17 11:11:49.761 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/admin/admin_monitoring.py:192: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @router.on_event("startup")
+2026-09-17 11:11:49.947 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.admin:_mount_admin_webhook_routes:135 - Canonical admin webhook mode is off; historical webhook CRUD, test, delivery, and incident-notify routes are disabled. Explicitly select temporary compatibility or migration before use.
+2026-09-17 11:11:50.184 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2901 - Registered 21 minimal-test routers from router groups
+2026-09-17 11:11:50.185 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_groups.minimal:iter_minimal_optional_router_specs:238 - Skipping audio routers in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)
+2026-09-17 11:11:50.185 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_groups.minimal:iter_minimal_optional_router_specs:276 - Skipping audio-jobs router in minimal test app (set MINIMAL_TEST_INCLUDE_AUDIO_JOBS=1 to enable)
+2026-09-17 11:11:50.241 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:50.319 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+2026-09-17 11:11:50.319 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+2026-09-17 11:11:50.329 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+2026-09-17 11:11:50.329 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+2026-09-17 11:11:50.773 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:50.774 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.278 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.279 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.279 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.487 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_apply_environment_overrides:235 - Applying development environment overrides
+2026-09-17 11:11:51.487 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_parse_rate_limit_configs:274 - Loaded 5 rate limit tier configurations
+2026-09-17 11:11:51.487 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_parse_circuit_breaker_configs:289 - Loaded 6 circuit breaker configurations
+2026-09-17 11:11:51.487 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:load_config:221 - Configuration loaded successfully from /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/evaluations_config.yaml
+2026-09-17 11:11:51.487 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:load_config:222 - Environment: development
+2026-09-17 11:11:51.489 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:51.490 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-f97ce7d3
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa_verified
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bullshit_benchmark
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mmlu_pro
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: gpqa_diamond
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simple_bench
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: aider_polyglot
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bfcl
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mask
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: vending_bench
+2026-09-17 11:11:51.557 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: swe_bench
+2026-09-17 11:11:51.717 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sharing.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from ..utils.prototype_error_contract import (
+2026-09-17 11:11:51.717 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sharing.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from ..utils.prototype_error_contract import (
+2026-09-17 11:11:51.754 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.755 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:51.756 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 11:11:53.703 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sandbox.py:217: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @router.on_event("startup")
+2026-09-17 11:11:53.704 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sandbox.py:223: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @router.on_event("shutdown")
+2026-09-17 11:11:53.733 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2903 - Registered 99 optional minimal-test routers from router groups
+2026-09-17 11:11:53.738 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.csrf_protection:__init__:281 - CSRF Protection Middleware initialized (enabled=False)
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-17 11:11:55.569 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Audit.unified_audit_service:shutdown_audit_service:3978 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ/conftest.py:587: DeprecationWarning: Global shutdown is deprecated. Use: from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+  await shutdown_audit_service()
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 11:11:55.570 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+================= 1 failed, 3 deselected, 4 warnings in 7.76s ==================

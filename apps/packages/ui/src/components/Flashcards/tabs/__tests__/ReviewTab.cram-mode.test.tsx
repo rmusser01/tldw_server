@@ -532,10 +532,19 @@ describe("ReviewTab cram mode", () => {
 
   it.each([false, true])("re-rating preserves the remaining queue after refetch (reordered=%s)", async reordered => {
     const { cards, refresh } = mountQueue()
+    cards[0].next_intervals = { again: "< 1 min", hard: "6 days", good: "10 days", easy: "13 days" }
+    refresh(cards)
+    reviewMutateAsync.mockResolvedValue({
+      uuid: cards[0].uuid, review_session_id: 77, interval_days: 10, version: 3,
+      next_intervals: { again: "< 1 min", hard: "14 days", good: "25 days", easy: "1 mo" }
+    })
     fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
     await rate("Alpha")
     refresh(reordered ? [cards[1], cards[2], cards[0]] : cards)
     fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"))
+    expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextContent("14 days")
+    expect(screen.getByTestId("flashcards-review-rate-3")).toHaveTextContent("25 days")
+    expect(screen.getByTestId("flashcards-review-rate-4")).toHaveTextContent("1 mo")
     await rate("Alpha", 2)
     expect(screen.getByText("Bravo")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent("2 cards remaining, 1 reviewed")

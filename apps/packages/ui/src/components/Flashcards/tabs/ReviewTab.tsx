@@ -559,7 +559,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           attemptedAnswerTimeMs = Date.now() - answerStartTimeRef.current
         }
 
-        // Store the card for potential undo before submitting
+        // Preserve content while the successful response supplies its new schedule.
         const cardForUndo = { ...card }
 
         const advanceCramQueue = () => {
@@ -623,7 +623,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         advanceCramQueue()
 
         // Enable undo for 10 seconds with visible countdown
-        setLastReviewedCard(cardForUndo)
+        setLastReviewedCard({ ...cardForUndo, ...reviewResult })
         setShowUndoButton(true)
         setUndoCountdown(10)
         if (undoTimeoutRef.current) {
@@ -1865,7 +1865,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                                 count: reviewedCount
                               })
                             : t("option:flashcards.reviewedThisSession", {
-                                defaultValue: "{{count}} cards reviewed this session",
+                                defaultValue:
+                                  "{count, plural, one {# card reviewed this session} other {# cards reviewed this session}}",
                                 count: reviewedCount
                               })}
                         </Text>

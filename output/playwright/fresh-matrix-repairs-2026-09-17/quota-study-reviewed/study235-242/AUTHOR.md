@@ -1,0 +1,11 @@
+# UAT235/242 author verification
+
+Tasks13260.177/184, original native acceptance pending. Production: merge the successful authority-guarded review response into the content snapshot used for re-rate; use existing ICU plural convention for Due completion in default/English translation. No scheduling API, identity, queue, counters, authority or practice-only contract changed.
+
+RED: rendered Due and both reordered/unchanged Cram queues display stale6days instead of response14days (3failures); actual Due completion with real ICU+English resource and fallback says1cards (2failures). One additional negative test initially expected raw error detail, but existing UI correctly maps it to Review not saved; changed only that expectation. Corrected negative control passes on original production. InitialRED6failed/34passed;5causal failures retained.
+
+GREEN40/0skip across3files; adjacent100/0skip across6files covers current Due/Cram/ownership/session/queue behavior. Repeated Due re-rate shows response20days after second save; card content remains. Failed save retains prior preview and no new re-rate. Existing schedule-OFF no-write controls pass. Due one/two counts are rendered with actual English resource and fallback.
+
+Scoped ESLint invoked from repository root with explicit frontend config passes (first frontend-cwd command ignored shared files and is not verification). No Python, BanditN/A. Full compiler90diagnostics, matching prior count; two existing Node EventEmitter diagnostic wordings differ from retained230baseline because installed ambient types differ. Fresh HEAD compiler read-overlay comparison under the same dependencies is running; no worktree files are swapped. No native five-card or Study acceptance claimed.
+
+Final static detail: correct scoped ESLint has0errors/41warnings, exactly matching fresh HEAD lintText baseline. Initial frontend-cwd ignored-file output is retained but is not accepted as lint coverage. Fresh baseline/current compiler programs (identical installed dependencies/options, baseline source read overlay only) both have90diagnostics with exact semantic match. Incremental CLI differs only in two unchanged EventEmitter error wordings; no changed-path diagnostic or new compiler error. Compiler is not globally clean; these are existing failures, not a passing full typecheck.

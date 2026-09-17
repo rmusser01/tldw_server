@@ -1,0 +1,311 @@
+{
+  "at": "2026-09-17T18:29:54.838Z",
+  "tasks": [
+    "TASK13260.187",
+    "TASK13260.177",
+    "TASK13260.184"
+  ],
+  "baseRevision": "ea2bc4d04e",
+  "status": "reviewed implementations; original native acceptance pending",
+  "secretScan": {
+    "knownValues": 27,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/bandit-baseline.json",
+      "path": "quota245/bandit-baseline.json",
+      "bytes": 773,
+      "sha256": "2d0e628ce031baf717e4ee76d132463dce328992eb09a5bb8c067aadbfaf7721"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/bandit-baseline.txt",
+      "path": "quota245/bandit-baseline.txt",
+      "bytes": 248,
+      "sha256": "6f1e2271846e7ed2a5b3d23d1895a257bac98e3a6c4808d39d47599b1c2fb1f4"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/bandit-final.json",
+      "path": "quota245/bandit-final.json",
+      "bytes": 773,
+      "sha256": "4ca8654d3937db92cc5bd06b534d2faa15a7d298cf4d1b0de63818d150f02dc3"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/bandit-final.txt",
+      "path": "quota245/bandit-final.txt",
+      "bytes": 245,
+      "sha256": "d969f934c6d579f08f8431fd4c28cda6827e7e25aa0b75ecf31544b43e1672c5"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/evidence-manifest.json",
+      "path": "quota245/evidence-manifest.json",
+      "bytes": 3750,
+      "sha256": "140b06bff1387669b64d9dcc112b473faf075632596c5f2a5cdadb2d24d595f7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/evidence-scan.json",
+      "path": "quota245/evidence-scan.json",
+      "bytes": 170,
+      "sha256": "e49c554bbd4688bfc08aa889279a893ac1b091f2e5906c781eb4e70f79de5d42"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/green-final-receipt.txt",
+      "path": "quota245/green-final-receipt.txt",
+      "bytes": 2096,
+      "sha256": "89790acebf87e3b3b57c81a2589b7e074291de3fe4addf7a4ee75cf06ecbcf3b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/green-first-receipt.txt",
+      "path": "quota245/green-first-receipt.txt",
+      "bytes": 2311,
+      "sha256": "82f9572e9e02815cc60a2b931eca9c3e8029c886cb38091650f9b091a09dce82"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-causal-red-final-command.json",
+      "path": "quota245/quota245-causal-red-final-command.json",
+      "bytes": 434,
+      "sha256": "3c084ddaf714f096a6aa063e0797d2e7453cb7e622ca901c0558cec1546e0cc3"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-causal-red-final.redacted.log",
+      "path": "quota245/quota245-causal-red-final.redacted.log",
+      "bytes": 78706,
+      "sha256": "6ac35face42150dfde746ba91055347198306e8571e930381f54c63f6f55c001"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-green-final-command.json",
+      "path": "quota245/quota245-green-final-command.json",
+      "bytes": 721,
+      "sha256": "9d5702c8fe7b8703304e36f7edb15db94ca87aec044b2e69cf765c3e719d1abf"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-green-final.redacted.log",
+      "path": "quota245/quota245-green-final.redacted.log",
+      "bytes": 6691,
+      "sha256": "772a58fad6fa567eedf4cfcecff55688edf14f9d78d217143e934bf9b89ba151"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-green-first.redacted.log",
+      "path": "quota245/quota245-green-first.redacted.log",
+      "bytes": 15822,
+      "sha256": "b4dffff543ff057564d02d0f896e5898b5977a36d5d0154408685b6325d74dab"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/quota245-red-boundary.redacted.log",
+      "path": "quota245/quota245-red-boundary.redacted.log",
+      "bytes": 31076,
+      "sha256": "436a06e4819dcf62dc8b752f804729757e20ffeb3943b0f0831c6652f22841b2"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/red-boundary-receipt.txt",
+      "path": "quota245/red-boundary-receipt.txt",
+      "bytes": 2367,
+      "sha256": "6965dbd5e720bea1a456c506a0773d97ba012665d729dbf8adc6c027a7a079e7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/red-final-receipt.txt",
+      "path": "quota245/red-final-receipt.txt",
+      "bytes": 2316,
+      "sha256": "271d931ef1025c77cad2fce49798cc097984de0e96b818407206de365c8959d2"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/red-host-receipt.txt",
+      "path": "quota245/red-host-receipt.txt",
+      "bytes": 2315,
+      "sha256": "a7bfcabdce429542bf7c6b609fede5fae614a8254b1e37cd1af7b2a7dc8802b0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/red-receipt.txt",
+      "path": "quota245/red-receipt.txt",
+      "bytes": 2310,
+      "sha256": "ab42b75d2e5329f83beda2a30f565851323314f8a9d3bc062ace51d9373deee1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/report.md",
+      "path": "quota245/report.md",
+      "bytes": 4328,
+      "sha256": "7c68e737bb86a22f8a3e15468360552de02c1b87cb0b045dcd43e22efa944a61"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/ruff-baseline.json",
+      "path": "quota245/ruff-baseline.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/ruff-final.json",
+      "path": "quota245/ruff-final.json",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/ruff-tests-initial.json",
+      "path": "quota245/ruff-tests-initial.json",
+      "bytes": 1120,
+      "sha256": "2f8b0f1f7dabed56c8d03f9a8b75cbde829d2c849eda76710e6787b87ab54fe0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/source-freeze.json",
+      "path": "quota245/source-freeze.json",
+      "bytes": 731,
+      "sha256": "5baadcd8c7052ca6b445c2ceef8b985f8f40dc7ae98629af2304d6390523f039"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/quota245/static-summary.json",
+      "path": "quota245/static-summary.json",
+      "bytes": 206,
+      "sha256": "db113a46ac942d96a039410edc73f51c002b336fa8bc636d1bf06df0bb4545c3"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review245/REVIEW.md",
+      "path": "review245/REVIEW.md",
+      "bytes": 1957,
+      "sha256": "174830032d443fdebde1fc8e85fd01fbf6cae160ff1fff35b3a0b2b636ff6eaa"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review245/bandit-production.json",
+      "path": "review245/bandit-production.json",
+      "bytes": 773,
+      "sha256": "d9b691b5c7d64bcac42844dc68a3997cf8e64fe1af064e79c05304e147b7967e"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review245/quota245-independent-root-command.json",
+      "path": "review245/quota245-independent-root-command.json",
+      "bytes": 739,
+      "sha256": "f680d6d64f1e984d39d7eef4a55c720c4d28dcf4d5cdac67a764a64187f56151"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review245/quota245-independent-root.redacted.log",
+      "path": "review245/quota245-independent-root.redacted.log",
+      "bytes": 6691,
+      "sha256": "22e4fe2319b5668a2ac6b5e39cc9e29c56a5e619d2bc9b82d6befe54fbf5d68b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review245/source-verification.json",
+      "path": "review245/source-verification.json",
+      "bytes": 619,
+      "sha256": "eebe6f5c2ba829754f8651942871716d2196f5c6e000a7814ec33a94c9449679"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/AUTHOR.md",
+      "path": "study235-242/AUTHOR.md",
+      "bytes": 2331,
+      "sha256": "703f0e8d985425c18bc2f4f891f447c95ceeaff4eb00eaf1a4cba1bc2083b0d2"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/adjacent.txt",
+      "path": "study235-242/adjacent.txt",
+      "bytes": 12036,
+      "sha256": "720fa602530b76487c1b9971201d4450562804f37e4b01aca3c1bc8739010337"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/compiler-baseline.mjs",
+      "path": "study235-242/compiler-baseline.mjs",
+      "bytes": 1880,
+      "sha256": "b12a8c3ba133765a182cebf91268ed919c2282f584cc5efdbfc59abdf34379d8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/compiler-comparison.json",
+      "path": "study235-242/compiler-comparison.json",
+      "bytes": 592,
+      "sha256": "076852806ef65c8a4cbbed7c5742d83684750f97223cb92b887ef488634a9efa"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/compiler-fresh-comparison.json",
+      "path": "study235-242/compiler-fresh-comparison.json",
+      "bytes": 1039,
+      "sha256": "5e0addaedd1c563d3166771f01e0946510615a1ddeeee14fb0c0283a2a5c9475"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/compiler-program-comparison.json",
+      "path": "study235-242/compiler-program-comparison.json",
+      "bytes": 110,
+      "sha256": "afb8f6d6130b498ed58420b027eb806fee754aea8021540ed3be44afe2dc1cad"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/eslint-root.txt",
+      "path": "study235-242/eslint-root.txt",
+      "bytes": 4766,
+      "sha256": "882531b7019cbc5a7d3eff489cae8fbe70673912756e9eee7378c4689ce098b0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/eslint.txt",
+      "path": "study235-242/eslint.txt",
+      "bytes": 798,
+      "sha256": "473a1deb5f9a7f2ef016ddf6acf307c2736a26f9ccac5f8fa1eb7fa2d6d16969"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/failure-control.txt",
+      "path": "study235-242/failure-control.txt",
+      "bytes": 986,
+      "sha256": "319b691bfd2a8f75b7eb630e9d882c26a309ae3326d55e5a16a6b4bcc45a445c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/green.txt",
+      "path": "study235-242/green.txt",
+      "bytes": 1417,
+      "sha256": "cdbfebe316651233d73186fbda4d92eab56ec08388093a5bd9cd4038ac6187ad"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/lint-compare.mjs",
+      "path": "study235-242/lint-compare.mjs",
+      "bytes": 1495,
+      "sha256": "a1c1c0573130ab6d9eef0db5600709b1657fb7e39705f38e40cb3dcebfb476e2"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/lint-comparison.json",
+      "path": "study235-242/lint-comparison.json",
+      "bytes": 10413,
+      "sha256": "1957d6784a94a8ed9ce7d14863d8c7ed9f2276c3513029eb852d601486ac5f86"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/red.txt",
+      "path": "study235-242/red.txt",
+      "bytes": 34441,
+      "sha256": "064bd5fda180231b66833d008de4f142e734b0ebf360e4608dee0da89d0547f7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/tsc-fresh-baseline.json",
+      "path": "study235-242/tsc-fresh-baseline.json",
+      "bytes": 29243,
+      "sha256": "4b00790c882d282c0fc13a37033829a255bda9c476bea30a05249446a1f36018"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/tsc-fresh-current.json",
+      "path": "study235-242/tsc-fresh-current.json",
+      "bytes": 29243,
+      "sha256": "4b00790c882d282c0fc13a37033829a255bda9c476bea30a05249446a1f36018"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/study235-242/tsc.txt",
+      "path": "study235-242/tsc.txt",
+      "bytes": 24428,
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review235-242/REVIEW.md",
+      "path": "review235-242/REVIEW.md",
+      "bytes": 3165,
+      "sha256": "0723602ce23ea743776922d5426bf2db6241bbbdc24dddbe98a02cc137d6978c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review235-242/focused.log",
+      "path": "review235-242/focused.log",
+      "bytes": 62,
+      "sha256": "b28657a1fefe0d7e04b771cea467796c572d8c4fde40d6eae02f1baa623c797a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review235-242/hashes.json",
+      "path": "review235-242/hashes.json",
+      "bytes": 1068,
+      "sha256": "946ac96c9ad7398eceb4343ade26c46b93e9232348389962280b0ad8f685b9f1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review235-242/tests.log",
+      "path": "review235-242/tests.log",
+      "bytes": 34200,
+      "sha256": "94c65d25bb2385e9aeae859371d4c10feefcfc9413091bf6315e24e2b7ad2b17"
+    }
+  ]
+}

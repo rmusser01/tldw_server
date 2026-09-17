@@ -1,0 +1,14 @@
+{
+  "ruff": {
+    "baseline": 0,
+    "final": 0,
+    "added": 0
+  },
+  "bandit": {
+    "baseline": 0,
+    "final": 0,
+    "added": 0
+  },
+  "git_diff_check": "passed",
+  "fixture_sql_parser_controls": 15
+}

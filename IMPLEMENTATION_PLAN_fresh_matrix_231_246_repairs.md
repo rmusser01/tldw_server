@@ -37,7 +37,7 @@
 **Tests:** Normal fresh/repeated AuthNZ quota bootstrap; actual restricted worker→executor→Media INSERT/foreign denial/scope cleanup; world-book catalogue read; warning uniqueness; actual installed Next response after30seconds plus abort/failure controls.
 **Status:** In Progress
 
-- [ ]245: extend canonical bootstrap and real quota/guard controls; retain partial-index upserts, FK/check constraints, fractional usage and fail-closed behavior.
+- [x]245: extend canonical bootstrap and real quota/guard controls; retain partial-index upserts, FK/check constraints, fractional usage and fail-closed behavior. Independent52/0skip; native admission pending.
 - [ ]238/233: reproduce actual worker persistence with trusted owner in required PostgreSQL; carry scope through executor and reset it; deduplicate terminal warnings at their producer.
 - [x]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle; independent32/0skip, native acceptance pending.
 - [x]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls; independent4/0skip, native acceptance pending.
@@ -49,9 +49,9 @@
 **Goal:** Correct231,232,235–237,240–244 and determine246's actual failure boundary.
 **Success criteria:** Each original behavior has a causal regression and minimal reviewed correction;246 has a supported disposition, not an assumed timeout cause.
 **Tests:** Actual component/hook/QueryClient lifetimes; provider alias conflict controls; saved ordinary-mode transition; canonical re-rate previews; real SQLite/PG Hard/Again analytics; one/multiple localization; transport first-byte/idle/abort boundaries.
-**Status:** Not Started
+**Status:** In Progress
 
-- [ ] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion.
+- [x] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion. Independent100/0skip; native acceptance pending.
 - [ ] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit legacy fallback and owner/date filters.
 - [ ] Media237/241/244: missing-auth initial render, late success/rejection after disconnect, delayed selection, actual wizard completion, preserved filters and old-owner rejection.
 - [ ] Chat/model231/232/236/243: correct surface copy, actionable sanitized400, qualified alias readiness/recovery and fresh ordinary-mode transition without private-state regressions.

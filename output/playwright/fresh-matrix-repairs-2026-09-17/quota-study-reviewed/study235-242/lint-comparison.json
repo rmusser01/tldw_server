@@ -1,0 +1,253 @@
+{
+  "baseline": 41,
+  "current": 41,
+  "exactSemanticMatch": true,
+  "diagnostics": [
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "rule": "react-hooks/exhaustive-deps",
+      "message": "React Hook React.useEffect has a missing dependency: 'activeCard'. Either include it or remove the dependency array.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "rule": "react-hooks/exhaustive-deps",
+      "message": "React Hook React.useCallback has a missing dependency: 'reviewedCount'. Either include it or remove the dependency array.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "rule": "@typescript-eslint/no-explicit-any",
+      "message": "Unexpected any. Specify a different type.",
+      "severity": 1
+    }
+  ]
+}

@@ -1,0 +1,660 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:73595) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:73597) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:73596) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+···Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+·······stderr | ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx > ReviewTab re-rate action > keeps the current preview and does not enable re-rate when saving fails
+[flashcards:error] {
+  code: 'FLASHCARDS_UNKNOWN',
+  status: undefined,
+  operation: 'submitting your review',
+  raw: 'Controlled review failure'
+}
+
+·x····xxx·····x··x············
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx > ReviewTab cram completion > renders Due completion for 1 reviews (English resource=true)
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx > ReviewTab cram completion > renders Due completion for 1 reviews (English resource=false)
+TestingLibraryElementError: Unable to find an element with the text: 1 card reviewed this session. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2 "[39m
+        [33mdata-testid[39m=[32m"flashcards-review-topbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined min-w-64 max-w-full flex-1 css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-allow-clear ant-select-show-arrow"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-deck-select"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content-value"[39m
+              [33mstyle[39m=[32m"visibility: visible;"[39m
+              [33mtitle[39m=[32m"Biology"[39m
+            [36m>[39m
+              [0mBiology[0m
+            [36m</div>[39m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33mautocomplete[39m=[32m"off"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-clear"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"close-circle"[39m
+              [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"close-circle"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfill-rule[39m=[32m"evenodd"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm127.98 274.82h-.04l-.08.06L512 466.75 384.14 338.88c-.04-.05-.06-.06-.08-.06a.12.12 0 00-.07 0c-.03 0-.05.01-.09.05l-45.02 45.02a.2.2 0 00-.05.09.12.12 0 000 .07v.02a.27.27 0 00.06.06L466.75 512 338.88 639.86c-.05.04-.06.06-.06.08a.12.12 0 000 .07c0 .03.01.05.05.09l45.02 45.02a.2.2 0 00.09.05.12.12 0 00.07 0c.02 0 .04-.01.08-.05L512 557.25l127.86 127.87c.04.04.06.05.08.05a.12.12 0 00.07 0c.03 0 .05-.01.09-.05l45.02-45.02a.2.2 0 00.05-.09.12.12 0 000-.07v-.02a.27.27 0 00-.05-.06L557.25 512l127.87-127.86c.04-.04.05-.06.05-.08a.12.12 0 000-.07c0-.03-.01-.05-.05-.09l-45.02-45.02a.2.2 0 00-.09-.05.12.12 0 00-.07 0z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mchecked[39m=[32m""[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Due only"[39m
+              [36m>[39m
+                [0mDue only[0m
+              [36m</div>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Cram"[39m
+              [36m>[39m
+                [0mCram[0m
+              [36m</div>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+          ...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2 "[39m
+        [33mdata-testid[39m=[32m"flashcards-review-topbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined min-w-64 max-w-full flex-1 css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-allow-clear ant-select-show-arrow"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-deck-select"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content-value"[39m
+              [33mstyle[39m=[32m"visibility: visible;"[39m
+              [33mtitle[39m=[32m"Biology"[39m
+            [36m>[39m
+              [0mBiology[0m
+            [36m</div>[39m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33mautocomplete[39m=[32m"off"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-clear"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"close-circle"[39m
+              [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"close-circle"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfill-rule[39m=[32m"evenodd"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm127.98 274.82h-.04l-.08.06L512 466.75 384.14 338.88c-.04-.05-.06-.06-.08-.06a.12.12 0 00-.07 0c-.03 0-.05.01-.09.05l-45.02 45.02a.2.2 0 00-.05.09.12.12 0 000 .07v.02a.27.27 0 00.06.06L466.75 512 338.88 639.86c-.05.04-.06.06-.06.08a.12.12 0 000 .07c0 .03.01.05.05.09l45.02 45.02a.2.2 0 00.09.05.12.12 0 00.07 0c.02 0 .04-.01.08-.05L512 557.25l127.86 127.87c.04.04.06.05.08.05a.12.12 0 00.07 0c.03 0 .05-.01.09-.05l45.02-45.02a.2.2 0 00.05-.09.12.12 0 000-.07v-.02a.27.27 0 00-.05-.06L557.25 512l127.87-127.86c.04-.04.05-.06.05-.08a.12.12 0 000-.07c0-.03-.01-.05-.05-.09l-45.02-45.02a.2.2 0 00-.09-.05.12.12 0 00-.07 0z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mchecked[39m=[32m""[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Due only"[39m
+              [36m>[39m
+                [0mDue only[0m
+              [36m</div>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Cram"[39m
+              [36m>[39m
+                [0mCram[0m
+              [36m</div>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+          ...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx:342:25
+    340|     /></I18nextProvider>)
+    341|     for (const card of cards) await rate(card.front)
+    342|     expect(await screen.findByText(expected as string)).toBeInTheDocum…
+       |                         ^
+    343|     expect(reviewMutateAsync).toHaveBeenCalledTimes(count as number)
+    344|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx > ReviewTab cram mode > re-rating preserves the remaining queue after refetch (reordered=false)
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx > ReviewTab cram mode > re-rating preserves the remaining queue after refetch (reordered=true)
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  14 days
+Received:
+  Hard26 days
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx:545:60
+    543|     refresh(reordered ? [cards[1], cards[2], cards[0]] : cards)
+    544|     fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"…
+    545|     expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextC…
+       |                                                            ^
+    546|     expect(screen.getByTestId("flashcards-review-rate-3")).toHaveTextC…
+    547|     expect(screen.getByTestId("flashcards-review-rate-4")).toHaveTextC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx > ReviewTab re-rate action > uses each saved schedule for the next re-rate preview while retaining card content
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  14 days
+Received:
+  Hard26 days
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx:325:60
+    323|     fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"…
+    324|     expect(await screen.findByText("Answer one")).toBeInTheDocument()
+    325|     expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextC…
+       |                                                            ^
+    326|     expect(screen.getByTestId("flashcards-review-rate-3")).toHaveTextC…
+    327|     expect(screen.getByTestId("flashcards-review-rate-4")).toHaveTextC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx > ReviewTab re-rate action > keeps the current preview and does not enable re-rate when saving fails
+TestingLibraryElementError: Unable to find an element with the text: Controlled review failure. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2 rounded border border-border/70 bg-surface2/60 p-2"[39m
+        [33mdata-testid[39m=[32m"flashcards-review-topbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined min-w-64 max-w-full flex-1 css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-allow-clear ant-select-show-arrow"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-deck-select"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content-value"[39m
+              [33mstyle[39m=[32m"visibility: visible;"[39m
+              [33mtitle[39m=[32m"Biology"[39m
+            [36m>[39m
+              [0mBiology[0m
+            [36m</div>[39m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33mautocomplete[39m=[32m"off"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-clear"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"close-circle"[39m
+              [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"close-circle"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfill-rule[39m=[32m"evenodd"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm127.98 274.82h-.04l-.08.06L512 466.75 384.14 338.88c-.04-.05-.06-.06-.08-.06a.12.12 0 00-.07 0c-.03 0-.05.01-.09.05l-45.02 45.02a.2.2 0 00-.05.09.12.12 0 000 .07v.02a.27.27 0 00.06.06L466.75 512 338.88 639.86c-.05.04-.06.06-.06.08a.12.12 0 000 .07c0 .03.01.05.05.09l45.02 45.02a.2.2 0 00.09.05.12.12 0 00.07 0c.02 0 .04-.01.08-.05L512 557.25l127.86 127.87c.04.04.06.05.08.05a.12.12 0 00.07 0c.03 0 .05-.01.09-.05l45.02-45.02a.2.2 0 00.05-.09.12.12 0 000-.07v-.02a.27.27 0 00-.05-.06L557.25 512l127.87-127.86c.04-.04.05-.06.05-.08a.12.12 0 000-.07c0-.03-.01-.05-.05-.09l-45.02-45.02a.2.2 0 00-.09-.05.12.12 0 00-.07 0z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mchecked[39m=[32m""[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Due only"[39m
+              [36m>[39m
+                [0mDue only[0m
+              [36m</div>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Cram"[39m
+              [36m>[39m
+                [0mCram[0m
+              [36m</div>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"mb-3 flex flex-wrap items-center gap-2 rounded border border-border/70 bg-surface2/60 p-2"[39m
+        [33mdata-testid[39m=[32m"flashcards-review-topbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-select ant-select-outlined min-w-64 max-w-full flex-1 css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-allow-clear ant-select-show-arrow"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-deck-select"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-content"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-select-content-value"[39m
+              [33mstyle[39m=[32m"visibility: visible;"[39m
+              [33mtitle[39m=[32m"Biology"[39m
+            [36m>[39m
+              [0mBiology[0m
+            [36m</div>[39m
+            [36m<input[39m
+              [33maria-autocomplete[39m=[32m"list"[39m
+              [33maria-expanded[39m=[32m"false"[39m
+              [33maria-haspopup[39m=[32m"listbox"[39m
+              [33mautocomplete[39m=[32m"off"[39m
+              [33mclass[39m=[32m"ant-select-input"[39m
+              [33mid[39m=[32m"test-id"[39m
+              [33mreadonly[39m=[32m""[39m
+              [33mrole[39m=[32m"combobox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m""[39m
+            [36m/>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-suffix"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"down"[39m
+              [33mclass[39m=[32m"anticon anticon-down"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"down"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-select-clear"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-label[39m=[32m"close-circle"[39m
+              [33mclass[39m=[32m"anticon anticon-close-circle"[39m
+              [33mrole[39m=[32m"img"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mdata-icon[39m=[32m"close-circle"[39m
+                [33mfill[39m=[32m"currentColor"[39m
+                [33mfill-rule[39m=[32m"evenodd"[39m
+                [33mfocusable[39m=[32m"false"[39m
+                [33mheight[39m=[32m"1em"[39m
+                [33mviewBox[39m=[32m"64 64 896 896"[39m
+                [33mwidth[39m=[32m"1em"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm127.98 274.82h-.04l-.08.06L512 466.75 384.14 338.88c-.04-.05-.06-.06-.08-.06a.12.12 0 00-.07 0c-.03 0-.05.01-.09.05l-45.02 45.02a.2.2 0 00-.05.09.12.12 0 000 .07v.02a.27.27 0 00.06.06L466.75 512 338.88 639.86c-.05.04-.06.06-.06.08a.12.12 0 000 .07c0 .03.01.05.05.09l45.02 45.02a.2.2 0 00.09.05.12.12 0 00.07 0c.02 0 .04-.01.08-.05L512 557.25l127.86 127.87c.04.04.06.05.08.05a.12.12 0 00.07 0c.03 0 .05-.01.09-.05l45.02-45.02a.2.2 0 00.05-.09.12.12 0 000-.07v-.02a.27.27 0 00-.05-.06L557.25 512l127.87-127.86c.04-.04.05-.06.05-.08a.12.12 0 000-.07c0-.03-.01-.05-.05-.09l-45.02-45.02a.2.2 0 00-.09-.05.12.12 0 00-.07 0z"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-mode-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item ant-segmented-item-selected"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mchecked[39m=[32m""[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Due only"[39m
+              [36m>[39m
+                [0mDue only[0m
+              [36m</div>[39m
+            [36m</label>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented-item"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33mclass[39m=[32m"ant-segmented-item-input"[39m
+                [33mname[39m=[32m"test-id"[39m
+                [33mtype[39m=[32m"radio"[39m
+              [36m/>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-segmented-item-label"[39m
+                [33mtitle[39m=[32m"Cram"[39m
+              [36m>[39m
+                [0mCram[0m
+              [36m</div>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"segmented control"[39m
+          [33maria-orientation[39m=[32m"horizontal"[39m
+          [33mclass[39m=[32m"ant-segmented css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+          [33mdata-testid[39m=[32m"flashcards-review-prompt-side-toggle"[39m
+          [33mrole[39m=[32m"radiogroup"[39m
+          [33mtabindex[39m=[32m"0"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-segmented-group"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"ant-segmented...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.rerate.test.tsx:344:18
+    342|     fireEvent.click(screen.getByTestId("flashcards-review-show-answer"…
+    343|     fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    344|     await screen.findByText("Controlled review failure")
+       |                  ^
+    345|     expect(screen.getByText("Answer one")).toBeInTheDocument()
+    346|     expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextC…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  6 failed | 34 passed (40)
+   Start at  11:15:34
+   Duration  5.58s (transform 2.24s, setup 330ms, import 5.65s, tests 7.04s, environment 843ms)
+
