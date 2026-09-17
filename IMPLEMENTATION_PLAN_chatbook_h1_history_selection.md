@@ -56,7 +56,7 @@ Keep each task's failing/passing command, relevant changed paths and commit in T
 
 Existing modules retain their current responsibilities. Add owner methods to `MessageStore` and its `CharactersRAGDB` delegation. Extend the existing API client, mounted hooks, stores and controllers listed per task. Do not create a parallel conversation database, a generic accepted-turn platform or a second settings service.
 
-The following exact proposed interfaces are the stage boundaries. Implementers may refine internal helpers, but must update consumers and this plan together if a public signature changes.
+The following interfaces are the stage boundaries, updated as their owning tasks are implemented. Fork interfaces remain proposed until Stage 4. Implementers may refine internal helpers, but must update consumers and this plan together if a public signature changes.
 
 ```typescript
 // types/history-selection.ts: use readonly members for captured objects.
@@ -91,18 +91,35 @@ function resolveHistorySelection(
 // All non-ready variants contain a code and no writable child/admission.
 
 function captureHistorySnapshot(
-  view: HistoryViewSelectionV1, purpose: "send" | "fork", signal: AbortSignal
+  owner: HistoryOwnerV1, view: HistoryCaptureRequestV1["view"],
+  purpose: "send" | "fork", signal?: AbortSignal
 ): Promise<HistoryCaptureResultV1>
 
+function prepareHistoryContext(
+  payload: unknown, validate_lease: () => boolean
+): PreparedHistoryContextV1
+
 function finalizeHistorySelection(
-  capture: HistorySelectionCaptureV1,
+  owner: HistoryOwnerV1, capture: HistorySelectionCaptureV1,
   prepared: PreparedHistoryContextV1,
   currentView: HistoryViewSelectionV1
 ): HistorySelectionV1
 
 function confirmLegacyHistoryProjection(
-  confirmation: LegacyHistoryProjectionConfirmV1, signal: AbortSignal
-): Promise<HistoryCaptureResultV1>
+  owner: HistoryOwnerV1, scope: HistoryBookmarkScope,
+  confirmation: LegacyHistoryProjectionConfirmV1,
+  view: HistoryViewSelectionV1, signal?: AbortSignal
+): Promise<LegacyHistoryProjectionV1>
+
+function appendSelectedUser(
+  owner: HistoryOwnerV1, selection: HistorySelectionV1,
+  input: Message, opts?: HistoryOperationOptions
+): Promise<HistoryAdmissionV1>
+
+function settleAcceptedAssistant(
+  owner: HistoryOwnerV1, admission: HistoryAdmissionReferenceV1,
+  input: Message, opts?: HistoryOperationOptions
+): Promise<Message | {id: string}>
 
 function prepareLocalFork(request: ForkRequestV1): Promise<LocalForkProjectionV1>
 function commitLocalFork(projection: LocalForkProjectionV1): Promise<ForkResultV1>
@@ -111,6 +128,8 @@ function createBranchMessage(deps: BranchDependencies):
 ```
 
 `HistoryCaptureResultV1` is a successful `captured` result or the same structured non-ready errors as `HistoryResolutionV1`. `HistorySelectionCaptureV1` holds snapshot/selected manifest rows, explicit `selected_content` bound by message ID/revision/order, view fence, purpose and storage-context digest, without a final request digest. The shared `nodes` member is the complete lightweight manifest; selected content carries text and ordered images separately. `bindSelectedHistoryContent` and native `bind_selected_history_content` validate this binding; owners still load and fence the content coherently. `PreparedHistoryContextV1` holds the immutable credential-free composer payload or fork policy, its request-context digest and a small adapter over existing request-scope/context/connection lease validation. `finalizeHistorySelection` must receive these inputs explicitly; it cannot consult the current global draft. Admission receives the finalized value after both phases.
+
+Task2.3 refines the client boundary to take an explicit `HistoryOwnerV1`: local profile/owner/conversation; native canonical conversation with verified request scope, separate workspace scope and lease validator; or an unavailable code. Cancellation belongs to each operation. Finalization is synchronous over the detached canonical JSON payload and originating view; source/storage validation belongs to the actual owner append transaction. Dispatch the same frozen `prepared.payload`. `HistoryBookmarkScope` is `{profile_id, client_session_id}`; native bookmarks use the browser profile without adopting local conversation ownership. Native capability is established by a successful capture on the same live adapter, not by constructing an object containing a stored owner key. The report records exact public types and capability limits; mounted consumers remain Stage3 work.
 
 `BranchDependencies` is the typed extraction of existing handler dependencies plus the selection/operation adapters; it is not a service locator. `LocalForkProjectionV1` contains captured owner/source fences, ordered source revisions, preallocated ID map, allowlisted child rows/files and the immutable request. Preparation does not write a child; commit revalidates the source transactionally.
 
@@ -221,7 +240,7 @@ Execution evidence: contract commits `28c7d1904e`, `2fed0871c4`, `77dde3d2b4`; 1
 
 **Tests:** H1-C/D/H, more than 20,000 rows, dual review/replay, transaction rollback, metadata forgery, stale parent and SQLite/PostgreSQL concurrency.
 
-**Status:** In Progress.
+**Status:** Complete (owner/API/adapter scope; browser durability remains Stage 5).
 
 ### Task 2.1: native owner snapshot, migration and legacy CAS
 
@@ -315,14 +334,16 @@ Execution evidence: implementation `3f8144d505` and fix `db1c6feddf` provide nat
 
 **Interfaces:** Consumes Stage 1 types and Task 2.2 routes. Produces `captureHistorySnapshot`, `finalizeHistorySelection`, `confirmLegacyHistoryProjection`, owner-scoped bookmark load/save, and immutable local accepted user metadata for later settlement.
 
-- [ ] Add tests for local/profile versus server/account identity, two independent client sessions, explicit empty bookmark, stale deleted target and existing scope invalidation. An old mirror with only `server_chat_id` stays unbound until explicit verified connection binding; migration must not adopt the currently logged-in account or upload content. Use existing scoped mirror test patterns; preserve pending UAT fixes.
-- [ ] Add the next free Dexie schema migration. The reviewed pin is version 14; do not assume 15 is still free. Add `historySelections` keyed by `[profile_id+client_session_id+owner_key+conversation_id]`, `historyProjections` keyed by `[owner_key+conversation_id+projection_id]`, and narrowly scoped local admission metadata in the existing message records. Migrate structure only; no timestamp ancestry rewrite.
-- [ ] Implement complete local snapshot reads and synchronous canonical hashes inside the transaction using existing Noble utilities. Do not keep a Dexie transaction alive across HTTP, Plasmo storage or Web Crypto awaits. Required external state that cannot be fenced must be excluded or explicitly unsupported under the spec.
-- [ ] Confirm local legacy projection and bookmark atomically; for server projections commit the bookmark only after owner acknowledgement. Persist a generated confirmation ID before dispatch and resolve matching replay through the owner. Verify two reviewed interpretations and their explicit descendants survive reopen.
-- [ ] Implement local selected user append and assistant settlement with protected metadata and explicit parents, not only a read-only selection helper. A local mirror of a server chat must use server admission and existing scoped mirroring, not local ownership.
-- [ ] Add the server owner adapter and strict version response validation. Return a captured snapshot/resolved rows before client composition; finalize the request-context digest only with the explicit prepared composer payload and a current lease. A missing/older selection endpoint stops dependent mutation; never fall back to display arrays. Keep workspace routing in its existing parameter object, separate from owner namespace.
-- [ ] Run `pnpm --dir apps/packages/ui exec vitest run src/db/dexie/__tests__/history-selection.test.ts src/services/__tests__/chat-history-selection.test.ts src/services/__tests__/chat-surface-scope.test.ts src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts`. Transaction mocks are orchestration evidence only; real IndexedDB commit/rollback is required in Stage 5.
-- [ ] Review/type-check and commit the owner adapters.
+- [x] Add tests for local/profile versus server/account identity, two independent client sessions, explicit empty bookmark, stale deleted target and existing scope invalidation. An old mirror with only `server_chat_id` stays unbound until explicit verified connection binding; migration must not adopt the currently logged-in account or upload content. Use existing scoped mirror test patterns; preserve pending UAT fixes.
+- [x] Add the next free Dexie schema migration. The reviewed pin is version 14; do not assume 15 is still free. Add `historySelections` keyed by `[profile_id+client_session_id+owner_key+conversation_id]`, `historyProjections` keyed by `[owner_key+conversation_id+projection_id]`, and narrowly scoped local admission metadata in the existing message records. Migrate structure only; no timestamp ancestry rewrite.
+- [x] Implement complete local snapshot reads and synchronous canonical hashes inside the transaction using existing Noble utilities. Do not keep a Dexie transaction alive across HTTP, Plasmo storage or Web Crypto awaits. Required external state that cannot be fenced must be excluded or explicitly unsupported under the spec.
+- [x] Confirm local legacy projection and bookmark atomically; for server projections commit the bookmark only after owner acknowledgement. Persist a generated confirmation ID before dispatch and resolve matching replay through the owner. Verify two reviewed interpretations and their explicit descendants survive reopen.
+- [x] Implement local selected user append and assistant settlement with protected metadata and explicit parents, not only a read-only selection helper. A local mirror of a server chat must use server admission and existing scoped mirroring, not local ownership.
+- [x] Add the server owner adapter and strict version response validation. Return a captured snapshot/resolved rows before client composition; finalize the request-context digest only with the explicit prepared composer payload and a current lease. A missing/older selection endpoint stops dependent mutation; never fall back to display arrays. Keep workspace routing in its existing parameter object, separate from owner namespace.
+- [x] Run `pnpm --dir apps/packages/ui exec vitest run src/db/dexie/__tests__/history-selection.test.ts src/services/__tests__/chat-history-selection.test.ts src/services/__tests__/chat-surface-scope.test.ts src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts`. Transaction mocks are orchestration evidence only; real IndexedDB commit/rollback is required in Stage 5.
+- [x] Review/type-check and commit the owner adapters.
+
+Execution evidence: `f93b78c5d9` implements local/native client owners and Dexie version15; reviewed fix `0bcdc845ef` resolves all three reported P1/P2 findings, with no new P1/P2 in scoped re-review. Original affected scope passed187 tests; final changed scope passed233 tests across6 files with no skips, including actual domain/proxy error propagation and concurrent pending-confirmation cleanup. Focused owner TypeScript, formatting and diff checks pass. Expanded proxy-test typing reproduces nine exact baseline errors on unchanged lines; expected negative transport logging is disclosed. Native writes require a live capability capture, mirror IDs need authoritative association, and a durable dispatch marker preserves uncertain confirmations. Storage doubles are orchestration evidence only; real IndexedDB, mounted behavior and the stated unsupported-mode limits remain explicit downstream gates.
 
 ## Stage 3: mounted UI, hydration and normal send
 
@@ -332,7 +353,7 @@ Execution evidence: implementation `3f8144d505` and fix `db1c6feddf` provide nat
 
 **Tests:** H1-A/B/C/D/G, actual mounted submit and restore paths, in-flight admission races and comparison regressions.
 
-**Status:** Not Started.
+**Status:** In Progress.
 
 ### Task 3.1: shared view cursor and history review
 
@@ -343,6 +364,8 @@ Execution evidence: implementation `3f8144d505` and fix `db1c6feddf` provide nat
 - Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`, `Playground.tsx`, `components/Sidepanel/Chat/body.tsx` and `routes/sidepanel-chat.tsx`.
 - Extend `components/Sidepanel/Chat/SidepanelHeaderSimple.tsx`, `ControlRow.tsx` and their existing route/handoff tests only where necessary to route H1 expansion to the extension full page with the scoped selection reference. Keep explicit WebUI draft/page-context handoff distinct.
 - Modify `apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx`, `hooks/chat/useServerChatLoader.ts`, `store/playground-session.tsx`, `store/sidepanel-chat-tabs.tsx` and `store/option/types.ts`.
+- Extend `hooks/useLoadLocalConversation.ts` and `hooks/chat/useServerChatHistoryId.ts` at their actual hydration/mirror ownership boundaries; extend `hooks/chat/__tests__/useServerChatHistoryId.test.tsx` and add focused local-load race/selection tests. The former directly formats and installs raw history after asynchronous reads; the latter currently reuses a bare server ID and can link the current local history. H1 loads must preserve selection fences and verified ownership through these real callbacks.
+- Extend `apps/packages/ui/src/db/dexie/helpers.ts` only at the selected-history formatting boundary. The live hydration imports `formatToMessage`/`formatToChatHistory` there; avoid legacy variant collapse and timestamp sorting for an explicit selected path. Keep canonical provider roles/tool fields distinct from presentation role normalization.
 - Extend `apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx`, `useServerChatLoader.test.ts`, `useServerChatLoader.scope.test.tsx` and `src/store/__tests__/playground-session-store.test.ts`.
 - Modify canonical `apps/packages/ui/src/assets/locale/en/playground.json`; regenerate `apps/packages/ui/src/public/_locales/en/playground.json` through the existing locale script. Use the shared Playground namespace in both shells.
 
