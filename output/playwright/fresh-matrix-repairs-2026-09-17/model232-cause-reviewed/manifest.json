@@ -1,0 +1,394 @@
+{
+  "at": "2026-09-17T22:37:50.263Z",
+  "reviewedFindings": [
+    232
+  ],
+  "nativeAccepted": false,
+  "baselineSource": "5aea3524e69179ef6f48edce333a9c477a70d71c",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-adjacent.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-adjacent.txt",
+      "sourceBytes": 72846,
+      "sourceSha256": "7c333826fac8c418edd167c790117c5d88a6399f7eefd59c129158727811e70d",
+      "bytes": 72846,
+      "sha256": "7c333826fac8c418edd167c790117c5d88a6399f7eefd59c129158727811e70d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-green.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-green.txt",
+      "sourceBytes": 1153,
+      "sourceSha256": "729e0bd5e83f3fac7a2a1b7757ec7b46b16be46fe146b88f92a8de363d713ce0",
+      "bytes": 1153,
+      "sha256": "729e0bd5e83f3fac7a2a1b7757ec7b46b16be46fe146b88f92a8de363d713ce0",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-red-v2.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-red-v2.txt",
+      "sourceBytes": 5220,
+      "sourceSha256": "34654e7015de4261869fb9c8c7ec2119e0df39e60eb608a7ceb222b5987e3268",
+      "bytes": 5220,
+      "sha256": "34654e7015de4261869fb9c8c7ec2119e0df39e60eb608a7ceb222b5987e3268",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-red.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-red.txt",
+      "sourceBytes": 5730,
+      "sourceSha256": "f8da3d3739caf00b3a79e931c7cd2873a3dd6a9a0f1f636793bd5268a02e64e0",
+      "bytes": 5730,
+      "sha256": "f8da3d3739caf00b3a79e931c7cd2873a3dd6a9a0f1f636793bd5268a02e64e0",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/adjacent-saved-normal.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/adjacent-saved-normal.log",
+      "sourceBytes": 28534,
+      "sourceSha256": "9580f3aa73d1e7c7514fa5449e703717f4ebcf110030a16ce661e5e641e75b8f",
+      "bytes": 28534,
+      "sha256": "9580f3aa73d1e7c7514fa5449e703717f4ebcf110030a16ce661e5e641e75b8f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/adjacent.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/adjacent.log",
+      "sourceBytes": 9207,
+      "sourceSha256": "7af575702d8d3083df4a701fe018c14e312427658bcaad8380d74547571e018a",
+      "bytes": 9207,
+      "sha256": "7af575702d8d3083df4a701fe018c14e312427658bcaad8380d74547571e018a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/audit.mjs",
+      "sourceBytes": 8302,
+      "sourceSha256": "15b09359e20594fa0c1bf0e71625718916c63cd9b78e7df9c5bfca3e72f03df2",
+      "bytes": 8302,
+      "sha256": "15b09359e20594fa0c1bf0e71625718916c63cd9b78e7df9c5bfca3e72f03df2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/bandit.json",
+      "sourceBytes": 1330,
+      "sourceSha256": "fa4926eb82a80e31f16cbcd20ca46ae525bcc5e1cf6bcb58e3c9789be7029711",
+      "bytes": 1330,
+      "sha256": "fa4926eb82a80e31f16cbcd20ca46ae525bcc5e1cf6bcb58e3c9789be7029711",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/bandit.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/bandit.log",
+      "sourceBytes": 246,
+      "sourceSha256": "def9c9899f9d85d7ede91ed9309706e63523d85baff46a23384714c22aec4d53",
+      "bytes": 246,
+      "sha256": "def9c9899f9d85d7ede91ed9309706e63523d85baff46a23384714c22aec4d53",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/baseline-causal.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/baseline-causal.log",
+      "sourceBytes": 5327,
+      "sourceSha256": "469f8e53849b2b2ce89a99fddb60f2c8bd8807e1a97b36add193429ad8c9623d",
+      "bytes": 5327,
+      "sha256": "469f8e53849b2b2ce89a99fddb60f2c8bd8807e1a97b36add193429ad8c9623d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/baseline-chat-error-message.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/baseline-chat-error-message.ts",
+      "sourceBytes": 10737,
+      "sourceSha256": "95e95e6b27dc3b92efd03702f9025eb7fe5150fc73a3d263d6892bac8de4aafa",
+      "bytes": 10737,
+      "sha256": "95e95e6b27dc3b92efd03702f9025eb7fe5150fc73a3d263d6892bac8de4aafa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/baseline.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/baseline.config.ts",
+      "sourceBytes": 597,
+      "sourceSha256": "5280553d489c2972c00b417d1e0b693e72f0c91b0c25b39e5609bd4a4cbd4973",
+      "bytes": 597,
+      "sha256": "5280553d489c2972c00b417d1e0b693e72f0c91b0c25b39e5609bd4a4cbd4973",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/comparison.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/comparison.json",
+      "sourceBytes": 191,
+      "sourceSha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093",
+      "bytes": 191,
+      "sha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/eslint-baseline.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/eslint-baseline.json",
+      "sourceBytes": 686,
+      "sourceSha256": "c313578a6616bd097140ab936c46581864a899a9a2a2aacd07305d28055e5859",
+      "bytes": 686,
+      "sha256": "c313578a6616bd097140ab936c46581864a899a9a2a2aacd07305d28055e5859",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/eslint-current.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/eslint-current.json",
+      "sourceBytes": 1057,
+      "sourceSha256": "95e380c106b1a7ecd62dd9ac30f14ad976f2a6f6cf0040c875e80b11a367e447",
+      "bytes": 1057,
+      "sha256": "95e380c106b1a7ecd62dd9ac30f14ad976f2a6f6cf0040c875e80b11a367e447",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/focused-final.log",
+      "sourceBytes": 1153,
+      "sourceSha256": "a7ac690ac49c1ac38cb21df6930bb88431a11a3e983498c6904d151f3c17474c",
+      "bytes": 1153,
+      "sha256": "a7ac690ac49c1ac38cb21df6930bb88431a11a3e983498c6904d151f3c17474c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/focused.log",
+      "sourceBytes": 1153,
+      "sourceSha256": "11538def4cf62838ad768cf11147486b5610a8f777e728e6f92e5c908a15a015",
+      "bytes": 1153,
+      "sha256": "11538def4cf62838ad768cf11147486b5610a8f777e728e6f92e5c908a15a015",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/REVIEW.md",
+      "sourceBytes": 5332,
+      "sourceSha256": "c55d94522d2a0f8d9f5e896fc3987176870d0ee06afcc28a1be1779a61c0fa1a",
+      "bytes": 5332,
+      "sha256": "c55d94522d2a0f8d9f5e896fc3987176870d0ee06afcc28a1be1779a61c0fa1a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/source-after-static.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/source-after-static.json",
+      "sourceBytes": 517,
+      "sourceSha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7",
+      "bytes": 517,
+      "sha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/source-before.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/source-before.json",
+      "sourceBytes": 517,
+      "sourceSha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7",
+      "bytes": 517,
+      "sha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/static-checks.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/static-checks.mjs",
+      "sourceBytes": 4060,
+      "sourceSha256": "4db6ebff5da24f029a99fd7b5c9155b523b66426e877c4120613f5ca7f9ed6ac",
+      "bytes": 4060,
+      "sha256": "4db6ebff5da24f029a99fd7b5c9155b523b66426e877c4120613f5ca7f9ed6ac",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/static-current.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/static-current.log",
+      "sourceBytes": 191,
+      "sourceSha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093",
+      "bytes": 191,
+      "sha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/static.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/static.log",
+      "sourceBytes": 6356,
+      "sourceSha256": "60da554959e3178ad7cfb8dcef427aefcac43f8273f5424db243cf3251ee44c2",
+      "bytes": 6356,
+      "sha256": "60da554959e3178ad7cfb8dcef427aefcac43f8273f5424db243cf3251ee44c2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/typescript-baseline.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/typescript-baseline.json",
+      "sourceBytes": 30792,
+      "sourceSha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b",
+      "bytes": 30792,
+      "sha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/typescript-current.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/typescript-current.json",
+      "sourceBytes": 30792,
+      "sourceSha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b",
+      "bytes": 30792,
+      "sha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model232-error-captured.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/model232-error-captured.txt",
+      "sourceBytes": 12879,
+      "sourceSha256": "e1468b4681f3ffc2de94169b3060d9b898dcba71c0808c5fb4fa22d1acf20fab",
+      "bytes": 12879,
+      "sha256": "e1468b4681f3ffc2de94169b3060d9b898dcba71c0808c5fb4fa22d1acf20fab",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/package.json",
+      "path": "evidence/apps/packages/ui/package.json",
+      "sourceBytes": 8056,
+      "sourceSha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8",
+      "bytes": 8056,
+      "sha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/background-proxy.ts",
+      "path": "evidence/apps/packages/ui/src/services/background-proxy.ts",
+      "sourceBytes": 80256,
+      "sourceSha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "bytes": 80256,
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "path": "evidence/apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "sourceBytes": 3861,
+      "sourceSha256": "fb6ce4a4f31f01e012fa4c7f850225c283be97e40cf078770ecfe2a1baf43640",
+      "bytes": 3861,
+      "sha256": "fb6ce4a4f31f01e012fa4c7f850225c283be97e40cf078770ecfe2a1baf43640",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "path": "evidence/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sourceBytes": 74917,
+      "sourceSha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "bytes": 74917,
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "path": "evidence/apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "sourceBytes": 25395,
+      "sourceSha256": "0e2df34c47ef1994724a768bea3aa567d8aab4327eebae772157c06ac87e3445",
+      "bytes": 25395,
+      "sha256": "0e2df34c47ef1994724a768bea3aa567d8aab4327eebae772157c06ac87e3445",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "path": "evidence/apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "sourceBytes": 5803,
+      "sourceSha256": "5d11e742f8be0fcaa5608e0cc91beaf6ffe10069ceee6c43b078661e6cd36591",
+      "bytes": 5803,
+      "sha256": "5d11e742f8be0fcaa5608e0cc91beaf6ffe10069ceee6c43b078661e6cd36591",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/utils/chat-error-message.ts",
+      "path": "evidence/apps/packages/ui/src/utils/chat-error-message.ts",
+      "sourceBytes": 11077,
+      "sourceSha256": "8ffeaa317543c00a6de276dfe9eb8697f7a78012b84abad493a2fa1e91c04c21",
+      "bytes": 11077,
+      "sha256": "8ffeaa317543c00a6de276dfe9eb8697f7a78012b84abad493a2fa1e91c04c21",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/utils/format-error-message.ts",
+      "path": "evidence/apps/packages/ui/src/utils/format-error-message.ts",
+      "sourceBytes": 2530,
+      "sourceSha256": "61ce0b9e02104919b8503ef60bfc9737172c9da90bc56f181865063f6a461b9e",
+      "bytes": 2530,
+      "sha256": "61ce0b9e02104919b8503ef60bfc9737172c9da90bc56f181865063f6a461b9e",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/utils/server-error-message.ts",
+      "path": "evidence/apps/packages/ui/src/utils/server-error-message.ts",
+      "sourceBytes": 4086,
+      "sourceSha256": "efbdf858d45a5d329af83a0151b970416d30ae0eeaec6e282e7b1d80a4f69054",
+      "bytes": 4086,
+      "sha256": "efbdf858d45a5d329af83a0151b970416d30ae0eeaec6e282e7b1d80a4f69054",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/tsconfig.json",
+      "path": "evidence/apps/packages/ui/tsconfig.json",
+      "sourceBytes": 458,
+      "sourceSha256": "312b3923c1499df153a1606899c3204b57d14ee92b07ffb218a2d4bc5b5a0917",
+      "bytes": 458,
+      "sha256": "312b3923c1499df153a1606899c3204b57d14ee92b07ffb218a2d4bc5b5a0917",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/vitest.config.ts",
+      "path": "evidence/apps/packages/ui/vitest.config.ts",
+      "sourceBytes": 1043,
+      "sourceSha256": "678eb0b079091b7163170e578e0fc79abf6edf6c2b4d8254f39d428f67de57d2",
+      "bytes": 1043,
+      "sha256": "678eb0b079091b7163170e578e0fc79abf6edf6c2b4d8254f39d428f67de57d2",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/tldw-frontend/eslint.config.mjs",
+      "path": "evidence/apps/tldw-frontend/eslint.config.mjs",
+      "sourceBytes": 3118,
+      "sourceSha256": "3a8eb124f708ef4241459b176db3d39f4769dd2faa7f56c4ed2ad4484214ea7e",
+      "bytes": 3118,
+      "sha256": "3a8eb124f708ef4241459b176db3d39f4769dd2faa7f56c4ed2ad4484214ea7e",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/tldw-frontend/tsconfig.json",
+      "path": "evidence/apps/tldw-frontend/tsconfig.json",
+      "sourceBytes": 1418,
+      "sourceSha256": "5b71ff79e9d16197f41df2609b33985081fec39360b47966c19c8875202aa8bb",
+      "bytes": 1418,
+      "sha256": "5b71ff79e9d16197f41df2609b33985081fec39360b47966c19c8875202aa8bb",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/tldw-frontend/vitest.config.ts",
+      "path": "evidence/apps/tldw-frontend/vitest.config.ts",
+      "sourceBytes": 1853,
+      "sourceSha256": "8767ae53d8910ffa56482501a6cf8f26ff657f73fd23d3b69b98cb1ba1e4b9d1",
+      "bytes": 1853,
+      "sha256": "8767ae53d8910ffa56482501a6cf8f26ff657f73fd23d3b69b98cb1ba1e4b9d1",
+      "encoding": "identity"
+    },
+    {
+      "source": "backlog/tasks/task-13260.174 - Show-actionable-unavailable-model-guidance-in-Chat.md",
+      "path": "evidence/backlog/tasks/task-13260.174 - Show-actionable-unavailable-model-guidance-in-Chat.md",
+      "sourceBytes": 3809,
+      "sourceSha256": "5fe3ec2fb58115ab4716ec41a25b45cb6749e93042364636395b7bb3ecda63aa",
+      "bytes": 3809,
+      "sha256": "5fe3ec2fb58115ab4716ec41a25b45cb6749e93042364636395b7bb3ecda63aa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model232-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model232-review/audit.json",
+      "sourceBytes": 13959,
+      "sourceSha256": "394ac6012f662a28d250477e8107b1d06b44fe2c6d5159301d46aa75cc3fd4c1",
+      "bytes": 13959,
+      "sha256": "394ac6012f662a28d250477e8107b1d06b44fe2c6d5159301d46aa75cc3fd4c1",
+      "encoding": "identity"
+    }
+  ]
+}

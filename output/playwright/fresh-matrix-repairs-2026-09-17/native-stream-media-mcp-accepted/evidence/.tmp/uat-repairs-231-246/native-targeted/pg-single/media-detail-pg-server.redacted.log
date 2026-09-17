@@ -1,0 +1,11 @@
+2026-09-17 20:36:12.889 UTC [8729] STATEMENT:  SELECT * FROM MediaFiles WHERE media_id = :media_id AND file_type = :file_type AND deleted = FALSE ORDER BY id DESC LIMIT 1
+2026-09-17 20:36:42.873 UTC [8965] ERROR:  syntax error at or near ":" at character 43
+2026-09-17 20:36:42.873 UTC [8965] STATEMENT:  SELECT * FROM MediaFiles WHERE media_id = :media_id AND file_type = :file_type AND deleted = FALSE ORDER BY id DESC LIMIT 1
+2026-09-17 20:37:06.648 UTC [30] LOG:  checkpoint starting: immediate force wait
+2026-09-17 20:37:12.399 UTC [30] LOG:  checkpoint complete: wrote 5 buffers (0.0%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.005 s; sync files=6, longest=0.001 s, average=0.001 s; distance=12275 kB, estimate=13139 kB; lsn=14/98EFE050, redo lsn=14/98EFDFE0
+2026-09-17 20:37:12.865 UTC [8965] ERROR:  syntax error at or near ":" at character 43
+2026-09-17 20:37:12.865 UTC [8965] STATEMENT:  SELECT * FROM MediaFiles WHERE media_id = :media_id AND file_type = :file_type AND deleted = FALSE ORDER BY id DESC LIMIT 1
+2026-09-17 20:37:13.815 UTC [30] LOG:  checkpoint starting: immediate force wait
+2026-09-17 20:37:13.822 UTC [30] LOG:  checkpoint complete: wrote 97 buffers (0.6%), wrote 2 SLRU buffers; 0 WAL file(s) added, 0 removed, 1 recycled; write=0.002 s, sync=0.004 s, total=0.007 s; sync files=53, longest=0.002 s, average=0.001 s; distance=12711 kB, estimate=13097 kB; lsn=14/99B68030, redo lsn=14/99B67FC0
+2026-09-17 20:37:42.869 UTC [8965] ERROR:  syntax error at or near ":" at character 43
+2026-09-17 20:37:42.869 UTC [8965] STATEMENT:  SELECT * FROM MediaFiles WHERE media_id = :media_id AND file_type = :file_type AND deleted = FALSE ORDER BY id DESC LIMIT 1

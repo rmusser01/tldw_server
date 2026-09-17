@@ -97,3 +97,7 @@
 - Retention review corrected one row7 filename typo; initial manifest081a0d27... superseded by1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593. No outcome changed.
 
 - 22:06UTC checkpoint:243/248 and254 independently native-accepted with retained74payload packet and retention review. Account transitions, cancellation/canonical history and corrected real startup/data preservation verified.246 and253/241 native positives collected; independent acceptance pending. MCP251 uses a new targeted fresh PG single profile without resetting completed original setup. Full matrix remains held.
+
+- 22:33UTC:232 ordinary native400 still renders generic guidance. Existing task174 reopened implementation; cause-chain mapping passes20focused checks after causal red2/18controls. Independent review and native updated-source retry required.241/246/251/253 native reviews clear, retention review pending. Alice/Bob reciprocal media isolation captured; both upload analyses warn truthfully on truncation. Full matrix remains held.
+
+- 22:40UTC:241/246/251/253 accepted after independent native/retention review; tasksDone.232 cause-chain fix independently203passes and90unchangedcompiler, nativeupdatedsourcepending. New255/task197 actualPGworldbookcreation500 requires tests-first supported transaction/readback repair and independent review. Fullmatrixheld.

@@ -1,0 +1,367 @@
+{
+  "at": "2026-09-17T22:36:45.073Z",
+  "task": "TASK-13260.174",
+  "finding": "UAT232",
+  "verdict": "CLEAR_BOUNDED_IMPLEMENTATION_NATIVE_PENDING",
+  "baselineCommit": "5aea3524e69179ef6f48edce333a9c477a70d71c",
+  "baselineProductionSha256": "95e95e6b27dc3b92efd03702f9025eb7fe5150fc73a3d263d6892bac8de4aafa",
+  "sourceHashes": [
+    {
+      "path": "apps/packages/ui/src/utils/chat-error-message.ts",
+      "sha256": "8ffeaa317543c00a6de276dfe9eb8697f7a78012b84abad493a2fa1e91c04c21"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "sha256": "5d11e742f8be0fcaa5608e0cc91beaf6ffe10069ceee6c43b078661e6cd36591"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "sha256": "fb6ce4a4f31f01e012fa4c7f850225c283be97e40cf078770ecfe2a1baf43640"
+    }
+  ],
+  "checks": [
+    {
+      "name": "final three source hashes match final static review bytes",
+      "passed": true
+    },
+    {
+      "name": "baseline overlay matches baseline committed formatter",
+      "passed": true
+    },
+    {
+      "name": "focused final run passes20",
+      "passed": true
+    },
+    {
+      "name": "four frontend-config adjacent suites pass84",
+      "passed": true
+    },
+    {
+      "name": "saved-normal separately passes99 under its existing package config",
+      "passed": true
+    },
+    {
+      "name": "independent baseline reproduces exactly2 failures with18 controls",
+      "passed": true
+    },
+    {
+      "name": "final scoped lint is clean",
+      "passed": true
+    },
+    {
+      "name": "no new or removed compiler diagnostics",
+      "passed": true
+    },
+    {
+      "name": "Bandit limitations correctly identified",
+      "passed": true
+    },
+    {
+      "name": "native diagnostic is structured ordinary400 plus generic Health UI",
+      "passed": true
+    }
+  ],
+  "commands": [
+    {
+      "cwd": "apps/packages/ui",
+      "command": "node node_modules/vitest/vitest.mjs run --maxWorkers=1 --no-file-parallelism src/utils/__tests__/chat-error-message.test.ts src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "log": "focused-final.log",
+      "exit": 0
+    },
+    {
+      "cwd": "apps/tldw-frontend",
+      "command": "node node_modules/vitest/vitest.mjs run --maxWorkers=1 --no-file-parallelism ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx ../packages/ui/src/services/tldw/__tests__/TldwChat.abort.test.ts ../packages/ui/src/utils/__tests__/server-error-message.test.ts",
+      "log": "adjacent.log",
+      "exit": 1,
+      "limit": "84tests pass, saved-normal collection fails missing pa-tesseract alias"
+    },
+    {
+      "cwd": "apps/packages/ui",
+      "command": "node node_modules/vitest/vitest.mjs run --maxWorkers=1 --no-file-parallelism src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+      "log": "adjacent-saved-normal.log",
+      "exit": 0
+    },
+    {
+      "cwd": "apps/tldw-frontend",
+      "command": "node node_modules/vitest/vitest.mjs run --config ../../.tmp/uat-repairs-231-246/model232-review/baseline.config.ts --maxWorkers=1 --no-file-parallelism ../packages/ui/src/utils/__tests__/chat-error-message.test.ts ../packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "log": "baseline-causal.log",
+      "exit": 1,
+      "limit": "expected2causal failures"
+    },
+    {
+      "cwd": ".",
+      "command": "node .tmp/uat-repairs-231-246/model232-review/static-checks.mjs",
+      "log": "static.log",
+      "exit": 134,
+      "limit": "default heap exhausted after baseline compiler result"
+    },
+    {
+      "cwd": ".",
+      "command": "node --max-old-space-size=8192 .tmp/uat-repairs-231-246/model232-review/static-checks.mjs current",
+      "log": "static-current.log",
+      "exit": 0
+    },
+    {
+      "cwd": ".",
+      "command": "source .venv/bin/activate && PYTHONDONTWRITEBYTECODE=1 python -m bandit apps/packages/ui/src/utils/chat-error-message.ts apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts -f json -o .tmp/uat-repairs-231-246/model232-review/bandit.json",
+      "exit": 0,
+      "limit": "3unsupportedTypeScript parse errors"
+    },
+    {
+      "cwd": ".",
+      "command": "git diff --check -- apps/packages/ui/src/utils/chat-error-message.ts apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "exit": 0
+    }
+  ],
+  "comparisons": {
+    "eslint": {
+      "baseline": 0,
+      "current": 0,
+      "added": [],
+      "removed": []
+    },
+    "typescript": {
+      "baseline": 90,
+      "current": 90,
+      "added": [],
+      "removed": []
+    }
+  },
+  "nativeDiagnostic": {
+    "at": "2026-09-17T22:18:48.107Z",
+    "status": 400,
+    "path": "/api/v1/chat/completions",
+    "errorCode": "model_not_available",
+    "genericHealthGuidance": true
+  },
+  "verification": {
+    "focused": 20,
+    "adjacentFrontend": 84,
+    "adjacentSavedNormal": 99,
+    "totalSuccessful": 203,
+    "successfulFiles": 7,
+    "skipped": 0,
+    "baseline": {
+      "expectedFailures": 2,
+      "passingControls": 18
+    },
+    "bandit": {
+      "parseErrors": 3,
+      "meaningfulTypeScriptCoverage": false
+    }
+  },
+  "limitations": [
+    "Native visible recovery, real Retry and canonical reload remain pending on accepted source.",
+    "HTTP behavior is a deterministic server fixture; the real service, domain adapter, direct transport parser, SSE parser and formatter execute.",
+    "Initial configuration/collection failures and compiler OOM remain retained; final green totals combine suites run under appropriate existing configs.",
+    "Compiler result is differential90/90, not a clean-build claim.",
+    "No product/source/Git/task/browser/runtime/database edits by reviewer. Only review artifacts were written."
+  ],
+  "reviewedFiles": [
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-adjacent.txt",
+      "bytes": 72846,
+      "sha256": "7c333826fac8c418edd167c790117c5d88a6399f7eefd59c129158727811e70d"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-green.txt",
+      "bytes": 1153,
+      "sha256": "729e0bd5e83f3fac7a2a1b7757ec7b46b16be46fe146b88f92a8de363d713ce0"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-red-v2.txt",
+      "bytes": 5220,
+      "sha256": "34654e7015de4261869fb9c8c7ec2119e0df39e60eb608a7ceb222b5987e3268"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-red.txt",
+      "bytes": 5730,
+      "sha256": "f8da3d3739caf00b3a79e931c7cd2873a3dd6a9a0f1f636793bd5268a02e64e0"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/adjacent-saved-normal.log",
+      "bytes": 28534,
+      "sha256": "9580f3aa73d1e7c7514fa5449e703717f4ebcf110030a16ce661e5e641e75b8f"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/adjacent.log",
+      "bytes": 9207,
+      "sha256": "7af575702d8d3083df4a701fe018c14e312427658bcaad8380d74547571e018a"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/audit.mjs",
+      "bytes": 8302,
+      "sha256": "15b09359e20594fa0c1bf0e71625718916c63cd9b78e7df9c5bfca3e72f03df2"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/bandit.json",
+      "bytes": 1330,
+      "sha256": "fa4926eb82a80e31f16cbcd20ca46ae525bcc5e1cf6bcb58e3c9789be7029711"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/bandit.log",
+      "bytes": 246,
+      "sha256": "def9c9899f9d85d7ede91ed9309706e63523d85baff46a23384714c22aec4d53"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/baseline-causal.log",
+      "bytes": 5327,
+      "sha256": "469f8e53849b2b2ce89a99fddb60f2c8bd8807e1a97b36add193429ad8c9623d"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/baseline-chat-error-message.ts",
+      "bytes": 10737,
+      "sha256": "95e95e6b27dc3b92efd03702f9025eb7fe5150fc73a3d263d6892bac8de4aafa"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/baseline.config.ts",
+      "bytes": 597,
+      "sha256": "5280553d489c2972c00b417d1e0b693e72f0c91b0c25b39e5609bd4a4cbd4973"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/comparison.json",
+      "bytes": 191,
+      "sha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/eslint-baseline.json",
+      "bytes": 686,
+      "sha256": "c313578a6616bd097140ab936c46581864a899a9a2a2aacd07305d28055e5859"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/eslint-current.json",
+      "bytes": 1057,
+      "sha256": "95e380c106b1a7ecd62dd9ac30f14ad976f2a6f6cf0040c875e80b11a367e447"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/focused-final.log",
+      "bytes": 1153,
+      "sha256": "a7ac690ac49c1ac38cb21df6930bb88431a11a3e983498c6904d151f3c17474c"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/focused.log",
+      "bytes": 1153,
+      "sha256": "11538def4cf62838ad768cf11147486b5610a8f777e728e6f92e5c908a15a015"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/REVIEW.md",
+      "bytes": 5332,
+      "sha256": "c55d94522d2a0f8d9f5e896fc3987176870d0ee06afcc28a1be1779a61c0fa1a"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/source-after-static.json",
+      "bytes": 517,
+      "sha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/source-before.json",
+      "bytes": 517,
+      "sha256": "bcdde75f6fcb629f1a419d5ffdfe6fa792929fd8d95ecbef90bc518abe506ea7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/static-checks.mjs",
+      "bytes": 4060,
+      "sha256": "4db6ebff5da24f029a99fd7b5c9155b523b66426e877c4120613f5ca7f9ed6ac"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/static-current.log",
+      "bytes": 191,
+      "sha256": "6465aa0675948fbd5c79007acc0f084e5969a1a5e49a36fe35a8988785545093"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/static.log",
+      "bytes": 6356,
+      "sha256": "60da554959e3178ad7cfb8dcef427aefcac43f8273f5424db243cf3251ee44c2"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/typescript-baseline.json",
+      "bytes": 30792,
+      "sha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model232-review/typescript-current.json",
+      "bytes": 30792,
+      "sha256": "67df1b8a718ca755f0204e2d4633b994ce7808d02151852b7ee749f3fb911f0b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model232-error-captured.txt",
+      "bytes": 12879,
+      "sha256": "e1468b4681f3ffc2de94169b3060d9b898dcba71c0808c5fb4fa22d1acf20fab"
+    },
+    {
+      "path": "apps/packages/ui/package.json",
+      "bytes": 8056,
+      "sha256": "4ab92688af46a9e2555123aed2c25d1415cf334d7b256d6879ddf7d5099d51e8"
+    },
+    {
+      "path": "apps/packages/ui/src/services/background-proxy.ts",
+      "bytes": 80256,
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "bytes": 3861,
+      "sha256": "fb6ce4a4f31f01e012fa4c7f850225c283be97e40cf078770ecfe2a1baf43640"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "bytes": 74917,
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwChat.ts",
+      "bytes": 25395,
+      "sha256": "0e2df34c47ef1994724a768bea3aa567d8aab4327eebae772157c06ac87e3445"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "bytes": 5803,
+      "sha256": "5d11e742f8be0fcaa5608e0cc91beaf6ffe10069ceee6c43b078661e6cd36591"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/chat-error-message.ts",
+      "bytes": 11077,
+      "sha256": "8ffeaa317543c00a6de276dfe9eb8697f7a78012b84abad493a2fa1e91c04c21"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/format-error-message.ts",
+      "bytes": 2530,
+      "sha256": "61ce0b9e02104919b8503ef60bfc9737172c9da90bc56f181865063f6a461b9e"
+    },
+    {
+      "path": "apps/packages/ui/src/utils/server-error-message.ts",
+      "bytes": 4086,
+      "sha256": "efbdf858d45a5d329af83a0151b970416d30ae0eeaec6e282e7b1d80a4f69054"
+    },
+    {
+      "path": "apps/packages/ui/tsconfig.json",
+      "bytes": 458,
+      "sha256": "312b3923c1499df153a1606899c3204b57d14ee92b07ffb218a2d4bc5b5a0917"
+    },
+    {
+      "path": "apps/packages/ui/vitest.config.ts",
+      "bytes": 1043,
+      "sha256": "678eb0b079091b7163170e578e0fc79abf6edf6c2b4d8254f39d428f67de57d2"
+    },
+    {
+      "path": "apps/tldw-frontend/eslint.config.mjs",
+      "bytes": 3118,
+      "sha256": "3a8eb124f708ef4241459b176db3d39f4769dd2faa7f56c4ed2ad4484214ea7e"
+    },
+    {
+      "path": "apps/tldw-frontend/tsconfig.json",
+      "bytes": 1418,
+      "sha256": "5b71ff79e9d16197f41df2609b33985081fec39360b47966c19c8875202aa8bb"
+    },
+    {
+      "path": "apps/tldw-frontend/vitest.config.ts",
+      "bytes": 1853,
+      "sha256": "8767ae53d8910ffa56482501a6cf8f26ff657f73fd23d3b69b98cb1ba1e4b9d1"
+    },
+    {
+      "path": "backlog/tasks/task-13260.174 - Show-actionable-unavailable-model-guidance-in-Chat.md",
+      "bytes": 3809,
+      "sha256": "5fe3ec2fb58115ab4716ec41a25b45cb6749e93042364636395b7bb3ecda63aa"
+    }
+  ]
+}

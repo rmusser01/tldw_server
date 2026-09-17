@@ -1,0 +1,327 @@
+### Page
+- Page URL: http://127.0.0.1:18782/media?id=1
+- Page Title: Media | tldw
+- Console: 3 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=f1e1]:
+  - generic [ref=f1e4]:
+    - link "Skip to main content" [ref=f1e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f1e6]:
+      - button "Expand sidebar" [ref=f1e7] [cursor=pointer]
+      - button "New Chat" [ref=f1e11] [cursor=pointer]
+      - generic [ref=f1e14]:
+        - button "Quick Ingest" [ref=f1e15] [cursor=pointer]
+        - button "Chat" [ref=f1e19] [cursor=pointer]
+        - button "Prompts" [ref=f1e22] [cursor=pointer]
+        - button "Characters" [ref=f1e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f1e31] [cursor=pointer]
+        - button "World Books" [ref=f1e35] [cursor=pointer]
+        - button "Notes" [ref=f1e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f1e42] [cursor=pointer]
+        - button "Media" [ref=f1e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f1e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f1e59] [cursor=pointer]
+        - button "Kanban" [ref=f1e65] [cursor=pointer]
+        - button "Watchlists" [ref=f1e67] [cursor=pointer]
+      - generic [ref=f1e72]:
+        - button "Open Notes Dock" [ref=f1e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f1e78] [cursor=pointer]
+        - button "Settings" [ref=f1e81] [cursor=pointer]
+    - main [ref=f1e85]:
+      - generic [ref=f1e86]:
+        - generic [ref=f1e89]:
+          - generic [ref=f1e90]:
+            - button "Expand sidebar" [ref=f1e91] [cursor=pointer]
+            - generic [ref=f1e93]:
+              - img "tldw Assistant" [ref=f1e94]
+              - generic [ref=f1e95]: tldw Assistant
+              - button "Companion Home" [ref=f1e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f1e100] [cursor=pointer]
+          - generic [ref=f1e113]:
+            - button "Search - Open command palette" [ref=f1e114] [cursor=pointer]:
+              - generic [ref=f1e118]: Search
+              - generic [ref=f1e119]: ⌘K
+            - button "Open settings" [ref=f1e133] [cursor=pointer]
+            - generic [ref=f1e145]:
+              - button "Notifications, 0 unread" [ref=f1e146] [cursor=pointer]
+              - status [ref=f1e150]: Notifications are active
+            - button "Switch to light theme" [ref=f1e151] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f1e158] [cursor=pointer]:
+              - generic [ref=f1e159]: "?"
+        - generic [ref=f1e632]:
+          - generic [ref=f1e634]:
+            - generic [ref=f1e635]:
+              - generic [ref=f1e636]:
+                - heading "Media Inspector" [level=1] [ref=f1e637]
+                - generic [ref=f1e638]:
+                  - generic [ref=f1e639]: 1 / 1
+                  - button "Trash" [ref=f1e640] [cursor=pointer]
+                  - button "Bulk" [ref=f1e644] [cursor=pointer]
+              - generic [ref=f1e647]:
+                - button "Show media only" [pressed] [ref=f1e648] [cursor=pointer]:
+                  - generic [ref=f1e649]: Media
+                  - generic [ref=f1e650]: "1"
+                - button "Show notes only" [ref=f1e651] [cursor=pointer]:
+                  - generic [ref=f1e652]: Notes
+                  - generic [ref=f1e653]: "0"
+            - generic [ref=f1e655]:
+              - generic [ref=f1e656]:
+                - generic [ref=f1e657]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f1e659] [cursor=pointer]
+              - generic [ref=f1e662]:
+                - generic [ref=f1e663]:
+                  - textbox "Search media (title/content)" [ref=f1e668]
+                  - button "Search syntax help" [ref=f1e670] [cursor=pointer]: "?"
+                - button "Search" [ref=f1e671] [cursor=pointer]
+                - generic [ref=f1e672]:
+                  - generic [ref=f1e673]:
+                    - generic [ref=f1e674]: Filters
+                    - button "Clear all" [ref=f1e678] [cursor=pointer]
+                  - generic [ref=f1e679]:
+                    - generic [ref=f1e680]: Search mode
+                    - generic [ref=f1e681]:
+                      - button "Full-text search" [pressed] [ref=f1e682] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f1e683] [cursor=pointer]: Metadata
+                  - generic [ref=f1e684]:
+                    - generic [ref=f1e685]: Sort by
+                    - generic [ref=f1e686] [cursor=pointer]:
+                      - generic [ref=f1e687]:
+                        - generic "Relevance" [ref=f1e688]
+                        - combobox [ref=f1e689]
+                      - img "down" [ref=f1e691]
+                  - generic [ref=f1e694]:
+                    - generic [ref=f1e695]: Date range
+                    - generic [ref=f1e696]:
+                      - generic [ref=f1e697]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f1e698]
+                      - generic [ref=f1e699]:
+                        - text: End date
+                        - textbox "End date" [ref=f1e700]
+                  - button "Advanced search" [ref=f1e702] [cursor=pointer]
+                  - generic [ref=f1e706] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f1e707]
+                    - generic [ref=f1e710]: Favorites only
+                  - generic [ref=f1e711]:
+                    - button "Media types" [ref=f1e712] [cursor=pointer]
+                    - generic [ref=f1e718] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f1e719]
+                      - generic [ref=f1e720]: Document
+                  - button "Keywords" [ref=f1e722] [cursor=pointer]
+                  - generic [ref=f1e727]:
+                    - generic [ref=f1e728]: Exclude keywords
+                    - generic [ref=f1e730]:
+                      - generic [ref=f1e731]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f1e733]
+                      - img "down" [ref=f1e735]
+                    - generic [ref=f1e738]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f1e739]: 0 exclude keyword suggestions available
+                - generic [ref=f1e740]:
+                  - generic [ref=f1e741]:
+                    - generic [ref=f1e742]: Collection
+                    - combobox "Collection" [ref=f1e743]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f1e744]: Create collections from bulk selection to organize related items.
+            - generic [ref=f1e745]:
+              - generic [ref=f1e747]:
+                - generic [ref=f1e748]:
+                  - generic [ref=f1e749]:
+                    - generic [ref=f1e750]: Results
+                    - generic [ref=f1e751]: 1 / 1
+                  - generic [ref=f1e752]:
+                    - button "Standard view" [pressed] [ref=f1e753] [cursor=pointer]
+                    - button "Compact view" [ref=f1e759] [cursor=pointer]
+                - 'button "Select media: rowan-observatory-public-20260917" [ref=f1e762] [cursor=pointer]':
+                  - generic [ref=f1e763]:
+                    - button "Add to favorites" [ref=f1e768]
+                    - generic [ref=f1e771]:
+                      - generic [ref=f1e772]:
+                        - generic [ref=f1e773]: MEDIA
+                        - generic [ref=f1e774]: document
+                        - generic [ref=f1e775]: 1m ago
+                      - generic [ref=f1e776]: rowan-observatory-public-20260917
+              - generic [ref=f1e777]:
+                - generic [ref=f1e778]:
+                  - generic [ref=f1e779]: 1 of 1 results
+                  - generic [ref=f1e780]:
+                    - generic [ref=f1e781]: "Per page:"
+                    - combobox "Per page:" [ref=f1e782]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f1e784] [cursor=pointer]:
+                  - generic [ref=f1e785]: "?"
+                  - generic [ref=f1e786]: for shortcuts
+            - button "Library tools" [ref=f1e788] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f1e793] [cursor=pointer]
+          - generic [ref=f1e797]:
+            - generic [ref=f1e799]:
+              - generic [ref=f1e800] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f1e801]
+                - generic [ref=f1e802]: Show chapters/sections panel
+              - generic [ref=f1e803] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f1e804]
+                - generic [ref=f1e805]: Allow generated fallback structure
+              - generic [ref=f1e806]: "Generated sections: 2"
+            - generic [ref=f1e807]:
+              - complementary "Chapters and sections" [ref=f1e808]:
+                - generic [ref=f1e809]:
+                  - generic [ref=f1e810]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f1e815]
+                  - generic [ref=f1e816]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                - tree [ref=f1e817]:
+                  - generic [ref=f1e818]:
+                    - button "1 Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create..." [ref=f1e821] [cursor=pointer]:
+                      - generic [ref=f1e822]: "1"
+                      - generic [ref=f1e823]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                    - button "2 Generated Section 2" [ref=f1e826] [cursor=pointer]:
+                      - generic [ref=f1e827]: "2"
+                      - generic [ref=f1e828]: Generated Section 2
+              - generic [ref=f1e829]:
+                - button "Create study pack" [ref=f1e831] [cursor=pointer]
+                - generic [ref=f1e832]:
+                  - paragraph [ref=f1e833]: Unable to load this item. Please try again.
+                  - button "Retry" [ref=f1e834] [cursor=pointer]
+                - generic [ref=f1e835]:
+                  - generic [ref=f1e836]: Showing rowan-observatory-public-20260917
+                  - generic [ref=f1e838]:
+                    - generic [ref=f1e839]:
+                      - button "Previous" [disabled] [ref=f1e840]
+                      - generic [ref=f1e843]: 1/1
+                      - button "Next" [disabled] [ref=f1e844]
+                    - heading "rowan-observatory-public-20260917" [level=3] [ref=f1e847]
+                    - generic [ref=f1e848]:
+                      - button "Chat with this media" [disabled] [ref=f1e849]
+                      - button "Analyze" [ref=f1e852] [cursor=pointer]
+                      - button "Actions" [ref=f1e856] [cursor=pointer]
+                  - generic [ref=f1e862]:
+                    - generic [ref=f1e863]:
+                      - generic [ref=f1e864]: document
+                      - generic "2026-09-17 20:32:22.746000+00:00" [ref=f1e865]: Ingested 1m ago
+                      - generic "2026-09-17 20:32:22.746000+00:00" [ref=f1e866]: Updated 1m ago
+                      - generic [ref=f1e867]: 0 Words
+                      - generic "Reading progress" [ref=f1e871]: 0% read
+                    - button "Metadata details Open" [ref=f1e873] [cursor=pointer]:
+                      - generic [ref=f1e874]: Metadata details
+                      - generic [ref=f1e875]: Open
+                    - generic [ref=f1e877]:
+                      - generic [ref=f1e878]:
+                        - generic: Add keywords...
+                        - combobox [ref=f1e880]
+                      - img "down" [ref=f1e882]
+                    - generic [ref=f1e885]:
+                      - generic [ref=f1e886]:
+                        - button "Content" [ref=f1e887] [cursor=pointer]
+                        - generic [ref=f1e891]:
+                          - generic [ref=f1e892] [cursor=pointer]:
+                            - generic [ref=f1e893]:
+                              - generic "Auto" [ref=f1e894]
+                              - combobox "Display mode" [ref=f1e895]
+                            - img "down" [ref=f1e897]
+                          - group "Text size" [ref=f1e900]:
+                            - button "Text size S" [ref=f1e901] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f1e902] [cursor=pointer]: M
+                            - button "Text size L" [ref=f1e903] [cursor=pointer]: L
+                          - button "Find in content" [ref=f1e904] [cursor=pointer]
+                      - region "Media content" [ref=f1e911]:
+                        - paragraph [ref=f1e913]: No content available
+                    - generic [ref=f1e914]:
+                      - generic [ref=f1e915]:
+                        - button "Analysis" [ref=f1e916] [cursor=pointer]
+                        - button "Generate" [ref=f1e921] [cursor=pointer]
+                      - generic [ref=f1e925]: No analysis yet
+                    - generic [ref=f1e927]:
+                      - button "Statistics" [ref=f1e928] [cursor=pointer]
+                      - generic [ref=f1e933]:
+                        - generic [ref=f1e934]:
+                          - generic [ref=f1e935]: Words
+                          - generic [ref=f1e936]: "0"
+                        - generic [ref=f1e937]:
+                          - generic [ref=f1e938]: Characters
+                          - generic [ref=f1e939]: "0"
+                        - generic [ref=f1e940]:
+                          - generic [ref=f1e941]: Paragraphs
+                          - generic [ref=f1e942]: "0"
+                    - button "Metadata" [ref=f1e944] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f1e949] [cursor=pointer]
+                    - button "Version History" [ref=f1e955] [cursor=pointer]
+                    - button "Delete item" [ref=f1e965] [cursor=pointer]
+  - generic [active]:
+    - generic [ref=f1e971]:
+      - generic [ref=f1e972]:
+        - navigation [ref=f1e974]:
+          - button [disabled] [ref=f1e975]:
+            - img "previous" [ref=f1e976]
+          - generic [ref=f1e978]:
+            - generic [ref=f1e979]: 1/
+            - text: "1"
+          - button [disabled] [ref=f1e980]:
+            - img "next" [ref=f1e981]
+        - link "Next.js 16.1.4 (stale) Turbopack" [ref=f1e984] [cursor=pointer]:
+          - /url: https://nextjs.org/docs/messages/version-staleness
+          - generic "There is a newer version (16.3.5) available, upgrade recommended!" [ref=f1e987]: Next.js 16.1.4 (stale)
+          - generic [ref=f1e988]: Turbopack
+      - dialog "Runtime Error" [ref=f1e990]:
+        - generic [ref=f1e993]:
+          - generic [ref=f1e994]:
+            - generic [ref=f1e995]:
+              - generic [ref=f1e996]: Runtime Error
+              - generic [ref=f1e998]:
+                - button "Copy Error Info" [ref=f1e999] [cursor=pointer]
+                - button "No related documentation found" [disabled] [ref=f1e1002]
+                - button "Attach Node.js inspector" [ref=f1e1005] [cursor=pointer]
+            - generic [ref=f1e1014]: Database error retrieving media details (GET /api/v1/media/1)
+          - generic [ref=f1e1016]:
+            - generic [ref=f1e1017]:
+              - paragraph [ref=f1e1019]:
+                - generic [ref=f1e1025]: ../packages/ui/src/services/background-proxy.ts (1054:19) @ buildRequestError
+                - button "Open in editor" [ref=f1e1026] [cursor=pointer]
+              - generic [ref=f1e1031]:
+                - generic [ref=f1e1032]: 1052 | return createAbortError(msg, status, details)
+                - generic [ref=f1e1033]: "1053 | }"
+                - generic [ref=f1e1034]: "> 1054 | const error = new Error(`${msg} (${method} ${path})`) as Error & {"
+                - generic [ref=f1e1035]: "| ^"
+                - generic [ref=f1e1036]: "1055 | status?: number"
+                - generic [ref=f1e1037]: "1056 | code?: string"
+                - generic [ref=f1e1038]: "1057 | details?: unknown"
+            - generic [ref=f1e1039]:
+              - paragraph [ref=f1e1041]:
+                - text: Call Stack
+                - generic [ref=f1e1042]: "4"
+              - generic [ref=f1e1043]:
+                - generic [ref=f1e1044]:
+                  - text: buildRequestError
+                  - button "Open buildRequestError in editor" [ref=f1e1045] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1054:19)
+              - generic [ref=f1e1048]:
+                - generic [ref=f1e1049]:
+                  - text: handleFailedResponse
+                  - button "Open handleFailedResponse in editor" [ref=f1e1050] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1200:28)
+              - generic [ref=f1e1053]:
+                - generic [ref=f1e1054]:
+                  - text: async bgRequestImpl
+                  - button "Open async bgRequestImpl in editor" [ref=f1e1055] [cursor=pointer]
+                - text: ../packages/ui/src/services/background-proxy.ts (1445:21)
+              - generic [ref=f1e1058]:
+                - generic [ref=f1e1059]:
+                  - text: async useMediaNavigationState.useCallback[loadSelectedDetails] [as current]
+                  - button "Open async useMediaNavigationState.useCallback[loadSelectedDetails] [as current] in editor" [ref=f1e1060] [cursor=pointer]
+                - text: ../packages/ui/src/components/Review/hooks/useMediaNavigationState.ts (127:22)
+        - generic [ref=f1e1063]: "1"
+        - generic [ref=f1e1064]: "2"
+    - generic [ref=f1e1070] [cursor=pointer]:
+      - button "Open issues overlay" [ref=f1e1071]:
+        - generic [ref=f1e1075]:
+          - generic [aria-hidden] [ref=f1e1076]: "0"
+          - generic [ref=f1e1077]: "1"
+        - generic [ref=f1e1078]: Issue
+      - button "Collapse issues badge" [ref=f1e1079]
+  - alert [ref=f1e479]: Media | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T19-54-16-493Z.log#L48-L49
+

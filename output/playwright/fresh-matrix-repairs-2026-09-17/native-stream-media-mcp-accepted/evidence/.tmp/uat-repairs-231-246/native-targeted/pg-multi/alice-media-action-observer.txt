@@ -1,0 +1,8 @@
+### Result
+{"at":"2026-09-17T22:11:20.986Z","url":"http://127.0.0.1:18783/media","passiveDomObservation":true,"interceptsOrDelaysTraffic":false}
+### Ran Playwright code
+```js
+await (async page=>{await page.evaluate(()=>{window.__uatMediaActionObserver?.disconnect();window.__uatMediaActionTransitions=[];let previous='';const sample=()=>{const button=[...document.querySelectorAll('button')].find(e=>e.textContent?.trim()==='Chat with this media'||e.getAttribute('aria-label')==='Chat with this media');const region=document.querySelector('[role="region"][aria-label="Media content"]');const state={present:Boolean(button),disabled:button?button.disabled:null,contentPresent:Boolean(region),contentLength:region?.textContent?.length||0};const key=JSON.stringify(state);if(key===previous)return;previous=key;window.__uatMediaActionTransitions.push({at:new Date().toISOString(),...state});};window.__uatMediaActionObserver=new MutationObserver(sample);window.__uatMediaActionObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','aria-disabled','aria-label']});sample();});return {at:new Date().toISOString(),url:page.url(),passiveDomObservation:true,interceptsOrDelaysTraffic:false};}
+)(page);
+```
+

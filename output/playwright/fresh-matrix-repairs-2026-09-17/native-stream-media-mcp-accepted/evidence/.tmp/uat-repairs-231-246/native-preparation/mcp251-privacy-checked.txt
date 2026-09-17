@@ -1,0 +1,5 @@
+### Ran Playwright code
+```js
+await page.getByRole('checkbox', { name: 'I understand local or remote' }).check();
+```
+

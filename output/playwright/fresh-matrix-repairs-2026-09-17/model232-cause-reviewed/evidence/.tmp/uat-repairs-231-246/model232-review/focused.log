@@ -1,0 +1,18 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:86596) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts > ordinary chat unavailable-model recovery through browser transport > renders actionable HTTP400 guidance and preserves request identity when retried
+Stream completion failed: Model 'missing-model' is not available for provider 'ollama'. Select one of the server-advertised models for this provider.
+
+ ✓ src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts (1 test) 9ms
+(node:86597) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/chat-error-message.test.ts (19 tests) 5ms
+
+ Test Files  2 passed (2)
+      Tests  20 passed (20)
+   Start at  15:30:56
+   Duration  935ms (transform 213ms, setup 114ms, import 229ms, tests 14ms, environment 415ms)
+

@@ -1,0 +1,1 @@
+async page=>{await page.getByRole('button',{name:'Chat as E2E-TestBot — Repair Alice PGmulti 20260917',exact:true}).click();await page.getByRole('textbox',{name:'Type a message... (/ commands, @ mentions)',exact:true}).waitFor({timeout:20000});return {at:new Date().toISOString(),url:page.url(),ui:await page.locator('body').ariaSnapshot()};}

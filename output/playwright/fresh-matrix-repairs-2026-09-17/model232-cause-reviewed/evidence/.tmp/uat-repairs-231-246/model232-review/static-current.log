@@ -1,0 +1,14 @@
+{
+  "eslint": {
+    "baseline": 0,
+    "current": 0,
+    "added": [],
+    "removed": []
+  },
+  "typescript": {
+    "baseline": 90,
+    "current": 90,
+    "added": [],
+    "removed": []
+  }
+}

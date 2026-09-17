@@ -1,0 +1,14 @@
+### Result
+{"start":"2026-09-17T22:14:09.862Z","at":"2026-09-17T22:14:10.166Z","url":"http://127.0.0.1:18784/","response":{"status":200,"state":{"status":"in_progress","completed_steps":["setup_path","privacy_security","providers","ingest_defaults","audio_defaults","optional_advanced","mcp_tools"],"mcp_tools":{"selected_pack_ids":["research","learning","writing","media_library","personal_knowledge"],"assignment_id":1,"catalog_version":"2026-07-04.v1","external_status":"not_enabled","last_validation_run_id":"mcp-tools-validation:719ee022e88b43c6af9c3f62a19ce81a","validation_state":"built_in_passed","selected_addon_ids":[],"effective_tool_count":23,"validated_at":"2026-09-17T22:13:05.904016+00:00","validation_message":"Built-in MCP tool check passed.","acknowledged":true,"profile_id":1,"confirmation_version":"2026-07-04.v1","sample_tool_name":"mcp.tools.list","confirmed_addon_ids":[]}}},"ui":"- link \"Skip to main content\":\n  - /url: \"#main-content\"\n- main:\n  - paragraph: Solo onboarding\n  - heading \"First-time setup\" [level=1]\n  - paragraph: Configure the minimum needed to reach a successful first chat.\n  - button \"Skip for now\"\n  - region \"Setup readiness\":\n    - heading \"Setup readiness\" [level=2]\n    - paragraph: Chat must be ready. RAG and speech can be configured later.\n    - button \"Retry\"\n    - paragraph: Checking setup readiness...\n  - region \"First chat\":\n    - heading \"First chat\" [level=2]\n    - paragraph: Completion requires an actual successful response from llamacpp.\n    - text: Default chat target llamacpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf First prompt\n    - textbox \"First prompt\": Say hello in one short sentence.\n    - button \"Back to MCP tools\"\n    - button \"Send test chat\"\n- alert"}
+### Ran Playwright code
+```js
+await (async page=>{const start=new Date().toISOString();const wait=page.waitForResponse(r=>r.request().method()==='GET'&&r.url().includes('/api/v1/setup/first-run/state'),{timeout:20000});await page.reload();const r=await wait;const b=await r.json();return {start,at:new Date().toISOString(),url:page.url(),response:{status:r.status(),state:{status:b.status,completed_steps:b.completed_steps,mcp_tools:b.step_data?.mcp_tools}},ui:await page.locator('body').ariaSnapshot()};}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18784/
+- Page Title: Home | tldw
+- Console: 0 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T22-00-40-451Z.log#L11-L13
+

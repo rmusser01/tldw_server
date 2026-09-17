@@ -1,0 +1,1692 @@
+{
+  "at": "2026-09-17T22:31:37.261Z",
+  "acceptedFindings": [
+    241,
+    246,
+    251,
+    253
+  ],
+  "runtimeSource": "a7d3155a567afb25982eb360ea24b973cc3249c9",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sourceBytes": 11746,
+      "sourceSha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "bytes": 11746,
+      "sha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py.gz",
+      "sourceBytes": 359125,
+      "sourceSha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b",
+      "bytes": 65864,
+      "sha256": "2a01873396a92020a1e0dc7329e9488764645fe3102b34dde9299fd75cca9e33",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "sourceBytes": 7302,
+      "sourceSha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "bytes": 7302,
+      "sha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sourceBytes": 11746,
+      "sourceSha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "bytes": 11746,
+      "sha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py.gz",
+      "sourceBytes": 359125,
+      "sourceSha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b",
+      "bytes": 65864,
+      "sha256": "2a01873396a92020a1e0dc7329e9488764645fe3102b34dde9299fd75cca9e33",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "sourceBytes": 7302,
+      "sourceSha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "bytes": 7302,
+      "sha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-stream246-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-stream246-review/audit.mjs",
+      "sourceBytes": 16586,
+      "sourceSha256": "e6df966f84309ff161341aecdcf6277de6c71583c66591a9c14f492535e7b0b3",
+      "bytes": 16586,
+      "sha256": "e6df966f84309ff161341aecdcf6277de6c71583c66591a9c14f492535e7b0b3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-stream246-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-stream246-review/REVIEW.md",
+      "sourceBytes": 7136,
+      "sourceSha256": "c5f98298cf811c023242ed59bda77bedc4f5b6af0c58618e8010a0b79f197cc4",
+      "bytes": 7136,
+      "sha256": "c5f98298cf811c023242ed59bda77bedc4f5b6af0c58618e8010a0b79f197cc4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/observe-character-timing-runtime.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/observe-character-timing-runtime.js",
+      "sourceBytes": 2099,
+      "sourceSha256": "3be9a79929d48d1ee937040fcda5e0d5509b618362e50c9e2ee16e72cfe5fbb2",
+      "bytes": 2099,
+      "sha256": "3be9a79929d48d1ee937040fcda5e0d5509b618362e50c9e2ee16e72cfe5fbb2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/observe-upgraded-stream.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/observe-upgraded-stream.js",
+      "sourceBytes": 827,
+      "sourceSha256": "442ced008e80048f447c2e90af2f82a23ed351e869b7e8d6cc30bde4fd6a0d5e",
+      "bytes": 827,
+      "sha256": "442ced008e80048f447c2e90af2f82a23ed351e869b7e8d6cc30bde4fd6a0d5e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-create.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-create.js",
+      "sourceBytes": 796,
+      "sourceSha256": "ff93914790b9ba351f10797251f3c2f77847fbf0118e463373cdfa4cd6ee89a3",
+      "bytes": 796,
+      "sha256": "ff93914790b9ba351f10797251f3c2f77847fbf0118e463373cdfa4cd6ee89a3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-created-entry.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-created-entry.txt",
+      "sourceBytes": 13117,
+      "sourceSha256": "68d38dbabf8fd6696b09e428f598d931c73742d8cf536da6aa06d53a6b6d27aa",
+      "bytes": 13117,
+      "sha256": "68d38dbabf8fd6696b09e428f598d931c73742d8cf536da6aa06d53a6b6d27aa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-entry.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-entry.js",
+      "sourceBytes": 345,
+      "sourceSha256": "dea3f27e6ee488c67671af7672e2ac2843ce7c5254ca55f22bb06730bf3ded2b",
+      "bytes": 345,
+      "sha256": "dea3f27e6ee488c67671af7672e2ac2843ce7c5254ca55f22bb06730bf3ded2b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-entry.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-entry.txt",
+      "sourceBytes": 4898,
+      "sourceSha256": "40fe90e2b23176d7e572a11e71fea283b0727694dda867107aa82f356f20f93d",
+      "bytes": 4898,
+      "sha256": "40fe90e2b23176d7e572a11e71fea283b0727694dda867107aa82f356f20f93d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-reloaded.txt",
+      "sourceBytes": 34692,
+      "sourceSha256": "6488c0823ab724d281da91723392b4a08b31f150095b5a2cec67c14f8f03146e",
+      "bytes": 34692,
+      "sha256": "6488c0823ab724d281da91723392b4a08b31f150095b5a2cec67c14f8f03146e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-send.txt",
+      "sourceBytes": 5427,
+      "sourceSha256": "73016fe9ea8b672ba2ef98c58b05fb39f3053467b5b71fdf399b27d4130697e9",
+      "bytes": 5427,
+      "sha256": "73016fe9ea8b672ba2ef98c58b05fb39f3053467b5b71fdf399b27d4130697e9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-fresh-exact-terminal.txt.gz",
+      "sourceBytes": 1210799,
+      "sourceSha256": "59d3ed561fc37711101f311a1942fe9af7006bfc7bdc2e5c859e5c27ac1560b3",
+      "bytes": 79924,
+      "sha256": "443afbf42b8b5702b4240c7a1cc44f4f6025e0884a0c4b1f50e7aa3383a828f2",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-terminal.txt",
+      "sourceBytes": 34184,
+      "sourceSha256": "28b6e388da582ed09164d9363b50d4bc38e3aa7c2d1684450e46757411401795",
+      "bytes": 34184,
+      "sha256": "28b6e388da582ed09164d9363b50d4bc38e3aa7c2d1684450e46757411401795",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-reloaded.txt",
+      "sourceBytes": 178458,
+      "sourceSha256": "8a38023a099f3283a291dcfd8f9aa96b9d9bd6bbd455af491850d15db2e84ec2",
+      "bytes": 178458,
+      "sha256": "8a38023a099f3283a291dcfd8f9aa96b9d9bd6bbd455af491850d15db2e84ec2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-send.txt",
+      "sourceBytes": 6686,
+      "sourceSha256": "2e1116013b32f35d31b4b6924066a1919122b14c5e737da2db7316552edd1158",
+      "bytes": 6686,
+      "sha256": "2e1116013b32f35d31b4b6924066a1919122b14c5e737da2db7316552edd1158",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-terminal-v2.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-terminal-v2.txt.gz",
+      "sourceBytes": 809219,
+      "sourceSha256": "c345921cd2dc881526a1cfa0904b770f015bfc49e640e40d3bf66ef4df743552",
+      "bytes": 51857,
+      "sha256": "cf3ea9f2175918d6db90a623d629e308ce5532d9833c0a9108aa8fc7b51ba349",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-exact-terminal.txt.gz",
+      "sourceBytes": 706224,
+      "sourceSha256": "0c98bcae5522f0a45e64fc262d9ff28dea4fe85347f5f54e62df415b74d458c3",
+      "bytes": 45039,
+      "sha256": "30043e52cd0b34629c9d17fd5844a2df1bd9a50b96eb772fa97dbb09625d7b06",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-library-settled.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-library-settled.txt",
+      "sourceBytes": 9637,
+      "sourceSha256": "d7b993772ebe46ac08a11a086c34a0f148b97352396673061b08699347c4b5cb",
+      "bytes": 9637,
+      "sha256": "d7b993772ebe46ac08a11a086c34a0f148b97352396673061b08699347c4b5cb",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-library.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/testbot-upgraded-library.txt",
+      "sourceBytes": 765,
+      "sourceSha256": "595fcab6a23f8648697f84fe588114eb759aa9eefc82096213dbc0549e74d38e",
+      "bytes": 765,
+      "sha256": "595fcab6a23f8648697f84fe588114eb759aa9eefc82096213dbc0549e74d38e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-create.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-create.js",
+      "sourceBytes": 781,
+      "sourceSha256": "8075b2c3f25bac84b1098ec08472ca889ecb2aef7ef9a65880cf7e4da7009821",
+      "bytes": 781,
+      "sha256": "8075b2c3f25bac84b1098ec08472ca889ecb2aef7ef9a65880cf7e4da7009821",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-created-entry.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-created-entry.txt",
+      "sourceBytes": 13076,
+      "sourceSha256": "aa6947c5c7c2adda9b93aa32f8adb6e238ae5a4dfbea830b5e5799f9a9141261",
+      "bytes": 13076,
+      "sha256": "aa6947c5c7c2adda9b93aa32f8adb6e238ae5a4dfbea830b5e5799f9a9141261",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-entry-settled.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-entry-settled.txt",
+      "sourceBytes": 10418,
+      "sourceSha256": "492601fe092c68bcd5d8d005d082ea4e92e79b53461b0d0e764b16136f03eea2",
+      "bytes": 10418,
+      "sha256": "492601fe092c68bcd5d8d005d082ea4e92e79b53461b0d0e764b16136f03eea2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-entry.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-entry.txt",
+      "sourceBytes": 10772,
+      "sourceSha256": "fe5827354b4e7960b07b61b31212c4eb9fb45ab42c245b944eae78757cf0696e",
+      "bytes": 10772,
+      "sha256": "fe5827354b4e7960b07b61b31212c4eb9fb45ab42c245b944eae78757cf0696e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-reloaded.txt",
+      "sourceBytes": 64748,
+      "sourceSha256": "a38ed467f649d74189efc79fbeab703c99c234caad2c841fc710514318999185",
+      "bytes": 64748,
+      "sha256": "a38ed467f649d74189efc79fbeab703c99c234caad2c841fc710514318999185",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-send.txt",
+      "sourceBytes": 5504,
+      "sourceSha256": "ab13ffa8f1f7f36713f8cf137763cde9f1cc207ab23425c9bbe3a6913e3f41cc",
+      "bytes": 5504,
+      "sha256": "ab13ffa8f1f7f36713f8cf137763cde9f1cc207ab23425c9bbe3a6913e3f41cc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-fresh-exact-terminal.txt.gz",
+      "sourceBytes": 1921902,
+      "sourceSha256": "08aec93922e52a246e8fc7ef74fe1d3dcc72f5edaf57fd11a00437ef9039573d",
+      "bytes": 134141,
+      "sha256": "49ef8eb0cb0c31e8c8ca4b5bfee17eaaae563f204be93569b722628a2f4ae528",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-terminal.txt",
+      "sourceBytes": 34500,
+      "sourceSha256": "14aa0801cb768dadb8a6a2fcf9d74ba7a5a88dca1aeb170d94b52f56e18485dd",
+      "bytes": 34500,
+      "sha256": "14aa0801cb768dadb8a6a2fcf9d74ba7a5a88dca1aeb170d94b52f56e18485dd",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-reloaded.txt",
+      "sourceBytes": 195750,
+      "sourceSha256": "3c4b713dd8b29eba3a97d4c3483fe059201758f587b5d26b579c4af8340bb676",
+      "bytes": 195750,
+      "sha256": "3c4b713dd8b29eba3a97d4c3483fe059201758f587b5d26b579c4af8340bb676",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-send.txt",
+      "sourceBytes": 8542,
+      "sourceSha256": "84d9a44889825e9bb51c452c5e4368ca81531576b4fe56d6572ee1f194c2f930",
+      "bytes": 8542,
+      "sha256": "84d9a44889825e9bb51c452c5e4368ca81531576b4fe56d6572ee1f194c2f930",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-exact-terminal.txt.gz",
+      "sourceBytes": 1092410,
+      "sourceSha256": "aaf0725294d7c742530e7bd181ea6f3191802a13676ed1252af008afb1422f84",
+      "bytes": 66085,
+      "sha256": "d30450fe3e8652e2badc9a04104d3faf27635b0b90e7e9df340793091c972281",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-library-settled.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-library-settled.txt",
+      "sourceBytes": 9499,
+      "sourceSha256": "a17826ff8e1f10bea1bb94f8dea62dab805fa63e51e9afd5e6da3afbd39cf141",
+      "bytes": 9499,
+      "sha256": "a17826ff8e1f10bea1bb94f8dea62dab805fa63e51e9afd5e6da3afbd39cf141",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-library.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-library.txt",
+      "sourceBytes": 766,
+      "sourceSha256": "1e136ae8bb286cfc57a0e81ba1430b77929cd89be8b62eebbcdb72e56115069b",
+      "bytes": 766,
+      "sha256": "1e136ae8bb286cfc57a0e81ba1430b77929cd89be8b62eebbcdb72e56115069b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-reloaded.txt",
+      "sourceBytes": 117003,
+      "sourceSha256": "fe93afedf3002eb6b0bd252e6dceedc13fa59e327e7ccdcfb62cf6d915954b86",
+      "bytes": 117003,
+      "sha256": "fe93afedf3002eb6b0bd252e6dceedc13fa59e327e7ccdcfb62cf6d915954b86",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-send.txt",
+      "sourceBytes": 8204,
+      "sourceSha256": "1ea4a29a8bcc66c44df62870cfcf3ee9ff734fe4bb931a02d98af978c9e797a7",
+      "bytes": 8204,
+      "sha256": "1ea4a29a8bcc66c44df62870cfcf3ee9ff734fe4bb931a02d98af978c9e797a7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-upgraded-terminal.txt.gz",
+      "sourceBytes": 459547,
+      "sourceSha256": "c3c2fffe97484ac7531e739ecd1bf9ec85a3db7ce68d9561ae0a7b7f13c98f38",
+      "bytes": 29364,
+      "sha256": "e0f90d199b258f8fb4b176ca3b37f09bd9f23715c763e85278cc8bbd95da6ffc",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/settle-upgraded-stream.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/settle-upgraded-stream.js",
+      "sourceBytes": 367,
+      "sourceSha256": "fe4ac8f816be290cfd3697104182209f01977dca89599dbf20c5df0e36e541f8",
+      "bytes": 367,
+      "sha256": "fe4ac8f816be290cfd3697104182209f01977dca89599dbf20c5df0e36e541f8",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/UPGRADED_NATIVE_NOTES.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/UPGRADED_NATIVE_NOTES.md",
+      "sourceBytes": 2632,
+      "sourceSha256": "f30825241ffb6fe9eabc07ed178872a10ab309008fd720def66eda28e887b5a6",
+      "bytes": 2632,
+      "sha256": "f30825241ffb6fe9eabc07ed178872a10ab309008fd720def66eda28e887b5a6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-native-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/upgrade254-native-review/audit.json",
+      "sourceBytes": 29661,
+      "sourceSha256": "be0127da527763cc46b450c3885b8de84c8ebc6dcdc2491cda7bf9873f793be1",
+      "bytes": 29661,
+      "sha256": "be0127da527763cc46b450c3885b8de84c8ebc6dcdc2491cda7bf9873f793be1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-native-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/upgrade254-native-review/REVIEW.md",
+      "sourceBytes": 4443,
+      "sourceSha256": "e89ef5f7508ec73347af5509cd68aeffccf17548c8106d0b170e981082b24c47",
+      "bytes": 4443,
+      "sha256": "e89ef5f7508ec73347af5509cd68aeffccf17548c8106d0b170e981082b24c47",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/background-proxy.ts",
+      "path": "evidence/apps/packages/ui/src/services/background-proxy.ts",
+      "sourceBytes": 80256,
+      "sourceSha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "bytes": 80256,
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "path": "evidence/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sourceBytes": 11746,
+      "sourceSha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "bytes": 11746,
+      "sha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48",
+      "encoding": "identity"
+    },
+    {
+      "source": "backlog/tasks/task-13260.188 - Diagnose-native-TestBot-stream-timeout-in-fresh-PostgreSQL-multi-user-UAT.md",
+      "path": "evidence/backlog/tasks/task-13260.188 - Diagnose-native-TestBot-stream-timeout-in-fresh-PostgreSQL-multi-user-UAT.md",
+      "sourceBytes": 6990,
+      "sourceSha256": "fb927a786bd618ef4a2ca3fc846da13e5635c7f878f536027fa48ef34d2fda55",
+      "bytes": 6990,
+      "sha256": "fb927a786bd618ef4a2ca3fc846da13e5635c7f878f536027fa48ef34d2fda55",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/manifest.json",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/manifest.json",
+      "sourceBytes": 14270,
+      "sourceSha256": "a7b3c3701b9c58c7c4cb553008187fc2075041b3529e94be4105422ecbb5b208",
+      "bytes": 14270,
+      "sha256": "a7b3c3701b9c58c7c4cb553008187fc2075041b3529e94be4105422ecbb5b208",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/review246-buffering/final-hash-audit.json",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/review246-buffering/final-hash-audit.json",
+      "sourceBytes": 837,
+      "sourceSha256": "2656b7aeace597c3214e73fed14a6ce8e47a6d01b5e1134a98c15d6ae402ee9f",
+      "bytes": 837,
+      "sha256": "2656b7aeace597c3214e73fed14a6ce8e47a6d01b5e1134a98c15d6ae402ee9f",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/review246-buffering/REVIEW246.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/review246-buffering/REVIEW246.md",
+      "sourceBytes": 5553,
+      "sourceSha256": "539fb8e68979476077011b93502395a34f97a94c69bc61fcddd78159f519fc17",
+      "bytes": 5553,
+      "sha256": "539fb8e68979476077011b93502395a34f97a94c69bc61fcddd78159f519fc17",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/stream246-native-audit/REPORT.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/character-stream-buffering-reviewed/stream246-native-audit/REPORT.md",
+      "sourceBytes": 7474,
+      "sourceSha256": "33d275fdef3de21779b83e4a89cd5a49bf2d455cf244faa09c3a718f2f55b413",
+      "bytes": 7474,
+      "sha256": "33d275fdef3de21779b83e4a89cd5a49bf2d455cf244faa09c3a718f2f55b413",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "path": "evidence/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py.gz",
+      "sourceBytes": 359125,
+      "sourceSha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b",
+      "bytes": 65864,
+      "sha256": "2a01873396a92020a1e0dc7329e9488764645fe3102b34dde9299fd75cca9e33",
+      "encoding": "gzip"
+    },
+    {
+      "source": "tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "path": "evidence/tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "sourceBytes": 7302,
+      "sourceSha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "bytes": 7302,
+      "sha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-stream246-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-stream246-review/audit.json",
+      "sourceBytes": 28444,
+      "sourceSha256": "32e3eefa5d1fe259f3b0707f1cfbdc07a84d0ed79f61217ad5ab0ef16678debc",
+      "bytes": 28444,
+      "sha256": "32e3eefa5d1fe259f3b0707f1cfbdc07a84d0ed79f61217ad5ab0ef16678debc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt",
+      "sourceBytes": 1917,
+      "sourceSha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "bytes": 1917,
+      "sha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-failure.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-failure.txt",
+      "sourceBytes": 119431,
+      "sourceSha256": "62c6d7da6c4b6da693021f1e5be802f9601ca461ba10ed2da36e3f4532112214",
+      "bytes": 119431,
+      "sha256": "62c6d7da6c4b6da693021f1e5be802f9601ca461ba10ed2da36e3f4532112214",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-loaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-loaded.txt",
+      "sourceBytes": 18466,
+      "sourceSha256": "59fd35aafc80edb50db1d2a3d1d4ae64ff96fe226ce999e4320986dd7b15cb1e",
+      "bytes": 18466,
+      "sha256": "59fd35aafc80edb50db1d2a3d1d4ae64ff96fe226ce999e4320986dd7b15cb1e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-current-error.redacted.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-current-error.redacted.log",
+      "sourceBytes": 33282,
+      "sourceSha256": "44fa941dc901f8c4164be965664c9e72b5b560aea7d60a86454fd10a3c9c7a2f",
+      "bytes": 33282,
+      "sha256": "44fa941dc901f8c4164be965664c9e72b5b560aea7d60a86454fd10a3c9c7a2f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-pg-server.redacted.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-pg-server.redacted.log",
+      "sourceBytes": 1745,
+      "sourceSha256": "6d15a3b0c41c1497e3449c4eda96e22e5ed266a4b1890c7ba3b83f00f87ec948",
+      "bytes": 1745,
+      "sha256": "6d15a3b0c41c1497e3449c4eda96e22e5ed266a4b1890c7ba3b83f00f87ec948",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-error.redacted.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-detail-error.redacted.log",
+      "sourceBytes": 8454,
+      "sourceSha256": "b21303a78e15a23b45dc55e5291b6b154a66414340af20641a2dbe80c5110665",
+      "bytes": 8454,
+      "sha256": "b21303a78e15a23b45dc55e5291b6b154a66414340af20641a2dbe80c5110665",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-upgraded-read-v2.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-upgraded-read-v2.txt",
+      "sourceBytes": 15152,
+      "sourceSha256": "f8dd8bc0ef2d9fafd77a05abde1ba331f6443962aae7afdaf41a4b5b236f5970",
+      "bytes": 15152,
+      "sha256": "f8dd8bc0ef2d9fafd77a05abde1ba331f6443962aae7afdaf41a4b5b236f5970",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/review253/REVIEW.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/review253/REVIEW.md",
+      "sourceBytes": 3475,
+      "sourceSha256": "335dc6ba83ce8a6b9136643aac8a983c77b5f2bce528f63e12abcd1c76c9be49",
+      "bytes": 3475,
+      "sha256": "335dc6ba83ce8a6b9136643aac8a983c77b5f2bce528f63e12abcd1c76c9be49",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/README.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/README.md",
+      "sourceBytes": 701,
+      "sourceSha256": "c6b6dfc68d87b89e5a5e22412a0ff5c7a5473f4b0bbbc73ccfffab88fdf8662d",
+      "bytes": 701,
+      "sha256": "c6b6dfc68d87b89e5a5e22412a0ff5c7a5473f4b0bbbc73ccfffab88fdf8662d",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/manifest.json",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/manifest.json",
+      "sourceBytes": 12758,
+      "sourceSha256": "1b542f3ce22ab8d4dc07a254bb31eaf5cbcf8708e635987db413e33aebea81a7",
+      "bytes": 12758,
+      "sha256": "1b542f3ce22ab8d4dc07a254bb31eaf5cbcf8708e635987db413e33aebea81a7",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/review253/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/media-files-binding-reviewed/review253/review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "sourceBytes": 9832,
+      "sourceSha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "bytes": 9832,
+      "sha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "sourceBytes": 9832,
+      "sourceSha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "bytes": 9832,
+      "sha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "path": "evidence/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py",
+      "sourceBytes": 9832,
+      "sourceSha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "bytes": 9832,
+      "sha256": "92add9435b57918956230f1117b43a03b48eff474a8e617b8d3dc9b4a4ea9e8a",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/review-media/REVIEW.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/review-media/REVIEW.md",
+      "sourceBytes": 1738,
+      "sourceSha256": "6fc633d980808ebb521d8d42d71e8fc0b543dfff6ac6537c74f1554264f6e585",
+      "bytes": 1738,
+      "sha256": "6fc633d980808ebb521d8d42d71e8fc0b543dfff6ac6537c74f1554264f6e585",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/source-freeze.json",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/source-freeze.json",
+      "sourceBytes": 2400,
+      "sourceSha256": "c186b9fd27e73aa8c1e96a690e1e51190cd13f9439d676ce49e2eec680f614d2",
+      "bytes": 2400,
+      "sha256": "c186b9fd27e73aa8c1e96a690e1e51190cd13f9439d676ce49e2eec680f614d2",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sourceBytes": 73382,
+      "sourceSha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "bytes": 73382,
+      "sha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sourceBytes": 73382,
+      "sourceSha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "bytes": 73382,
+      "sha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "path": "evidence/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "sourceBytes": 38956,
+      "sourceSha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "bytes": 38956,
+      "sha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "sourceBytes": 38956,
+      "sourceSha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "bytes": 38956,
+      "sha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "path": "evidence/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "sourceBytes": 16247,
+      "sourceSha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "bytes": 16247,
+      "sha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "sourceBytes": 16247,
+      "sourceSha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "bytes": 16247,
+      "sha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sourceBytes": 87550,
+      "sourceSha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "bytes": 87550,
+      "sha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sourceBytes": 87550,
+      "sourceSha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "bytes": 87550,
+      "sha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "sourceBytes": 17977,
+      "sourceSha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "bytes": 17977,
+      "sha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "sourceBytes": 17977,
+      "sourceSha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "bytes": 17977,
+      "sha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "sourceBytes": 60276,
+      "sourceSha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "bytes": 60276,
+      "sha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "sourceBytes": 60276,
+      "sourceSha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "bytes": 60276,
+      "sha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "sourceBytes": 9850,
+      "sourceSha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "bytes": 9850,
+      "sha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "sourceBytes": 9850,
+      "sourceSha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "bytes": 9850,
+      "sha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "sourceBytes": 45247,
+      "sourceSha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "bytes": 45247,
+      "sha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "sourceBytes": 45247,
+      "sourceSha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "bytes": 45247,
+      "sha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "sourceBytes": 8241,
+      "sourceSha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "bytes": 8241,
+      "sha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "sourceBytes": 8241,
+      "sourceSha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "bytes": 8241,
+      "sha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "sourceBytes": 12308,
+      "sourceSha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "bytes": 12308,
+      "sha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "sourceBytes": 12308,
+      "sourceSha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "bytes": 12308,
+      "sha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "sourceBytes": 85910,
+      "sourceSha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "bytes": 85910,
+      "sha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "sourceBytes": 85910,
+      "sourceSha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "bytes": 85910,
+      "sha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "sourceBytes": 16010,
+      "sourceSha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "bytes": 16010,
+      "sha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "sourceBytes": 16010,
+      "sourceSha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "bytes": 16010,
+      "sha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/green-final-after-review.log",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/green-final-after-review.log",
+      "sourceBytes": 2735,
+      "sourceSha256": "868bcc6aedfbab9d2fc7616d07d03631478c6de5ffb9e58d6f039a4f61aa1b2a",
+      "bytes": 2735,
+      "sha256": "868bcc6aedfbab9d2fc7616d07d03631478c6de5ffb9e58d6f039a4f61aa1b2a",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/consumer-ui-controls.log",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/media237-241-244/consumer-ui-controls.log",
+      "sourceBytes": 5889,
+      "sourceSha256": "7c34f1aeca7e4bef9a592cd57306271e067c7f97addcf4d37b01afb21084f21c",
+      "bytes": 5889,
+      "sha256": "7c34f1aeca7e4bef9a592cd57306271e067c7f97addcf4d37b01afb21084f21c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-chat-open.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-chat-open.txt",
+      "sourceBytes": 18689,
+      "sourceSha256": "05be2b2c5f4c257ea2cd3b5c9bd72a13cd3784b399b1fa38418e285dce09122d",
+      "bytes": 18689,
+      "sha256": "05be2b2c5f4c257ea2cd3b5c9bd72a13cd3784b399b1fa38418e285dce09122d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-draft-captured.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-draft-captured.txt",
+      "sourceBytes": 5093,
+      "sourceSha256": "396dab0beb329ca3285a892ae83893794fa77341aff0cf71260fd607153101ba",
+      "bytes": 5093,
+      "sha256": "396dab0beb329ca3285a892ae83893794fa77341aff0cf71260fd607153101ba",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-prepared.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-prepared.txt",
+      "sourceBytes": 153,
+      "sourceSha256": "81e09f7fb675f9026cc4ba618156bfd0207f260b958c242ed6a3e7cd0ef647f4",
+      "bytes": 153,
+      "sha256": "81e09f7fb675f9026cc4ba618156bfd0207f260b958c242ed6a3e7cd0ef647f4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-prepare.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-prepare.js",
+      "sourceBytes": 1131,
+      "sourceSha256": "8620cd85be163496577bf4dd78a566d05d2f380bd7d489296c73168977f112e6",
+      "bytes": 1131,
+      "sha256": "8620cd85be163496577bf4dd78a566d05d2f380bd7d489296c73168977f112e6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-current.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-current.txt",
+      "sourceBytes": 9575,
+      "sourceSha256": "14b6c711dc182f99a78aca8478f7da9385f6a1eaba7b18ce87ca5e7b670c166c",
+      "bytes": 9575,
+      "sha256": "14b6c711dc182f99a78aca8478f7da9385f6a1eaba7b18ce87ca5e7b670c166c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-from-empty.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-from-empty.txt",
+      "sourceBytes": 21256,
+      "sourceSha256": "40869fcbc802a5d22faf40331afe1ba2244d55393854c9fe208eac17d8a8106e",
+      "bytes": 21256,
+      "sha256": "40869fcbc802a5d22faf40331afe1ba2244d55393854c9fe208eac17d8a8106e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-from-empty.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-from-empty.js",
+      "sourceBytes": 981,
+      "sourceSha256": "4c2bb0a3de8f2cc460f4e534b66a7478a353ebada7d2e976765e4b0720331c39",
+      "bytes": 981,
+      "sha256": "4c2bb0a3de8f2cc460f4e534b66a7478a353ebada7d2e976765e4b0720331c39",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-send.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-send.txt",
+      "sourceBytes": 7139,
+      "sourceSha256": "d5b4de4a2b10860466196f0ace3e38bbd47ddb51bc1c4804b95ff4b71871df9b",
+      "bytes": 7139,
+      "sha256": "d5b4de4a2b10860466196f0ace3e38bbd47ddb51bc1c4804b95ff4b71871df9b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-send.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-send.js",
+      "sourceBytes": 759,
+      "sourceSha256": "d45b7c16f25914961ea3809810258f75303177ff7e3fc9016d82bf662bcbaf31",
+      "bytes": 759,
+      "sha256": "d45b7c16f25914961ea3809810258f75303177ff7e3fc9016d82bf662bcbaf31",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-terminal.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-terminal.txt.gz",
+      "sourceBytes": 2050519,
+      "sourceSha256": "7803fa03dd7ff09b7e1e8cf5765d0baec8d101b03ff8bd5ff39a42375b8b7560",
+      "bytes": 141610,
+      "sha256": "12883d1c4f6abebe930fc7a2b3bdafa027ea7a1589e0a54f2338473c980d13d0",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reloaded.txt",
+      "sourceBytes": 45,
+      "sourceSha256": "d07cd8cf16d573ff193528dc69f7886104a70576898d1aa4b0354c1c1b605be1",
+      "bytes": 45,
+      "sha256": "d07cd8cf16d573ff193528dc69f7886104a70576898d1aa4b0354c1c1b605be1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reloaded-v2.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reloaded-v2.txt",
+      "sourceBytes": 37704,
+      "sourceSha256": "d258e44c28298cace7d22d13e147323c126ea9bf27637610534f47e4bd08d76d",
+      "bytes": 37704,
+      "sha256": "d258e44c28298cace7d22d13e147323c126ea9bf27637610534f47e4bd08d76d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reload.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-single/media-handoff-reload.js",
+      "sourceBytes": 547,
+      "sourceSha256": "7895325a461f157d75f23f6a50fe8b42a804e945aa91b739c8c0a07c107cae97",
+      "bytes": 547,
+      "sha256": "7895325a461f157d75f23f6a50fe8b42a804e945aa91b739c8c0a07c107cae97",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/observe-media-action.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/observe-media-action.js",
+      "sourceBytes": 1063,
+      "sourceSha256": "222d6d88b5d888406e1d67be9cd4badb47b11bf40427ec13f92fc6daa847a408",
+      "bytes": 1063,
+      "sha256": "222d6d88b5d888406e1d67be9cd4badb47b11bf40427ec13f92fc6daa847a408",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-action-observer.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-action-observer.txt",
+      "sourceBytes": 1259,
+      "sourceSha256": "f90a8d5ef8527b92037034145754fb49fc1a2b3977460fbb4215f59e4037dbe5",
+      "bytes": 1259,
+      "sha256": "f90a8d5ef8527b92037034145754fb49fc1a2b3977460fbb4215f59e4037dbe5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-selected.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-selected.txt",
+      "sourceBytes": 14048,
+      "sourceSha256": "a2644092b5ef03776b868114b2f1b4da58d368ecc0e20867d81a24f8cfb045da",
+      "bytes": 14048,
+      "sha256": "a2644092b5ef03776b868114b2f1b4da58d368ecc0e20867d81a24f8cfb045da",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-handoff.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-handoff.txt",
+      "sourceBytes": 10434,
+      "sourceSha256": "11d3d891ed63a61df7889f461440fa035734b8058e08061589dfe9d10c20e89f",
+      "bytes": 10434,
+      "sha256": "11d3d891ed63a61df7889f461440fa035734b8058e08061589dfe9d10c20e89f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-select.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-select.js",
+      "sourceBytes": 503,
+      "sourceSha256": "671052c72ef5b471d402957f9ee5566e42fa9f1467bb2f3fa885f80ad08e5ff9",
+      "bytes": 503,
+      "sha256": "671052c72ef5b471d402957f9ee5566e42fa9f1467bb2f3fa885f80ad08e5ff9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-handoff.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-media-handoff.js",
+      "sourceBytes": 518,
+      "sourceSha256": "f441cb0c61c36fb28b898671270c1687406211f68a49dfe1f3f7397648163cdc",
+      "bytes": 518,
+      "sha256": "f441cb0c61c36fb28b898671270c1687406211f68a49dfe1f3f7397648163cdc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-observed.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-ingest-observed.txt",
+      "sourceBytes": 90758,
+      "sourceSha256": "966011554f15d32d9d460c73521033ec2d2a45ce9b0b161098198723f286616b",
+      "bytes": 90758,
+      "sha256": "966011554f15d32d9d460c73521033ec2d2a45ce9b0b161098198723f286616b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "sourceBytes": 73382,
+      "sourceSha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "bytes": 73382,
+      "sha256": "5db7453274ce4d695fa30120b924fc3a95322a18ff30fad18e3501350e553a58",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "sourceBytes": 38956,
+      "sourceSha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "bytes": 38956,
+      "sha256": "e71165187716e2001a6043fb391941ef084052228617f4b6210d325168691c4e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "sourceBytes": 16247,
+      "sourceSha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "bytes": 16247,
+      "sha256": "2cd6edc3741e5146a801c0b04a3a55dd9c413dc14040a16896e7fdea9e35f3b5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "sourceBytes": 87550,
+      "sourceSha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "bytes": 87550,
+      "sha256": "85e99d506a898eeae822b43cf12395590a47ebd75602c4f890a93612fc0af728",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "sourceBytes": 17977,
+      "sourceSha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "bytes": 17977,
+      "sha256": "14297b0914a3f51ea74954cb950ba7aa55824cc6e2aab3f97a43ec8e26ece04b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "sourceBytes": 60276,
+      "sourceSha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "bytes": 60276,
+      "sha256": "25b4c1ac6c4f25a8d865c71b7fab8ac0ab4285e47d52b51b39d06859c3a118ea",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "sourceBytes": 9850,
+      "sourceSha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "bytes": 9850,
+      "sha256": "5b7979a1582dbe4088b5f617737fe8de933650cc226eea27bad3eae3bf7c65c6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "sourceBytes": 45247,
+      "sourceSha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "bytes": 45247,
+      "sha256": "082bdccf088e34b1532000c06e5973e55c66e8920e7a0e380d00f7b8224c24f6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "sourceBytes": 8241,
+      "sourceSha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "bytes": 8241,
+      "sha256": "399a48cd4ab6d5cd049033afa7ddc0dc57f291644b2f14b35d258be89d1b03ee",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "sourceBytes": 12308,
+      "sourceSha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "bytes": 12308,
+      "sha256": "2263b219c37c5716caad881c48b3116d55b1c54cda61a98bf05dad1b1f30e16d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "sourceBytes": 85910,
+      "sourceSha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "bytes": 85910,
+      "sha256": "3cd2c8f6586b4931bb3923ad4a07ad48a188d55964ceb7002e0cd674f8f6bca6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "sourceBytes": 16010,
+      "sourceSha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "bytes": 16010,
+      "sha256": "426a4d17751fdf49a74393fbf5bbb7651bcbe87654c9449c51ab4bf69f0384dc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-media-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-media-review/REVIEW.md",
+      "sourceBytes": 5265,
+      "sourceSha256": "979d0fc1666ea17bdd07cdc49b1b48789e6744b97e99f511ccc4e56ac512574a",
+      "bytes": 5265,
+      "sha256": "979d0fc1666ea17bdd07cdc49b1b48789e6744b97e99f511ccc4e56ac512574a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-media-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-media-review/audit.mjs",
+      "sourceBytes": 17687,
+      "sourceSha256": "f74fa596b98e128f8a5f6760fb9c72e0fff8f0a8d28a5a3fe744617b58c132a2",
+      "bytes": 17687,
+      "sha256": "f74fa596b98e128f8a5f6760fb9c72e0fff8f0a8d28a5a3fe744617b58c132a2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-media-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-media-review/audit.json",
+      "sourceBytes": 38943,
+      "sourceSha256": "512fb8de464589ba84e6f33bbe62d2c7b16fee8a31465354e5c9b9627f7766a7",
+      "bytes": 38943,
+      "sha256": "512fb8de464589ba84e6f33bbe62d2c7b16fee8a31465354e5c9b9627f7766a7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/copy-preparation/python-dependency-copy.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/copy-preparation/python-dependency-copy.json",
+      "sourceBytes": 2387,
+      "sourceSha256": "b816c912f53544085c8fdbf22b7710f2cc0cc9135053b4912a73a2147ccb02ce",
+      "bytes": 2387,
+      "sha256": "b816c912f53544085c8fdbf22b7710f2cc0cc9135053b4912a73a2147ccb02ce",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sourceBytes": 28198,
+      "sourceSha256": "edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b",
+      "bytes": 28198,
+      "sha256": "edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/pg_role_adapter.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/pg_role_adapter.py",
+      "sourceBytes": 7036,
+      "sourceSha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409",
+      "bytes": 7036,
+      "sha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-mcp251-fresh-targeted-20260917-pg-single/safe-profile-manifest.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-mcp251-fresh-targeted-20260917-pg-single/safe-profile-manifest.json",
+      "sourceBytes": 4983,
+      "sourceSha256": "1583ff5447d57c64b17df4f9aa090ed43f77ff92ba153336cd2b2f325ca00385",
+      "bytes": 4983,
+      "sha256": "1583ff5447d57c64b17df4f9aa090ed43f77ff92ba153336cd2b2f325ca00385",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/next.config.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/next.config.mjs",
+      "sourceBytes": 10706,
+      "sourceSha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "bytes": 10706,
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/package.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/package.json",
+      "sourceBytes": 11304,
+      "sourceSha256": "caa51e521d4ab3d7e5d0b647af543561a20b6df049180c2191a99aa84343d07b",
+      "bytes": 11304,
+      "sha256": "caa51e521d4ab3d7e5d0b647af543561a20b6df049180c2191a99aa84343d07b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/react/package.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/react/package.json",
+      "sourceBytes": 999,
+      "sourceSha256": "d4e68a5c96babb20cad1daafea8b78822eae45b341552cf5418d06a5304fa64c",
+      "bytes": 999,
+      "sha256": "d4e68a5c96babb20cad1daafea8b78822eae45b341552cf5418d06a5304fa64c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/typescript/package.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/typescript/package.json",
+      "sourceBytes": 3620,
+      "sourceSha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6",
+      "bytes": 3620,
+      "sha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/scripts/validate-networking-config.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/apps/tldw-frontend/scripts/validate-networking-config.mjs",
+      "sourceBytes": 2061,
+      "sourceSha256": "eac9a0e9424e499bc89e07de5e291157d3b2dfcb890e7151daeaab38207c464a",
+      "bytes": 2061,
+      "sha256": "eac9a0e9424e499bc89e07de5e291157d3b2dfcb890e7151daeaab38207c464a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "sourceBytes": 173908,
+      "sourceSha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "bytes": 173908,
+      "sha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/tldw_Server_API/app/main.py",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/pg-single/tldw_Server_API/app/main.py",
+      "sourceBytes": 123863,
+      "sourceSha256": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+      "bytes": 123863,
+      "sha256": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/complete.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/complete.json",
+      "sourceBytes": 564,
+      "sourceSha256": "f22c7fa2f653843c09c875997b38aea71037eb06ecd17e2a93f4f08e1d72a2e2",
+      "bytes": 564,
+      "sha256": "f22c7fa2f653843c09c875997b38aea71037eb06ecd17e2a93f4f08e1d72a2e2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/gate.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/gate.json",
+      "sourceBytes": 913,
+      "sourceSha256": "acd6f8eb24f3d01092cccd5889353347f8b742fba8dcb52ddc6b4f6d105d26a4",
+      "bytes": 913,
+      "sha256": "acd6f8eb24f3d01092cccd5889353347f8b742fba8dcb52ddc6b4f6d105d26a4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-multi-dependencies.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-multi-dependencies.json",
+      "sourceBytes": 1200,
+      "sourceSha256": "dc9c05489525e512a248db39dfd905fec395d4efa316a39b0b2ee072694fc9ba",
+      "bytes": 1200,
+      "sha256": "dc9c05489525e512a248db39dfd905fec395d4efa316a39b0b2ee072694fc9ba",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-multi-source-manifest.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-multi-source-manifest.json.gz",
+      "sourceBytes": 8354103,
+      "sourceSha256": "0694998e81a85fd7df172189f0b1b852542643d5b99d5603272b08c5358f658a",
+      "bytes": 1848838,
+      "sha256": "c3f9efa11f072e1057270e8dae5ac48994e26835c2ab6bfa9a7af82035348831",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-single-dependencies.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-single-dependencies.json",
+      "sourceBytes": 1202,
+      "sourceSha256": "63d19d57efb65c0d812bbffb563266f0b7cbc70661d19935f102a4f236de67ef",
+      "bytes": 1202,
+      "sha256": "63d19d57efb65c0d812bbffb563266f0b7cbc70661d19935f102a4f236de67ef",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-single-source-manifest.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/pg-single-source-manifest.json.gz",
+      "sourceBytes": 8354104,
+      "sourceSha256": "b4adbf7926b22995c46d6aef5c10c97d46ad27bcc6588b48a4091407bd518ab3",
+      "bytes": 1848835,
+      "sha256": "1e14ffd985f0b8e013708d545be3c77472e2246bb26ff44774aee3f38849f721",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/python-reuse.json",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/repair-sources/mcp251-fresh-targeted-20260917/preparation/python-reuse.json",
+      "sourceBytes": 1417,
+      "sourceSha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-mcp251-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-mcp251-review/audit.mjs",
+      "sourceBytes": 21573,
+      "sourceSha256": "c024ad8124c0b333fbc2e418e7231b700a3fb854db02411cc0be3015847e5092",
+      "bytes": 21573,
+      "sha256": "c024ad8124c0b333fbc2e418e7231b700a3fb854db02411cc0be3015847e5092",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-mcp251-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-mcp251-review/REVIEW.md",
+      "sourceBytes": 5476,
+      "sourceSha256": "1126c3f50de45218fcf9bc6b0b2f4cb713579ec05d84110f8e7a3aa2621badb2",
+      "bytes": 5476,
+      "sha256": "1126c3f50de45218fcf9bc6b0b2f4cb713579ec05d84110f8e7a3aa2621badb2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-advanced-continue.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-advanced-continue.txt",
+      "sourceBytes": 1811,
+      "sourceSha256": "0c3f6282db31ffa8fe2417e25b263eccf605a7d9514c410b2a7cbee79b0c5fd0",
+      "bytes": 1811,
+      "sha256": "0c3f6282db31ffa8fe2417e25b263eccf605a7d9514c410b2a7cbee79b0c5fd0",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-audio-continue.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-audio-continue.txt",
+      "sourceBytes": 1618,
+      "sourceSha256": "b7901526f0b83a4bd1d3cabad1c4bf79b703927d70554f57af160004471f5e9f",
+      "bytes": 1618,
+      "sha256": "b7901526f0b83a4bd1d3cabad1c4bf79b703927d70554f57af160004471f5e9f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-audio-step.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-audio-step.txt",
+      "sourceBytes": 3075,
+      "sourceSha256": "09991c6f4a6ccc5554afb6cf1452cd73f47ce587d9a72847a0eafd7439cb4f0d",
+      "bytes": 3075,
+      "sha256": "09991c6f4a6ccc5554afb6cf1452cd73f47ce587d9a72847a0eafd7439cb4f0d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-browser-open.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-browser-open.txt",
+      "sourceBytes": 807,
+      "sourceSha256": "e843df8a888584e66363ab03a8580bc7a8cfa7eb92bdf308fc867827c0d98cb4",
+      "bytes": 807,
+      "sha256": "e843df8a888584e66363ab03a8580bc7a8cfa7eb92bdf308fc867827c0d98cb4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-browser-settled.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-browser-settled.txt",
+      "sourceBytes": 3272,
+      "sourceSha256": "3755e51d0810847e4ed841e12bf117dba8e624d088b53f3b4dc6f3dc311ae7f7",
+      "bytes": 3272,
+      "sha256": "3755e51d0810847e4ed841e12bf117dba8e624d088b53f3b4dc6f3dc311ae7f7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-console.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-console.txt",
+      "sourceBytes": 590,
+      "sourceSha256": "feb4543390a907196734eba85e18b60489f6b0078049d22c6b10c3d51f183e9a",
+      "bytes": 590,
+      "sha256": "feb4543390a907196734eba85e18b60489f6b0078049d22c6b10c3d51f183e9a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-copy-result.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-copy-result.txt",
+      "sourceBytes": 409,
+      "sourceSha256": "dbd8affc062293f152ca4b0dba3037998eea13104b531662eaee0b4f8790968b",
+      "bytes": 409,
+      "sha256": "dbd8affc062293f152ca4b0dba3037998eea13104b531662eaee0b4f8790968b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-discovered.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-discovered.txt",
+      "sourceBytes": 6928,
+      "sourceSha256": "7ef49fdb2a3a60905c44ad7ac85bbb10190842f02ae55ba8e69a2ad601055567",
+      "bytes": 6928,
+      "sha256": "7ef49fdb2a3a60905c44ad7ac85bbb10190842f02ae55ba8e69a2ad601055567",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-discovery.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-discovery.txt",
+      "sourceBytes": 7268,
+      "sourceSha256": "5396ebdf60d452bcff0d2f81eef3ae903d73360f0fbed9f98bbe8be130db6654",
+      "bytes": 7268,
+      "sha256": "5396ebdf60d452bcff0d2f81eef3ae903d73360f0fbed9f98bbe8be130db6654",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-endpoint-corrected.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-endpoint-corrected.txt",
+      "sourceBytes": 133,
+      "sourceSha256": "961a47e03bf69d0ca532e218a9706ebb35a4cc1be93e456db82779bcd6248c7c",
+      "bytes": 133,
+      "sha256": "961a47e03bf69d0ca532e218a9706ebb35a4cc1be93e456db82779bcd6248c7c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-endpoint.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-endpoint.txt",
+      "sourceBytes": 130,
+      "sourceSha256": "4d43912a8bd77639b16854a99d31ac263bb00395a3c746c62cbf15ce78b16c32",
+      "bytes": 130,
+      "sha256": "4d43912a8bd77639b16854a99d31ac263bb00395a3c746c62cbf15ce78b16c32",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-ingest-defaults.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-ingest-defaults.txt",
+      "sourceBytes": 3958,
+      "sourceSha256": "6ba44d51d2fa6177e7d13d9d37ad1d7a757fdfadf06c22babdfdc3b8f0929868",
+      "bytes": 3958,
+      "sha256": "6ba44d51d2fa6177e7d13d9d37ad1d7a757fdfadf06c22babdfdc3b8f0929868",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-local-path.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-local-path.txt",
+      "sourceBytes": 4326,
+      "sourceSha256": "05765b5beb96b6e8785b6cef8e9198e3844fff9ee67dd037a7f7767c260df843",
+      "bytes": 4326,
+      "sha256": "05765b5beb96b6e8785b6cef8e9198e3844fff9ee67dd037a7f7767c260df843",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-observer-installed.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-observer-installed.txt",
+      "sourceBytes": 2586,
+      "sourceSha256": "2c5fab95978357bee6e3dadc7f8449909ba5fb7075648ffcd63e717b0b935c46",
+      "bytes": 2586,
+      "sha256": "2c5fab95978357bee6e3dadc7f8449909ba5fb7075648ffcd63e717b0b935c46",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-preflight.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-preflight.txt",
+      "sourceBytes": 4920,
+      "sourceSha256": "fb0ebb483ac1240a0497b83fadfa5c02e699c774bbcd7bf92b17a12d8f7e5bc4",
+      "bytes": 4920,
+      "sha256": "fb0ebb483ac1240a0497b83fadfa5c02e699c774bbcd7bf92b17a12d8f7e5bc4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-privacy-checked.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-privacy-checked.txt",
+      "sourceBytes": 119,
+      "sourceSha256": "d60673fdcd7f926740bdfaad53b0ad42cf38b24850b0862fbd2d88dcc4ded1c6",
+      "bytes": 119,
+      "sha256": "d60673fdcd7f926740bdfaad53b0ad42cf38b24850b0862fbd2d88dcc4ded1c6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-provider-continue.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-provider-continue.txt",
+      "sourceBytes": 2104,
+      "sourceSha256": "46e75e2596d0700653371c4187851d9d65b1c8e3a1a0735d5f705a6043f12530",
+      "bytes": 2104,
+      "sha256": "46e75e2596d0700653371c4187851d9d65b1c8e3a1a0735d5f705a6043f12530",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-provider-form.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-provider-form.txt",
+      "sourceBytes": 6769,
+      "sourceSha256": "276ddb4da9004157570fcb4b6238a192a58ec1c68cebfb5eda4d4c6f04303e7d",
+      "bytes": 6769,
+      "sha256": "276ddb4da9004157570fcb4b6238a192a58ec1c68cebfb5eda4d4c6f04303e7d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-provider-selected.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-provider-selected.txt",
+      "sourceBytes": 107,
+      "sourceSha256": "a6dce8cfc3655e2697e5d5ad1e6d4626f6780e1d549289bd6e79cc149ac0953c",
+      "bytes": 107,
+      "sha256": "a6dce8cfc3655e2697e5d5ad1e6d4626f6780e1d549289bd6e79cc149ac0953c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-provider-validated.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-provider-validated.txt",
+      "sourceBytes": 3671,
+      "sourceSha256": "c0b728567b4544a5ab838fb08d26a07ee98dfc9908794378aafb78ff0385dbea",
+      "bytes": 3671,
+      "sha256": "c0b728567b4544a5ab838fb08d26a07ee98dfc9908794378aafb78ff0385dbea",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-providers-open.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-providers-open.txt",
+      "sourceBytes": 5733,
+      "sourceSha256": "532c68f5af450e034a212f19ab9720107b2abf5130813b66f9cafb43037ae6bc",
+      "bytes": 5733,
+      "sha256": "532c68f5af450e034a212f19ab9720107b2abf5130813b66f9cafb43037ae6bc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-providers-saved.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-providers-saved.txt",
+      "sourceBytes": 3797,
+      "sourceSha256": "8d83c50f1ecbef6bf96dcf0d9d1318525fce6735e8797bd5e404d5cc739190fa",
+      "bytes": 3797,
+      "sha256": "8d83c50f1ecbef6bf96dcf0d9d1318525fce6735e8797bd5e404d5cc739190fa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-reload.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-reload.js",
+      "sourceBytes": 469,
+      "sourceSha256": "99bdd3694953d1641787627cade295934612b275cf61307a30c25bb8900459a0",
+      "bytes": 469,
+      "sha256": "99bdd3694953d1641787627cade295934612b275cf61307a30c25bb8900459a0",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-reloaded.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-reloaded.txt",
+      "sourceBytes": 2562,
+      "sourceSha256": "9f8ece970905dc534e9374d9b9afab4a0107e9bd624c2a30ef872be04ab4a813",
+      "bytes": 2562,
+      "sha256": "9f8ece970905dc534e9374d9b9afab4a0107e9bd624c2a30ef872be04ab4a813",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-sample-tool.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-sample-tool.txt",
+      "sourceBytes": 3959,
+      "sourceSha256": "d67686f0e70bd1b273347c4614a25dd17f39bddee7d043e68e04295a6a7606d2",
+      "bytes": 3959,
+      "sha256": "d67686f0e70bd1b273347c4614a25dd17f39bddee7d043e68e04295a6a7606d2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-save-packs.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-save-packs.js",
+      "sourceBytes": 471,
+      "sourceSha256": "d5b42d6f65218406f8c2135648a77b3bc6c39003db7e841485acd59e62688c0b",
+      "bytes": 471,
+      "sha256": "d5b42d6f65218406f8c2135648a77b3bc6c39003db7e841485acd59e62688c0b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-save-packs.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-save-packs.txt",
+      "sourceBytes": 3782,
+      "sourceSha256": "9086ea99a098296c8a1995dfa5363cef9b729cc5e361d0eaa1b5fb429595eba5",
+      "bytes": 3782,
+      "sha256": "9086ea99a098296c8a1995dfa5363cef9b729cc5e361d0eaa1b5fb429595eba5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-targeted-gate.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-targeted-gate.json",
+      "sourceBytes": 671,
+      "sourceSha256": "5354a45d6cc6531078ba942c17ad54b15eb8964a40720ccbe9382e3123f68543",
+      "bytes": 671,
+      "sha256": "5354a45d6cc6531078ba942c17ad54b15eb8964a40720ccbe9382e3123f68543",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-tools-step.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-tools-step.txt",
+      "sourceBytes": 4151,
+      "sourceSha256": "15211644e9a68f2af933ad4f22f983a09456aaba0da2e3e57e72d38dd7afb46e",
+      "bytes": 4151,
+      "sha256": "15211644e9a68f2af933ad4f22f983a09456aaba0da2e3e57e72d38dd7afb46e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-preparation/mcp251-validate.js",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-preparation/mcp251-validate.js",
+      "sourceBytes": 479,
+      "sourceSha256": "4a12b9e27fc274f21ec0c215cbeb8e5bf27c1374bb00f28107d7c4f20f9ed948",
+      "bytes": 479,
+      "sha256": "4a12b9e27fc274f21ec0c215cbeb8e5bf27c1374bb00f28107d7c4f20f9ed948",
+      "encoding": "identity"
+    },
+    {
+      "source": "backlog/tasks/task-13260.193 - Fix-PostgreSQL-MCP-setup-permission-profile-lookup-UAT-251.md",
+      "path": "evidence/backlog/tasks/task-13260.193 - Fix-PostgreSQL-MCP-setup-permission-profile-lookup-UAT-251.md",
+      "sourceBytes": 2674,
+      "sourceSha256": "3faf80bca61c14399c13e1f1dd8aee769c504d8563e8b11c20da8cd561a3fde3",
+      "bytes": 2674,
+      "sha256": "3faf80bca61c14399c13e1f1dd8aee769c504d8563e8b11c20da8cd561a3fde3",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/mcp251/review-snapshot/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/mcp251/review-snapshot/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "sourceBytes": 173908,
+      "sourceSha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "bytes": 173908,
+      "sha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/README.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/README.md",
+      "sourceBytes": 763,
+      "sourceSha256": "8120dc42d5ba4326a0994112ce6a556b5f139f9a1d49f87dcab2266f37bcb4bb",
+      "bytes": 763,
+      "sha256": "8120dc42d5ba4326a0994112ce6a556b5f139f9a1d49f87dcab2266f37bcb4bb",
+      "encoding": "identity"
+    },
+    {
+      "source": "output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/review251/REVIEW.md",
+      "path": "evidence/output/playwright/fresh-matrix-repairs-2026-09-17/mcp-setup-fixture-reviewed/review251/REVIEW.md",
+      "sourceBytes": 3793,
+      "sourceSha256": "b6dbc194e7a5ce66902a26958f343c0e1986c2f634a420b4fe359fdb0e0de438",
+      "bytes": 3793,
+      "sha256": "b6dbc194e7a5ce66902a26958f343c0e1986c2f634a420b4fe359fdb0e0de438",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "path": "evidence/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "sourceBytes": 173908,
+      "sourceSha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "bytes": 173908,
+      "sha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-mcp251-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-mcp251-review/audit.json",
+      "sourceBytes": 30287,
+      "sourceSha256": "0a093490c3bf61e12192c90f3ca2c2ca84c49515376b43071692bec7afcb5cf0",
+      "bytes": 30287,
+      "sha256": "0a093490c3bf61e12192c90f3ca2c2ca84c49515376b43071692bec7afcb5cf0",
+      "encoding": "identity"
+    }
+  ]
+}

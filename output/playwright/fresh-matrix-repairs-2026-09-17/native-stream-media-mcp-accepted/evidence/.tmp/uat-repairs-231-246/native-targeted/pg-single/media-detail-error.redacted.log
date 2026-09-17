@@ -1,0 +1,56 @@
+                 -> <function BaseHTTPMiddleware.__call__.<locals>.call_next at 0x12e807a60>
+
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+          |            |       |            |       -> <attribute '__context__' of 'BaseException' objects>
+          |            |       |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          |            |       -> <attribute '__cause__' of 'BaseException' objects>
+          |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+          |    |   |      |                      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.send_no_error at 0x12e805580>
+          |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x12e8047c0>
+          |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18702), 'c...
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+          |            |       |            |       -> <attribute '__context__' of 'BaseException' objects>
+          |            |       |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          |            |       -> <attribute '__cause__' of 'BaseException' objects>
+          |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+          |    |   |      |                      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.send_no_error at 0x12e805580>
+          |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x12e8047c0>
+          |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18702), 'c...
+          |    -> <tldw_Server_API.app.main._SandboxArtifactPathGuard object at 0x108c4b8d0>
+          -> <tldw_Server_API.app.core.AuthNZ.llm_budget_middleware.LLMBudgetMiddleware object at 0x12db67b10>
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+          |            |       |            |       -> <attribute '__context__' of 'BaseException' objects>
+          |            |       |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          |            |       -> <attribute '__cause__' of 'BaseException' objects>
+          |            -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+          -> IndeterminateDatatypeError('could not determine data type of parameter $1')
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+          |    |   |      |                      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.send_no_error at 0x12e805580>
+          |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x12e8047c0>
+          |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18702), 'c...
+          |    -> <tldw_Server_API.app.main._SandboxArtifactPathGuard object at 0x108c4b8d0>
+          -> <tldw_Server_API.app.core.AuthNZ.llm_budget_middleware.LLMBudgetMiddleware object at 0x12db67b10>
+
+    statement = await self._protocol.prepare(
+                      |    -> <member '_protocol' of 'Connection' objects>
+                      -> <tldw_Server_API.app.core.AuthNZ.database._GuardedAsyncpgConnection object at 0x12dcfba50>
+  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
+
+asyncpg.exceptions.IndeterminateDatatypeError: could not determine data type of parameter $1
+2026-09-17 13:03:02.237 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.MCP_unified.server:_log_metrics:1345 - Server metrics: {'connections': {'active': 0, 'total_messages': 0, 'total_errors': 0}, 'modules': {'media': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'template': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'mcp_discovery': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'governance': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'notes': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'prompts': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'skills': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'cooking': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'knowledge': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'docs': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'rag': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'kanban': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'quizzes': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'flashcards': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}, 'slides': {'requests': 0, 'errors': 0, 'error_rate': 0, 'avg_latency_ms': 0}}}
+2026-09-17 13:03:02.423 | INFO     | trace= span= tp= req= job= ps=: | asyncio.runners:run:118 - Running job "Monitor authentication failures (trigger: interval[0:05:00], next run at: 2026-09-17 13:08:02 PDT)" (scheduled at 2026-09-17 13:03:02.406124-07:00)
+2026-09-17 13:03:02.437 | INFO     | trace= span= tp= req= job= ps=: | asyncio.runners:run:118 - Job "Monitor authentication failures (trigger: interval[0:05:00], next run at: 2026-09-17 13:08:02 PDT)" executed successfully
+2026-09-17 13:03:02.563 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/Databases/jobs.db
+2026-09-17 13:03:02.564 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_content_jobs_pollers:_build_standalone_html_generation_runtime:1520 - Standalone HTML generation remains closed; error_type=DigestKeyConfigError
+2026-09-17 13:04:02.569 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/Databases/jobs.db
+2026-09-17 13:04:02.570 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.startup_content_jobs_pollers:_build_standalone_html_generation_runtime:1520 - Standalone HTML generation remains closed; error_type=DigestKeyConfigError
+2026-09-17 13:05:02.577 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Jobs.migrations:ensure_jobs_tables:1505 - Ensured Jobs schema at /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/Databases/jobs.db

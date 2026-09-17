@@ -1,0 +1,91 @@
+### Page
+- Page URL: http://127.0.0.1:18784/
+- Page Title: Home | tldw
+- Console: 0 errors, 5 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e16]:
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - paragraph [ref=e21]: Solo onboarding
+          - generic [ref=e22]:
+            - generic [ref=e23]:
+              - heading "First-time setup" [level=1] [ref=e24]
+              - paragraph [ref=e25]: Configure the minimum needed to reach a successful first chat.
+            - button "Skip for now" [ref=e26] [cursor=pointer]
+        - region "Setup readiness" [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - heading "Setup readiness" [level=2] [ref=e30]
+              - paragraph [ref=e31]: Chat must be ready. RAG and speech can be configured later.
+            - button "Retry" [ref=e32] [cursor=pointer]
+          - generic [ref=e33]:
+            - generic [ref=e34]:
+              - generic [ref=e35]:
+                - generic [ref=e36]:
+                  - paragraph [ref=e37]: Chat
+                  - paragraph [ref=e38]: First-chat lane
+                - generic [ref=e39]: ready with warnings
+              - group [ref=e40]:
+                - generic "Chat details" [ref=e41] [cursor=pointer]
+            - generic [ref=e42]:
+              - generic [ref=e43]:
+                - generic [ref=e44]:
+                  - paragraph [ref=e45]: Embeddings/RAG
+                  - paragraph [ref=e46]: Optional lane
+                - generic [ref=e47]: ready with warnings
+              - group [ref=e48]:
+                - generic "Embeddings/RAG details" [ref=e49] [cursor=pointer]
+            - generic [ref=e50]:
+              - generic [ref=e51]:
+                - generic [ref=e52]:
+                  - paragraph [ref=e53]: Speech
+                  - paragraph [ref=e54]: Optional lane
+                - generic [ref=e55]: ready with warnings
+              - group [ref=e56]:
+                - generic "Speech details" [ref=e57] [cursor=pointer]
+        - region [ref=e306]:
+          - generic [ref=e312]:
+            - heading "Ingest defaults" [level=2] [ref=e313]
+            - paragraph [ref=e314]: Choose conservative defaults for your first sources.
+          - generic [ref=e315]:
+            - checkbox "Allow local file ingest Keep this off unless you want the WebUI to help ingest files from local paths." [ref=e316]
+            - generic [ref=e317]:
+              - text: Allow local file ingest
+              - generic [ref=e318]: Keep this off unless you want the WebUI to help ingest files from local paths.
+          - generic [ref=e319]:
+            - text: Allowed local roots
+            - textbox "Allowed local roots" [disabled] [ref=e320]:
+              - /placeholder: /Users/me/Documents
+          - group "Chunking profile" [ref=e321]:
+            - generic [ref=e323]:
+              - generic [ref=e324]:
+                - radio "simple" [ref=e325]
+                - text: simple
+              - generic [ref=e326]:
+                - radio "balanced" [checked] [ref=e327]
+                - text: balanced
+              - generic [ref=e328]:
+                - radio "advanced" [ref=e329]
+                - text: advanced
+          - group "Metadata mode" [ref=e330]:
+            - generic [ref=e332]:
+              - generic [ref=e333]:
+                - radio "automatic" [checked] [ref=e334]
+                - text: automatic
+              - generic [ref=e335]:
+                - radio "ask" [ref=e336]
+                - text: ask
+              - generic [ref=e337]:
+                - radio "minimal" [ref=e338]
+                - text: minimal
+          - generic [ref=e339]:
+            - button "Back" [ref=e340] [cursor=pointer]
+            - button "Continue" [ref=e341] [cursor=pointer]
+  - alert [ref=e10]
+```
+

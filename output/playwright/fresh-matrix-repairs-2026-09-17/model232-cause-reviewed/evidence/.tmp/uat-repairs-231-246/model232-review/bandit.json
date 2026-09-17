@@ -1,0 +1,48 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/utils/chat-error-message.ts",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T22:32:49Z",
+  "metrics": {
+    "./apps/packages/ui/src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts": {
+      "loc": 73,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/utils/__tests__/chat-error-message.test.ts": {
+      "loc": 102,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/utils/chat-error-message.ts": {
+      "loc": 307,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 482,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

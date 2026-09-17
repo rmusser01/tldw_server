@@ -1,0 +1,893 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
+
+(node:85987) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability false'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability error'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability true control'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'user ACK only / persist genuinely uns…'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'assistant ACK only / persist genuinel…'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary unpersisted text fa…'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary fallback on capabil…'
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: immediate
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue reports the exact diagnostic Retry outcome: provider failed
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Complete answer
+Using continueChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Partial answer
+Using continueChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps resolved ordinary metadata after saving the first completed turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (99 tests) 13862ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: immediate  418ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK  563ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK  570ms
+     ✓ UAT131 preserves captured source identity across late edit  360ms
+     ✓ UAT131 preserves captured source identity across equal rows  361ms
+     ✓ UAT131 preserves captured source identity across authority  359ms
+     ✓ UAT131 preserves captured source identity across new history  361ms
+     ✓ UAT131 preserves captured source identity across route roundtrip  360ms
+     ✓ UAT103 keeps a retrieval failure local through actual action, reload and next completion  418ms
+     ✓ UAT103 keeps a no evidence local through actual action, reload and next completion  423ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false  637ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false  630ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true  637ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true  634ms
+     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  429ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false  457ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false  433ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true  639ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true  635ms
+(node:86094) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (47 tests | 47 failed) 5038ms
+     × binds actual auth lease through Character transport: late-success 7ms
+     × binds actual auth lease through Character transport: late-failure 1ms
+     × binds actual auth lease through Character transport: partial-logout 1ms
+     × binds actual auth lease through Character transport: caller-stop 1ms
+     × binds actual auth lease through Character transport: partial-error 1ms
+     × binds actual auth lease through Character transport: same-owner 0ms
+     × rejects late Character side effects after actual logout at prerequisite 1ms
+     × rejects late Character side effects after actual logout at user-ack 0ms
+     × rejects late Character side effects after actual logout at visual-identity 0ms
+     × rejects late Character side effects after actual logout at persist-success 0ms
+     × rejects late Character side effects after actual logout at persist-failure 0ms
+     × stops Character creation after actual logout at create-ack 1ms
+     × stops Character creation after actual logout at greeting-ack 1ms
+     × qualifies real Character stream lifetime without changing timeout policy: idle 5003ms
+     × qualifies real Character stream lifetime without changing timeout policy: explicit-budget 2ms
+     × qualifies real Character stream lifetime without changing timeout policy: raw-progress 1ms
+     × qualifies real Character stream lifetime without changing timeout policy: caller-abort 1ms
+     × qualifies real Character stream lifetime without changing timeout policy: authority-abort 1ms
+     × maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport 1ms
+     × retries failed complete-v2 in its original conversation with the greeting and user receipts intact 1ms
+     × UAT103 keeps a local source diagnostic Retry in the original character conversation 1ms
+     × retains server branching when regenerating actual assistant content: Complete reply 1ms
+     × retains server branching when regenerating actual assistant content: Partial reply after interruption 1ms
+     × retains server branching when regenerating actual assistant content: __tldw_error__:malformed 0ms
+     × forwards scoped current-chat controls through the real Character transport (sampling=0) 1ms
+     × forwards scoped current-chat controls through the real Character transport (sampling=0.5) 0ms
+     × omits unset controls from the real Character request after switching to an unconfigured model scope 1ms
+     × retains captured model controls while a pending Character user save outlives a settings-scope change 0ms
+     × does not publish recovered IDs or save an old owner's partial after the lease invalidates 0ms
+     × preserves closed reasoning as a recoverable tracked completion with acknowledged IDs 0ms
+     × preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs 0ms
+     × preserves structured reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     × forwards the confirmed assistant ID from fallback success to local persistence 1ms
+     × forwards the confirmed assistant ID from degraded success to local persistence 0ms
+     × keeps tracked character routing anchored to current chat metadata when global character state is stale 0ms
+     × rebinds a greeting to the newly created conversation after a failed session 0ms
+     × handles emote commands without sending chat 0ms
+     × uses manual visual identity override when resolving assistant message metadata 0ms
+     × does not let stale overlay assistant state override the active character chat 0ms
+     × honors an explicit tracked character switch over the current chat metadata 0ms
+     × reuses the latest store character chat when greeting persistence updates before the send closure 0ms
+     × uses the latest store character id when the hook prop still points at another character 0ms
+     × passes workspace scope through when creating a character-backed chat 0ms
+     × strips explicit streaming emote directives and persists emote events 0ms
+     × preserves explicit emote metadata when recovering a failed stream 1ms
+     × does not duplicate recovery persistence when saved-degraded includes emote metadata 1ms
+     × sends emote metadata when normal persist falls back to addChatMessage 1ms
+(node:86122) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx > PlaygroundChatErrorBanner > renders real unavailable-model guidance and opens model selection with inline Retry=false
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx (18 tests) 129ms
+(node:86123) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/server-error-message.test.ts (9 tests) 2ms
+(node:86124) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts > ordinary chat unavailable-model recovery through browser transport > renders actionable HTTP400 guidance and preserves request identity when retried
+Stream completion failed: Model 'missing-model' is not available for provider 'ollama'. Select one of the server-advertised models for this provider.
+
+ ✓ src/services/tldw/__tests__/TldwChat.model-error.integration.test.ts (1 test) 10ms
+(node:86125) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > preserves a streaming request-scope change error
+Stream completion failed: scope changed
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > aborts the internal request when the caller's signal fires
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+stderr | src/services/tldw/__tests__/TldwChat.abort.test.ts > TldwChatService abort lifecycle > cancelStream aborts every in-flight stream (global stop everything)
+Stream completion failed: Aborted
+
+ ✓ src/services/tldw/__tests__/TldwChat.abort.test.ts (10 tests) 6ms
+(node:86126) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/chat-error-message.test.ts (19 tests) 6ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 47 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: late-success
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: late-failure
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: partial-logout
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: caller-stop
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: partial-error
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: same-owner
+Error: Cannot find package '@web/lib/auth' imported from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx'
+ ❯ enableActualAuthority src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:368:29
+    366|       apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0…
+    367|     })
+    368|     const { authService } = await vi.importActual<typeof import("@web/…
+       |                             ^
+    369|     return () => authService.logout()
+    370|   }
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:374:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at prerequisite
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at user-ack
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at visual-identity
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at persist-success
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at persist-failure
+Error: Cannot find package '@web/lib/auth' imported from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx'
+ ❯ enableActualAuthority src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:368:29
+    366|       apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0…
+    367|     })
+    368|     const { authService } = await vi.importActual<typeof import("@web/…
+       |                             ^
+    369|     return () => authService.logout()
+    370|   }
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:457:22
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > stops Character creation after actual logout at create-ack
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > stops Character creation after actual logout at greeting-ack
+Error: Cannot find package '@web/lib/auth' imported from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx'
+ ❯ enableActualAuthority src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:368:29
+    366|       apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0…
+    367|     })
+    368|     const { authService } = await vi.importActual<typeof import("@web/…
+       |                             ^
+    369|     return () => authService.logout()
+    370|   }
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:491:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: idle
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:531:89
+    529|   }
+    530| 
+    531|   it.each(["idle", "explicit-budget", "raw-progress", "caller-abort", …
+       |                                                                                         ^
+    532|     "qualifies real Character stream lifetime without changing timeout…
+    533|       actualAuthority.enabled = true
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: explicit-budget
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: raw-progress
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: caller-abort
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: authority-abort
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:561:56
+    559|       vi.useFakeTimers()
+    560|       let pending!: ReturnType<typeof result.current.onSubmit>
+    561|       await act(async () => { pending = result.current.onSubmit({ mess…
+       |                                                        ^
+    562|       const user = result.current.messages.find(row => !row.isBot)!
+    563|       expect(user.serverMessageId).toBe("user-server-1")
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:561:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:631:50
+    629|       return { ...actions, messages, history }
+    630|     })
+    631|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    632|     expect(requests, JSON.stringify(result.current.messages)).toHaveLe…
+    633|     expect(decodeChatErrorPayload(result.current.messages.at(-1)!.mess…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:631:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:689:66
+    687| 
+    688|     let initialResult: unknown
+    689|     await act(async () => { initialResult = await result.current.onSub…
+       |                                                                  ^
+    690|     expect(initialResult).toMatchObject({ status: "failed" })
+    691|     expect(decodeChatErrorPayload(result.current.messages.at(-1)!.mess…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:689:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > UAT103 keeps a local source diagnostic Retry in the original character conversation
+TypeError: Cannot read properties of null (reading 'regenerateLastMessage')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:725:50
+    723|     }
+    724|     const { result } = renderHook(() => useChatActions(options as unkn…
+    725|     await act(async () => { await result.current.regenerateLastMessage…
+       |                                                  ^
+    726|     expect(createChatMock).not.toHaveBeenCalled()
+    727|     expect(options.setServerChatId).not.toHaveBeenCalled()
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:725:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: Complete reply
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: Partial reply after interruption
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+TypeError: Cannot read properties of null (reading 'regenerateLastMessage')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:749:52
+    747|       createChatMock.mockResolvedValueOnce({ id: "regenerated-branch",…
+    748|       const { result } = renderHook(() => useChatActions(options as un…
+    749|       await act(async () => { await result.current.regenerateLastMessa…
+       |                                                    ^
+    750|       expect(createChatMock).toHaveBeenCalledWith(expect.objectContain…
+    751|       expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContainin…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:749:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards scoped current-chat controls through the real Character transport (sampling=0)
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:768:50
+    766|     const options = scopedOptions("openai:deepseek-chat", { numPredict…
+    767|     const { result } = renderHook(() => useChatActions(options as unkn…
+    768|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    769|     expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({
+    770|       path: expect.stringContaining("/chats/tracked-chat-1/complete-v2…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:768:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > omits unset controls from the real Character request after switching to an unconfigured model scope
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:780:50
+    778|     const options = scopedOptions("openai:deepseek-chat", {})
+    779|     const { result } = renderHook(() => useChatActions(options as unkn…
+    780|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    781|     const body = bgStreamMock.mock.calls[0][0].body
+    782|     for (const key of ["max_tokens", "temperature", "top_p", "repetiti…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:780:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains captured model controls while a pending Character user save outlives a settings-scope change
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:792:54
+    790|     const { result, rerender } = renderHook(({ options }) => useChatAc…
+    791|     let pending!: ReturnType<typeof result.current.onSubmit>
+    792|     await act(async () => { pending = result.current.onSubmit({ messag…
+       |                                                      ^
+    793|     await waitFor(() => expect(addChatMessageMock).toHaveBeenCalled())
+    794|     const next = { ...scopedOptions("openai:new-model", { numPredict: …
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:792:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not publish recovered IDs or save an old owner's partial after the lease invalidates
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:811:54
+    809|     const { result } = renderHook(() => useChatActions(options as unkn…
+    810|     let pending!: ReturnType<typeof result.current.onSubmit>
+    811|     await act(async () => { pending = result.current.onSubmit({ messag…
+       |                                                      ^
+    812|     await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTim…
+    813|     recoveryAuthority.controller.abort()
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:811:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:833:50
+    831|     const options = { ...createHookOptions(), setMessages: vi.fn((next…
+    832|     const { result } = renderHook(() => useChatActions(options as unkn…
+    833|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    834|     expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    835|     expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectConta…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:833:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:852:50
+    850|     const options = createHookOptions()
+    851|     const { result } = renderHook(() => useChatActions(options as unkn…
+    852|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    853|     expect(addChatMessageMock).toHaveBeenCalledTimes(outcome === "fall…
+    854|     expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectCon…
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:852:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > keeps tracked character routing anchored to current chat metadata when global character state is stale
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:865:28
+    863| 
+    864|     await act(async () => {
+    865|       await result.current.onSubmit({
+       |                            ^
+    866|         message: "Hello tracked character",
+    867|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:864:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rebinds a greeting to the newly created conversation after a failed session
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:907:50
+    905|     }
+    906|     const { result } = renderHook(() => useChatActions(options as any))
+    907|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    908|     expect(visibleMessages.find(message => message.messageType === "ch…
+    909|   })
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:907:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > handles emote commands without sending chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:920:43
+    918|     let submitResult: unknown
+    919|     await act(async () => {
+    920|       submitResult = await result.current.onSubmit({
+       |                                           ^
+    921|         message: "/emote surprised",
+    922|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:919:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > uses manual visual identity override when resolving assistant message metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:952:28
+    950| 
+    951|     await act(async () => {
+    952|       await result.current.onSubmit({
+       |                            ^
+    953|         message: "React to this",
+    954|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:951:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not let stale overlay assistant state override the active character chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:991:28
+    989| 
+    990|     await act(async () => {
+    991|       await result.current.onSubmit({
+       |                            ^
+    992|         message: "Continue the other character chat",
+    993|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:990:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > honors an explicit tracked character switch over the current chat metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1053:28
+    1051| 
+    1052|     await act(async () => {
+    1053|       await result.current.onSubmit({
+       |                            ^
+    1054|         message: "Start talking with Miku",
+    1055|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1052:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > reuses the latest store character chat when greeting persistence updates before the send closure
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1118:28
+    1116| 
+    1117|     await act(async () => {
+    1118|       await result.current.onSubmit({
+       |                            ^
+    1119|         message: "Continue Ashley from her greeting",
+    1120|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1117:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > uses the latest store character id when the hook prop still points at another character
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1176:28
+    1174| 
+    1175|     await act(async () => {
+    1176|       await result.current.onSubmit({
+       |                            ^
+    1177|         message: "Continue Miku from the selected greeting",
+    1178|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1175:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > passes workspace scope through when creating a character-backed chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1226:28
+    1224| 
+    1225|     await act(async () => {
+    1226|       await result.current.onSubmit({
+       |                            ^
+    1227|         message: "Hello workspace character",
+    1228|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1225:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > strips explicit streaming emote directives and persists emote events
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1295:28
+    1293| 
+    1294|     await act(async () => {
+    1295|       await result.current.onSubmit({
+       |                            ^
+    1296|         message: "Test explicit emotes",
+    1297|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1294:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves explicit emote metadata when recovering a failed stream
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1350:28
+    1348| 
+    1349|     await act(async () => {
+    1350|       await result.current.onSubmit({
+       |                            ^
+    1351|         message: "Recover explicit emote",
+    1352|         image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1349:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not duplicate recovery persistence when saved-degraded includes emote metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1429:30
+    1427| 
+    1428|       await act(async () => {
+    1429|         await result.current.onSubmit({
+       |                              ^
+    1430|           message: "Recover saved degraded emote",
+    1431|           image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1428:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/47]⎯
+
+ FAIL  src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > sends emote metadata when normal persist falls back to addChatMessage
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1474:30
+    1472|     try {
+    1473|       await act(async () => {
+    1474|         await result.current.onSubmit({
+       |                              ^
+    1475|           message: "Fallback explicit emote",
+    1476|           image: ""
+ ❯ ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1473:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/47]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  47 failed | 156 passed (203)
+   Start at  15:28:58
+   Duration  23.41s (transform 745ms, setup 355ms, import 2.02s, tests 19.05s, environment 1.39s)
+

@@ -1,0 +1,162 @@
+### Page
+- Page URL: http://127.0.0.1:18783/characters
+- Page Title: Characters | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f4e11]:
+  - generic [ref=f4e14]:
+    - link "Skip to main content" [ref=f4e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f4e16]:
+      - button "Expand sidebar" [ref=f4e17] [cursor=pointer]
+      - button "New Chat" [ref=f4e21] [cursor=pointer]
+      - generic [ref=f4e24]:
+        - button "Quick Ingest" [ref=f4e25] [cursor=pointer]
+        - button "Chat" [ref=f4e29] [cursor=pointer]
+        - button "Prompts" [ref=f4e32] [cursor=pointer]
+        - button "Characters" [ref=f4e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f4e41] [cursor=pointer]
+        - button "World Books" [ref=f4e45] [cursor=pointer]
+        - button "Notes" [ref=f4e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f4e52] [cursor=pointer]
+        - button "Media" [ref=f4e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f4e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f4e69] [cursor=pointer]
+        - button "Kanban" [ref=f4e75] [cursor=pointer]
+        - button "Watchlists" [ref=f4e77] [cursor=pointer]
+      - generic [ref=f4e82]:
+        - button "Open Notes Dock" [ref=f4e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f4e88] [cursor=pointer]
+        - button "Settings" [ref=f4e91] [cursor=pointer]
+    - main [ref=f4e95]:
+      - generic [ref=f4e96]:
+        - generic [ref=f4e99]:
+          - generic [ref=f4e100]:
+            - button "Expand sidebar" [ref=f4e101] [cursor=pointer]
+            - generic [ref=f4e103]:
+              - img "tldw Assistant" [ref=f4e104]
+              - generic [ref=f4e105]: tldw Assistant
+              - button "Companion Home" [ref=f4e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f4e110] [cursor=pointer]
+          - generic [ref=f4e113]:
+            - button "Search - Open command palette" [ref=f4e114] [cursor=pointer]:
+              - generic [ref=f4e118]: Search
+              - generic [ref=f4e119]: ⌘K
+            - button "Open settings" [ref=f4e120] [cursor=pointer]
+            - generic [ref=f4e132]:
+              - button "Notifications, 0 unread" [ref=f4e133] [cursor=pointer]
+              - status [ref=f4e137]: Notifications are active
+            - button "Switch to light theme" [ref=f4e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f4e145] [cursor=pointer]:
+              - generic [ref=f4e146]: "?"
+        - generic [ref=f4e148]:
+          - generic [ref=f4e149]:
+            - heading "Characters" [level=1] [ref=f4e150]
+            - paragraph [ref=f4e151]: Create reusable characters you can pick from the chat header and reuse across conversations.
+          - generic [ref=f4e152]:
+            - link "Skip to characters content" [ref=f4e153] [cursor=pointer]:
+              - /url: "#characters-main-content"
+            - main [ref=f4e154]:
+              - button [aria-hidden] [ref=f4e159] [cursor=pointer]: Upload character
+              - generic [ref=f4e160]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+              - generic [ref=f4e162]:
+                - button "New character" [ref=f4e163] [cursor=pointer]
+                - button "Import character" [ref=f4e165] [cursor=pointer]
+                - generic [ref=f4e170]:
+                  - textbox "Search characters" [ref=f4e171]
+                  - generic [ref=f4e172]: /
+                - radiogroup "View mode" [ref=f4e174]:
+                  - generic [ref=f4e175]:
+                    - generic [ref=f4e176] [cursor=pointer]:
+                      - radio [checked]
+                      - generic "Table view" [ref=f4e177]
+                    - generic [ref=f4e180] [cursor=pointer]:
+                      - radio
+                      - generic "Gallery view" [ref=f4e181]
+                - radiogroup "Character list view" [ref=f4e188]:
+                  - generic [ref=f4e189]:
+                    - generic [ref=f4e190] [cursor=pointer]:
+                      - radio "Active" [checked]
+                      - generic "Active characters" [ref=f4e191]: Active
+                    - generic [ref=f4e192] [cursor=pointer]:
+                      - radio "Trash"
+                      - generic "Recently deleted characters" [ref=f4e193]: Trash
+                - button "Filters" [ref=f4e194] [cursor=pointer]
+                - button "Display options" [ref=f4e199] [cursor=pointer]:
+                  - generic [ref=f4e200]: Display
+              - status [ref=f4e203]: 2 characters found
+              - generic [ref=f4e208]:
+                - table [ref=f4e212]:
+                  - rowgroup [ref=f4e220]:
+                    - row [ref=f4e221]:
+                      - columnheader "Select all on page" [ref=f4e222]:
+                        - checkbox "Select all on page" [ref=f4e225] [cursor=pointer]
+                      - columnheader "Name" [ref=f4e227] [cursor=pointer]
+                      - columnheader "Tags" [ref=f4e238]
+                      - columnheader "Creator" [ref=f4e239] [cursor=pointer]
+                      - columnheader "Activity" [ref=f4e250] [cursor=pointer]
+                      - columnheader "Actions" [ref=f4e261]
+                  - rowgroup [ref=f4e262]:
+                    - row [ref=f4e263]:
+                      - cell "Select E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e264]:
+                        - checkbox "Select E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e267] [cursor=pointer]
+                      - cell [ref=f4e269]:
+                        - generic [ref=f4e277]:
+                          - button "Edit name inline for E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e279]: E2E-TestBot — Repair Alice PGmulti 20260917
+                          - generic [ref=f4e282]: "1"
+                      - cell [ref=f4e285]
+                      - cell [ref=f4e286]
+                      - cell "2h ago Updated 2h ago" [ref=f4e287]:
+                        - generic [ref=f4e288]:
+                          - generic [ref=f4e289]: 2h ago
+                          - generic [ref=f4e290]: Updated 2h ago
+                      - cell [ref=f4e291]:
+                        - generic [ref=f4e292]:
+                          - button "Chat as E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e293] [cursor=pointer]
+                          - button "Edit character E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e296] [cursor=pointer]
+                          - button "Delete character E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e299] [cursor=pointer]
+                          - button "Add E2E-TestBot — Repair Alice PGmulti 20260917 to favorites" [ref=f4e303] [cursor=pointer]
+                          - button "More actions for E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f4e306] [cursor=pointer]
+                    - row [ref=f4e311]:
+                      - cell "Select Helpful AI Assistant" [ref=f4e312]:
+                        - checkbox "Select Helpful AI Assistant" [ref=f4e315] [cursor=pointer]
+                      - cell [ref=f4e317]:
+                        - generic [ref=f4e324]:
+                          - button "Edit name inline for Helpful AI Assistant" [ref=f4e327]: Helpful AI Assistant
+                          - button "Edit description inline for Helpful AI Assistant" [ref=f4e331]: A default, friendly assistant created automatically by the system.
+                      - cell [ref=f4e334]:
+                        - generic [ref=f4e335]:
+                          - button "default" [ref=f4e336] [cursor=pointer]
+                          - button "neutral" [ref=f4e338] [cursor=pointer]
+                          - button "Show and filter +1 hidden tags" [ref=f4e340]: "+1"
+                      - cell "System" [ref=f4e341]
+                      - cell "2h ago Updated 2h ago" [ref=f4e343]:
+                        - generic [ref=f4e344]:
+                          - generic [ref=f4e345]: 2h ago
+                          - generic [ref=f4e346]: Updated 2h ago
+                      - cell [ref=f4e347]:
+                        - generic [ref=f4e348]:
+                          - button "Chat as Helpful AI Assistant" [ref=f4e349] [cursor=pointer]
+                          - button "Edit character Helpful AI Assistant" [ref=f4e352] [cursor=pointer]
+                          - button "Delete character Helpful AI Assistant" [ref=f4e355] [cursor=pointer]
+                          - button "Add Helpful AI Assistant to favorites" [ref=f4e359] [cursor=pointer]
+                          - button "More actions for Helpful AI Assistant" [ref=f4e362] [cursor=pointer]
+                - list [ref=f4e367]:
+                  - listitem "Previous Page" [ref=f4e368]:
+                    - button [disabled] [ref=f4e369]:
+                      - img "left" [ref=f4e370]
+                  - listitem "1" [ref=f4e373] [cursor=pointer]
+                  - listitem "Next Page" [ref=f4e375]:
+                    - button [disabled] [ref=f4e376]:
+                      - img "right" [ref=f4e377]
+                  - listitem [ref=f4e380]:
+                    - generic [ref=f4e381]:
+                      - generic [ref=f4e382]:
+                        - generic "10 / page" [ref=f4e383]
+                        - combobox "Page Size" [ref=f4e384]
+                      - img "down" [ref=f4e386]
+  - alert [ref=f4e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T21-52-06-487Z.log#L4-L5
+
