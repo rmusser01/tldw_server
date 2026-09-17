@@ -1,0 +1,21 @@
+{
+  "baselineFindings": 2,
+  "currentFindings": 2,
+  "identical": true,
+  "newTestFindings": 0,
+  "bandit-production": {
+    "exit": 0,
+    "findings": 0,
+    "errors": 0,
+    "excluded": []
+  },
+  "bandit-tests": {
+    "exit": 0,
+    "findings": 0,
+    "errors": 0,
+    "excluded": [
+      "B101"
+    ]
+  },
+  "astParseFiles": 3
+}

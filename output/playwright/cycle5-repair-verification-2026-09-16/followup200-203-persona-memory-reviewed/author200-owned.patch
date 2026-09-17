@@ -1,0 +1,237 @@
+--- a/tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py
+@@ -1253,7 +1253,7 @@
+         if require_missing_session_id:
+             clauses.append("(session_id IS NULL OR session_id = '')")
+         if not include_archived:
+-            clauses.append("archived = 0")
++            clauses.append("archived = FALSE" if self.backend_type == BackendType.POSTGRESQL else "archived = 0")
+         if not include_deleted:
+             clauses.append("deleted = 0")
+         return " AND ".join(clauses), params
+@@ -4089,7 +4089,7 @@
+             "ORDER BY last_modified DESC, id ASC LIMIT ? OFFSET ?"
+         )
+         params.extend([max(1, int(limit)), max(0, int(offset))])
+-        cursor = self.execute_query(query, tuple(params))
++        cursor = self.execute_query(query, tuple(params), read_only=True)
+         return [self._persona_memory_row_to_dict(row) for row in cursor.fetchall() if row]
+
+     def get_persona_memory_entry_by_id(
+--- /dev/null
++++ b/tldw_Server_API/tests/DB_Management/test_persona_memory_filter_backends.py
+@@ -0,0 +1,214 @@
++"""Real persona-memory filters and the optional character completion read chain."""
++
++from types import SimpleNamespace
++
++import pytest
++
++from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import _inject_character_memory_from_db
++from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
++from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.fixture(params=["sqlite", "postgresql"])
++def memory_db(request, tmp_path):
++    backend = None
++    if request.param == "postgresql":
++        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++    db = CharactersRAGDB(tmp_path / "persona-memory.db", client_id="1", backend=backend)
++    profile = db.create_persona_profile({"id": "char:1", "user_id": "1", "name": "Memory fixture"})
++    other = db.create_persona_profile({"user_id": "2", "name": "Other owner"})
++    second = db.create_persona_profile({"user_id": "1", "name": "Other persona"})
++    db.close_connection()
++    try:
++        yield SimpleNamespace(db=db, profile=profile, other=other, second=second)
++    finally:
++        db.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++def entry(f, label, **values):
++    return f.db.add_persona_memory_entry(
++        {"persona_id": f.profile, "user_id": "1", "memory_type": "fact", "content": label, **values}
++    )
++
++
++def inject(f):
++    return _inject_character_memory_from_db(
++        [{"role": "user", "content": "Question"}], f.db, "1", "1", "Assistant", "User"
++    )
++
++
++@pytest.mark.parametrize("archived,deleted", [(False, False), (True, False), (False, True), (True, True)])
++def test_archive_deleted_flags_and_owner_persona_filters(memory_db, archived, deleted):
++    f = memory_db
++    active = entry(f, "Active")
++    archive = entry(f, "Archived", archived=True)
++    removed = entry(f, "Deleted", deleted=True)
++    both = entry(f, "Both", archived=True, deleted=True)
++    entry(f, "Other owner", persona_id=f.other, user_id="2")
++    entry(f, "Other persona", persona_id=f.second)
++    rows = f.db.list_persona_memory_entries(
++        user_id="1", persona_id=f.profile, include_archived=archived, include_deleted=deleted
++    )
++    expected = (
++        {active}
++        | ({archive} if archived else set())
++        | ({removed} if deleted else set())
++        | ({both} if archived and deleted else set())
++    )
++    assert {row["id"] for row in rows} == expected
++    assert all(isinstance(row["archived"], bool) and isinstance(row["deleted"], bool) for row in rows)
++
++
++def test_scope_type_session_and_pagination_are_preserved(memory_db):
++    f = memory_db
++    for index in range(3):
++        entry(
++            f,
++            f"Scoped {index}",
++            scope_snapshot_id="scope-a",
++            session_id="session-a",
++            last_modified=f"2026-09-01T00:00:0{index}Z",
++        )
++    entry(f, "Other scope", scope_snapshot_id="scope-b", session_id="session-a")
++    entry(f, "Other session", scope_snapshot_id="scope-a", session_id="session-b")
++    entry(f, "Other type", memory_type="preference", scope_snapshot_id="scope-a", session_id="session-a")
++    rows = f.db.list_persona_memory_entries(
++        user_id=" 1 ",
++        persona_id=f.profile,
++        memory_type="fact",
++        scope_snapshot_id=" scope-a ",
++        session_id=" session-a ",
++        limit=1,
++        offset=1,
++    )
++    assert [row["content"] for row in rows] == ["Scoped 1"]
++
++
++def test_owner_boundary_without_a_persona_filter(memory_db):
++    f = memory_db
++    first = entry(f, "First persona")
++    second = entry(f, "Second persona", persona_id=f.second)
++    entry(f, "Other owner", persona_id=f.other, user_id="2")
++    assert {row["id"] for row in f.db.list_persona_memory_entries(user_id="1")} == {first, second}
++    assert f.db.list_persona_memory_entries(user_id="2", persona_id=f.profile) == []
++
++
++def test_shared_filter_backfill_only_updates_eligible_memories(memory_db):
++    f = memory_db
++    eligible = entry(f, "Eligible")
++    archived = entry(f, "Archived", archived=True)
++    deleted = entry(f, "Deleted", deleted=True)
++    scoped = entry(f, "Existing scope", scope_snapshot_id="existing")
++    session = entry(f, "Existing session", session_id="session-a")
++    other = entry(f, "Other owner", persona_id=f.other, user_id="2")
++    assert (
++        f.db.backfill_persona_memory_scope_namespace(user_id="1", persona_id=f.profile, scope_snapshot_id="new-scope")
++        == 1
++    )
++    rows = f.db.list_persona_memory_entries(user_id="1", include_archived=True, include_deleted=True)
++    assert {row["id"]: row["scope_snapshot_id"] for row in rows} == {
++        eligible: "new-scope",
++        archived: None,
++        deleted: None,
++        scoped: "existing",
++        session: None,
++    }
++    assert f.db.list_persona_memory_entries(user_id="2")[0]["id"] == other
++    assert f.db.list_persona_memory_entries(user_id="2")[0]["scope_snapshot_id"] is None
++
++
++@pytest.mark.parametrize("populated", [False, True])
++def test_actual_optional_memory_injection_allows_next_worldbook_initialization(memory_db, populated):
++    f = memory_db
++    if populated:
++        entry(f, "Citrine calibration is twenty-seven.")
++        entry(f, "Archived secret", archived=True)
++        entry(f, "Deleted secret", deleted=True)
++    formatted = inject(f)
++    # This is the next real completion dependency after optional memory lookup.
++    WorldBookService(f.db)
++    assert f.db.execute_query("SELECT COUNT(*) AS count FROM world_books", read_only=True).fetchone()["count"] == 0
++    assert any("Citrine calibration" in row["content"] for row in formatted) is populated
++    assert all("secret" not in row["content"] for row in formatted)
++
++
++@pytest.mark.parametrize("memory_db", ["postgresql"], indirect=True)
++def test_standalone_optional_driver_failure_does_not_poison_next_dependency(memory_db, monkeypatch):
++    f = memory_db
++    original = f.db.backend.execute
++
++    def execute(query, params=None, **kwargs):
++        if "FROM persona_memory_entries" in query:
++            # Real PostgreSQL statement failure, same actual connection/cursor.
++            return original("SELECT 1 / 0", **kwargs)
++        return original(query, params, **kwargs)
++
++    monkeypatch.setattr(f.db.backend, "execute", execute)
++    assert inject(f) == [{"role": "user", "content": "Question"}]
++    WorldBookService(f.db)
++    assert f.db._get_thread_connection().info.transaction_status.name == "IDLE"
++
++
++@pytest.mark.parametrize("commit", [False, True])
++def test_successful_memory_read_preserves_explicit_caller_transaction(memory_db, commit):
++    f = memory_db
++    note = f.db.add_note(title="Committed", content="Caller transaction")
++    entry(f, "Caller-safe memory")
++    f.db.close_connection()
++    try:
++        with f.db.transaction():
++            f.db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending", note))
++            assert "Caller-safe memory" in inject(f)[-1]["content"]
++            if f.db.backend_type == BackendType.POSTGRESQL:
++                assert f.db._get_thread_connection().info.transaction_status.name == "INTRANS"
++                assert f.db.backend.execute("SELECT title FROM notes WHERE id=%s", (note,)).scalar == "Committed"
++            if not commit:
++                raise RuntimeError("caller rollback")
++    except RuntimeError as exc:
++        assert not commit and str(exc) == "caller rollback"
++    assert f.db.get_note_by_id(note)["title"] == ("Pending" if commit else "Committed")
++
++
++@pytest.mark.parametrize("memory_db", ["postgresql"], indirect=True)
++@pytest.mark.parametrize("commit", [False, True])
++def test_successful_read_does_not_settle_implicit_postgres_caller_write(memory_db, commit):
++    f = memory_db
++    note = f.db.add_note(title="Committed", content="Caller transaction")
++    entry(f, "Caller-safe memory")
++    f.db.close_connection()
++    raw = f.db._get_thread_connection()
++    f.db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending", note))
++    assert "Caller-safe memory" in inject(f)[-1]["content"]
++    assert raw.info.transaction_status.name == "INTRANS"
++    assert f.db.backend.execute("SELECT title FROM notes WHERE id=%s", (note,)).scalar == "Committed"
++    (raw.commit if commit else raw.rollback)()
++    assert f.db.get_note_by_id(note)["title"] == ("Pending" if commit else "Committed")
++
++
++@pytest.mark.parametrize("memory_db", ["postgresql"], indirect=True)
++def test_failed_read_does_not_rollback_an_existing_caller_transaction(memory_db, monkeypatch):
++    f = memory_db
++    note = f.db.add_note(title="Committed", content="Caller transaction")
++    f.db.close_connection()
++    raw = f.db._get_thread_connection()
++    f.db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending", note))
++    original = f.db.backend.execute
++
++    def execute(query, params=None, **kwargs):
++        if "FROM persona_memory_entries" in query:
++            return original("SELECT 1 / 0", **kwargs)
++        return original(query, params, **kwargs)
++
++    monkeypatch.setattr(f.db.backend, "execute", execute)
++    with pytest.raises(CharactersRAGDBError):
++        f.db.list_persona_memory_entries(user_id="1", persona_id=f.profile)
++    # The failing caller owns its abort/recovery decision; do not silently settle it.
++    assert raw.info.transaction_status.name == "INERROR"
++    raw.rollback()
++    assert f.db.get_note_by_id(note)["title"] == "Committed"
