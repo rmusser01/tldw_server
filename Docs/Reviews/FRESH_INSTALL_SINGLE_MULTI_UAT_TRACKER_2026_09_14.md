@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** all 48 frozen outcomes are retained and independently reviewed, with 16 unresolved findings (231–246). The final [PostgreSQL multi-user review](../../output/playwright/fresh-matrix-2026-09-17/pg-multi-completed-1751/RETENTION_REVIEW.md) confirms evidence fidelity, not application acceptance. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md). No new full UAT starts until these findings have reviewed fixes or evidence-backed dispositions and original-scenario acceptance.
+- **Current repair gate:** 247 findings total: 230 previously verified, 2 reviewed implementations awaiting native acceptance (234/239), and 15 unresolved (231–233, 235–238, 240–247). All 48 frozen outcomes are retained and independently reviewed. The [proxy and World Book repairs](../../output/playwright/fresh-matrix-repairs-2026-09-17/proxy-worldbook-reviewed/README.md) pass independent checks, including 32 required PostgreSQL/SQLite tests with zero skips. New247 is a confirmed cross-owner sequence rewind found during238 verification. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
 
 - **Fresh-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2604,3 +2604,13 @@ Independent normal API logins pass30asserted observations: Notes ownread/write20
 Administrator native source upload also413Quota check unavailable at17:46:13, analysisoff. No job/Media iscreated;245blocksanalysis/reanalysis/Trash/restore and positiveMedia/jobownershipcontrols. No source or schema insertedaround thefailure. TestBot246 originaltimeout remains open; afterlogout/reopen canonicalhistorycontains onlyuserturn and itsMoreactions offersDelete/Pin, noRetry. No newturnsent as a substitute. Final controlledoutagecheck is pending.
 
 FinalPGmultioutage/recovery passes with actualportrefusal, same-profile restart, nativeRetryAlice2/originalNotev5; no re-login. Bothfixtureholders/dataremain while completed appportsareclosed17:51UTC. All16new findings231–246 remainopen; no newfullUATbefore repair acceptance.
+
+## UAT-247 — P1: Tenant-scoped Media initialization rewinds a shared PostgreSQL sequence
+
+- Open, TASK13260.189. Discovered by the actual restricted-role worker regression after238 scope propagation: owner1 succeeds, then owner2 fails with SQLSTATE23505 on the Media primary key. At both INSERTs the role is non-superuser/non-BYPASSRLS, admin0, and the trusted owner scope is correct. The shared sequence is `last_value:1,is_called:false` before each INSERT.
+- Normal Media constructor sequence synchronization uses tenant-filtered `MAX(id)` and can reset a serial below another owner's allocated IDs. Prior147's Media-only sequence allowlist remains effective; this is a distinct own-table/high-water failure. No sequence repair or RLS bypass was applied to obtain the evidence.
+- Exact causal receipt: `.tmp/fresh-uat-recovery-20260916/uat238-reuse-sqlstate-proof.redacted.log`, one PostgreSQL failure and one SQLite control pass. Both-owner ingestion acceptance remains blocked pending a reviewed correction and native replay.
+
+### Reviewed repairs awaiting native acceptance
+
+UAT234 and239 have independent passing regressions and retained [review](../../output/playwright/fresh-matrix-repairs-2026-09-17/proxy-worldbook-reviewed/review234-239/REVIEW.md).234's real Next request survives31.5seconds with ordinary forwarding, upstream503 and client cancellation preserved.239's catalogue/read/initialization checks pass32 on required PostgreSQL/SQLite with zero skips; caller rollback and standalone read release are covered. Real Biology5 Study and Character editor catalogue still need native acceptance; neither finding is closed. Manifest SHA `7b9a35a0b44b23a7dc27bd085ca762e697d172e3752557b2835bcbad26aad01f`.

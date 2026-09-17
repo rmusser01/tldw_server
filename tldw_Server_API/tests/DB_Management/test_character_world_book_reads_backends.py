@@ -117,3 +117,49 @@ def test_standalone_world_book_reads_finish_owned_postgres_transaction(books):
     assert service.get_entry_counts_for_world_books([101]) == {101: 2}
     if db.backend_type == BackendType.POSTGRESQL:
         assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
+
+
+@pytest.mark.parametrize("include_disabled,expected", [
+    (False, [101, 102, 105, 103]), (True, [101, 102, 105, 104, 103])
+])
+def test_world_book_catalogue_filters_deleted_and_disabled_in_name_order(books, include_disabled, expected):
+    db, service, character = books
+    assert service.list_world_books(include_disabled=include_disabled) == []
+    _seed(db, character)
+    assert [book["id"] for book in service.list_world_books(include_disabled=include_disabled)] == expected
+    if db.backend_type == BackendType.POSTGRESQL:
+        assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_actual_world_book_catalogue_route_returns_rows_and_counts(books, populated):
+    db, _service, character = books
+    if populated:
+        _seed(db, character)
+    app = FastAPI()
+    app.include_router(characters.router, prefix="/api/v1/characters")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/characters/world-books", params={"include_disabled": True})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert [book["id"] for book in data["world_books"]] == ([101, 102, 105, 104, 103] if populated else [])
+    assert data["total"] == (5 if populated else 0)
+    assert data["enabled_count"] == (4 if populated else 0)
+    assert data["disabled_count"] == (1 if populated else 0)
+    if populated:
+        assert [book["entry_count"] for book in data["world_books"]] == [2, 0, 0, 0, 0]
+
+
+def test_catalogue_keeps_callers_uncommitted_write_inside_rollback(books):
+    db, service, character = books
+    _seed(db, character)
+    with pytest.raises(RuntimeError, match="caller rollback"):
+        with db.transaction() as conn:
+            conn.execute("UPDATE world_books SET name = ? WHERE id = ?", ("A pending name", 103))
+            pending = {book["id"]: book["name"] for book in service.list_world_books()}
+            assert pending[103] == "A pending name"
+            raise RuntimeError("caller rollback")
+    assert [book["name"] for book in service.list_world_books()] == [
+        "Alpha", "Beta", "Disabled attachment", "Top"
+    ]

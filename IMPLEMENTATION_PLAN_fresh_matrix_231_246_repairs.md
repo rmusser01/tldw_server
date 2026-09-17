@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now247), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
@@ -35,12 +35,13 @@
 **Goal:** Restore fresh PostgreSQL upload admission/content persistence, catalogue access and long-running generation.
 **Success criteria:**245,238,239,233 and234 have causal regressions, minimal reviewed fixes and adjacent controls.
 **Tests:** Normal fresh/repeated AuthNZ quota bootstrap; actual restricted worker→executor→Media INSERT/foreign denial/scope cleanup; world-book catalogue read; warning uniqueness; actual installed Next response after30seconds plus abort/failure controls.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ]245: extend canonical bootstrap and real quota/guard controls; retain partial-index upserts, FK/check constraints, fractional usage and fail-closed behavior.
 - [ ]238/233: reproduce actual worker persistence with trusted owner in required PostgreSQL; carry scope through executor and reset it; deduplicate terminal warnings at their producer.
-- [ ]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle.
-- [ ]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls.
+- [x]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle; independent32/0skip, native acceptance pending.
+- [x]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls; independent4/0skip, native acceptance pending.
+- [ ]247: prevent own Media sequence rewind under RLS-filtered tenant initialization, retaining high-water IDs and explicit-ID repair without weakening authority; separate from147's foreign-table allowlist.
 - [ ] Review and commit each independently testable unit; leave native acceptance pending until Stage4.
 
 ## Stage3: Repair UI, study and stream findings

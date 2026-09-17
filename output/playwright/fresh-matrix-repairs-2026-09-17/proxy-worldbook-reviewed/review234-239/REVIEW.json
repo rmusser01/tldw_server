@@ -1,0 +1,178 @@
+{
+  "reviewedAt": "2026-09-17T18:16:10.663164+00:00",
+  "tasks": [
+    "TASK13260.176",
+    "TASK13260.181"
+  ],
+  "disposition": "CLEAR for integration; native acceptance pending",
+  "sourceFiles": [
+    {
+      "path": "apps/tldw-frontend/next.config.mjs",
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "bytes": 10706
+    },
+    {
+      "path": "apps/tldw-frontend/package.json",
+      "sha256": "86f71612f0333f4508b42c321398fe359c58f6b680dc9d2d8959dadde53a6408",
+      "bytes": 11718
+    },
+    {
+      "path": "apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sha256": "f51043ba0ea21695e617b1fd5b1fc58a118dbc373c8586052e59688d22b120bf",
+      "bytes": 6563
+    },
+    {
+      "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "sha256": "9f7fcb8368da6e57136f1f3c610dc8390edfc3638f6a4143cc9018c8d5ec87cc",
+      "bytes": 103669
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_character_world_book_reads_backends.py",
+      "sha256": "482b850ebcf2498890cfc55670fca99dcdbb5260577508bae138710f564c72aa",
+      "bytes": 8005
+    }
+  ],
+  "sourceHashesStable": true,
+  "worldBookASTOutsideListUnchanged": true,
+  "independentTests": {
+    "nextProxy": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "delayedResponseMs": 31504.92,
+      "totalMs": 32639.409959
+    },
+    "configCombinations": 4,
+    "requiredPostgresAndSqlite": {
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5,
+      "seconds": 37.91,
+      "label": "repair239-independent-sidebar"
+    }
+  },
+  "static": {
+    "eslint": "0 diagnostics",
+    "nodeSyntax": "pass",
+    "pythonCompile": "pass",
+    "ruff": {
+      "ruff-current.json": [
+        {
+          "code": "I001",
+          "message": "Import block is un-sorted or un-formatted"
+        },
+        {
+          "code": "SIM118",
+          "message": "Use `key in dict` instead of `key in dict.keys()`"
+        },
+        {
+          "code": "SIM118",
+          "message": "Use `key in dict` instead of `key in dict.keys()`"
+        }
+      ],
+      "ruff-baseline.json": [
+        {
+          "code": "I001",
+          "message": "Import block is un-sorted or un-formatted"
+        },
+        {
+          "code": "SIM118",
+          "message": "Use `key in dict` instead of `key in dict.keys()`"
+        },
+        {
+          "code": "SIM118",
+          "message": "Use `key in dict` instead of `key in dict.keys()`"
+        }
+      ]
+    },
+    "banditProduction": {
+      "findings": 0,
+      "errors": 0
+    },
+    "banditFocusedTests": {
+      "findings": 0,
+      "errors": 0,
+      "excluded": [
+        "B101"
+      ]
+    }
+  },
+  "causalEvidence": [
+    {
+      "path": ".tmp/uat-repairs-231-246/proxy234/red.txt",
+      "sha256": "65dfe33ec80065bfb81f8470874e6180b0bb2477f4880f4ef92e4a82b56b5149"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/repair239-red.redacted.log",
+      "sha256": "9632577af4a8e2fba1d897c4de6bbcb348e96dbc5bdc950ba72543bcdf181cee"
+    }
+  ],
+  "report": {
+    "path": "REVIEW.md",
+    "sha256": "01709445f2e208d570f22baf0b336b3d83f2941451221fd90ee619c0748362e2"
+  },
+  "artifacts": [
+    {
+      "path": "REVIEW.md",
+      "sha256": "01709445f2e208d570f22baf0b336b3d83f2941451221fd90ee619c0748362e2",
+      "bytes": 4552
+    },
+    {
+      "path": "bandit-production.json",
+      "sha256": "7b13773045997bc84674c4a55b5753464022771ab3d28ef4c4943ec412d6d983",
+      "bytes": 780
+    },
+    {
+      "path": "bandit-test.json",
+      "sha256": "7ebe91b412ce25595028042f5d30ccabde5e8364fef8e4a6c0ca050c5cdd6344",
+      "bytes": 796
+    },
+    {
+      "path": "config-matrix.json",
+      "sha256": "bae0330167710da231a5454a81120cb41f9424b9344739693fed5a59a2da3ea3",
+      "bytes": 1577
+    },
+    {
+      "path": "eslint.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "proxy-independent.log",
+      "sha256": "cd51632767604066bb50b3e78f1aebd62ee28f07ce7c6312fccd0bce97346c64",
+      "bytes": 419
+    },
+    {
+      "path": "repair239-independent-sidebar-command.json",
+      "sha256": "63f61ea6f62bef462ac5fae6eaef36ccf911ed14a64a51da35f87e8f45091e7b",
+      "bytes": 450
+    },
+    {
+      "path": "repair239-independent-sidebar.redacted.log",
+      "sha256": "ab41678f63e1a6da0e18b2ac848bc3af6f0bbf40c121d6063f44033024b37c54",
+      "bytes": 9963
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "1c104e8e0d3f6320165ad30f9815625e156cbb320ad3c13d5dc7bbdc27137742",
+      "bytes": 3214
+    },
+    {
+      "path": "ruff-current.json",
+      "sha256": "6586d54ac62ca9d5ad4cf2114da065ecffce7c61ec95ac9fd7f44cec1af56b82",
+      "bytes": 3193
+    },
+    {
+      "path": "source-before.json",
+      "sha256": "3d90614b91275e41648394eb6d5a5221b7bc751c799b517186c9ccd99d2886b8",
+      "bytes": 907
+    }
+  ],
+  "limitations": [
+    "Native Biology and Character catalogue acceptance pending",
+    "No full frontend compiler/build or whole repository suite",
+    "No meaningful Bandit JavaScript coverage",
+    "No new WorldBook ownership or writer claim"
+  ]
+}

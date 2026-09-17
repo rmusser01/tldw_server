@@ -1,0 +1,32 @@
+✔ forwards ordinary request body and authorization through the real rewrite (938.824791ms)
+✔ preserves upstream error status and body (2.020791ms)
+✔ client cancellation closes the upstream connection (1.919959ms)
+✖ delivers a generation response after the former 30-second cutoff (30005.247667ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31003.470916
+
+✖ failing tests:
+
+test at apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs:142:1
+✖ delivers a generation response after the former 30-second cutoff (30005.247667ms)
+  AssertionError [ERR_ASSERTION]: Internal Server Error
+  
+  500 !== 200
+  
+      at test.timeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs:147:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 500,
+    expected: 200,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

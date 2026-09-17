@@ -176,10 +176,13 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // Isolated UAT runs rebuild from fresh state; avoid retaining multi-GB dev caches.
-  ...(liveTierDistDir
-    ? { experimental: { turbopackFileSystemCacheForDev: false } }
-    : {}),
+  experimental: {
+    // Generation already allows 180s on the client. Next's 30s rewrite default
+    // otherwise drops valid backend responses before that budget expires.
+    ...(deploymentMode === 'quickstart' ? { proxyTimeout: 180000 } : {}),
+    // Isolated UAT runs rebuild from fresh state; avoid multi-GB dev caches.
+    ...(liveTierDistDir ? { turbopackFileSystemCacheForDev: false } : {}),
+  },
   turbopack: {
     root: repoWorkspaceRoot,
     // Keep Turbopack aliases aligned with shared UI + web shims.

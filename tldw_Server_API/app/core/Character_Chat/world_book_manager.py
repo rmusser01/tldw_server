@@ -754,22 +754,21 @@ class WorldBookService:
             List of world book data dictionaries
         """
         try:
-            with self.db.get_connection() as conn:
-                query = "SELECT * FROM world_books WHERE deleted = ?"
-                params: list[Any] = [False]
-                if not include_disabled:
-                    query += " AND enabled = ?"
-                    params.append(True)
-                query += " ORDER BY name"
+            query = "SELECT * FROM world_books WHERE deleted = ?"
+            params: list[Any] = [False]
+            if not include_disabled:
+                query += " AND enabled = ?"
+                params.append(True)
+            query += " ORDER BY name"
 
-                cursor = conn.execute(query, tuple(params))
-                books = [dict(row) for row in cursor.fetchall()]
+            cursor = self.db.execute_query(query, tuple(params), read_only=True)
+            books = [dict(row) for row in cursor.fetchall()]
 
-                # Cache the books
-                for book in books:
-                    self._book_cache[book['id']] = book
+            # Cache the books
+            for book in books:
+                self._book_cache[book['id']] = book
 
-                return books
+            return books
 
         except _WORLD_BOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error listing world books: {e}")

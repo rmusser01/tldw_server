@@ -39,6 +39,10 @@ The source audits in `.tmp/uat-next-matrix-20260916/audits` and the retained mat
 
 ## Verification and release gate
 
+### Follow-up247: tenant-scoped Media sequence maintenance
+
+TASK13260.189 was created before edits after the actual238 worker test proved owner1 insertion followed by owner2 SQLSTATE23505. Both scoped INSERTs use non-superuser/non-BYPASSRLS roles and admin0. Normal Media initialization rewinds its shared serial to1 from a tenant-filtered MAX; prior147 correctly excludes foreign module sequences but does not prevent this own-table rewind. Preserve allocated sequence high-water marks, explicit-ID migration/import repair, empty-table behavior and unrelated sequences. Diagnose concurrent allocation as well as sequential tenant initialization before selecting a minimal correction; a read/modify/setval race must not silently reintroduce rewind. Do not disable RLS or introduce elevated content writes. Required official PostgreSQL tests and original two-owner queued-upload acceptance apply.
+
 Each unit needs a demonstrated causal RED, minimal GREEN, relevant adjacent controls and independent review. Required PostgreSQL tests use official fixtures and run without skips; never provision a replacement cluster. Run scoped lint/format checks and Bandit for changed Python using `.venv`. Compare the full frontend compiler against the recorded90 existing signatures and investigate new failures.
 
 Retain sanitized evidence with hashes and per-issue repair revision, test result, native original-scenario acceptance and limits. Keep SQLite/PG profiles and official holders for targeted verification; any updated runtime is explicitly a repair profile, not part of the frozen matrix. Use serial real-model inference. Begin a new full fresh48-row run only after all findings, including246, have a reviewed and evidence-backed disposition. External source denial, image capability limits and reused dependency installation remain explicit.
