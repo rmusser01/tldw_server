@@ -1,0 +1,22 @@
+{
+  "authorManifestSha256": "39facfbb2fb1494927a85d5dcb3bf90cee4808d9e7804123555ffe610de489fc",
+  "checkedEntries": 60,
+  "mismatches": [],
+  "baseline": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "baselineSha256": "6d4980caceb60ea46f563d808c1431331ba241471564bf222671af2d909622e0",
+      "matchesCommit": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "baselineSha256": "62e82d6cf682d5aff270a38b70763632bfeb5b40c021871d4512405e19d56447",
+      "matchesCommit": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "baselineSha256": "c2b2afa38128c327bf19e3de6837ccb6e31623c38a9bdb3a223e305945a3f081",
+      "matchesCommit": true
+    }
+  ]
+}

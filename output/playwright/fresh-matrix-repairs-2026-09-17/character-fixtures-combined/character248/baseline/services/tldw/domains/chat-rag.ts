@@ -1,0 +1,2224 @@
+import type { ScopedRequestOptions } from "../TldwApiClient"
+import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
+import { buildQuery } from '../client-utils'
+import { createJsonResponseLike } from '../json-response-like'
+import { appendPathQuery } from '../path-utils'
+import { captureChatRequestDebugSnapshot } from '../chat-request-debug'
+import type { TldwApiClientCore } from '../TldwApiClient'
+import type { ChatScope } from '@/types/chat-scope'
+import { toChatScopeParams } from '@/types/chat-scope'
+import { normalizeChatRole } from '@/utils/normalize-chat-role'
+import { parseRagStreamLine } from '@/services/rag/stream-contract'
+import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
+import { DEFAULT_RAG_SETTINGS } from '@/services/rag/unified-rag'
+import {
+  requestScopeFields,
+  type ServicePromptRequestScope
+} from './service-prompts'
+import type {
+  ChatCompletionRequestOptions,
+  ChatCompletionStreamOptions,
+  ChatCompletionRequest,
+  ServerChatSummary,
+  ServerChatMessage,
+  ChatSettingsResponse,
+  LorebookDiagnosticExportResponse,
+  ConversationSharePermission,
+  ConversationShareLinkCreateResponse,
+  ConversationShareLinksListResponse,
+  ConversationShareLinkResolveResponse,
+  OpenWebUIHydrationRequest,
+  WorldBookProcessResponse,
+} from '../TldwApiClient'
+import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
+
+const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
+
+const readCompleteMessageImages = (value: unknown): string[] => {
+  if (!Array.isArray(value) || value.some(image => {
+    if (typeof image !== "string") return true
+    const match = /^data:image\/(?:png|jpeg|webp|gif|bmp|x-icon);base64,(.+)$/.exec(image)
+    if (!match) return true
+    const encoded = match[1]
+    return encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)
+  })) throw new Error("A saved chat attachment is incomplete or invalid. Reload the conversation before retrying.")
+  return value as string[]
+}
+
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        detail?: unknown
+        details?: { detail?: unknown; code?: unknown; saved?: unknown }
+      }
+    | null
+  const detail =
+    candidate?.detail &&
+    typeof candidate.detail === "object" &&
+    !Array.isArray(candidate.detail)
+      ? candidate.detail
+      : candidate?.details?.detail &&
+            typeof candidate.details.detail === "object" &&
+            !Array.isArray(candidate.details.detail)
+        ? candidate.details.detail
+        : candidate?.details &&
+              typeof candidate.details === "object" &&
+              !Array.isArray(candidate.details)
+          ? candidate.details
+          : null
+  const detailRecord = detail as Record<string, unknown> | null
+  return (
+    detailRecord?.code === "persist_validation_degraded" &&
+    detailRecord?.saved === true
+  )
+}
+
+const buildSanitizedRagSearchError = (
+  error: unknown
+): Error & { status?: number; code?: string } => {
+  const sanitized = sanitizeRagProviderFailure(error)
+  const sanitizedError = new Error(sanitized.message) as Error & {
+    status?: number
+    code?: string
+  }
+  if (typeof sanitized.status === "number") {
+    sanitizedError.status = sanitized.status
+  }
+  if (sanitized.code) {
+    sanitizedError.code = sanitized.code
+  }
+  return sanitizedError
+}
+
+const RAG_REQUEST_ONLY_OPTION_KEYS = [
+  "chat_history",
+  "clarification_timeout_sec",
+  "classifier_model",
+  "classifier_provider",
+  "discussion_platforms",
+  "enable_discussion_search",
+  "enable_image_search",
+  "enable_pre_retrieval_clarification",
+  "enable_query_classification",
+  "enable_query_reformulation",
+  "enable_research_action_dedup",
+  "enable_research_loop",
+  "enable_research_progress",
+  "enable_structured_response",
+  "enable_suggestions",
+  "enable_video_search",
+  "include_rerank_debug_documents",
+  "min_relevance_score",
+  "num_suggestions",
+  "research_max_iterations",
+  "research_max_iterations_balanced",
+  "research_max_iterations_quality",
+  "research_max_iterations_speed",
+  "search_depth_mode",
+  "search_url_scraping",
+  "sql_target_id",
+  "workspace_id",
+]
+
+const RAG_SEARCH_OPTION_KEYS = new Set([
+  ...Object.keys(DEFAULT_RAG_SETTINGS).filter((key) => key !== "query"),
+  ...RAG_REQUEST_ONLY_OPTION_KEYS,
+])
+
+const RAG_SIMPLE_OPTION_KEYS = new Set(["sources", "top_k"])
+
+const RAG_PROVIDER_CREDENTIAL_SUFFIXES = [
+  "accesskey",
+  "accesskeyid",
+  "apikey",
+  "apiurl",
+  "appconfig",
+  "authorization",
+  "authorizationheader",
+  "authsource",
+  "baseurl",
+  "clientsecret",
+  "cookie",
+  "credential",
+  "credentialfields",
+  "credentials",
+  "endpoint",
+  "endpointurl",
+  "password",
+  "privatekey",
+  "providerurl",
+  "bearer",
+  "secret",
+  "secretkey",
+  "secretaccesskey",
+  "token",
+]
+
+const UNSAFE_OBJECT_PROPERTY_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+])
+
+const isRagProviderCredentialKey = (key: string): boolean => {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "")
+  return RAG_PROVIDER_CREDENTIAL_SUFFIXES.some((suffix) =>
+    normalized.endsWith(suffix)
+  )
+}
+
+const stripBrowserProviderCredentials = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const sanitized: unknown[] = []
+    for (const entry of value) {
+      const cleanEntry = stripBrowserProviderCredentials(entry)
+      if (cleanEntry !== undefined) sanitized.push(cleanEntry)
+    }
+    return sanitized
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value
+  }
+  if (typeof value !== "object") return undefined
+
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) {
+      return undefined
+    }
+
+    const sanitized = Object.create(null) as Record<string, unknown>
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (UNSAFE_OBJECT_PROPERTY_KEYS.has(key.toLowerCase())) continue
+      if (isRagProviderCredentialKey(key)) continue
+      const cleanEntry = stripBrowserProviderCredentials(entry)
+      if (cleanEntry !== undefined) sanitized[key] = cleanEntry
+    }
+    return sanitized
+  } catch {
+    return undefined
+  }
+}
+
+const sanitizeRagChatHistory = (value: unknown): Array<{
+  role: string
+  content: string
+}> | undefined => {
+  if (!Array.isArray(value)) return undefined
+
+  const sanitized: Array<{ role: string; content: string }> = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    try {
+      const prototype = Object.getPrototypeOf(entry)
+      if (prototype !== Object.prototype && prototype !== null) continue
+      const role = Object.getOwnPropertyDescriptor(entry, "role")?.value
+      const content = Object.getOwnPropertyDescriptor(entry, "content")?.value
+      if (typeof role !== "string" || typeof content !== "string") continue
+      sanitized.push({ role, content })
+    } catch {
+      // Fail closed for hostile or revoked proxy objects.
+    }
+  }
+  return sanitized
+}
+
+const sanitizeRagOptions = (
+  options: Record<string, unknown>,
+  allowedKeys: ReadonlySet<string>
+): Record<string, unknown> => {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(options)) {
+    if (!allowedKeys.has(key)) continue
+    if (key === "chat_history") {
+      const chatHistory = sanitizeRagChatHistory(value)
+      if (chatHistory !== undefined) sanitized.chat_history = chatHistory
+      continue
+    }
+    const cleanValue = stripBrowserProviderCredentials(value)
+    if (cleanValue !== undefined) sanitized[key] = cleanValue
+  }
+  return sanitized
+}
+
+export const buildSanitizedRagRequestBody = (
+  query: string,
+  options: Record<string, unknown>,
+  kind: "search" | "simple" = "search"
+): Record<string, unknown> => ({
+  query,
+  ...sanitizeRagOptions(
+    options,
+    kind === "simple" ? RAG_SIMPLE_OPTION_KEYS : RAG_SEARCH_OPTION_KEYS
+  ),
+})
+
+/** Conservative compatibility ceiling for browser/proxy HTTP request targets. */
+export const RAG_SIMPLE_MAX_PATH_LENGTH = 8000
+
+export const buildSanitizedRagSimplePath = (
+  query: string,
+  options: Record<string, unknown>
+) => {
+  const params = buildSanitizedRagRequestBody(query, options, "simple")
+  const path = appendPathQuery("/api/v1/rag/simple", buildQuery(params))
+  if (path.length > RAG_SIMPLE_MAX_PATH_LENGTH) {
+    throw new RangeError(
+      "RAG simple request URL exceeds the 8,000-character transport limit."
+    )
+  }
+  return path
+}
+
+// NOTE: the chat-completion "sanitizer" that used to live here corrupted successful
+// non-streaming replies (any content containing "error"/"exception"/a file path was
+// replaced with "Chat completion failed."). It was removed — bgRequest throws on non-2xx,
+// so createChatCompletion only ever sees success bodies. See FRONTEND_AUDIT.md (C1) / TASK-12091.
+
+export const chatRagMethods = {
+  normalizeChatSummary(input: any): ServerChatSummary {
+    const created_at = String(input?.created_at || input?.createdAt || "")
+    const updated_at =
+      input?.updated_at ??
+      input?.updatedAt ??
+      input?.last_modified ??
+      input?.lastModified ??
+      null
+    const state = input?.state ?? input?.conversation_state ?? null
+    const last_active =
+      input?.last_active ??
+      input?.lastActive ??
+      updated_at ??
+      created_at ??
+      null
+    const messageCountRaw = input?.message_count ?? input?.messageCount
+    const message_count =
+      typeof messageCountRaw === "number"
+        ? messageCountRaw
+        : typeof messageCountRaw === "string" && messageCountRaw.trim().length > 0
+          ? Number.parseFloat(messageCountRaw)
+          : null
+    const character_id = input?.character_id ?? input?.characterId ?? null
+    const character_name =
+      typeof input?.character_name === "string" && input.character_name.trim().length > 0
+        ? input.character_name.trim()
+        : typeof input?.characterName === "string" &&
+            input.characterName.trim().length > 0
+          ? input.characterName.trim()
+          : null
+    const assistant_kind =
+      input?.assistant_kind ??
+      input?.assistantKind ??
+      (character_id != null ? "character" : null)
+    const assistant_id =
+      input?.assistant_id ??
+      input?.assistantId ??
+      (assistant_kind === "character" && character_id != null
+        ? String(character_id)
+        : null)
+    const assistant_name =
+      typeof input?.assistant_name === "string" && input.assistant_name.trim().length > 0
+        ? input.assistant_name.trim()
+        : typeof input?.assistantName === "string" &&
+            input.assistantName.trim().length > 0
+          ? input.assistantName.trim()
+          : character_name
+    const scope_type =
+      input?.scope_type === "global" || input?.scopeType === "global"
+        ? "global"
+        : input?.scope_type === "workspace" || input?.scopeType === "workspace"
+          ? "workspace"
+          : null
+    const workspace_id =
+      typeof input?.workspace_id === "string" && input.workspace_id.trim().length > 0
+        ? input.workspace_id
+        : typeof input?.workspaceId === "string" &&
+            input.workspaceId.trim().length > 0
+          ? input.workspaceId
+          : null
+    return {
+      id: String(input?.id ?? ""),
+      title: String(input?.title || ""),
+      created_at,
+      updated_at: updated_at ? String(updated_at) : null,
+      last_active: last_active ? String(last_active) : null,
+      message_count: Number.isFinite(message_count as number)
+        ? (message_count as number)
+        : null,
+      source: input?.source ?? null,
+      state: state ? String(state) : null,
+      topic_label: input?.topic_label ?? input?.topicLabel ?? null,
+      cluster_id: input?.cluster_id ?? input?.clusterId ?? null,
+      external_ref: input?.external_ref ?? input?.externalRef ?? null,
+      bm25_norm:
+        typeof input?.bm25_norm === "number"
+          ? input?.bm25_norm
+          : typeof input?.relevance === "number"
+            ? input?.relevance
+            : null,
+      character_id,
+      character_name,
+      assistant_kind:
+        assistant_kind === "character" || assistant_kind === "persona"
+          ? assistant_kind
+          : null,
+      assistant_id:
+        assistant_id == null || assistant_id === ""
+          ? null
+          : String(assistant_id),
+      assistant_name,
+      persona_memory_mode:
+        input?.persona_memory_mode === "read_only" ||
+        input?.persona_memory_mode === "read_write"
+          ? input.persona_memory_mode
+          : input?.personaMemoryMode === "read_only" ||
+              input?.personaMemoryMode === "read_write"
+            ? input.personaMemoryMode
+            : null,
+      parent_conversation_id:
+        input?.parent_conversation_id ?? input?.parentConversationId ?? null,
+      root_id: input?.root_id ?? input?.rootId ?? null,
+      forked_from_message_id:
+        input?.forked_from_message_id ?? input?.forkedFromMessageId ?? null,
+      version:
+        typeof input?.version === "number"
+          ? input.version
+          : typeof input?.expected_version === "number"
+            ? input.expected_version
+            : null,
+      scope_type,
+      workspace_id
+    }
+  },
+
+  async createChatCompletion(
+    this: TldwApiClientCore,
+    request: ChatCompletionRequest,
+    options?: ChatCompletionRequestOptions
+  ): Promise<Response> {
+    // Non-stream request via background
+    captureChatRequestDebugSnapshot({
+      endpoint: "/api/v1/chat/completions",
+      method: "POST",
+      mode: "non-stream",
+      body: request,
+      metadata: options?.debugMetadata
+    })
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const res = await bgRequest<Response>({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
+      body: request,
+      timeoutMs: options?.timeoutMs,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })
+    // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
+    // For simplicity, return a minimal object with json() and text()
+    // NOTE: bgRequest throws on non-2xx, so `res` here is always a SUCCESS body.
+    // Do NOT run it through the error-string "sanitizer" — that corrupts legitimate
+    // assistant replies that merely mention "error"/"exception"/a file path, and the
+    // streaming path never sanitized. See apps/FRONTEND_AUDIT.md (C1) / TASK-12091.
+    const data = res as any
+    return createJsonResponseLike(data, { status: 200 })
+  },
+
+  async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
+    request.stream = true
+    captureChatRequestDebugSnapshot({
+      endpoint: "/api/v1/chat/completions",
+      method: "POST",
+      mode: "stream",
+      body: request,
+      metadata: options?.debugMetadata
+    })
+    const scopeFields = requestScopeFields(options?.requestScope)
+    for await (const line of bgStream({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...scopeFields.headers
+      },
+      body: request,
+      abortSignal: options?.signal,
+      streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })) {
+      try {
+        const parsed = JSON.parse(line)
+        yield parsed
+      } catch (e) {
+        // Ignore empty/whitespace-only lines and SSE comments (": ...")
+        const trimmed = line.trim()
+        if (trimmed && !trimmed.startsWith(":")) {
+          console.warn("[tldw:stream] Unparseable SSE line:", trimmed.slice(0, 200))
+        }
+      }
+    }
+  },
+
+  // RAG Methods
+  async ragHealth(this: TldwApiClientCore): Promise<any> {
+    return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
+  },
+
+  async ragSourceHealth(this: TldwApiClientCore, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    return await this.request<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: "/api/v1/rag/source-health",
+      method: "GET",
+    })
+  },
+
+  async ragSearch(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
+    const {
+      timeoutMs,
+      signal,
+      requestScope,
+      ...rest
+    }: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      [key: string]: unknown
+    } = options || {}
+    const normalizedQuery = this.normalizeRagQuery(query)
+    const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
+    const scopeFields = requestScopeFields(requestScope)
+    try {
+      return await (requestScope
+        ? bgRequest<any>({
+          path: '/api/v1/rag/search',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...scopeFields.headers
+          },
+          body,
+          timeoutMs,
+          abortSignal: signal,
+          servicePromptConfig: scopeFields.servicePromptConfig,
+          sanitizeRagProviderError: true
+        })
+        : this.requestWithCurrentConfig<any>({
+          path: '/api/v1/rag/search',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          timeoutMs,
+          abortSignal: signal,
+          sanitizeRagProviderError: true
+        }))
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
+      const message = error instanceof Error ? error.message : String(error ?? '')
+      const aborted =
+        (error as { name?: string } | null)?.name === 'AbortError' ||
+        /abort|cancel/i.test(message)
+      if (aborted) {
+        throw error
+      }
+      throw buildSanitizedRagSearchError(error)
+    }
+  },
+
+  async *ragSearchStream(
+    this: TldwApiClientCore,
+    query: string,
+    options?: any
+  ): AsyncGenerator<any, void, unknown> {
+    const { timeoutMs, signal, requestScope, ...rest } = options || {}
+    const scopeFields = requestScopeFields(requestScope)
+    const normalizedQuery = this.normalizeRagQuery(query)
+    const body = buildSanitizedRagRequestBody(normalizedQuery, rest)
+    for await (const line of bgStream({
+      ...scopeFields,
+      path: '/api/v1/rag/search/stream',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
+      body,
+      abortSignal: signal,
+      streamIdleTimeoutMs: timeoutMs,
+      sanitizeRagProviderStreamError: true
+    })) {
+      yield parseRagStreamLine(line)
+    }
+  },
+
+  async ragSimple(this: TldwApiClientCore, query: string, options?: any): Promise<any> {
+    const { timeoutMs, ...rest } = options || {}
+    const normalizedQuery = this.normalizeRagQuery(query)
+    const path = buildSanitizedRagSimplePath(normalizedQuery, rest)
+    return await bgRequest<any>({ path, method: 'GET', timeoutMs })
+  },
+
+  // Research / Web search
+  async webSearch(this: TldwApiClientCore, options: any): Promise<any> {
+    const {
+      timeoutMs,
+      signal,
+      requestScope,
+      ...rest
+    }: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      [key: string]: unknown
+    } = options || {}
+    const scopeFields = requestScopeFields(requestScope)
+    return await bgRequest<any>({
+      path: "/api/v1/research/websearch",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...scopeFields.headers
+      },
+      body: rest,
+      timeoutMs,
+      abortSignal: signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })
+  },
+
+  // Chat list / CRUD
+  async listChatCommands(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/commands",
+      method: "GET"
+    })
+  },
+
+  async listChats(
+    this: TldwApiClientCore,
+    params?: Record<string, any>,
+    options?: { signal?: AbortSignal; scope?: ChatScope }
+  ): Promise<ServerChatSummary[]> {
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
+    const data = await bgRequest<any>({
+      path: `/api/v1/chats/${query}`,
+      method: "GET",
+      abortSignal: options?.signal
+    })
+
+    let list: any[] = []
+
+    if (Array.isArray(data)) {
+      list = data
+    } else if (data && typeof data === "object") {
+      const obj: any = data
+      if (Array.isArray(obj.chats)) {
+        list = obj.chats
+      } else if (Array.isArray(obj.items)) {
+        list = obj.items
+      } else if (Array.isArray(obj.results)) {
+        list = obj.results
+      } else if (Array.isArray(obj.data)) {
+        list = obj.data
+      }
+    }
+
+    return list.map((c) => this.normalizeChatSummary(c))
+  },
+
+  async listChatsWithMeta(
+    this: TldwApiClientCore,
+    params?: Record<string, any>,
+    options?: { signal?: AbortSignal; scope?: ChatScope }
+  ): Promise<{ chats: ServerChatSummary[]; total: number }> {
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
+    const data = await bgRequest<any>({
+      path: `/api/v1/chats/${query}`,
+      method: "GET",
+      abortSignal: options?.signal
+    })
+
+    let list: any[] = []
+    let total: number | null = null
+
+    if (Array.isArray(data)) {
+      list = data
+    } else if (data && typeof data === "object") {
+      const obj: any = data
+      if (typeof obj.total === "number") {
+        total = obj.total
+      } else if (typeof obj.count === "number") {
+        total = obj.count
+      }
+      if (Array.isArray(obj.chats)) {
+        list = obj.chats
+      } else if (Array.isArray(obj.items)) {
+        list = obj.items
+      } else if (Array.isArray(obj.results)) {
+        list = obj.results
+      } else if (Array.isArray(obj.data)) {
+        list = obj.data
+      }
+    }
+
+    const chats = list.map((c) => this.normalizeChatSummary(c))
+    return {
+      chats,
+      total: typeof total === "number" ? total : chats.length
+    }
+  },
+
+  async searchConversationsWithMeta(
+    this: TldwApiClientCore,
+    params?: Record<string, any>,
+    options?: { signal?: AbortSignal; scope?: ChatScope }
+  ): Promise<{ chats: ServerChatSummary[]; total: number }> {
+    const query = buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
+    const data = await bgRequest<any>({
+      path: `/api/v1/chats/conversations${query}`,
+      method: "GET",
+      abortSignal: options?.signal
+    })
+
+    let list: any[] = []
+    let total: number | null = null
+
+    if (Array.isArray(data)) {
+      list = data
+    } else if (data && typeof data === "object") {
+      const obj: any = data
+      if (typeof obj.total === "number") {
+        total = obj.total
+      } else if (typeof obj.count === "number") {
+        total = obj.count
+      } else if (obj.pagination && typeof obj.pagination.total === "number") {
+        total = obj.pagination.total
+      }
+      if (Array.isArray(obj.items)) {
+        list = obj.items
+      } else if (Array.isArray(obj.chats)) {
+        list = obj.chats
+      } else if (Array.isArray(obj.results)) {
+        list = obj.results
+      } else if (Array.isArray(obj.data)) {
+        list = obj.data
+      }
+    }
+
+    const chats = list.map((item) => this.normalizeChatSummary(item))
+    return {
+      chats,
+      total: typeof total === "number" ? total : chats.length
+    }
+  },
+
+  async createChat(
+    this: TldwApiClientCore,
+    payload: Record<string, any>,
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const res = await bgRequest<any>({
+      path: "/api/v1/chats/",
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: { ...payload, ...toChatScopeParams(options?.scope) },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })
+    return this.normalizeChatSummary(res)
+  },
+
+  async completeCharacterChatTurn(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: Record<string, any>
+  ): Promise<any> {
+    const cid = String(chat_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chats/${cid}/complete-v2`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getChat(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
+      method: "GET"
+    })
+    return this.normalizeChatSummary(res)
+  },
+
+  async getChatSettings(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ChatSettingsResponse> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<ChatSettingsResponse>({
+      path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
+      method: "GET",
+      expectedStatuses: [404]
+    })
+  },
+
+  async updateChatSettings(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    settings: Record<string, unknown>,
+    options?: { scope?: ChatScope }
+  ): Promise<ChatSettingsResponse> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<ChatSettingsResponse>({
+      path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: { settings }
+    })
+  },
+
+  async getChatLorebookDiagnostics(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    params?: Record<string, any>,
+    options?: { scope?: ChatScope }
+  ): Promise<LorebookDiagnosticExportResponse> {
+    const cid = String(chat_id)
+    const query = buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(params || {})
+    })
+    return await bgRequest<LorebookDiagnosticExportResponse>({
+      path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
+      method: "GET"
+    })
+  },
+
+  async getLatestChatVersion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<number | undefined> {
+    const cid = String(chat_id)
+    const current = await this.getChat(cid, options)
+    return typeof current?.version === "number" ? current.version : undefined
+  },
+
+  isVersionConflictError(this: TldwApiClientCore, error: unknown): boolean {
+    const candidate = error as
+      | {
+          status?: unknown
+          statusCode?: unknown
+          response?: {
+            status?: unknown
+            data?: {
+              code?: unknown
+              error?: { code?: unknown }
+            }
+          }
+          data?: { code?: unknown; error?: { code?: unknown } }
+          details?: { code?: unknown }
+          body?: { code?: unknown }
+          message?: unknown
+          code?: unknown
+        }
+      | null
+      | undefined
+    const rawStatus =
+      candidate?.status ?? candidate?.statusCode ?? candidate?.response?.status
+    const status =
+      typeof rawStatus === "number"
+        ? rawStatus
+        : typeof rawStatus === "string"
+          ? Number(rawStatus)
+          : Number.NaN
+    const structuredCodes = [
+      candidate?.code,
+      candidate?.response?.data?.code,
+      candidate?.response?.data?.error?.code,
+      candidate?.data?.code,
+      candidate?.data?.error?.code,
+      candidate?.details?.code,
+      candidate?.body?.code
+    ].map((value) => String(value ?? "").toLowerCase())
+    const hasStructuredConflictCode = structuredCodes.some((code) =>
+      [
+        "version_conflict",
+        "expected_version_mismatch",
+        "stale_version",
+        "conflict",
+        "precondition_failed"
+      ].includes(code)
+    )
+    const message = String(candidate?.message ?? candidate?.code ?? "")
+      .toLowerCase()
+    return (
+      status === 409 ||
+      status === 412 ||
+      hasStructuredConflictCode ||
+      message.includes("version conflict") ||
+      message.includes("expected_version") ||
+      message.includes("stale")
+    )
+  },
+
+  async updateChat(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: Record<string, any>,
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const cid = String(chat_id)
+    let expectedVersion = options?.expectedVersion
+    if (expectedVersion == null) {
+      try {
+        expectedVersion = await this.getLatestChatVersion(cid, options)
+      } catch {
+        // ignore and fall back to unversioned update
+      }
+    }
+    const attemptUpdate = async (
+      versionToUse: number | undefined,
+      hasRetried = false
+    ): Promise<ServerChatSummary> => {
+      const qp =
+        buildQuery({
+          ...toChatScopeParams(options?.scope),
+          ...(typeof versionToUse === "number"
+            ? { expected_version: versionToUse }
+            : {})
+        })
+      try {
+        const res = await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
+          path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
+          method: "PUT",
+          headers: { ...scopeFields.headers, "Content-Type": "application/json" },
+          body: payload
+        })
+        return this.normalizeChatSummary(res)
+      } catch (error) {
+        if (hasRetried || !this.isVersionConflictError(error)) {
+          throw error
+        }
+        const latestVersion = await this.getLatestChatVersion(cid, options)
+        return await attemptUpdate(latestVersion, true)
+      }
+    }
+
+    return await attemptUpdate(expectedVersion)
+  },
+
+  async deleteChat(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: {
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+      expectedVersion?: number
+      hardDelete?: boolean
+      scope?: ChatScope
+    }
+  ): Promise<void> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const cid = String(chat_id)
+    const attemptDelete = async (
+      versionToUse: number | undefined,
+      hasRetried = false
+    ): Promise<void> => {
+      const query = buildQuery({
+        ...toChatScopeParams(options?.scope),
+        ...(typeof versionToUse === "number"
+          ? { expected_version: versionToUse }
+          : {}),
+        ...(options?.hardDelete ? { hard_delete: true } : {})
+      })
+      try {
+        await bgRequest<void>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
+          path: `/api/v1/chats/${cid}${query}`,
+          method: "DELETE"
+        })
+      } catch (error) {
+        if (hasRetried || !this.isVersionConflictError(error)) {
+          throw error
+        }
+        const latestVersion = await this.getLatestChatVersion(cid, options)
+        await attemptDelete(latestVersion, true)
+      }
+    }
+
+    await attemptDelete(options?.expectedVersion)
+  },
+
+  async restoreChat(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { expectedVersion?: number; scope?: ChatScope }
+  ): Promise<ServerChatSummary> {
+    const cid = String(chat_id)
+    let expectedVersion = options?.expectedVersion
+    if (expectedVersion == null) {
+      expectedVersion = await this.getLatestChatVersion(cid, options)
+    }
+
+    const attemptRestore = async (
+      versionToUse: number | undefined,
+      hasRetried = false
+    ): Promise<ServerChatSummary> => {
+      const query = buildQuery(
+        {
+          ...toChatScopeParams(options?.scope),
+          ...(typeof versionToUse === "number"
+            ? { expected_version: versionToUse }
+            : {})
+        }
+      )
+      try {
+        const res = await bgRequest<any>({
+          path: `/api/v1/chats/${cid}/restore${query}`,
+          method: "POST"
+        })
+        return this.normalizeChatSummary(res)
+      } catch (error) {
+        if (hasRetried || !this.isVersionConflictError(error)) {
+          throw error
+        }
+        const latestVersion = await this.getLatestChatVersion(cid, options)
+        return await attemptRestore(latestVersion, true)
+      }
+    }
+
+    return await attemptRestore(expectedVersion)
+  },
+
+  async createConversationShareLink(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload?: {
+      permission?: ConversationSharePermission
+      ttl_seconds?: number
+      label?: string
+    },
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<ConversationShareLinkCreateResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<ConversationShareLinkCreateResponse>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: payload || {},
+    })
+  },
+
+  async listConversationShareLinks(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ConversationShareLinksListResponse> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<ConversationShareLinksListResponse>({
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
+      method: "GET",
+    })
+  },
+
+  async revokeConversationShareLink(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    shareId: string,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<{ success: boolean; share_id: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const cid = encodeURIComponent(String(chat_id))
+    const sid = encodeURIComponent(String(shareId))
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<{ success: boolean; share_id: string }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
+        query
+      ),
+      method: "DELETE",
+    })
+  },
+
+  async resolveConversationShareLink(
+    this: TldwApiClientCore,
+    token: string
+  ): Promise<ConversationShareLinkResolveResponse> {
+    const encodedToken = encodeURIComponent(token)
+    return await bgRequest<ConversationShareLinkResolveResponse>({
+      path: `/api/v1/chat/shared/conversations/${encodedToken}`,
+      method: "GET",
+      noAuth: true,
+    })
+  },
+
+  async listChatMessages(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    params?: Record<string, any>,
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope; fresh?: boolean }
+  ): Promise<ServerChatMessage[]> {
+    const cid = String(chat_id)
+    const query = buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(params || {})
+    })
+    const cacheKey = this.getChatMessagesCacheKey(cid, query)
+    const useSharedCache = !options?.fresh && !options?.requestScope
+    const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value
+    }
+    if (cached) {
+      this.chatMessagesCache.delete(cacheKey)
+    }
+
+    const inFlight = useSharedCache ? this.chatMessagesInFlight.get(cacheKey) : undefined
+    if (inFlight) {
+      return inFlight
+    }
+
+    const request = (async () => {
+      const scopeFields = requestScopeFields(options?.requestScope)
+      const data = await bgRequest<any>({
+        path: `/api/v1/chats/${cid}/messages${query}`,
+        method: "GET",
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig ? {
+          headers: scopeFields.headers,
+          servicePromptConfig: scopeFields.servicePromptConfig
+        } : {})
+      })
+
+      let list: any[] = []
+
+      if (Array.isArray(data)) {
+        list = data
+      } else if (data && typeof data === "object") {
+        const obj: any = data
+        if (Array.isArray(obj.messages)) {
+          list = obj.messages
+        } else if (Array.isArray(obj.items)) {
+          list = obj.items
+        } else if (Array.isArray(obj.results)) {
+          list = obj.results
+        } else if (Array.isArray(obj.data)) {
+          list = obj.data
+        }
+      }
+
+      const normalized = list.map((m) => {
+        if ([true, "true"].includes(params?.include_images) && m.has_image === true &&
+            (!Array.isArray(m.images) || m.images.length === 0)) {
+          throw new Error("The server did not return the complete saved chat attachments. Reload after updating the server.")
+        }
+        const senderCandidate =
+          typeof m.sender === "string"
+            ? m.sender
+            : typeof m.author === "string"
+              ? m.author
+              : typeof (m as any)?.message?.sender === "string"
+                ? (m as any).message.sender
+                : typeof (m as any)?.message?.author === "string"
+                  ? (m as any).message.author
+                  : undefined
+        const roleCandidate =
+          typeof m.role === "string"
+            ? m.role
+            : typeof senderCandidate === "string"
+              ? senderCandidate
+                : typeof (m as any)?.message?.role === "string"
+                  ? (m as any).message.role
+                  : undefined
+        const senderLower =
+          typeof senderCandidate === "string"
+            ? senderCandidate.trim().toLowerCase()
+            : ""
+        const senderLooksLikeUser =
+          senderLower === "user" ||
+          senderLower === "human" ||
+          senderLower.startsWith("user")
+        const senderLooksLikeSystem =
+          senderLower === "system" || senderLower.startsWith("system")
+        const senderLooksLikeTool =
+          senderLower === "tool" ||
+          senderLower.startsWith("tool") ||
+          senderLower === "function"
+        const fallbackRole =
+          senderLower &&
+          !senderLooksLikeUser &&
+          !senderLooksLikeSystem &&
+          !senderLooksLikeTool
+            ? "assistant"
+            : "user"
+        const role =
+          typeof (m as any)?.is_bot === "boolean" ||
+          typeof (m as any)?.isBot === "boolean"
+            ? (m as any).is_bot || (m as any).isBot
+              ? "assistant"
+              : "user"
+            : normalizeChatRole(roleCandidate, fallbackRole)
+        const created_at = String(
+          m.created_at || m.createdAt || m.timestamp || ""
+        )
+        const metadataExtraCandidate =
+          (m as any).metadata_extra ?? (m as any).metadataExtra
+        const metadataExtra =
+          metadataExtraCandidate &&
+          typeof metadataExtraCandidate === "object" &&
+          !Array.isArray(metadataExtraCandidate)
+            ? (metadataExtraCandidate as Record<string, unknown>)
+            : undefined
+        const rawPinned =
+          (metadataExtra?.pinned as unknown) ?? (m as any).pinned
+        const pinned =
+          typeof rawPinned === "boolean"
+            ? rawPinned
+            : typeof rawPinned === "string"
+              ? ["1", "true", "yes", "on"].includes(rawPinned.trim().toLowerCase())
+              : undefined
+        return {
+          id: String(m.id),
+          role,
+          sender:
+            typeof senderCandidate === "string" && senderCandidate.trim().length > 0
+              ? senderCandidate
+              : undefined,
+          content: String(m.content ?? ""),
+          ...(Object.prototype.hasOwnProperty.call(m, "images") ? { images: readCompleteMessageImages(m.images) } : {}),
+          created_at,
+          version:
+            typeof m.version === "number"
+              ? m.version
+              : typeof m.expected_version === "number"
+                ? m.expected_version
+                : undefined,
+          metadata_extra: metadataExtra,
+          pinned
+        } as ServerChatMessage
+      })
+      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
+        value: normalized,
+        expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
+      })
+      return normalized
+    })()
+
+    if (useSharedCache) this.chatMessagesInFlight.set(cacheKey, request)
+    try {
+      return await request
+    } finally {
+      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
+    }
+  },
+
+  async addChatMessage(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: Record<string, any>,
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ): Promise<ServerChatMessage> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
+    const res = await bgRequest<ServerChatMessage>({
+      path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: payload,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
+    })
+    this.invalidateChatMessagesCache(cid)
+    return res
+  },
+
+  async prepareCharacterCompletion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload?: Record<string, any>,
+    options?: { scope?: ChatScope }
+  ): Promise<any> {
+    const cid = String(chat_id)
+    const body = payload || {}
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    captureChatRequestDebugSnapshot({
+      endpoint: appendPathQuery(`/api/v1/chats/${cid}/completions`, query),
+      method: "POST",
+      mode: "non-stream",
+      body
+    })
+    return await bgRequest<any>({
+      path: appendPathQuery(`/api/v1/chats/${cid}/completions`, query),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    })
+  },
+
+  async getCharacterPromptPreview(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload?: Record<string, any>,
+    options?: { scope?: ChatScope }
+  ): Promise<any> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    return await bgRequest<any>({
+      path: appendPathQuery(`/api/v1/chats/${cid}/prompt-preview`, query),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload || {}
+    })
+  },
+
+  async persistCharacterCompletion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: Record<string, any>,
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
+  ): Promise<any> {
+    const cid = String(chat_id)
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
+    try {
+      const res = await bgRequest<any>({
+        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...scopeFields.headers },
+        body: payload,
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig
+          ? { servicePromptConfig: scopeFields.servicePromptConfig }
+          : {})
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
+  },
+
+  async *streamCharacterChatCompletion(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload?: Record<string, any>,
+    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
+  ): AsyncGenerator<any> {
+    const cid = String(chat_id)
+    const body = { ...(payload || {}), stream: true }
+    const query = buildQuery(toChatScopeParams(options?.scope))
+    captureChatRequestDebugSnapshot({
+      endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
+      method: "POST",
+      mode: "stream",
+      body
+    })
+    for await (const line of bgStream({
+      path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      abortSignal: options?.signal,
+      streamIdleTimeoutMs: options?.streamIdleTimeoutMs
+    })) {
+      if (!line) continue
+      try {
+        const parsed = JSON.parse(line)
+        yield parsed
+      } catch {
+        yield line
+      }
+    }
+  },
+
+  async searchChatMessages(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    query: string,
+    limit?: number,
+    options?: { scope?: ChatScope }
+  ): Promise<any> {
+    const cid = String(chat_id)
+    const qp = buildQuery({
+      ...toChatScopeParams(options?.scope),
+      query,
+      ...(typeof limit === "number" ? { limit } : {})
+    })
+    return await bgRequest<any>({
+      path: `/api/v1/chats/${cid}/messages/search${qp}`,
+      method: "GET"
+    })
+  },
+
+  async completeChat(this: TldwApiClientCore, chat_id: string | number, payload?: Record<string, any>): Promise<any> {
+    const cid = String(chat_id)
+    const body = payload || {}
+    captureChatRequestDebugSnapshot({
+      endpoint: `/api/v1/chats/${cid}/complete`,
+      method: "POST",
+      mode: "non-stream",
+      body
+    })
+    return await bgRequest<any>({ path: `/api/v1/chats/${cid}/complete`, method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+  },
+
+  async *streamCompleteChat(this: TldwApiClientCore, chat_id: string | number, payload?: Record<string, any>): AsyncGenerator<any> {
+    const cid = String(chat_id)
+    const body = payload || {}
+    captureChatRequestDebugSnapshot({
+      endpoint: `/api/v1/chats/${cid}/complete`,
+      method: "POST",
+      mode: "stream",
+      body
+    })
+    for await (const line of bgStream({ path: `/api/v1/chats/${cid}/complete`, method: 'POST', headers: { 'Content-Type': 'application/json' }, body })) {
+      try { yield JSON.parse(line) } catch {}
+    }
+  },
+
+  // Message (single) APIs
+  async getMessage(this: TldwApiClientCore, message_id: string | number): Promise<any> {
+    const mid = String(message_id)
+    return await bgRequest<any>({ path: `/api/v1/messages/${mid}`, method: 'GET' })
+  },
+
+  async editMessage(
+    this: TldwApiClientCore,
+    message_id: string | number,
+    content: string,
+    expectedVersion: number,
+    chatId?: string | number,
+    options?: { pinned?: boolean }
+  ): Promise<any> {
+    const mid = String(message_id)
+    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
+    const body: Record<string, unknown> = { content }
+    if (typeof options?.pinned === "boolean") {
+      body.pinned = options.pinned
+    }
+    const res = await bgRequest<any>({
+      path: `/api/v1/messages/${mid}${qp}`,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    })
+    if (chatId != null) {
+      this.invalidateChatMessagesCache(chatId)
+    }
+    return res
+  },
+
+  async deleteMessage(
+    this: TldwApiClientCore,
+    message_id: string | number,
+    expectedVersion: number,
+    chatId?: string | number
+  ): Promise<void> {
+    const mid = String(message_id)
+    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
+    await bgRequest<void>({
+      path: `/api/v1/messages/${mid}${qp}`,
+      method: 'DELETE'
+    })
+    if (chatId != null) {
+      this.invalidateChatMessagesCache(chatId)
+    }
+  },
+
+  async saveChatKnowledge(this: TldwApiClientCore, payload: {
+    conversation_id: string | number
+    message_id: string | number
+    snippet: string
+    tags?: string[]
+    make_flashcard?: boolean
+    flashcard_front?: string
+    flashcard_back?: string
+  }, options?: { scope?: ChatScope }): Promise<any> {
+    const body = {
+      ...payload,
+      ...toChatScopeParams(options?.scope),
+      conversation_id: String(payload.conversation_id),
+      message_id: String(payload.message_id)
+    }
+    return await bgRequest<any>({
+      path: "/api/v1/chat/knowledge/save",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    })
+  },
+
+  // World Books
+  async listWorldBooks(this: TldwApiClientCore, include_disabled?: boolean): Promise<any> {
+    const qp = include_disabled ? `?include_disabled=true` : ''
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books${qp}`, method: 'GET' })
+  },
+
+  async getWorldBookRuntimeConfig(this: TldwApiClientCore): Promise<{ max_recursive_depth: number }> {
+    return await bgRequest<{ max_recursive_depth: number }>({
+      path: "/api/v1/characters/world-books/config",
+      method: "GET"
+    })
+  },
+
+  async createWorldBook(this: TldwApiClientCore, payload: Record<string, any>): Promise<any> {
+    return await bgRequest<any>({ path: '/api/v1/characters/world-books', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async updateWorldBook(
+    this: TldwApiClientCore,
+    world_book_id: number | string,
+    payload: Record<string, any>,
+    options?: { expectedVersion?: number }
+  ): Promise<any> {
+    const wid = String(world_book_id)
+    const query = buildQuery(
+      typeof options?.expectedVersion === "number"
+        ? { expected_version: options.expectedVersion }
+        : {}
+    )
+    return await bgRequest<any>({
+      path: `/api/v1/characters/world-books/${wid}${query}`,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    })
+  },
+
+  async deleteWorldBook(this: TldwApiClientCore, world_book_id: number | string): Promise<any> {
+    const wid = String(world_book_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/${wid}`, method: 'DELETE' })
+  },
+
+  async listWorldBookEntries(this: TldwApiClientCore, world_book_id: number | string, enabled_only?: boolean): Promise<any> {
+    const wid = String(world_book_id)
+    const qp = enabled_only ? `?enabled_only=true` : ''
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/${wid}/entries${qp}`, method: 'GET' })
+  },
+
+  async addWorldBookEntry(this: TldwApiClientCore, world_book_id: number | string, payload: Record<string, any>): Promise<any> {
+    const wid = String(world_book_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/${wid}/entries`, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async updateWorldBookEntry(this: TldwApiClientCore, entry_id: number | string, payload: Record<string, any>): Promise<any> {
+    const eid = String(entry_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/entries/${eid}`, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async deleteWorldBookEntry(this: TldwApiClientCore, entry_id: number | string): Promise<any> {
+    const eid = String(entry_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/entries/${eid}`, method: 'DELETE' })
+  },
+
+  async bulkWorldBookEntries(this: TldwApiClientCore, payload: { entry_ids: number[]; operation: string; priority?: number }): Promise<any> {
+    return await bgRequest<any>({
+      path: '/api/v1/characters/world-books/entries/bulk',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    })
+  },
+
+  async attachWorldBookToCharacter(
+    this: TldwApiClientCore,
+    character_id: number | string,
+    world_book_id: number | string,
+    options?: { enabled?: boolean; priority?: number }
+  ): Promise<any> {
+    const cid = String(character_id)
+    const body: Record<string, any> = { world_book_id: Number(world_book_id) }
+    if (typeof options?.enabled === "boolean") {
+      body.enabled = options.enabled
+    }
+    if (typeof options?.priority === "number" && Number.isFinite(options.priority)) {
+      body.priority = options.priority
+    }
+    return await bgRequest<any>({
+      path: `/api/v1/characters/${cid}/world-books`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body
+    })
+  },
+
+  async detachWorldBookFromCharacter(this: TldwApiClientCore, character_id: number | string, world_book_id: number | string): Promise<any> {
+    const cid = String(character_id)
+    const wid = String(world_book_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books/${wid}`, method: 'DELETE' })
+  },
+
+  async listCharacterWorldBooks(this: TldwApiClientCore, character_id: number | string): Promise<any> {
+    const cid = String(character_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books`, method: 'GET' })
+  },
+
+  async processWorldBookContext(this: TldwApiClientCore, payload: {
+    text: string
+    world_book_ids?: number[]
+    character_id?: number
+    scan_depth?: number
+    token_budget?: number
+    recursive_scanning?: boolean
+  }, options?: { signal?: AbortSignal }): Promise<WorldBookProcessResponse> {
+    return await bgRequest<WorldBookProcessResponse>({
+      path: "/api/v1/characters/world-books/process",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      abortSignal: options?.signal
+    })
+  },
+
+  async exportWorldBook(this: TldwApiClientCore, world_book_id: number | string): Promise<any> {
+    const wid = String(world_book_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/${wid}/export`, method: 'GET' })
+  },
+
+  async importWorldBook(this: TldwApiClientCore, request: { world_book: Record<string, any>; entries?: any[]; merge_on_conflict?: boolean }): Promise<any> {
+    return await bgRequest<any>({ path: '/api/v1/characters/world-books/import', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request })
+  },
+
+  async worldBookStatistics(this: TldwApiClientCore, world_book_id: number | string): Promise<any> {
+    const wid = String(world_book_id)
+    return await bgRequest<any>({ path: `/api/v1/characters/world-books/${wid}/statistics`, method: 'GET' })
+  },
+
+  // Chat Dictionaries
+  async createDictionary(this: TldwApiClientCore, payload: Record<string, any>): Promise<any> {
+    return await bgRequest<any>({ path: '/api/v1/chat/dictionaries', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async listDictionaries(this: TldwApiClientCore, include_inactive?: boolean, include_usage?: boolean): Promise<any> {
+    const params = new URLSearchParams()
+    if (include_inactive) params.set('include_inactive', 'true')
+    if (include_usage) params.set('include_usage', 'true')
+    const qp = params.toString()
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET' })
+  },
+
+  async getDictionary(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}`, method: 'GET' })
+  },
+
+  async updateDictionary(this: TldwApiClientCore, dictionary_id: number | string, payload: Record<string, any>): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}`, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async deleteDictionary(this: TldwApiClientCore, dictionary_id: number | string, hard_delete?: boolean): Promise<any> {
+    const id = String(dictionary_id)
+    const qp = hard_delete ? `?hard_delete=true` : ''
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}${qp}`, method: 'DELETE' })
+  },
+
+  async listDictionaryEntries(this: TldwApiClientCore, dictionary_id: number | string, group?: string): Promise<any> {
+    const id = String(dictionary_id)
+    const qp = group ? `?group=${encodeURIComponent(group)}` : ''
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}/entries${qp}`, method: 'GET' })
+  },
+
+  async addDictionaryEntry(this: TldwApiClientCore, dictionary_id: number | string, payload: Record<string, any>): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}/entries`, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async updateDictionaryEntry(this: TldwApiClientCore, entry_id: number | string, payload: Record<string, any>): Promise<any> {
+    const eid = String(entry_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/entries/${eid}`, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: payload })
+  },
+
+  async deleteDictionaryEntry(this: TldwApiClientCore, entry_id: number | string): Promise<any> {
+    const eid = String(entry_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/entries/${eid}`, method: 'DELETE' })
+  },
+
+  async bulkDictionaryEntries(this: TldwApiClientCore, payload: {
+    entry_ids: number[]
+    operation: "delete" | "activate" | "deactivate" | "group"
+    group_name?: string
+  }): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/dictionaries/entries/bulk",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async reorderDictionaryEntries(
+    this: TldwApiClientCore,
+    dictionary_id: number | string,
+    payload: {
+      entry_ids: number[]
+    }
+  ): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/dictionaries/${id}/entries/reorder`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async exportDictionaryMarkdown(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}/export`, method: 'GET' })
+  },
+
+  async exportDictionaryJSON(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}/export/json`, method: 'GET' })
+  },
+
+  async importDictionaryJSON(this: TldwApiClientCore, data: any, activate?: boolean): Promise<any> {
+    return await bgRequest<any>({ path: '/api/v1/chat/dictionaries/import/json', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { data, activate: !!activate } })
+  },
+
+  async importDictionaryMarkdown(
+    this: TldwApiClientCore,
+    name: string,
+    content: string,
+    activate?: boolean
+  ): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/dictionaries/import",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        name,
+        content,
+        activate: !!activate
+      }
+    })
+  },
+
+  async validateDictionary(this: TldwApiClientCore, payload: {
+    data: Record<string, any>
+    schema_version?: number
+    strict?: boolean
+  }): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/dictionaries/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async processDictionary(this: TldwApiClientCore, payload: {
+    text: string
+    token_budget?: number
+    dictionary_id?: number | string
+    dictionary_ids?: Array<number | string>
+    max_iterations?: number
+    chat_id?: string
+  }, options?: { signal?: AbortSignal }): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/dictionaries/process",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      abortSignal: options?.signal
+    })
+  },
+
+  async dictionaryActivity(
+    this: TldwApiClientCore,
+    dictionary_id: number | string,
+    params?: {
+      limit?: number
+      offset?: number
+    }
+  ): Promise<any> {
+    const id = String(dictionary_id)
+    const query = new URLSearchParams()
+    if (typeof params?.limit === "number" && Number.isFinite(params.limit)) {
+      query.set("limit", String(Math.max(1, Math.floor(params.limit))))
+    }
+    if (typeof params?.offset === "number" && Number.isFinite(params.offset)) {
+      query.set("offset", String(Math.max(0, Math.floor(params.offset))))
+    }
+    const qp = query.toString()
+    return await bgRequest<any>({
+      path: `/api/v1/chat/dictionaries/${id}/activity${qp ? `?${qp}` : ""}`,
+      method: "GET"
+    })
+  },
+
+  async dictionaryStatistics(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {
+    const id = String(dictionary_id)
+    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries/${id}/statistics`, method: 'GET' })
+  },
+
+  async dictionaryVersions(
+    this: TldwApiClientCore,
+    dictionary_id: number | string,
+    params?: {
+      limit?: number
+      offset?: number
+    }
+  ): Promise<any> {
+    const id = String(dictionary_id)
+    const query = new URLSearchParams()
+    if (typeof params?.limit === "number" && Number.isFinite(params.limit)) {
+      query.set("limit", String(Math.max(1, Math.floor(params.limit))))
+    }
+    if (typeof params?.offset === "number" && Number.isFinite(params.offset)) {
+      query.set("offset", String(Math.max(0, Math.floor(params.offset))))
+    }
+    const qp = query.toString()
+    return await bgRequest<any>({
+      path: `/api/v1/chat/dictionaries/${id}/versions${qp ? `?${qp}` : ""}`,
+      method: "GET"
+    })
+  },
+
+  async dictionaryVersionSnapshot(
+    this: TldwApiClientCore,
+    dictionary_id: number | string,
+    revision: number | string
+  ): Promise<any> {
+    const id = String(dictionary_id)
+    const rev = String(revision)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/dictionaries/${id}/versions/${rev}`,
+      method: "GET"
+    })
+  },
+
+  async revertDictionaryVersion(
+    this: TldwApiClientCore,
+    dictionary_id: number | string,
+    revision: number | string
+  ): Promise<any> {
+    const id = String(dictionary_id)
+    const rev = String(revision)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/dictionaries/${id}/versions/${rev}/revert`,
+      method: "POST"
+    })
+  },
+
+  // Chat Documents
+  async generateChatDocument(this: TldwApiClientCore, payload: {
+    conversation_id: string | number
+    document_type: string
+    provider: string
+    model: string
+    specific_message?: string | null
+    custom_prompt?: string | null
+    stream?: boolean
+    async_generation?: boolean
+  }): Promise<any> {
+    const body = {
+      ...payload,
+      conversation_id: String(payload.conversation_id)
+    }
+    return await bgRequest<any>({
+      path: "/api/v1/chat/documents/generate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    })
+  },
+
+  async listChatDocuments(this: TldwApiClientCore, params?: {
+    conversation_id?: string | number
+    document_type?: string
+    limit?: number
+  }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents${query}`,
+      method: "GET"
+    })
+  },
+
+  async getChatDocument(this: TldwApiClientCore, document_id: number | string): Promise<any> {
+    const id = String(document_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents/${id}`,
+      method: "GET"
+    })
+  },
+
+  async deleteChatDocument(this: TldwApiClientCore, document_id: number | string): Promise<any> {
+    const id = String(document_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents/${id}`,
+      method: "DELETE"
+    })
+  },
+
+  async getChatDocumentJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents/jobs/${id}`,
+      method: "GET"
+    })
+  },
+
+  async cancelChatDocumentJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents/jobs/${id}`,
+      method: "DELETE"
+    })
+  },
+
+  async saveChatDocumentPrompt(this: TldwApiClientCore, payload: {
+    document_type: string
+    system_prompt: string
+    user_prompt: string
+    temperature?: number
+    max_tokens?: number
+  }): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/documents/prompts",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getChatDocumentPrompt(this: TldwApiClientCore, document_type: string): Promise<any> {
+    return await bgRequest<any>({
+      path: `/api/v1/chat/documents/prompts/${encodeURIComponent(document_type)}`,
+      method: "GET"
+    })
+  },
+
+  async chatDocumentStatistics(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/documents/statistics",
+      method: "GET"
+    })
+  },
+
+  // Chatbooks
+  async exportChatbook(this: TldwApiClientCore, payload: {
+    name: string
+    description: string
+    content_selections?: Record<string, string[]>
+    author?: string
+    include_media?: boolean
+    media_quality?: string
+    include_embeddings?: boolean
+    include_generated_content?: boolean
+    format_version?: "1.0.0" | "1.1.0"
+    tags?: string[]
+    categories?: string[]
+    async_mode?: boolean
+  }, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: "/api/v1/chatbooks/export",
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      body: payload
+    })
+  },
+
+  async previewChatbook(
+    this: TldwApiClientCore,
+    file: File,
+    options?: { source_format?: string }
+  ): Promise<any> {
+    const data = await file.arrayBuffer()
+    const name = file.name || "chatbook.zip"
+    const type = file.type || "application/zip"
+    const fields: Record<string, any> = {}
+    if (options?.source_format) fields.source_format = options.source_format
+    return await bgUpload<any>({
+      path: "/api/v1/chatbooks/preview",
+      method: "POST",
+      fields,
+      file: { name, type, data }
+    })
+  },
+
+  async importChatbook(
+    this: TldwApiClientCore,
+    file: File,
+    options?: {
+      conflict_resolution?: string
+      prefix_imported?: boolean
+      import_media?: boolean
+      import_embeddings?: boolean
+      async_mode?: boolean
+      content_selections?: Record<string, string[]>
+      source_format?: string
+      selected_openwebui_user_id?: string
+    }
+  ): Promise<any> {
+    const data = await file.arrayBuffer()
+    const name = file.name || "chatbook.zip"
+    const type = file.type || "application/zip"
+    const normalized: Record<string, any> = {}
+    for (const [k, v] of Object.entries(options || {})) {
+      if (typeof v === "undefined" || v === null) continue
+      if (typeof v === "boolean") {
+        normalized[k] = v ? "true" : "false"
+      } else if (typeof v === "object") {
+        normalized[k] = JSON.stringify(v)
+      } else {
+        normalized[k] = v
+      }
+    }
+    return await bgUpload<any>({
+      path: "/api/v1/chatbooks/import",
+      method: "POST",
+      fields: normalized,
+      file: { name, type, data }
+    })
+  },
+
+  async previewOpenWebUIHydration(
+    this: TldwApiClientCore,
+    payload: OpenWebUIHydrationRequest
+  ): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async createOpenWebUIHydrationJob(
+    this: TldwApiClientCore,
+    payload: OpenWebUIHydrationRequest
+  ): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getOpenWebUIHydrationJob(
+    this: TldwApiClientCore,
+    job_id: string
+  ): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
+    })
+  },
+
+  async listChatbookExportJobs(this: TldwApiClientCore, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/export/jobs${query}`,
+      method: "GET"
+    })
+  },
+
+  async listChatbookImportJobs(this: TldwApiClientCore, params?: { limit?: number; offset?: number }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/import/jobs${query}`,
+      method: "GET"
+    })
+  },
+
+  async getChatbookExportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/export/jobs/${id}`,
+      method: "GET"
+    })
+  },
+
+  async getChatbookImportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/import/jobs/${id}`,
+      method: "GET"
+    })
+  },
+
+  async cancelChatbookExportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/export/jobs/${id}`,
+      method: "DELETE"
+    })
+  },
+
+  async cancelChatbookImportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/import/jobs/${id}`,
+      method: "DELETE"
+    })
+  },
+
+  async removeChatbookExportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/export/jobs/${id}/remove`,
+      method: "DELETE"
+    })
+  },
+
+  async removeChatbookImportJob(this: TldwApiClientCore, job_id: string): Promise<any> {
+    const id = String(job_id)
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/import/jobs/${id}/remove`,
+      method: "DELETE"
+    })
+  },
+
+  async removeFinishedChatbookJobs(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/jobs/finished",
+      method: "DELETE"
+    })
+  },
+
+  async cleanupChatbooks(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/cleanup",
+      method: "POST"
+    })
+  },
+
+  async chatbooksHealth(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/health",
+      method: "GET"
+    })
+  },
+
+  async downloadChatbookExport(this: TldwApiClientCore, job_id: string, options?: ScopedRequestOptions): Promise<{ blob: Blob; filename: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    await this.ensureConfigForRequest(true)
+    const response = await this.request<{
+      ok: boolean
+      status: number
+      data?: ArrayBuffer
+      error?: string
+      headers?: Record<string, string>
+    }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: `/api/v1/chatbooks/download/${encodeURIComponent(job_id)}`,
+      method: "GET",
+      headers: { Accept: "application/octet-stream", ...scopeFields.headers },
+      responseType: "arrayBuffer",
+      returnResponse: true
+    })
+    if (!response) {
+      throw new Error("Download failed")
+    }
+    if (!response.ok) {
+      throw new Error(response.error || `Download failed: ${response.status}`)
+    }
+    const headers = new Headers(response.headers || {})
+    const blob = new Blob([response.data ?? new Uint8Array()], {
+      type: headers.get("content-type") || "application/octet-stream"
+    })
+    const disposition = headers.get("content-disposition")
+    let filename = `chatbook-${job_id}.zip`
+    if (disposition) {
+      const utfMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+      const plainMatch = disposition.match(/filename="?([^\";]+)"?/i)
+      const raw = utfMatch?.[1] || plainMatch?.[1]
+      if (raw) {
+        try {
+          filename = decodeURIComponent(raw)
+        } catch {
+          filename = raw
+        }
+      }
+    }
+    return { blob, filename }
+  },
+
+  async chatQueueStatus(this: TldwApiClientCore): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chat/queue/status",
+      method: "GET"
+    })
+  },
+
+  async chatQueueActivity(this: TldwApiClientCore, limit?: number): Promise<any> {
+    const query = buildQuery(
+      typeof limit === "number" ? { limit } : undefined
+    )
+    return await bgRequest<any>({
+      path: `/api/v1/chat/queue/activity${query}`,
+      method: "GET"
+    })
+  },
+}
+
+export type ChatRagMethods = typeof chatRagMethods

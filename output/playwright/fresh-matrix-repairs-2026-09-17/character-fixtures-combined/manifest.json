@@ -1,0 +1,720 @@
+{
+  "at": "2026-09-17T19:47:09.084Z",
+  "task": "TASK13260.190–192",
+  "status": "Reviewed implementations and combined regression verification; native acceptance pending",
+  "secretScan": {
+    "knownValues": 27,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/DESIGN248.md",
+      "path": "character248/DESIGN248.md",
+      "bytes": 5897,
+      "sha256": "42018ae4d2138da4ce2a1efd254fd980138902c9e6f8513e6703a2b36b70e91f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/IMPLEMENTATION248.md",
+      "path": "character248/IMPLEMENTATION248.md",
+      "bytes": 8133,
+      "sha256": "88b3b229032b09144ece542a28a3cac23044d9e04deb06b7e371100ef430ef93"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/PLAN248.md",
+      "path": "character248/PLAN248.md",
+      "bytes": 742,
+      "sha256": "37d853b8e0589ea7b9907c881ae79a5078925634f0bb9df128ab8a74a761604d"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/adjacent-default-config.log",
+      "path": "character248/adjacent-default-config.log",
+      "bytes": 53504,
+      "sha256": "70178079282a9b15c12d1e2205cf1050b1fd8aeb26bdb12903486e273354c060"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/adjacent-green.log",
+      "path": "character248/adjacent-green.log",
+      "bytes": 55859,
+      "sha256": "19cbbd0bed4d44cb399829c005e3d1025dd56da45a0a43eea192110803958d67"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/author-actual-auth-causal-red.log",
+      "path": "character248/author-actual-auth-causal-red.log",
+      "bytes": 4923,
+      "sha256": "9e8d55f27513880ea9339a8bd848b08ac85e8ad3b7e242fc6f49ad91e4150301"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/background-proxy-baseline.log",
+      "path": "character248/background-proxy-baseline.log",
+      "bytes": 21844,
+      "sha256": "71b952861f263c724fd74a3ff305dfa436f85c96cc1660e294960288a7bda761"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/bandit.json",
+      "path": "character248/bandit.json",
+      "bytes": 2297,
+      "sha256": "e7138243693f854c6020ea7b088efec6ce4485d05edb36e4d93a88915f14f1f8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/bandit.log",
+      "path": "character248/bandit.log",
+      "bytes": 243,
+      "sha256": "1ed791c12d9f99557b64a220dae27906c4b7941dc21dc54df5f6593893df79fe"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "path": "character248/baseline/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "bytes": 54708,
+      "sha256": "2420f3750f0e26e48e2073ac9b4b80a531d538060e507f285ca0c2170f1793b4"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/hooks/chat/useChatActions.ts",
+      "path": "character248/baseline/hooks/chat/useChatActions.ts",
+      "bytes": 165767,
+      "sha256": "6d4980caceb60ea46f563d808c1431331ba241471564bf222671af2d909622e0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "path": "character248/baseline/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "bytes": 12837,
+      "sha256": "a7fd95f11c8cc1775864d1640e36fa59ccc3d372642dc6916abf7de9e446e1bf"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+      "path": "character248/baseline/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+      "bytes": 8501,
+      "sha256": "ec66e900153e9008747f41a52b558c269b8fcc06944f890eb719294675261f41"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/services/tldw/domains/chat-rag.ts",
+      "path": "character248/baseline/services/tldw/domains/chat-rag.ts",
+      "bytes": 74677,
+      "sha256": "62e82d6cf682d5aff270a38b70763632bfeb5b40c021871d4512405e19d56447"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/baseline/services/tldw/service-prompt-scope-error.ts",
+      "path": "character248/baseline/services/tldw/service-prompt-scope-error.ts",
+      "bytes": 7615,
+      "sha256": "c2b2afa38128c327bf19e3de6837ccb6e31623c38a9bdb3a223e305945a3f081"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/commands.json",
+      "path": "character248/commands.json",
+      "bytes": 2251,
+      "sha256": "fab1432c7f52c0087e9d656435cd117f69fd89e3cc9263f71ef2919e94cf13b7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/creation-baseline-red.log",
+      "path": "character248/creation-baseline-red.log",
+      "bytes": 6477,
+      "sha256": "9eca7fa1f1f705d8f361acd6963154f0d95969eba4eb5ecc98379dcab70c8922"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/default-config-focused-transport.log",
+      "path": "character248/default-config-focused-transport.log",
+      "bytes": 25956,
+      "sha256": "52ae25e4e82c54e479192b2c85cf3c0f77b5b58326a2df3110eecc4d56fc7666"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/diff-check.txt",
+      "path": "character248/diff-check.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/eslint-baseline.json",
+      "path": "character248/eslint-baseline.json",
+      "bytes": 599931,
+      "sha256": "9d66857910b3ae9c039aa706443d9176d5c1f9cc2182a79a98d88b11c890f5e8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/eslint-comparison.json",
+      "path": "character248/eslint-comparison.json",
+      "bytes": 267,
+      "sha256": "fcaf73220f85a763d9e32ba0eec1c0f0cb28ccbda3d577c957016213351839ed"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/eslint-current.json",
+      "path": "character248/eslint-current.json",
+      "bytes": 613655,
+      "sha256": "61f8acf5047a835fb0596f39cc4c3dd77ccc0b1ac749de6adbaf1633f94b336a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/evidence-manifest.json",
+      "path": "character248/evidence-manifest.json",
+      "bytes": 10076,
+      "sha256": "39facfbb2fb1494927a85d5dcb3bf90cee4808d9e7804123555ffe610de489fc"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/evidence-scan.json",
+      "path": "character248/evidence-scan.json",
+      "bytes": 168,
+      "sha256": "cba41032e0a2d0214b83a17791ce2c46fca5948886c975ec51309bfab06eb852"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/final-baseline-red.log",
+      "path": "character248/final-baseline-red.log",
+      "bytes": 30389,
+      "sha256": "ee28167542dc1e97b8b87534f022e798f157786053c9dc7b846e4f648d1c4334"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/final-causal-baseline-red.log",
+      "path": "character248/final-causal-baseline-red.log",
+      "bytes": 28440,
+      "sha256": "94261c6a9604c22c79af1f5b306f0139b639bae6a538d7e847244cadb994f0a5"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/focused-default-green.log",
+      "path": "character248/focused-default-green.log",
+      "bytes": 4359,
+      "sha256": "df9ef77fb4bbf242e92c02410674af0dea1966f58bf8e6eab2819490a4f505fc"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/focused-green.log",
+      "path": "character248/focused-green.log",
+      "bytes": 4359,
+      "sha256": "50081808f49984ca88f78f39e38bce985230cfe7332ca57375be779da35b411f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/freeze-verification.json",
+      "path": "character248/freeze-verification.json",
+      "bytes": 932,
+      "sha256": "0f16eb682537749fb4872f41f8538f1321084bf92ee665d462b8850b2ebec38f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/full-focused-initial.log",
+      "path": "character248/full-focused-initial.log",
+      "bytes": 38040,
+      "sha256": "37a59830f11ff3d5c7cdeac67cedab9f9b4b3c718ede0276d2bfd366853a5868"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/full-focused-scoped-options.log",
+      "path": "character248/full-focused-scoped-options.log",
+      "bytes": 16995,
+      "sha256": "494102a28bcf5574e2c96ee87f09231ad51250f793af03f24fb475a395db6002"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/initial-green.log",
+      "path": "character248/initial-green.log",
+      "bytes": 615,
+      "sha256": "5be242ab95d20ece6a79cfd11ec72a20f15f8abe6d57955c8c5583d2cf0f7900"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/owned-manifest.json",
+      "path": "character248/owned-manifest.json",
+      "bytes": 2040,
+      "sha256": "6dd7a5e19cdd9f5a2bf91192ad0dc3dbb417891561957f3c335686846a1247a4"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/owned-paths.json",
+      "path": "character248/owned-paths.json",
+      "bytes": 377,
+      "sha256": "d43a472a6a0ae4bf5f55f3744e1cb62eb00e4b5211020204ae18c25adb5e014f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/owned.patch",
+      "path": "character248/owned.patch",
+      "bytes": 34181,
+      "sha256": "896ed0543736398a648efa7fa4949916f10e1b730ff6cd68392272701c9e5d0c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-actual-auth-red.log",
+      "path": "character248/permanent-actual-auth-red.log",
+      "bytes": 28382,
+      "sha256": "cdbdac8329adf30253770741c009400750a92cf83e469049643902fc7706e0d1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-auth-causal-red.log",
+      "path": "character248/permanent-auth-causal-red.log",
+      "bytes": 7599,
+      "sha256": "54ed7cb4161812b34f791d939f8cafad0d525b97e94b020a9d0bc3f4116a1f34"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-causal-red.log",
+      "path": "character248/permanent-causal-red.log",
+      "bytes": 19444,
+      "sha256": "e54e5bc55507c1eea733e41d1388e636cda7f82d2f59767d15e69f4691582015"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-confirmed-red.log",
+      "path": "character248/permanent-confirmed-red.log",
+      "bytes": 30150,
+      "sha256": "dc84bf34a471c821bbf1214376c203f59e5379457d2c7bec01ce28e96b861335"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-lifetime-red.log",
+      "path": "character248/permanent-lifetime-red.log",
+      "bytes": 20171,
+      "sha256": "facd1724f2b3c19f1a47f12e1ec4bf81f36d4cf01a0dbb0d819fade5236116f1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/permanent-red.log",
+      "path": "character248/permanent-red.log",
+      "bytes": 11823,
+      "sha256": "cb92b3fe5c3e7d6a85ad871e3078465ca5c989740645b1b891398338fc3e4b75"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "path": "character248/review-snapshot/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "bytes": 67679,
+      "sha256": "f31f57391ba79b36158c8a9cf48aeb1b778647a4ef69efca07c2d40315dff8c4"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/hooks/chat/useChatActions.ts",
+      "path": "character248/review-snapshot/hooks/chat/useChatActions.ts",
+      "bytes": 166902,
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "path": "character248/review-snapshot/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "bytes": 13658,
+      "sha256": "0b08c5f7693b6ae7a1c4960ceea6c596d3c1235c0ea822c2393dd48ff1f7dbbd"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+      "path": "character248/review-snapshot/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+      "bytes": 9200,
+      "sha256": "a772e32c6fc6f32bd216df29e318e4cb423e387c46318f6ea59706025e73e341"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/services/tldw/domains/chat-rag.ts",
+      "path": "character248/review-snapshot/services/tldw/domains/chat-rag.ts",
+      "bytes": 74917,
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/review-snapshot/services/tldw/service-prompt-scope-error.ts",
+      "path": "character248/review-snapshot/services/tldw/service-prompt-scope-error.ts",
+      "bytes": 7631,
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-AUTHORITY-FINDING.md",
+      "path": "character248/reviewer-AUTHORITY-FINDING.md",
+      "bytes": 4274,
+      "sha256": "7688da44b75e3fb997914b70bc7dc2b9d3a0aaf55361d2d59f711976c18e53dc"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-actual-auth-lease-command.json",
+      "path": "character248/reviewer-actual-auth-lease-command.json",
+      "bytes": 406,
+      "sha256": "b3c14fd91822d0bb0dc29bb49a052ea444c95625ba76a41a076a2ad9013cc96e"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-actual-auth-lease-probe.log",
+      "path": "character248/reviewer-actual-auth-lease-probe.log",
+      "bytes": 4924,
+      "sha256": "c98deaa9344281a138ccae6179d31c1a8fb44706c44d30478558a118b0cdaac0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-actual-auth-lease-probe.tsx.txt",
+      "path": "character248/reviewer-actual-auth-lease-probe.tsx.txt",
+      "bytes": 54947,
+      "sha256": "a5e905570c212aa8c8b23973b63a866bf24d53e7cf96322a2c3cc0900fa83f45"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-auth-probe.config.ts",
+      "path": "character248/reviewer-auth-probe.config.ts",
+      "bytes": 523,
+      "sha256": "d95944d224409b38875ab72fe18d52979c918262865da71d67f117e353531a0a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/reviewer-red-manifest.json",
+      "path": "character248/reviewer-red-manifest.json",
+      "bytes": 1206,
+      "sha256": "fef3db260f405edd278b38521ba8f35ff5f446d4fb565997d463171454b84747"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/scoped-stream-allowlist-red.log",
+      "path": "character248/scoped-stream-allowlist-red.log",
+      "bytes": 5153,
+      "sha256": "571fdef6984071f07d51be60326c747a90673bfd4527bd5707f6a828942e6c64"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/static-validation.log",
+      "path": "character248/static-validation.log",
+      "bytes": 71,
+      "sha256": "cc10f047c3101627d3f5f58f9e726652af591ed1896a630def7133021541c263"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/tsc-baseline.json",
+      "path": "character248/tsc-baseline.json",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/tsc-comparison.json",
+      "path": "character248/tsc-comparison.json",
+      "bytes": 70,
+      "sha256": "64ca044225e1b87af199fbd3adf8b4301dcf096cb0a1c262bd0ea4016f5b7e4c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/tsc-current.json",
+      "path": "character248/tsc-current.json",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/validate248.mjs",
+      "path": "character248/validate248.mjs",
+      "bytes": 3052,
+      "sha256": "f245f10c6eef1b30ce74edb48c42a20a23c07aa4600dcc73f2bfd274f0659eda"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/vitest.baseline.config.ts",
+      "path": "character248/vitest.baseline.config.ts",
+      "bytes": 700,
+      "sha256": "4a6415ab08d0c3f6349bf16b9fbe38728db43ef8c7cdf083f40e835cc0f0258d"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character248/vitest.config.ts",
+      "path": "character248/vitest.config.ts",
+      "bytes": 495,
+      "sha256": "6a4a2514098297ae8545481ef96daee269411e6383f3e42a0decffaa6c295fab"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/REVIEW.json",
+      "path": "review248/REVIEW.json",
+      "bytes": 921,
+      "sha256": "95385b0ca701f54d786481f2e30ce7a40da9129cbecd206b604ef8ad995981b8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/REVIEW.md",
+      "path": "review248/REVIEW.md",
+      "bytes": 4304,
+      "sha256": "5395ce708f1f9b9369da8103e040034d8ed37c675c752598cd9a17e44b66be67"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/adjacent-bounded-command.json",
+      "path": "review248/adjacent-bounded-command.json",
+      "bytes": 762,
+      "sha256": "1b99629a593c6df2c1ceb3e085d6bffff96babd6a289ff9d69d470919df2e91d"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/adjacent-bounded.log",
+      "path": "review248/adjacent-bounded.log",
+      "bytes": 31907,
+      "sha256": "64ecffaad1ad1bc9c46e1cd9b35931fc52555b28406bb80d6dd4635c11331420"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/author-evidence-verification.json",
+      "path": "review248/author-evidence-verification.json",
+      "bytes": 781,
+      "sha256": "4714afd07467952befe7596101ab422b77ef86a8ebf06d4d42936e05cbcab56f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/bandit.json",
+      "path": "review248/bandit.json",
+      "bytes": 2297,
+      "sha256": "94955974fb69bae5f383c612d001fe6b2d77b069ef534f04e7de327af672913b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/bandit.log",
+      "path": "review248/bandit.log",
+      "bytes": 240,
+      "sha256": "bb9a00d61e3ddb7e1520f0720ad5ced7b7855e31ba605e914909806cea116109"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/baseline-command.json",
+      "path": "review248/baseline-command.json",
+      "bytes": 507,
+      "sha256": "c42f05903ca9d29fd5a81951498b040c855d40b75f103d5d6c2a0975e50ae86c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/baseline.log",
+      "path": "review248/baseline.log",
+      "bytes": 30389,
+      "sha256": "0953e864f536cc14712b8aad00ef46fbd3b30721be8d3b696da11209850c9e49"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/eslint-baseline.json",
+      "path": "review248/eslint-baseline.json",
+      "bytes": 599931,
+      "sha256": "9d66857910b3ae9c039aa706443d9176d5c1f9cc2182a79a98d88b11c890f5e8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/eslint-comparison.json",
+      "path": "review248/eslint-comparison.json",
+      "bytes": 267,
+      "sha256": "fcaf73220f85a763d9e32ba0eec1c0f0cb28ccbda3d577c957016213351839ed"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/eslint-current.json",
+      "path": "review248/eslint-current.json",
+      "bytes": 613655,
+      "sha256": "61f8acf5047a835fb0596f39cc4c3dd77ccc0b1ac749de6adbaf1633f94b336a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/focused-command.json",
+      "path": "review248/focused-command.json",
+      "bytes": 409,
+      "sha256": "389da7817856bc58e89c99aeaff37e58fb6660ee9a5f62575a268af36bf3d5c6"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/focused.log",
+      "path": "review248/focused.log",
+      "bytes": 4359,
+      "sha256": "8e8540d30b57450ea6693a3b4545fa1e152deb501ae9cd181aa1a00c22668942"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/reviewer-manifest.json",
+      "path": "review248/reviewer-manifest.json",
+      "bytes": 3416,
+      "sha256": "29f125330d3d0c15aa2c6793ac6612c9d3d2e5a36cfc54c96a16ab0599550c46"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/source-after.json",
+      "path": "review248/source-after.json",
+      "bytes": 2034,
+      "sha256": "ad433a2a8cd291fb6a2b3b416971e60d8be301a184f9606a056c25d98f8eb6bd"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/source-before.json",
+      "path": "review248/source-before.json",
+      "bytes": 2004,
+      "sha256": "3d40e61fb6da8a66fe14ba0b8a52011d3ccce7df283c4fe193bbf6423aa35cc9"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/static.log",
+      "path": "review248/static.log",
+      "bytes": 71,
+      "sha256": "cc10f047c3101627d3f5f58f9e726652af591ed1896a630def7133021541c263"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/tsc-baseline.json",
+      "path": "review248/tsc-baseline.json",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/tsc-comparison.json",
+      "path": "review248/tsc-comparison.json",
+      "bytes": 70,
+      "sha256": "64ca044225e1b87af199fbd3adf8b4301dcf096cb0a1c262bd0ea4016f5b7e4c"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/tsc-current.json",
+      "path": "review248/tsc-current.json",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/validate-independent.mjs",
+      "path": "review248/validate-independent.mjs",
+      "bytes": 3122,
+      "sha256": "78ba37db5725068f4b9ae35739ce34f61668d059405b9495501411506d1594ff"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/AUTHOR.md",
+      "path": "transport-fixture250/AUTHOR.md",
+      "bytes": 2508,
+      "sha256": "2ddf4b292dfd43cc3f45e570511b1ac66bec64d5866c6a55ccc8c00c2e1dbeef"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/assertion-preservation.json",
+      "path": "transport-fixture250/assertion-preservation.json",
+      "bytes": 131,
+      "sha256": "133a6ac0eee1c4a20c2502be5ec0f9d7435c04b519fd0a0c2b2fe31d0b6213e8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/bandit.json",
+      "path": "transport-fixture250/bandit.json",
+      "bytes": 717,
+      "sha256": "7f880c491063e9d167821cfc269082015bc542bdd0c0002a983feba6ef1490d6"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/bandit.log",
+      "path": "transport-fixture250/bandit.log",
+      "bytes": 251,
+      "sha256": "6962a27b410852b1047f0f95ee75c6c8b8f20780aa03b0aaf7fa1690b84103df"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/commands.json",
+      "path": "transport-fixture250/commands.json",
+      "bytes": 872,
+      "sha256": "dc70d91d339fad6adc91e04d682ae0df499ce259b88e4ca4ddd4e7050afdb889"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/config-inputs.json",
+      "path": "transport-fixture250/config-inputs.json",
+      "bytes": 473,
+      "sha256": "82daab040154763de212d7ff4a55730961a24d01e97428c12c351b5b094ec886"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/diff-check.log",
+      "path": "transport-fixture250/diff-check.log",
+      "bytes": 7,
+      "sha256": "19eaf43821a7660ec323a87c8457bf74823beb296c39f5e01aa8a683aa50f061"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/eslint-baseline.json",
+      "path": "transport-fixture250/eslint-baseline.json",
+      "bytes": 242220,
+      "sha256": "b27403b881937b4a23353144d570dc5662c035482576dee626a977a26f56f6d0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/eslint-current.json",
+      "path": "transport-fixture250/eslint-current.json",
+      "bytes": 242292,
+      "sha256": "7b33c17016b657f8254de1158ececf1cf549006231d5c4eaa0663536976e15e1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/evidence-manifest.json",
+      "path": "transport-fixture250/evidence-manifest.json",
+      "bytes": 3208,
+      "sha256": "ae412aa80dbb347f720bc44057006a7b2a4cce8e94685f690be564f8962967e8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/green-baseline.log",
+      "path": "transport-fixture250/green-baseline.log",
+      "bytes": 3800,
+      "sha256": "2a47ffffc24d34b6cd169c3289002092d751f87f72502bfd11cc3c1890ead1df"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/green-current-adjacent.log",
+      "path": "transport-fixture250/green-current-adjacent.log",
+      "bytes": 4413,
+      "sha256": "041bd7fba5b139e990651b1b3cbf3dd6cd5ac0f0ebb568a91bbc1ade2bfe0d08"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/lint-comparison.json",
+      "path": "transport-fixture250/lint-comparison.json",
+      "bytes": 114,
+      "sha256": "6a66f73b242dee28cfe9f2133b98dee657475f81aa2a87ff16de6de6e431b7e7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/lint.log",
+      "path": "transport-fixture250/lint.log",
+      "bytes": 288,
+      "sha256": "9ed52308bd585f0fa364689ef59b80dc6b49556430c0d96776cd52cead68a862"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/lint.mjs",
+      "path": "transport-fixture250/lint.mjs",
+      "bytes": 912,
+      "sha256": "59c5925b1bef6e09e7ead16fa48086adc6af3ff44a738dc31b07df7a612d00e8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/original.test.txt",
+      "path": "transport-fixture250/original.test.txt",
+      "bytes": 148943,
+      "sha256": "d0124f66662dbad0fbda849f0d5c434c30cf4120133825bed51e98d02ad365c8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/red.log",
+      "path": "transport-fixture250/red.log",
+      "bytes": 11515,
+      "sha256": "b694ff14606248b1f3eada1bb8aa1266f5254674d99bd7ce745060396ceeef8f"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/scan.json",
+      "path": "transport-fixture250/scan.json",
+      "bytes": 99,
+      "sha256": "923e7fa827a0e8c901e2edc275aab5139fad8d0151c120074c97efe8d5dfc0d7"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/transport-fixture250/source-freeze.json",
+      "path": "transport-fixture250/source-freeze.json",
+      "bytes": 294,
+      "sha256": "86cce125ca439f8de8a22ceea7366a51d9e432a25738c5dc24dfca0b154b9364"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/REVIEW.md",
+      "path": "review250/REVIEW.md",
+      "bytes": 1155,
+      "sha256": "1b90b84fb8229c5d369b0191138691658ed1bfcfa054643318311627b8055c0a"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/eslint-baseline.json",
+      "path": "review250/eslint-baseline.json",
+      "bytes": 242220,
+      "sha256": "b27403b881937b4a23353144d570dc5662c035482576dee626a977a26f56f6d0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/eslint-current.json",
+      "path": "review250/eslint-current.json",
+      "bytes": 242292,
+      "sha256": "7b33c17016b657f8254de1158ececf1cf549006231d5c4eaa0663536976e15e1"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/lint.mjs",
+      "path": "review250/lint.mjs",
+      "bytes": 948,
+      "sha256": "f37bf3ad7969af5a4e44a4d3e9edbbcde703b9ff721881589558e31b37089778"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/reviewer-manifest.json",
+      "path": "review250/reviewer-manifest.json",
+      "bytes": 664,
+      "sha256": "82d39dcbabe07430c6b33b9d5e30949ac018d66d8165c3f159bdb493644c8bb8"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review250/source-review.json",
+      "path": "review250/source-review.json",
+      "bytes": 467,
+      "sha256": "0e41d0ca5c51685a46c3faf5c5c2609cbb9b93aa5e8575f1e1225963e72397dd"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/compare-final-compiler.mjs",
+      "path": "combined/compare-final-compiler.mjs",
+      "bytes": 1802,
+      "sha256": "00f4e770733ea16389fd5c839d932e4be2a0a27bf9a6ac8432fe8db786f07355"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-README.md",
+      "path": "combined/final-README.md",
+      "bytes": 1232,
+      "sha256": "c93a0fc5c051e311d7d0f3d9a72a08957d178f47899332479ead9dde1f2ad98d"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-compiler-comparison.json",
+      "path": "combined/final-compiler-comparison.json",
+      "bytes": 268,
+      "sha256": "99a5111c7f70ac2306a98ce583108e69653b8677744393406bf01588398a9e91"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-compiler-current.json",
+      "path": "combined/final-compiler-current.json",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-consumer-command.json",
+      "path": "combined/final-consumer-command.json",
+      "bytes": 286,
+      "sha256": "64c4f447d1440748dac4633ad46348a859a0a869bced626fc3df38da15bb992b"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-consumer.log",
+      "path": "combined/final-consumer.log",
+      "bytes": 6072,
+      "sha256": "c3a950d26921d4baa908d03e391cf50a09222e4b3f2026187ddc0abd8df4f94e"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-fixture250-bandit.json",
+      "path": "combined/final-fixture250-bandit.json",
+      "bytes": 717,
+      "sha256": "4107afec9855fca6daaa9f360a27bc31a13ff0ffd4109cc1aa7673fa014f8cb0"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-frontend-command.json",
+      "path": "combined/final-frontend-command.json",
+      "bytes": 12775,
+      "sha256": "527d63514e3e5bb4255550fb7d1bbbfafab0ff79d904782a06b0fd2075cc08fb"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/final-frontend.log",
+      "path": "combined/final-frontend.log",
+      "bytes": 50625,
+      "sha256": "413909f00678a01059224240059c8117e4bdee2f9f13329979f356b9d5bf1241"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/combined/run-frontend.mjs",
+      "path": "combined/run-frontend.mjs",
+      "bytes": 2148,
+      "sha256": "bb36430a5f51d7d894473bbb64aa3a21cb4225072957239565e77a06be6e9f24"
+    }
+  ]
+}

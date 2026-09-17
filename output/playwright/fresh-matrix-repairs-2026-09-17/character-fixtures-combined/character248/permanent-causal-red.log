@@ -1,0 +1,257 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (35 tests | 1 failed | 34 skipped) 6ms
+     ↓ preserves optional complete attachment lists from the actual domain adapter: undefined
+     ↓ preserves optional complete attachment lists from the actual domain adapter: []
+     ↓ preserves optional complete attachment lists from the actual domain adapter: [ 'data:image/png;base64,aW1hZ2U=' ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: null
+     ↓ rejects incomplete or malformed attachment arrays without a subset: 'image'
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ …(2) ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ 'https://other/image' ]
+     ↓ rejects incomplete or malformed attachment arrays without a subset: [ 'data:image/png;base64,invalid!' ]
+     ↓ rejects an opt-in response that claims an image but omits its complete bytes: {}
+     ↓ rejects an opt-in response that claims an image but omits its complete bytes: { images: [] }
+     ↓ keeps captured character recovery scope optional without changing content (scoped: true)
+     ↓ keeps captured character recovery scope optional without changing content (scoped: false)
+     ↓ binds the QA fetchWithAuth request without changing its body
+     ↓ binds the QA listCharacters request without changing its body
+     ↓ binds the QA searchCharacters request without changing its body
+     ↓ binds the QA getChat request without changing its body
+     ↓ binds the QA updateChat request without changing its body
+     ↓ binds the QA deleteChat request without changing its body
+     ↓ binds the QA createConversationShareLink request without changing its body
+     ↓ binds the QA revokeConversationShareLink request without changing its body
+     ↓ binds the QA exportChatbook request without changing its body
+     ↓ binds the QA downloadChatbookExport request without changing its body
+     ↓ binds the QA createNote request without changing its body
+     ↓ binds the QA ragSourceHealth request without changing its body
+     × binds captured Character streaming scope outside the inference body 5ms
+     ↓ binds QA streaming scope outside the inference body
+     ↓ binds non-streaming chat without serializing the scope
+     ↓ binds streaming chat without serializing the scope
+     ↓ does not replay scoped RAG POSTs and keeps scope out of JSON
+     ↓ preserves structured scope errors in the exported base RAG method
+     ↓ binds web search and keeps request scope out of JSON
+     ↓ binds mirrored chat messages to the captured account and signal
+     ↓ binds chat-session creation to the captured account and signal
+     ↓ reads fresh promotion messages with captured scope without joining cached or pending reads
+     ↓ serializes raw recovery listing as explicit false while keeping the captured owner
+ ❯ ../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts (57 tests | 2 failed | 48 skipped) 4ms
+     × bounds captured Character generation /api/v1/chats/owned/complete-v2 POST 3ms
+     × bounds captured Character generation /api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w POST 0ms
+     ✓ bounds captured Character generation /api/v1/chats/owned/complete-v2 GET 0ms
+     ✓ bounds captured Character generation /api/v1/chats/owned/complete-v2 PUT 0ms
+     ✓ bounds captured Character generation /api/v1/chats/owned/complete POST 0ms
+     ✓ bounds captured Character generation /api/v1/chats/owned/complete-v2/extra POST 0ms
+     ✓ bounds captured Character generation /api/v1/chats//complete-v2 POST 0ms
+     ✓ bounds captured Character generation /api/v1/chats/a%2fb/complete-v2 POST 0ms
+     ✓ bounds captured Character generation /api/v1/chats/%2e%2e/complete-v2 POST 0ms
+     ↓ bounds character recovery /api/v1/chats/owned/completions/persist POST
+     ↓ bounds character recovery /api/v1/chats/other-owned/completions/persist?scope_type=global POST
+     ↓ bounds character recovery /api/v1/chats/owned/completions/persist GET
+     ↓ bounds character recovery /api/v1/chats/owned/completions/persist PUT
+     ↓ bounds character recovery /api/v1/chats/owned/completions POST
+     ↓ bounds character recovery /api/v1/chats/owned/completions/persist/extra POST
+     ↓ bounds character recovery /api/v1/chats//completions/persist POST
+     ↓ bounds character recovery /api/v1/chats/a%2fb/completions/persist POST
+     ↓ bounds character recovery /api/v1/chats/%2e%2e/completions/persist POST
+     ↓ bounds the scoped message-list route /api/v1/chats/owned-chat/messages?limit=200&offset=0
+     ↓ bounds the scoped message-list route /api/v1/chats/other-chat/messages
+     ↓ bounds the scoped message-list route /api/v1/chats/owned-chat
+     ↓ bounds the scoped message-list route /api/v1/chats/owned-chat/messages/other-message
+     ↓ bounds the scoped message-list route /api/v1/chats/a%2fb/messages
+     ↓ bounds the scoped message-list route /api/v1/chats/%2e%2e/messages
+     ↓ bounds the scoped message-list route /api/v1/chats//messages
+     ↓ bounds Notes request /api/v1/notes/ POST
+     ↓ bounds Notes request /api/v1/notes/private-note GET
+     ↓ bounds Notes request /api/v1/notes/private-note PUT
+     ↓ bounds Notes request /api/v1/notes/ GET
+     ↓ bounds Notes request /api/v1/notes/private-note DELETE
+     ↓ bounds Notes request /api/v1/notes/private-note PATCH
+     ↓ bounds Notes request /api/v1/notes/private-note/attachments POST
+     ↓ bounds Notes request /api/v1/notes/%2e%2e PUT
+     ↓ bounds Notes request /api/v1/notes/a%2fb PUT
+     ↓ allows only GET for the bounded context read /api/v1/writing/manuscripts/scenes/scene-a
+     ↓ allows only GET for the bounded context read /api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist
+     ↓ allows only GET for the bounded context read /api/v1/writing/manuscripts/projects/project-a/world-info?kind=location
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/projects/project-a
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/scene-a/annotations
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/projects/project-a/characters/relationships
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/projects/%2e%2e/characters
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/a%2fb
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/a%5cb
+     ↓ does not widen scoped access to /api/v1/writing/manuscripts/scenes/
+     ↓ compares only the frozen target keys
+     ↓ requires the captured single-user API-key scope to match
+     ↓ rejects a changed API key that collides in the UI scope hash
+     ↓ allows only Service Prompt and exact scoped execution routes
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/%2e%2e/messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/./messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/../messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/chat%2fid/messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/chat%5cid/messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats/chat\id/messages
+     ↓ rejects ambiguous scoped pathname /api/v1/chats//messages
+     ↓ matches only the pathname while leaving query data inert
+     ↓ creates the structured scope-change error
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (44 tests | 10 failed | 34 skipped) 5013ms
+     × binds actual auth lease through Character transport: late-success 5005ms
+     × binds actual auth lease through Character transport: late-failure 2ms
+     × binds actual auth lease through Character transport: partial-logout 1ms
+     × binds actual auth lease through Character transport: caller-stop 1ms
+     × binds actual auth lease through Character transport: same-owner 1ms
+     × rejects late Character side effects after actual logout at prerequisite 1ms
+     × rejects late Character side effects after actual logout at user-ack 1ms
+     × rejects late Character side effects after actual logout at visual-identity 1ms
+     × rejects late Character side effects after actual logout at persist-success 1ms
+     × rejects late Character side effects after actual logout at persist-failure 1ms
+     ↓ qualifies real Character stream lifetime without changing timeout policy: idle
+     ↓ qualifies real Character stream lifetime without changing timeout policy: explicit-budget
+     ↓ qualifies real Character stream lifetime without changing timeout policy: raw-progress
+     ↓ qualifies real Character stream lifetime without changing timeout policy: caller-abort
+     ↓ qualifies real Character stream lifetime without changing timeout policy: authority-abort
+     ↓ maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport
+     ↓ retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+     ↓ UAT103 keeps a local source diagnostic Retry in the original character conversation
+     ↓ retains server branching when regenerating actual assistant content: Complete reply
+     ↓ retains server branching when regenerating actual assistant content: Partial reply after interruption
+     ↓ retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0)
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+     ↓ omits unset controls from the real Character request after switching to an unconfigured model scope
+     ↓ retains captured model controls while a pending Character user save outlives a settings-scope change
+     ↓ does not publish recovered IDs or save an old owner's partial after the lease invalidates
+     ↓ preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ forwards the confirmed assistant ID from fallback success to local persistence
+     ↓ forwards the confirmed assistant ID from degraded success to local persistence
+     ↓ keeps tracked character routing anchored to current chat metadata when global character state is stale
+     ↓ rebinds a greeting to the newly created conversation after a failed session
+     ↓ handles emote commands without sending chat
+     ↓ uses manual visual identity override when resolving assistant message metadata
+     ↓ does not let stale overlay assistant state override the active character chat
+     ↓ honors an explicit tracked character switch over the current chat metadata
+     ↓ reuses the latest store character chat when greeting persistence updates before the send closure
+     ↓ uses the latest store character id when the hook prop still points at another character
+     ↓ passes workspace scope through when creating a character-backed chat
+     ↓ strips explicit streaming emote directives and persists emote events
+     ↓ preserves explicit emote metadata when recovering a failed stream
+     ↓ does not duplicate recovery persistence when saved-degraded includes emote metadata
+     ↓ sends emote metadata when normal persist falls back to addChatMessage
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: late-success
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:369:90
+    367|   }
+    368| 
+    369|   it.each(["late-success", "late-failure", "partial-logout", "caller-s…
+       |                                                                                          ^
+    370|     "binds actual auth lease through Character transport: %s", async m…
+    371|       const logout = await enableActualAuthority()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: late-failure
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: partial-logout
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: caller-stop
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > binds actual auth lease through Character transport: same-owner
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:397:56
+    395|       })
+    396|       let pending!: ReturnType<typeof result.current.onSubmit>
+    397|       await act(async () => { pending = result.current.onSubmit({ mess…
+       |                                                        ^
+    398|       const user = result.current.messages.find(row => !row.isBot)!
+    399|       expect(user.serverMessageId).toBe("user-server-1")
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:397:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at prerequisite
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at user-ack
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at visual-identity
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at persist-success
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rejects late Character side effects after actual logout at persist-failure
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:466:62
+    464|       replaceDraft = () => result.current.setMessages([{ id: "bob-draf…
+    465|       let outcome: unknown
+    466|       await act(async () => { outcome = await result.current.onSubmit(…
+       |                                                              ^
+    467|       expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted)…
+    468|       expect(result.current.messages).toEqual([{ id: "bob-draft", isBo…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:466:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts > TldwApiClient captured request scope > binds captured Character streaming scope outside the inference body
+AssertionError: expected { …(6) } to match object { …(6) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+@@ -12,15 +12,9 @@
+      "model": "owned-model",
+      "stream": true,
+    },
+    "headers": {
+      "Content-Type": "application/json",
+-     "X-TLDW-Expected-User-ID": "42",
+    },
+    "path": "/api/v1/chats/owned/complete-v2?scope_type=global",
+-   "servicePromptConfig": {
+-     "authMode": "multi-user",
+-     "expectedUserId": 42,
+-     "serverUrl": "https://research-one.test",
+-   },
+    "streamIdleTimeoutMs": 12345,
+  }
+
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts:125:45
+    123|     const options = { requestScope, signal, streamIdleTimeoutMs: 12345…
+    124|     for await (const _chunk of new TldwApiClient().streamCharacterChat…
+    125|     expect(mocks.bgStream.mock.calls[0][0]).toMatchObject({
+       |                                             ^
+    126|       path: "/api/v1/chats/owned/complete-v2?scope_type=global", abort…
+    127|       streamIdleTimeoutMs: 12345, ...expectedScopeFields,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  ../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts > Service Prompt scope policy > bounds captured Character generation /api/v1/chats/owned/complete-v2 POST
+ FAIL  ../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts > Service Prompt scope policy > bounds captured Character generation /api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w POST
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ ../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts:26:54
+     24|     ["/api/v1/chats/%2e%2e/complete-v2", "POST", false]
+     25|   ])("bounds captured Character generation %s %s", (path, method, allo…
+     26|     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+       |                                                      ^
+     27|   })
+     28| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+
+ Test Files  3 failed (3)
+      Tests  13 failed | 7 passed | 116 skipped (136)
+   Start at  12:24:29
+   Duration  8.61s (transform 1.28s, setup 297ms, import 2.06s, tests 5.02s, environment 703ms)
+

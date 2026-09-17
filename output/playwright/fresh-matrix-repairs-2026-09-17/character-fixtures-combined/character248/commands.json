@@ -1,0 +1,52 @@
+{
+  "focused": [
+    "node",
+    "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    ".tmp/uat-repairs-231-246/character248/vitest.config.ts",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+    "../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+    "../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts"
+  ],
+  "adjacent": [
+    "node",
+    "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    ".tmp/uat-repairs-231-246/character248/vitest.config.ts",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.overlay.integration.test.tsx",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx",
+    "../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+    "../packages/ui/src/services/__tests__/service-prompts.test.ts",
+    "../packages/ui/src/services/__tests__/background-proxy.test.ts",
+    "../packages/ui/src/services/tldw/domains/__tests__/service-prompts.test.ts"
+  ],
+  "baseline": [
+    "node",
+    "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    ".tmp/uat-repairs-231-246/character248/vitest.baseline.config.ts",
+    "../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+    "../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+    "../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+    "-t",
+    "actual auth lease|actual logout|captured Character|stops Character creation"
+  ],
+  "static": [
+    "node",
+    "--max-old-space-size=8192",
+    ".tmp/uat-repairs-231-246/character248/validate248.mjs"
+  ],
+  "transportBaseline": [
+    "node",
+    "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    ".tmp/uat-repairs-231-246/character248/vitest.baseline.config.ts",
+    "../packages/ui/src/services/__tests__/background-proxy.test.ts"
+  ]
+}

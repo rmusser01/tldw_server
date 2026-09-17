@@ -1,0 +1,649 @@
+diff --git a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
+index e73bd3b696..1c741d128f 100644
+--- a/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
++++ b/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx
+@@ -11,6 +11,8 @@ import { useStoreChatModelSettings } from "@/store/model"
+ import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
+ import { generateID } from "@/db/dexie/helpers"
+ import { decodeChatErrorPayload } from "@/utils/chat-error-message"
++import { getModelNicknameByID } from "@/db/dexie/nickname"
++import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
+ 
+ const {
+   bgStreamMock,
+@@ -54,6 +56,10 @@ const {
+ 
+ const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() }))
+ const realErrorPersistence = vi.hoisted(() => ({ enabled: false }))
++const actualAuthority = vi.hoisted(() => ({
++  enabled: false,
++  snapshot: null as import("@/services/service-prompts").ServicePromptSnapshot | null
++}))
+ 
+ const messageStoreState = vi.hoisted(() => ({
+   value: {
+@@ -68,7 +74,14 @@ const messageStoreState = vi.hoisted(() => ({
+ vi.mock("@/services/background-proxy", () => ({ bgStream: bgStreamMock, bgRequest: vi.fn(), bgUpload: vi.fn() }))
+ 
+ vi.mock("@/services/service-prompts", () => ({
+-  loadServicePromptSnapshot: async (ids: string[], { signal }: { signal: AbortSignal }) => ({
++  loadServicePromptSnapshot: async (ids: string[], { signal }: { signal: AbortSignal }) => {
++    if (actualAuthority.enabled) {
++      const actual = await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")
++      const snapshot = await actual.loadServicePromptSnapshot(ids as Parameters<typeof actual.loadServicePromptSnapshot>[0], { signal })
++      actualAuthority.snapshot = snapshot
++      return snapshot
++    }
++    return ({
+     scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+     scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal,
+     definitions: Object.fromEntries(ids.map(id => [id, {
+@@ -76,6 +89,7 @@ vi.mock("@/services/service-prompts", () => ({
+       parts: { template: "Fixture prompt" }
+     }])), capability: "unchecked", release: vi.fn()
+   })
++  }
+ }))
+ 
+ vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+@@ -200,6 +214,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
+     addChatMessage: addChatMessageMock,
+     getChatSettings: vi.fn(async () => ({ settings: null })),
+     initialize: vi.fn(async () => null),
++    ensureConfigForRequest: async () => createSafeStorage().get("tldwConfig"),
+     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
+   }
+ }))
+@@ -296,9 +311,14 @@ const createHookOptions = () => ({
+ })
+ 
+ describe("useChatActions character integration", () => {
+-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.clear() })
++  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear() })
+   beforeEach(() => {
+     realErrorPersistence.enabled = false
++    clearVisualIdentityResolverCaches()
++    actualAuthority.enabled = false
++    actualAuthority.snapshot = null
++    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
++    vi.mocked(getModelNicknameByID).mockResolvedValue(null)
+     vi.mocked(generateID).mockImplementation(() => "generated-id")
+     recoveryAuthority.controller = new AbortController()
+     vi.clearAllMocks()
+@@ -337,6 +357,170 @@ describe("useChatActions character integration", () => {
+   })
+ 
+ 
++
++  const enableActualAuthority = async () => {
++    actualAuthority.enabled = true
++    await createSafeStorage().set("tldwConfig", {
++      serverUrl: "http://127.0.0.1:8000", authMode: "single-user",
++      apiKey: "synthetic-test-key", credentialSource: "manual",
++      apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000"
++    })
++    const { authService } = await vi.importActual<typeof import("@web/lib/auth")>("@web/lib/auth")
++    return () => authService.logout()
++  }
++
++  it.each(["late-success", "late-failure", "partial-logout", "caller-stop", "partial-error", "same-owner"])(
++    "binds actual auth lease through Character transport: %s", async mode => {
++      const logout = await enableActualAuthority()
++      const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
++      let delivered!: () => void
++      const partialDelivered = new Promise<void>(resolve => { delivered = resolve })
++      bgStreamMock.mockImplementation(async function* (...args: Parameters<typeof actualProxy.bgStream>) {
++        for await (const chunk of actualProxy.bgStream(...args)) {
++          yield chunk
++          delivered()
++        }
++      })
++      streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
++      let sequence = 0
++      vi.mocked(generateID).mockImplementation(() => `authority-${++sequence}`)
++      let entered!: () => void
++      const opened = new Promise<void>(resolve => { entered = resolve })
++      let stream!: ReadableStreamDefaultController<Uint8Array>
++      const aborted = vi.fn()
++      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
++        const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })
++        // Keep the controlled source capable of late delivery after cancellation.
++        // The real transport must still honor its captured signal.
++        init.signal!.addEventListener("abort", aborted, { once: true })
++        entered()
++        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
++      })
++      vi.stubGlobal("fetch", fetchMock)
++      const caller = new AbortController()
++      const { result, unmount } = renderHook(() => {
++        const [messages, setMessages] = React.useState<Message[]>([])
++        const [history, setHistory] = React.useState<ChatHistory>([])
++        return { ...useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
++      })
++      let pending!: ReturnType<typeof result.current.onSubmit>
++      await act(async () => { pending = result.current.onSubmit({ message: "One acknowledged question", image: "", controller: caller }); await Promise.race([opened, pending.then(result => { throw new Error(`Turn settled before opening: ${JSON.stringify(result)}`) })]) })
++      const user = result.current.messages.find(row => !row.isBot)!
++      expect(user.serverMessageId).toBe("user-server-1")
++      const chunk = (content: string) => new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
++      if (mode === "partial-logout" || mode === "caller-stop" || mode === "partial-error") {
++        await act(async () => { stream.enqueue(chunk("Partial owned answer\n")); await partialDelivered })
++      }
++      const ownerChanges = mode !== "caller-stop" && mode !== "same-owner" && mode !== "partial-error"
++      let outcome: unknown
++      await act(async () => {
++        if (ownerChanges) {
++          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++          logout()
++          expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
++          expect(actualAuthority.snapshot!.scopeSignal.aborted).toBe(true)
++          expect(caller.signal.aborted).toBe(false)
++        } else if (mode === "caller-stop") caller.abort()
++        if (mode === "late-failure" || mode === "partial-error") stream.error(new Error("Late old-owner failure"))
++        else { stream.enqueue(chunk("Late Alice answer")); stream.close() }
++        outcome = await pending
++      })
++      expect(fetchMock).toHaveBeenCalledTimes(1)
++      expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
++      if (ownerChanges) {
++        expect(aborted).toHaveBeenCalledTimes(1)
++        expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
++        expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(0)
++        expect(saveLocalSuccessMock).not.toHaveBeenCalled()
++        expect(saveLocalErrorMock).not.toHaveBeenCalled()
++        expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++        expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
++      } else {
++        expect(result.current.messages.find(row => !row.isBot)).toMatchObject({ id: user.id, serverMessageId: "user-server-1" })
++        expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(false)
++        if (mode === "same-owner") {
++          expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(1)
++          expect(persistCharacterCompletionMock.mock.calls[0][2]).toEqual(expect.objectContaining({ requestScope: actualAuthority.snapshot!.requestScope, signal: actualAuthority.snapshot!.scopeSignal }))
++          expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({ scopeInvalidatedSignal: actualAuthority.snapshot!.scopeInvalidatedSignal }))
++        } else {
++          expect(aborted).toHaveBeenCalledTimes(mode === "caller-stop" ? 1 : 0)
++          expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(mode === "caller-stop" ? 0 : 1)
++          expect(saveLocalErrorMock).toHaveBeenCalledTimes(1)
++        }
++      }
++      unmount()
++    }
++  )
++
++  it.each(["prerequisite", "user-ack", "visual-identity", "persist-success", "persist-failure"])(
++    "rejects late Character side effects after actual logout at %s", async boundary => {
++      const logout = await enableActualAuthority()
++      let replaceDraft = () => {}
++      const invalidate = () => { logout(); replaceDraft() }
++      if (boundary === "prerequisite") vi.mocked(getModelNicknameByID).mockImplementationOnce(async () => { invalidate(); return null })
++      if (boundary === "user-ack") addChatMessageMock.mockImplementationOnce(async () => { invalidate(); return { id: "ack-old-user", version: 2 } })
++      if (boundary === "visual-identity") resolveVisualIdentityBindingMock.mockImplementationOnce(async () => { invalidate(); return null })
++      if (boundary === "persist-success" || boundary === "persist-failure") persistCharacterCompletionMock.mockImplementationOnce(async () => {
++        invalidate()
++        if (boundary === "persist-failure") throw new Error("Late old-owner persist failure")
++        return { assistant_message_id: "old-ack", version: 2 }
++      })
++      const options = { ...createHookOptions(), selectedCharacter: { id: 12, name: "Owned character" }, serverChatCharacterId: 12 }
++      const { result, unmount } = renderHook(() => {
++        const [messages, setMessages] = React.useState<Message[]>([])
++        const [history, setHistory] = React.useState<ChatHistory>([])
++        return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
++      })
++      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++      let outcome: unknown
++      await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
++      expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
++      expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++      expect(saveLocalSuccessMock).not.toHaveBeenCalled()
++      expect(saveLocalErrorMock).not.toHaveBeenCalled()
++      expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(0)
++      if (boundary === "prerequisite") expect(addChatMessageMock).not.toHaveBeenCalled()
++      if (boundary === "prerequisite" || boundary === "user-ack") expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
++      expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(boundary.startsWith("persist-") ? 1 : 0)
++      expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
++      unmount()
++    }
++  )
++
++  it.each(["create-ack", "greeting-ack"])("stops Character creation after actual logout at %s", async boundary => {
++    const logout = await enableActualAuthority()
++    let replaceDraft = () => {}
++    const invalidate = () => { logout(); replaceDraft() }
++    createChatMock.mockImplementationOnce(async () => {
++      if (boundary === "create-ack") invalidate()
++      return { id: "new-owned-character", character_id: 12, title: "Owned" }
++    })
++    if (boundary === "greeting-ack") addChatMessageMock.mockImplementationOnce(async () => { invalidate(); return { id: "old-greeting-ack", version: 1 } })
++    const character = { id: 12, name: "Owned character", greeting: "Owned greeting" }
++    const options = {
++      ...createHookOptions(), serverChatId: null, serverChatCharacterId: null, serverChatAssistantKind: null,
++      selectedCharacter: character,
++      selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } }
++    }
++    const { result, unmount } = renderHook(() => {
++      const [messages, setMessages] = React.useState<Message[]>([])
++      return { ...useChatActions({ ...options, messages, setMessages } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
++    })
++    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++    let outcome: unknown
++    await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
++    expect(createChatMock).toHaveBeenCalledTimes(1)
++    expect(createChatMock.mock.calls[0][1]).toEqual(expect.objectContaining({ requestScope: actualAuthority.snapshot!.requestScope, signal: actualAuthority.snapshot!.scopeSignal }))
++    expect(addChatMessageMock).toHaveBeenCalledTimes(boundary === "greeting-ack" ? 1 : 0)
++    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
++    expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
++    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
++    expect(saveLocalErrorMock).not.toHaveBeenCalled()
++    expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
++    expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
++    unmount()
++  })
++
+   const useRealCharacterTransport = () => {
+     streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+     bgStreamMock.mockImplementation(async function* () {
+@@ -346,6 +530,7 @@ describe("useChatActions character integration", () => {
+ 
+   it.each(["idle", "explicit-budget", "raw-progress", "caller-abort", "authority-abort"])(
+     "qualifies real Character stream lifetime without changing timeout policy: %s", async mode => {
++      actualAuthority.enabled = true
+       realErrorPersistence.enabled = true
+       await i18n.init({ lng: "en", resources: {} })
+       await createSafeStorage().set("tldwConfig", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "synthetic-test-key", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000", ...(mode === "explicit-budget" ? { streamIdleTimeoutMs: 12_000 } : {}) })
+@@ -419,6 +604,7 @@ describe("useChatActions character integration", () => {
+   )
+ 
+   it("maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport", async () => {
++    actualAuthority.enabled = true
+     realErrorPersistence.enabled = true
+     await i18n.init({ lng: "en", resources: {} })
+     await createSafeStorage().set("tldwConfig", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "synthetic-test-key", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000" })
+@@ -823,7 +1009,7 @@ describe("useChatActions character integration", () => {
+         assistant_content: "Tracked reply",
+         speaker_character_id: 42
+       }),
+-      undefined
++      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+     const lastPersistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
+       | unknown[]
+@@ -875,7 +1061,8 @@ describe("useChatActions character integration", () => {
+     expect(createChatMock).toHaveBeenCalledWith(
+       expect.objectContaining({
+         character_id: "99"
+-      })
++      }),
++      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+       "new-miku-chat",
+@@ -892,7 +1079,7 @@ describe("useChatActions character integration", () => {
+         speaker_character_id: 99,
+         speaker_character_name: "Miku"
+       }),
+-      undefined
++      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+   })
+ 
+@@ -950,7 +1137,7 @@ describe("useChatActions character integration", () => {
+         speaker_character_id: 4,
+         speaker_character_name: "Ashley"
+       }),
+-      undefined
++      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+   })
+ 
+@@ -1008,7 +1195,7 @@ describe("useChatActions character integration", () => {
+         speaker_character_id: 99,
+         speaker_character_name: "Miku"
+       }),
+-      undefined
++      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+   })
+ 
+@@ -1047,7 +1234,7 @@ describe("useChatActions character integration", () => {
+         character_id: "char-scoped",
+         state: "in-progress"
+       }),
+-      { scope }
++      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+     expect(addChatMessageMock).toHaveBeenCalledWith(
+       "unexpected-new-chat",
+@@ -1055,7 +1242,7 @@ describe("useChatActions character integration", () => {
+         role: "user",
+         content: "Hello workspace character"
+       }),
+-      { scope }
++      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+       "unexpected-new-chat",
+@@ -1070,7 +1257,7 @@ describe("useChatActions character integration", () => {
+       expect.objectContaining({
+         assistant_content: "Tracked reply"
+       }),
+-      { scope }
++      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
+     )
+     expect(normalChatModeMock).not.toHaveBeenCalled()
+   })
+diff --git a/apps/packages/ui/src/hooks/chat/useChatActions.ts b/apps/packages/ui/src/hooks/chat/useChatActions.ts
+index fcaec3188f..8ef658978b 100644
+--- a/apps/packages/ui/src/hooks/chat/useChatActions.ts
++++ b/apps/packages/ui/src/hooks/chat/useChatActions.ts
+@@ -1736,6 +1736,16 @@ export const useChatActions = ({
+       forceNarrate: boolean
+     }
+   }): Promise<ChatSubmitResult> => {
++    const executionSignal = servicePromptSnapshot?.scopeSignal ?? signal
++    const requestOptions = {
++      ...(scope ? { scope } : {}),
++      ...(servicePromptSnapshot ? { requestScope: servicePromptSnapshot.requestScope } : {}),
++      signal: executionSignal
++    }
++    const throwIfTurnCancelled = () => {
++      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
++      executionSignal.throwIfAborted()
++    }
+     // Capture the current turn's supported controls before asynchronous work.
+     const { numPredict, temperature, topP, repeatPenalty } = currentChatModelSettings
+     const completionSettings = {
+@@ -1852,7 +1862,7 @@ export const useChatActions = ({
+     let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+ 
+     const flushStreamingUpdate = () => {
+-      if (pendingStreamingText.length === 0) return
++      if (pendingStreamingText.length === 0 || servicePromptSnapshot?.scopeInvalidatedSignal.aborted) return
+       setMessages((prev) =>
+         prev.map((m) =>
+           m.id === generateMessageId
+@@ -1926,6 +1936,7 @@ export const useChatActions = ({
+     }
+ 
+     try {
++      throwIfTurnCancelled()
+       if (!resolvedModel) {
+         notification.error({
+           message: t("error"),
+@@ -1952,8 +1963,10 @@ export const useChatActions = ({
+       }
+ 
+       await tldwClient.initialize().catch(() => null)
++      throwIfTurnCancelled()
+ 
+       const modelInfo = await getModelNicknameByID(resolvedModel)
++      throwIfTurnCancelled()
+       const characterName =
+         activeCharacter?.name || modelInfo?.model_name || resolvedModel
+       const characterAvatar =
+@@ -2100,9 +2113,8 @@ export const useChatActions = ({
+           source: effectiveServerChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
+           external_ref: serverChatExternalRef || undefined
+         }
+-        const created = (scope
+-          ? await tldwClient.createChat(createPayload, { scope })
+-          : await tldwClient.createChat(createPayload)) as TldwChatMeta
++        const created = await tldwClient.createChat(createPayload, requestOptions) as TldwChatMeta
++        throwIfTurnCancelled()
+ 
+         let rawId: string | number | undefined
+         if (created && typeof created === "object") {
+@@ -2169,10 +2181,11 @@ export const useChatActions = ({
+           const createdGreeting = (await tldwClient.addChatMessage(chatId, {
+             role: "assistant",
+             content: greetingText
+-          }, scope ? { scope } : undefined)) as {
++          }, requestOptions)) as {
+             id?: string | number
+             version?: number
+           } | null
++          throwIfTurnCancelled()
+           if (createdGreeting?.id != null) {
+             setMessages((prev) => {
+               const updated = [...prev] as (Message & {
+@@ -2198,6 +2211,7 @@ export const useChatActions = ({
+             })
+           }
+         } catch (greetingPersistError) {
++          throwIfTurnCancelled()
+           console.warn(
+             "Failed to persist character greeting for new chat:",
+             greetingPersistError
+@@ -2240,8 +2254,9 @@ export const useChatActions = ({
+           const createdUser = (await tldwClient.addChatMessage(
+             chatId,
+             payload,
+-            scope ? { scope } : undefined
++            requestOptions
+           )) as TldwChatMessage | null
++          throwIfTurnCancelled()
+           persistedUserServerMessageId =
+             createdUser?.id != null ? String(createdUser.id) : undefined
+           setMessages((prev) => {
+@@ -2284,6 +2299,7 @@ export const useChatActions = ({
+         modelId: resolvedModel,
+         explicitProvider
+       })
++      throwIfTurnCancelled()
+       const normalizedModel = resolvedModel.replace(/^tldw:/, "").trim()
+       const streamModel =
+         normalizedModel.length > 0 ? normalizedModel : resolvedModel
+@@ -2322,8 +2338,9 @@ export const useChatActions = ({
+             resolvedMessageSteeringPrompts
+           )
+         },
+-        { signal, ...(scope ? { scope } : {}) }
++        requestOptions
+       )) {
++        throwIfTurnCancelled()
+         resetInactivityTimer()
+         const interruptionEvent =
+           chunk && typeof chunk === "object" && !Array.isArray(chunk)
+@@ -2377,8 +2394,9 @@ export const useChatActions = ({
+         }
+ 
+         count++
+-        if (signal?.aborted) break
++        if (executionSignal.aborted) break
+       }
++      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+       cancelStreamingUpdate()
+       flushStreamingUpdate()
+       if (inactivityTimer) clearTimeout(inactivityTimer)
+@@ -2392,11 +2410,7 @@ export const useChatActions = ({
+         throw timeoutError
+       }
+ 
+-      if (signal?.aborted) {
+-        const abortError = new Error("AbortError")
+-        ;(abortError as any).name = "AbortError"
+-        throw abortError
+-      }
++      throwIfTurnCancelled()
+ 
+       setMessages((prev) =>
+         prev.map((m) =>
+@@ -2527,6 +2541,7 @@ export const useChatActions = ({
+             }
+           }
+ 
++          throwIfTurnCancelled()
+           const persistPayload: Record<string, unknown> = {
+             assistant_content: finalPersistedContent,
+             assistant_message_id: generateMessageId
+@@ -2567,7 +2582,7 @@ export const useChatActions = ({
+           const persisted = (await tldwClient.persistCharacterCompletion(
+             chatId,
+             persistPayload,
+-            scope ? { scope } : undefined
++            requestOptions
+           )) as
+             | {
+                 assistant_message_id?: string | number
+@@ -2576,6 +2591,7 @@ export const useChatActions = ({
+                 version?: number
+               }
+             | null
++          throwIfTurnCancelled()
+           const createdAsstServerId =
+             persisted?.assistant_message_id ??
+             persisted?.message_id ??
+@@ -2605,6 +2621,7 @@ export const useChatActions = ({
+             }) as Message[])
+           )
+         } catch (e) {
++          throwIfTurnCancelled()
+           console.error(
+             "Failed to persist assistant message via completions/persist:",
+             e
+@@ -2645,11 +2662,12 @@ export const useChatActions = ({
+                   content: finalPersistedContent,
+                   ...(metadataExtra ? { metadata_extra: metadataExtra } : {})
+                 },
+-                scope ? { scope } : undefined
++                requestOptions
+               )) as {
+                 id?: string | number
+                 version?: number
+               } | null
++              throwIfTurnCancelled()
+               persistedAssistantServerMessageId =
+                 createdAsst?.id != null ? String(createdAsst.id) : undefined
+               assistantPersistedToServer = createdAsst?.id != null
+@@ -2672,6 +2690,7 @@ export const useChatActions = ({
+                 }) as Message[])
+               )
+             } catch (fallbackError) {
++              throwIfTurnCancelled()
+               assistantPersistedToServer = false
+               console.error(
+                 "Failed fallback assistant persistence with addChatMessage:",
+@@ -2686,6 +2705,7 @@ export const useChatActions = ({
+         )
+       }
+ 
++      throwIfTurnCancelled()
+       const lastEntry = historyBase[historyBase.length - 1]
+       const prevEntry = historyBase[historyBase.length - 2]
+       const endsWithUser =
+@@ -2742,8 +2762,12 @@ export const useChatActions = ({
+         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+         conversationId: activeChatId,
+         saveToDb: true,
+-        serverMessagesAlreadyPersisted: assistantPersistedToServer
++        serverMessagesAlreadyPersisted: assistantPersistedToServer,
++        scopeSignal: servicePromptSnapshot?.scopeSignal,
++        scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
++        requestScope: servicePromptSnapshot?.requestScope
+       })
++      throwIfServicePromptScopeInvalidated(servicePromptSnapshot)
+ 
+       setIsProcessing(false)
+       setStreaming(false)
+@@ -2974,6 +2998,9 @@ export const useChatActions = ({
+         assistantParentMessageId: resolvedAssistantParentMessageId ?? null
+       })
+ 
++      if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
++        return chatSubmitSkipped("Request scope changed")
++      }
+       if (!errorSave) {
+         const isInactivityTimeout =
+           e instanceof Error && (e as any).name === "StreamInactivityTimeout"
+diff --git a/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts b/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
+index e98697d6e0..ffa2c4257d 100644
+--- a/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
++++ b/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts
+@@ -117,6 +117,19 @@ describe("TldwApiClient captured request scope", () => {
+     expect(outbound.body ?? {}).not.toHaveProperty("requestScope")
+   })
+ 
++  it("binds captured Character streaming scope outside the inference body", async () => {
++    mocks.bgStream.mockImplementation(async function* () { yield '{"choices":[{"delta":{"content":"Owned"}}]}' })
++    const signal = new AbortController().signal
++    const options = { requestScope, signal, streamIdleTimeoutMs: 12345 }
++    for await (const _chunk of new TldwApiClient().streamCharacterChatCompletion("owned", { model: "owned-model" }, options)) { /* consume */ }
++    expect(mocks.bgStream.mock.calls[0][0]).toMatchObject({
++      path: "/api/v1/chats/owned/complete-v2?scope_type=global", abortSignal: signal,
++      streamIdleTimeoutMs: 12345, ...expectedScopeFields,
++      body: { model: "owned-model", stream: true }
++    })
++    expect(mocks.bgStream.mock.calls[0][0].body).not.toHaveProperty("requestScope")
++  })
++
+   it("binds QA streaming scope outside the inference body", async () => {
+     mocks.bgStream.mockImplementation(async function* () { yield '{"type":"contexts","contexts":[]}' })
+     const signal = new AbortController().signal
+diff --git a/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts b/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
+index 1a9f13c3c7..570d8f8124 100644
+--- a/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
++++ b/apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts
+@@ -12,6 +12,20 @@ import {
+ } from "@/services/chat-surface-scope"
+ 
+ describe("Service Prompt scope policy", () => {
++  it.each([
++    ["/api/v1/chats/owned/complete-v2", "POST", true],
++    ["/api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w", "POST", true],
++    ["/api/v1/chats/owned/complete-v2", "GET", false],
++    ["/api/v1/chats/owned/complete-v2", "PUT", false],
++    ["/api/v1/chats/owned/complete", "POST", false],
++    ["/api/v1/chats/owned/complete-v2/extra", "POST", false],
++    ["/api/v1/chats//complete-v2", "POST", false],
++    ["/api/v1/chats/a%2fb/complete-v2", "POST", false],
++    ["/api/v1/chats/%2e%2e/complete-v2", "POST", false]
++  ])("bounds captured Character generation %s %s", (path, method, allowed) => {
++    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
++  })
++
+   it.each([
+     ["/api/v1/chats/owned/completions/persist", "POST", true],
+     ["/api/v1/chats/other-owned/completions/persist?scope_type=global", "POST", true],
+diff --git a/apps/packages/ui/src/services/tldw/domains/chat-rag.ts b/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
+index f7677cccc5..60580f14f1 100644
+--- a/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
++++ b/apps/packages/ui/src/services/tldw/domains/chat-rag.ts
+@@ -1362,11 +1362,12 @@ export const chatRagMethods = {
+     this: TldwApiClientCore,
+     chat_id: string | number,
+     payload?: Record<string, any>,
+-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
++    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
+   ): AsyncGenerator<any> {
+     const cid = String(chat_id)
+     const body = { ...(payload || {}), stream: true }
+     const query = buildQuery(toChatScopeParams(options?.scope))
++    const scopeFields = requestScopeFields(options?.requestScope)
+     captureChatRequestDebugSnapshot({
+       endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
+       method: "POST",
+@@ -1376,10 +1377,11 @@ export const chatRagMethods = {
+     for await (const line of bgStream({
+       path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
+       method: "POST",
+-      headers: { "Content-Type": "application/json" },
++      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+       body,
+       abortSignal: options?.signal,
+-      streamIdleTimeoutMs: options?.streamIdleTimeoutMs
++      streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
++      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
+     })) {
+       if (!line) continue
+       try {
+diff --git a/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts b/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
+index ce726fe6b4..d04e37ee7b 100644
+--- a/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
++++ b/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts
+@@ -142,7 +142,7 @@ export const isServicePromptRequestPath = (
+   if (requestMethod !== "POST") return false
+   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
+   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate", "/api/v1/flashcards/assets", "/api/v1/flashcards/bulk"].includes(pathname)) return true
+-  if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
++  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2)$/.test(pathname)) return true
+   if (pathname === "/api/v1/chats/") return true
+   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
+     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)

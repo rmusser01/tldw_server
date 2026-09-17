@@ -1,0 +1,466 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (45 tests | 34 failed) 5136ms
+     ✓ binds actual auth lease through Character transport: late-success 63ms
+     ✓ binds actual auth lease through Character transport: late-failure 3ms
+     ✓ binds actual auth lease through Character transport: partial-logout 3ms
+     ✓ binds actual auth lease through Character transport: caller-stop 2ms
+     ✓ binds actual auth lease through Character transport: partial-error 2ms
+     ✓ binds actual auth lease through Character transport: same-owner 3ms
+     ✓ rejects late Character side effects after actual logout at prerequisite 2ms
+     ✓ rejects late Character side effects after actual logout at user-ack 1ms
+     ✓ rejects late Character side effects after actual logout at visual-identity 2ms
+     ✓ rejects late Character side effects after actual logout at persist-success 2ms
+     ✓ rejects late Character side effects after actual logout at persist-failure 1ms
+     × qualifies real Character stream lifetime without changing timeout policy: idle 5006ms
+     × qualifies real Character stream lifetime without changing timeout policy: explicit-budget 3ms
+     × qualifies real Character stream lifetime without changing timeout policy: raw-progress 2ms
+     × qualifies real Character stream lifetime without changing timeout policy: caller-abort 5ms
+     × qualifies real Character stream lifetime without changing timeout policy: authority-abort 2ms
+     × maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport 2ms
+     × retries failed complete-v2 in its original conversation with the greeting and user receipts intact 1ms
+     × UAT103 keeps a local source diagnostic Retry in the original character conversation 2ms
+     × retains server branching when regenerating actual assistant content: Complete reply 1ms
+     × retains server branching when regenerating actual assistant content: Partial reply after interruption 1ms
+     × retains server branching when regenerating actual assistant content: __tldw_error__:malformed 1ms
+     × forwards scoped current-chat controls through the real Character transport (sampling=0) 2ms
+     × forwards scoped current-chat controls through the real Character transport (sampling=0.5) 1ms
+     × omits unset controls from the real Character request after switching to an unconfigured model scope 2ms
+     × retains captured model controls while a pending Character user save outlives a settings-scope change 1ms
+     × does not publish recovered IDs or save an old owner's partial after the lease invalidates 1ms
+     × preserves closed reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     × preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     × preserves structured reasoning as a recoverable tracked completion with acknowledged IDs 1ms
+     × forwards the confirmed assistant ID from fallback success to local persistence 1ms
+     × forwards the confirmed assistant ID from degraded success to local persistence 1ms
+     × keeps tracked character routing anchored to current chat metadata when global character state is stale 1ms
+     × rebinds a greeting to the newly created conversation after a failed session 1ms
+     × handles emote commands without sending chat 1ms
+     × uses manual visual identity override when resolving assistant message metadata 1ms
+     × does not let stale overlay assistant state override the active character chat 1ms
+     × honors an explicit tracked character switch over the current chat metadata 1ms
+     × reuses the latest store character chat when greeting persistence updates before the send closure 1ms
+     × uses the latest store character id when the hook prop still points at another character 1ms
+     × passes workspace scope through when creating a character-backed chat 1ms
+     × strips explicit streaming emote directives and persists emote events 1ms
+     × preserves explicit emote metadata when recovering a failed stream 1ms
+     × does not duplicate recovery persistence when saved-degraded includes emote metadata 1ms
+     × sends emote metadata when normal persist falls back to addChatMessage 1ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (35 tests) 8ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts (57 tests) 5ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 34 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: idle
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:497:89
+    495|   }
+    496| 
+    497|   it.each(["idle", "explicit-budget", "raw-progress", "caller-abort", …
+       |                                                                                         ^
+    498|     "qualifies real Character stream lifetime without changing timeout…
+    499|       realErrorPersistence.enabled = true
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: explicit-budget
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: raw-progress
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: caller-abort
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: authority-abort
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:526:56
+    524|       vi.useFakeTimers()
+    525|       let pending!: ReturnType<typeof result.current.onSubmit>
+    526|       await act(async () => { pending = result.current.onSubmit({ mess…
+       |                                                        ^
+    527|       const user = result.current.messages.find(row => !row.isBot)!
+    528|       expect(user.serverMessageId).toBe("user-server-1")
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:526:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:595:50
+    593|       return { ...actions, messages, history }
+    594|     })
+    595|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    596|     expect(requests, JSON.stringify(result.current.messages)).toHaveLe…
+    597|     expect(decodeChatErrorPayload(result.current.messages.at(-1)!.mess…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:595:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:653:66
+    651| 
+    652|     let initialResult: unknown
+    653|     await act(async () => { initialResult = await result.current.onSub…
+       |                                                                  ^
+    654|     expect(initialResult).toMatchObject({ status: "failed" })
+    655|     expect(decodeChatErrorPayload(result.current.messages.at(-1)!.mess…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:653:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > UAT103 keeps a local source diagnostic Retry in the original character conversation
+TypeError: Cannot read properties of null (reading 'regenerateLastMessage')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:689:50
+    687|     }
+    688|     const { result } = renderHook(() => useChatActions(options as unkn…
+    689|     await act(async () => { await result.current.regenerateLastMessage…
+       |                                                  ^
+    690|     expect(createChatMock).not.toHaveBeenCalled()
+    691|     expect(options.setServerChatId).not.toHaveBeenCalled()
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:689:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: Complete reply
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: Partial reply after interruption
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+TypeError: Cannot read properties of null (reading 'regenerateLastMessage')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:713:52
+    711|       createChatMock.mockResolvedValueOnce({ id: "regenerated-branch",…
+    712|       const { result } = renderHook(() => useChatActions(options as un…
+    713|       await act(async () => { await result.current.regenerateLastMessa…
+       |                                                    ^
+    714|       expect(createChatMock).toHaveBeenCalledWith(expect.objectContain…
+    715|       expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContainin…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:713:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards scoped current-chat controls through the real Character transport (sampling=0)
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:732:50
+    730|     const options = scopedOptions("openai:deepseek-chat", { numPredict…
+    731|     const { result } = renderHook(() => useChatActions(options as unkn…
+    732|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    733|     expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({
+    734|       path: expect.stringContaining("/chats/tracked-chat-1/complete-v2…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:732:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > omits unset controls from the real Character request after switching to an unconfigured model scope
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:744:50
+    742|     const options = scopedOptions("openai:deepseek-chat", {})
+    743|     const { result } = renderHook(() => useChatActions(options as unkn…
+    744|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    745|     const body = bgStreamMock.mock.calls[0][0].body
+    746|     for (const key of ["max_tokens", "temperature", "top_p", "repetiti…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:744:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > retains captured model controls while a pending Character user save outlives a settings-scope change
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:756:54
+    754|     const { result, rerender } = renderHook(({ options }) => useChatAc…
+    755|     let pending!: ReturnType<typeof result.current.onSubmit>
+    756|     await act(async () => { pending = result.current.onSubmit({ messag…
+       |                                                      ^
+    757|     await waitFor(() => expect(addChatMessageMock).toHaveBeenCalled())
+    758|     const next = { ...scopedOptions("openai:new-model", { numPredict: …
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:756:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not publish recovered IDs or save an old owner's partial after the lease invalidates
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:775:54
+    773|     const { result } = renderHook(() => useChatActions(options as unkn…
+    774|     let pending!: ReturnType<typeof result.current.onSubmit>
+    775|     await act(async () => { pending = result.current.onSubmit({ messag…
+       |                                                      ^
+    776|     await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTim…
+    777|     recoveryAuthority.controller.abort()
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:775:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:797:50
+    795|     const options = { ...createHookOptions(), setMessages: vi.fn((next…
+    796|     const { result } = renderHook(() => useChatActions(options as unkn…
+    797|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    798|     expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    799|     expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectConta…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:797:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:816:50
+    814|     const options = createHookOptions()
+    815|     const { result } = renderHook(() => useChatActions(options as unkn…
+    816|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    817|     expect(addChatMessageMock).toHaveBeenCalledTimes(outcome === "fall…
+    818|     expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectCon…
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:816:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > keeps tracked character routing anchored to current chat metadata when global character state is stale
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:829:28
+    827| 
+    828|     await act(async () => {
+    829|       await result.current.onSubmit({
+       |                            ^
+    830|         message: "Hello tracked character",
+    831|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:828:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > rebinds a greeting to the newly created conversation after a failed session
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:871:50
+    869|     }
+    870|     const { result } = renderHook(() => useChatActions(options as any))
+    871|     await act(async () => { await result.current.onSubmit({ message: "…
+       |                                                  ^
+    872|     expect(visibleMessages.find(message => message.messageType === "ch…
+    873|   })
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:871:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > handles emote commands without sending chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:884:43
+    882|     let submitResult: unknown
+    883|     await act(async () => {
+    884|       submitResult = await result.current.onSubmit({
+       |                                           ^
+    885|         message: "/emote surprised",
+    886|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:883:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > uses manual visual identity override when resolving assistant message metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:916:28
+    914| 
+    915|     await act(async () => {
+    916|       await result.current.onSubmit({
+       |                            ^
+    917|         message: "React to this",
+    918|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:915:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not let stale overlay assistant state override the active character chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:955:28
+    953| 
+    954|     await act(async () => {
+    955|       await result.current.onSubmit({
+       |                            ^
+    956|         message: "Continue the other character chat",
+    957|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:954:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > honors an explicit tracked character switch over the current chat metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1017:28
+    1015| 
+    1016|     await act(async () => {
+    1017|       await result.current.onSubmit({
+       |                            ^
+    1018|         message: "Start talking with Miku",
+    1019|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1016:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > reuses the latest store character chat when greeting persistence updates before the send closure
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1081:28
+    1079| 
+    1080|     await act(async () => {
+    1081|       await result.current.onSubmit({
+       |                            ^
+    1082|         message: "Continue Ashley from her greeting",
+    1083|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1080:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > uses the latest store character id when the hook prop still points at another character
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1139:28
+    1137| 
+    1138|     await act(async () => {
+    1139|       await result.current.onSubmit({
+       |                            ^
+    1140|         message: "Continue Miku from the selected greeting",
+    1141|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1138:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > passes workspace scope through when creating a character-backed chat
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1189:28
+    1187| 
+    1188|     await act(async () => {
+    1189|       await result.current.onSubmit({
+       |                            ^
+    1190|         message: "Hello workspace character",
+    1191|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1188:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > strips explicit streaming emote directives and persists emote events
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1258:28
+    1256| 
+    1257|     await act(async () => {
+    1258|       await result.current.onSubmit({
+       |                            ^
+    1259|         message: "Test explicit emotes",
+    1260|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1257:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > preserves explicit emote metadata when recovering a failed stream
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1313:28
+    1311| 
+    1312|     await act(async () => {
+    1313|       await result.current.onSubmit({
+       |                            ^
+    1314|         message: "Recover explicit emote",
+    1315|         image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1312:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > does not duplicate recovery persistence when saved-degraded includes emote metadata
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1392:30
+    1390| 
+    1391|       await act(async () => {
+    1392|         await result.current.onSubmit({
+       |                              ^
+    1393|           message: "Recover saved degraded emote",
+    1394|           image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1391:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/34]⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > sends emote metadata when normal persist falls back to addChatMessage
+TypeError: Cannot read properties of null (reading 'onSubmit')
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1437:30
+    1435|     try {
+    1436|       await act(async () => {
+    1437|         await result.current.onSubmit({
+       |                              ^
+    1438|           message: "Fallback explicit emote",
+    1439|           image: ""
+ ❯ ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:47:24
+ ❯ act ../node_modules/.bun/react@18.3.1/node_modules/react/cjs/react.development.js:2512:16
+ ❯ Proxy.<anonymous> ../node_modules/.bun/@testing-library+react@16.3.2+e79794b3bc7ff534/node_modules/@testing-library/react/dist/act-compat.js:46:25
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:1436:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/34]⎯
+
+
+ Test Files  1 failed | 2 passed (3)
+      Tests  34 failed | 103 passed (137)
+   Start at  12:29:36
+   Duration  7.19s (transform 639ms, setup 198ms, import 1.07s, tests 5.15s, environment 603ms)
+

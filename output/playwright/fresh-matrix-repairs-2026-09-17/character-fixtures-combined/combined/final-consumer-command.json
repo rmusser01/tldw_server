@@ -1,0 +1,13 @@
+{
+  "cwd": "apps/packages/ui",
+  "argv": [
+    "node",
+    "../../tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
+    "--reporter=dot"
+  ],
+  "exitCode": 0,
+  "passed": 37,
+  "skipped": 0
+}

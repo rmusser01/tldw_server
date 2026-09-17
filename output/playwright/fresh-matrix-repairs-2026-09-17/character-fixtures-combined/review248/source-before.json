@@ -1,0 +1,47 @@
+{
+  "manifestSha256": "6dd7a5e19cdd9f5a2bf91192ad0dc3dbb417891561957f3c335686846a1247a4",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "kind": "production",
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767",
+      "bytes": 166902,
+      "snapshot": "review-snapshot/hooks/chat/useChatActions.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "kind": "production",
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "bytes": 74917,
+      "snapshot": "review-snapshot/services/tldw/domains/chat-rag.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "kind": "production",
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a",
+      "bytes": 7631,
+      "snapshot": "review-snapshot/services/tldw/service-prompt-scope-error.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "kind": "tests",
+      "sha256": "f31f57391ba79b36158c8a9cf48aeb1b778647a4ef69efca07c2d40315dff8c4",
+      "bytes": 67679,
+      "snapshot": "review-snapshot/hooks/chat/__tests__/useChatActions.character.integration.test.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "kind": "tests",
+      "sha256": "0b08c5f7693b6ae7a1c4960ceea6c596d3c1235c0ea822c2393dd48ff1f7dbbd",
+      "bytes": 13658,
+      "snapshot": "review-snapshot/services/tldw/__tests__/TldwApiClient.request-scope.test.ts"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/service-prompt-scope-error.test.ts",
+      "kind": "tests",
+      "sha256": "a772e32c6fc6f32bd216df29e318e4cb423e387c46318f6ea59706025e73e341",
+      "bytes": 9200,
+      "snapshot": "review-snapshot/services/tldw/__tests__/service-prompt-scope-error.test.ts"
+    }
+  ]
+}

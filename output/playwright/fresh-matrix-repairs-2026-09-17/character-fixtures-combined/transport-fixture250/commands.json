@@ -1,0 +1,26 @@
+{
+  "redAndBaselineGreen": [
+    "node",
+    "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+    "run",
+    "--config",
+    ".tmp/uat-repairs-231-246/character248/vitest.baseline.config.ts",
+    "../packages/ui/src/services/__tests__/background-proxy.test.ts",
+    "--reporter=dot"
+  ],
+  "currentAdjacentCwd": "apps/tldw-frontend",
+  "currentAdjacent": [
+    "node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "../packages/ui/src/services/__tests__/background-proxy.test.ts",
+    "../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts",
+    "../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts",
+    "../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+    "--reporter=dot"
+  ],
+  "lint": [
+    "node",
+    ".tmp/uat-repairs-231-246/transport-fixture250/lint.mjs"
+  ]
+}

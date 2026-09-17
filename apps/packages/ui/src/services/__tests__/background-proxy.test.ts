@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
@@ -84,6 +84,10 @@ describe("background proxy fallback safety", () => {
   })
 
   describe("failed Chat completion transport", () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
     const request = {
       model: "auto",
       messages: [{ role: "user" as const, content: "hello" }]

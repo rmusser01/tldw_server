@@ -1,0 +1,102 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (47 tests | 2 failed | 45 skipped) 47ms
+     ↓ binds actual auth lease through Character transport: late-success
+     ↓ binds actual auth lease through Character transport: late-failure
+     ↓ binds actual auth lease through Character transport: partial-logout
+     ↓ binds actual auth lease through Character transport: caller-stop
+     ↓ binds actual auth lease through Character transport: partial-error
+     ↓ binds actual auth lease through Character transport: same-owner
+     ↓ rejects late Character side effects after actual logout at prerequisite
+     ↓ rejects late Character side effects after actual logout at user-ack
+     ↓ rejects late Character side effects after actual logout at visual-identity
+     ↓ rejects late Character side effects after actual logout at persist-success
+     ↓ rejects late Character side effects after actual logout at persist-failure
+     × stops Character creation after actual logout at create-ack 43ms
+     × stops Character creation after actual logout at greeting-ack 3ms
+     ↓ qualifies real Character stream lifetime without changing timeout policy: idle
+     ↓ qualifies real Character stream lifetime without changing timeout policy: explicit-budget
+     ↓ qualifies real Character stream lifetime without changing timeout policy: raw-progress
+     ↓ qualifies real Character stream lifetime without changing timeout policy: caller-abort
+     ↓ qualifies real Character stream lifetime without changing timeout policy: authority-abort
+     ↓ maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport
+     ↓ retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+     ↓ UAT103 keeps a local source diagnostic Retry in the original character conversation
+     ↓ retains server branching when regenerating actual assistant content: Complete reply
+     ↓ retains server branching when regenerating actual assistant content: Partial reply after interruption
+     ↓ retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0)
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+     ↓ omits unset controls from the real Character request after switching to an unconfigured model scope
+     ↓ retains captured model controls while a pending Character user save outlives a settings-scope change
+     ↓ does not publish recovered IDs or save an old owner's partial after the lease invalidates
+     ↓ preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ forwards the confirmed assistant ID from fallback success to local persistence
+     ↓ forwards the confirmed assistant ID from degraded success to local persistence
+     ↓ keeps tracked character routing anchored to current chat metadata when global character state is stale
+     ↓ rebinds a greeting to the newly created conversation after a failed session
+     ↓ handles emote commands without sending chat
+     ↓ uses manual visual identity override when resolving assistant message metadata
+     ↓ does not let stale overlay assistant state override the active character chat
+     ↓ honors an explicit tracked character switch over the current chat metadata
+     ↓ reuses the latest store character chat when greeting persistence updates before the send closure
+     ↓ uses the latest store character id when the hook prop still points at another character
+     ↓ passes workspace scope through when creating a character-backed chat
+     ↓ strips explicit streaming emote directives and persists emote events
+     ↓ preserves explicit emote metadata when recovering a failed stream
+     ↓ does not duplicate recovery persistence when saved-degraded includes emote metadata
+     ↓ sends emote metadata when normal persist falls back to addChatMessage
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > stops Character creation after actual logout at create-ack
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > stops Character creation after actual logout at greeting-ack
+AssertionError: expected undefined to deeply equal ObjectContaining{…}
+
+- Expected: 
+ObjectContaining {
+  "requestScope": {
+    "config": {
+      "authMode": "single-user",
+      "authSource": undefined,
+      "expectedSingleUserApiKeyScope": "key:sha256:4a8c54e59d4a62d7dc43ffc0a124ba814dcc414be12815add13c3c714d4f703f",
+      "orgId": undefined,
+      "serverUrl": "http://127.0.0.1:8000",
+    },
+    "userId": null,
+  },
+  "signal": AbortSignal {
+    Symbol(kEvents): Map {},
+    Symbol(events.maxEventTargetListeners): 0,
+    Symbol(events.maxEventTargetListenersWarned): false,
+    Symbol(kHandlers): Map {},
+    Symbol(kAborted): true,
+    Symbol(kReason): AbortError {
+      "message": "This operation was aborted",
+    },
+    Symbol(kComposite): false,
+  },
+}
+
++ Received: 
+undefined
+
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:513:45
+    511|     await act(async () => { outcome = await result.current.onSubmit({ …
+    512|     expect(createChatMock).toHaveBeenCalledTimes(1)
+    513|     expect(createChatMock.mock.calls[0][1]).toEqual(expect.objectConta…
+       |                                             ^
+    514|     expect(addChatMessageMock).toHaveBeenCalledTimes(boundary === "gre…
+    515|     expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 45 skipped (47)
+   Start at  12:31:18
+   Duration  1.36s (transform 578ms, setup 80ms, import 981ms, tests 47ms, environment 190ms)
+
