@@ -1,0 +1,40 @@
+{
+  "task": "TASK13260.126",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/ReviewAnalyticsSummary.tsx",
+      "sha256": "c9adc3d60008465c148bb8c51bd3b73e118802e0e3cab890139dbf7a5e5215d5"
+    },
+    {
+      "path": "apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "3f65b787db85d93e80df728ac6df6fa0d8a8af6cd63ed56bac73703278ebbf2a"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/__tests__/ReviewAnalyticsSummary.plurals.test.tsx",
+      "sha256": "fedab946fdfe01c4fe51fed2e78842acd89857a0eda3a5000be82ab68eb39d41"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.analytics-summary.test.tsx",
+      "sha256": "dcd00c365fb3775b889b07952e50b5214ae60d8d958e41ca32a8bcda3bbbe32d"
+    }
+  ],
+  "production_change": "two existing ICU plural message strings",
+  "results": {
+    "red": {
+      "failed": 3,
+      "passed": 4,
+      "skipped": 0
+    },
+    "final": {
+      "passed": 18,
+      "files": 4,
+      "skipped": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 23,
+      "added": 0
+    }
+  },
+  "limits": "No native acceptance; Bandit cannot parse TSX."
+}

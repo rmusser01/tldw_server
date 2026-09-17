@@ -1,0 +1,20 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:60983) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60985) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60984) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:60986) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/i18n/__tests__/icu-format.test.ts (5 tests) 17ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/ReviewProgress.plurals.test.tsx (3 tests) 83ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/ReviewAnalyticsSummary.plurals.test.tsx (7 tests) 309ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.analytics-summary.test.tsx (3 tests) 410ms
+
+ Test Files  4 passed (4)
+      Tests  18 passed (18)
+   Start at  18:58:03
+   Duration  2.40s (transform 997ms, setup 466ms, import 2.59s, tests 819ms, environment 1.08s)

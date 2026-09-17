@@ -90,7 +90,7 @@ export const ReviewAnalyticsSummary: React.FC<ReviewAnalyticsSummaryProps> = ({
           </Text>
           <Text strong className="text-lg">
             {t("option:flashcards.studyStreakDays", {
-              defaultValue: "{{count}} days",
+              defaultValue: "{count, plural, one {# day} other {# days}}",
               count: summary.study_streak_days
             })}
           </Text>

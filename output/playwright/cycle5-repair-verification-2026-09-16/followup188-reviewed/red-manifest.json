@@ -1,0 +1,26 @@
+{
+  "status": "RED only; production hold",
+  "test_sha256": "fedab946fdfe01c4fe51fed2e78842acd89857a0eda3a5000be82ab68eb39d41",
+  "red": {
+    "failed": 3,
+    "passed": 4,
+    "skipped": 0,
+    "seconds": 1.18
+  },
+  "adjacent_baseline": {
+    "passed": 6,
+    "skipped": 0,
+    "seconds": 2.57
+  },
+  "test_lint": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "artifacts": {
+    "DESIGN188.md": "f2e083b4a8c5f5900c4b45e3784e332a179e94bd7dfcd357f361f3acfbb2101d",
+    "streak-red.log": "ebf41d28539f1351619a29f75c0255bdae6aa0c6de1815bb6e49f7657187c40f",
+    "adjacent-baseline.log": "3c317ad7a3e46d97c29139b53f1407aa30508dff15844d09b627d8e12aa05b0e",
+    "streak-red-test.tsx": "fedab946fdfe01c4fe51fed2e78842acd89857a0eda3a5000be82ab68eb39d41",
+    "baseline-manifest.json": "37acfbbb0a1c99ded8816b71e7f559fdf7f188d4c73f544db9b3df7f727e414f"
+  }
+}
