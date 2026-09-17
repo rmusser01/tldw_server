@@ -1817,7 +1817,7 @@ class NoteStore:
             params.insert(0, self._deleted_value(False))
         query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     @staticmethod
     def _normalize_graph_tag_filter(tag: str) -> str:
@@ -1847,12 +1847,13 @@ class NoteStore:
         if not normalized_tag or limit <= 0:
             return []
 
+        keyword_table = self._db._map_table_for_backend("keywords")
         if include_deleted:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
-                "JOIN keywords k ON k.id = nk.keyword_id "
+                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
                 "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
@@ -1862,7 +1863,7 @@ class NoteStore:
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
-                "JOIN keywords k ON k.id = nk.keyword_id "
+                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
                 "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
@@ -1873,7 +1874,7 @@ class NoteStore:
                 limit,
             ]
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     def get_note_ids_by_source_for_graph(
         self,
@@ -1923,7 +1924,7 @@ class NoteStore:
             )
             params = [src, limit]
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return (note_id, keyword_id, keyword) for notes with active keywords."""
@@ -1981,25 +1982,26 @@ class NoteStore:
     def count_user_notes(self, include_deleted: bool = True) -> int:
         """Count total notes for seedless query gate."""
         if include_deleted:
-            query = "SELECT COUNT(*) FROM notes"
+            query = "SELECT COUNT(*) AS cnt FROM notes"
             params: tuple[Any, ...] | None = None
         else:
-            query = "SELECT COUNT(*) FROM notes WHERE deleted = ?"
+            query = "SELECT COUNT(*) AS cnt FROM notes WHERE deleted = ?"
             params = (self._deleted_value(False),)
         cur = self._db.execute_query(query, params)
-        return cur.fetchone()[0]
+        return cur.fetchone()["cnt"]
 
     def count_notes_per_tag(self) -> dict[int, int]:
         """Return {keyword_id: note_count} for popularity cutoff."""
+        keyword_table = self._db._map_table_for_backend("keywords")
         query = (
             "SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt "
             "FROM note_keywords nk "
             "JOIN notes n ON n.id = nk.note_id AND n.deleted = ? "
-            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? "
+            f"JOIN {keyword_table} k ON k.id = nk.keyword_id AND k.deleted = ? "  # nosec B608
             "GROUP BY nk.keyword_id"
         )
         cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
-        return {row[0]: row[1] for row in cur.fetchall()}
+        return {row["keyword_id"]: row["cnt"] for row in cur.fetchall()}
 
     def get_note_source_info(self, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return source info for notes that have a conversation with source set."""
