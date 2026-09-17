@@ -600,7 +600,24 @@ const graphInputSchema = z.strictObject({
 })
 
 const normalizeGraph = (value: unknown): NotesGraphResponse => {
-  return parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
+  const graph = parseResponseAs<NotesGraphResponse>(graphResponseSchema, value)
+  const noteIds = new Map(
+    graph.nodes
+      .filter((node) => node.type === "note" && !node.id.startsWith("note:"))
+      .map((node) => [node.id, `note:${node.id}`])
+  )
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => ({
+      ...node,
+      id: noteIds.get(node.id) ?? node.id
+    })),
+    edges: graph.edges.map((edge) => ({
+      ...edge,
+      source: noteIds.get(edge.source) ?? edge.source,
+      target: noteIds.get(edge.target) ?? edge.target
+    }))
+  }
 }
 
 export const fetchNotesGraph = async (
