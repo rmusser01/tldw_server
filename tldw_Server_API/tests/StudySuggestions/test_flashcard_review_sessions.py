@@ -773,7 +773,8 @@ def test_review_session_creation_and_stale_cleanup_roll_back_with_outer_transact
         deck_id=None, review_mode="due", tag_filter=None, scope_key="due:global"
     )
     old = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat().replace("+00:00", "Z")
-    db.execute_query("UPDATE flashcard_review_sessions SET last_activity_at = ? WHERE id = ?", (old, stale["id"]))
+    # Commit fixture setup before testing the separate caller-owned rollback.
+    db.execute_query("UPDATE flashcard_review_sessions SET last_activity_at = ? WHERE id = ?", (old, stale["id"]), commit=True)
     before = db.get_flashcard_review_session(stale["id"])
     with pytest.raises(RuntimeError, match="rollback control"):
         with db.transaction():

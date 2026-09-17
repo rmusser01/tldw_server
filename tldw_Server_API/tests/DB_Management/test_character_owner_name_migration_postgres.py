@@ -24,6 +24,12 @@ class _RealV67Database(CharactersRAGDB):
     _POSTGRES_SCHEMA_VERSION = 67
 
 
+class _RealV68Database(CharactersRAGDB):
+    """Keep the exact character migration contract independent of later heads."""
+
+    _POSTGRES_SCHEMA_VERSION = 68
+
+
 @pytest.fixture
 def pg_backend(pg_database_config):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -70,7 +76,7 @@ def real_v67(pg_backend, tmp_path):
 
 def test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key(real_v67, tmp_path):
     backend, before, _live, _deleted = real_v67
-    upgraded = CharactersRAGDB(tmp_path / "owner2.db", client_id="2", backend=backend)
+    upgraded = _RealV68Database(tmp_path / "owner2.db", client_id="2", backend=backend)
     try:
         assert _rows(backend) == before
         assert _version(backend) == 68
@@ -106,7 +112,7 @@ def test_reopening_upgraded_schema_preserves_ids_and_constraints(real_v67, tmp_p
             reopened.append(db)
             db.close_connection()
             assert _rows(backend) == before
-            assert _version(backend) == 68
+            assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
             assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
     finally:
         for db in reopened:
@@ -137,7 +143,7 @@ def test_name_migration_rolls_back_catalog_data_and_version_on_failure(real_v67,
     assert _rows(backend) == before
     reopened = CharactersRAGDB(tmp_path / "retried.db", client_id="2", backend=backend)
     try:
-        assert _version(backend) == 68
+        assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert _rows(backend) == before
     finally:
         reopened.close_all_connections()

@@ -753,7 +753,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
-    _POSTGRES_SCHEMA_VERSION = 68
+    _POSTGRES_SCHEMA_VERSION = 69
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -17744,6 +17744,53 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 68:
             raise SchemaError("Character name PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v68_to_v69_postgres(self, conn: Any) -> None:
+        """Reserve deck names per owner without changing records or tombstones."""
+        if self._get_schema_version_postgres(conn) != 68:
+            raise SchemaError("Deck name migration requires PostgreSQL schema V68.")  # noqa: TRY003
+        catalog_query = (
+            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
+            "FROM pg_constraint c "
+            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conrelid = 'decks'::regclass AND c.contype = 'u' "
+            "GROUP BY c.oid, c.conname"
+        )
+        constraints = self.backend.execute(catalog_query, connection=conn).rows
+        old_keys = [row for row in constraints if row["columns"] == ["name"]]
+        new_key = "decks_client_id_name_key"
+        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
+            raise SchemaError("Unexpected deck name constraint catalog at PostgreSQL V68.")  # noqa: TRY003
+        self.backend.execute(
+            "ALTER TABLE decks ADD CONSTRAINT decks_client_id_name_key UNIQUE (client_id, name)",
+            connection=conn,
+        )
+        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
+        self.backend.execute(
+            f"ALTER TABLE decks DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
+            connection=conn,
+        )
+        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
+        remaining_global_name_key = self.backend.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
+            "WHERE i.indrelid = 'decks'::regclass AND i.indisunique "
+            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
+            connection=conn,
+        ).scalar
+        if remaining_global_name_key or not any(
+            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
+            for row in final_constraints
+        ):
+            raise SchemaError("Deck owner/name constraint verification failed.")  # noqa: TRY003
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
+            (69, self._SCHEMA_NAME, 68),
+            connection=conn,
+        )
+        if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 69:
+            raise SchemaError("Deck name PostgreSQL migration V68->V69 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
         """Migrate schema from V64 to V65 (character resume snapshot state)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
@@ -25039,6 +25086,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 68 and current_version < 68:
                 self._migrate_from_v67_to_v68_postgres(conn)
                 current_version = 68
+            if target_version >= 69 and current_version < 69:
+                self._migrate_from_v68_to_v69_postgres(conn)
+                current_version = 69
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -34745,6 +34795,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ==========================
     # Flashcards & Decks (V5)
     # ==========================
+    def _flashcard_owner_filter(self, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Scope shared PostgreSQL resources; SQLite client IDs identify devices."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        columns = {"": "client_id", "f": "f.client_id", "d": "d.client_id", "fa": "fa.client_id", "fr": "fr.client_id", "kw": "kw.client_id"}
+        return f" AND {columns[alias]} = ?", (self.client_id,)
+
+    def _validate_flashcard_deck_locked(self, conn: Any, deck_id: Any) -> None:
+        """Require a live owned deck when a PostgreSQL card references one."""
+        if self.backend_type != BackendType.POSTGRESQL or deck_id is None:
+            return
+        row = conn.execute(
+            "SELECT id FROM decks WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (deck_id, self.client_id),
+        ).fetchone()
+        if not row:
+            raise InputError("Deck not found")  # noqa: TRY003
+
+    def _validate_flashcard_workspace_locked(self, conn: Any, workspace_id: str | None) -> None:
+        """Validate the owner at the deck boundary without broadening workspace APIs."""
+        if self.backend_type != BackendType.POSTGRESQL or workspace_id is None:
+            return
+        row = conn.execute(
+            "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (workspace_id, self.client_id),
+        ).fetchone()
+        if not row:
+            raise InputError("Workspace not found")  # noqa: TRY003
+
     @staticmethod
     def _normalize_deck_parent_id(parent_deck_id: Any) -> int | None:
         if parent_deck_id is None:
@@ -34776,22 +34855,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if self.backend_type == BackendType.POSTGRESQL:
             parent_lookup_query = (
-                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 FOR UPDATE"
+                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 AND client_id = ? FOR UPDATE"
             )
-            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? FOR UPDATE"
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? AND client_id = ? FOR UPDATE"
+            owner_params = (self.client_id,)
         else:
             parent_lookup_query = "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0"
             ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ?"
+            owner_params = ()
         parent_row = self._coerce_mapping_row(
             conn.execute(
                 parent_lookup_query,
-                (parent_id,),
+                (parent_id, *owner_params),
             ).fetchone()
         )
         if not parent_row:
             raise InputError("Parent deck not found")  # noqa: TRY003
 
-        if target_deck_id is None:
+        if target_deck_id is None and self.backend_type != BackendType.POSTGRESQL:
             return parent_id
 
         seen: set[int] = set()
@@ -34803,10 +34884,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             row = self._coerce_mapping_row(
                 conn.execute(
                     ancestor_lookup_query,
-                    (current_parent_id,),
+                    (current_parent_id, *owner_params),
                 ).fetchone()
             )
             if not row:
+                if self.backend_type == BackendType.POSTGRESQL:
+                    raise InputError("Parent deck ancestry is not available to this owner")  # noqa: TRY003
                 return parent_id
             raw_parent_id = row.get("parent_deck_id")
             current_parent_id = None if raw_parent_id is None else self._normalize_deck_parent_id(raw_parent_id)
@@ -34837,8 +34920,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         prompt_side_for_insert = normalized_prompt_side or "front"
         scheduler_settings_json = scheduler_settings_to_json(scheduler_settings)
+        owner_filter, owner_params = self._flashcard_owner_filter()
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_workspace_locked(conn, workspace_id)
                 parent_for_insert = (
                     None
                     if parent_deck_id is ...
@@ -34850,11 +34935,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 # Undelete if a deck with the same name exists but is deleted
                 deleted_row = conn.execute(
-                    "SELECT id, version FROM decks WHERE name = ? AND deleted = 1",
-                    (name,),
+                    "SELECT id, version FROM decks WHERE name = ? AND deleted = 1" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (name, *owner_params),
                 ).fetchone()
                 if deleted_row:
-                    deck_id, current_version = int(deleted_row[0]), int(deleted_row[1])
+                    deck_id, current_version = int(deleted_row["id"]), int(deleted_row["version"])
                     if parent_deck_id is not ...:
                         self._validate_deck_parent_locked(
                             conn,
@@ -34890,9 +34975,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if parent_deck_id is not ...:
                         set_parts.append("parent_deck_id = ?")
                         params.append(parent_for_insert)
-                    params.extend([deck_id, current_version])
+                    params.extend([deck_id, current_version, *owner_params])
                     rc = conn.execute(
-                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?",  # nosec B608
+                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?{owner_filter}",  # nosec B608
                         tuple(params),
                     ).rowcount
                     if rc == 0:
@@ -34963,6 +35048,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             conditions = ["ds.user_id = ?"]
             params_list: list[Any] = [int(shared_with_user_id)]
+            if self.backend_type == BackendType.POSTGRESQL:
+                conditions.append("d.client_id = ?")
+                params_list.append(self.client_id)
             if not include_deleted:
                 conditions.append("d.deleted = 0")
             if workspace_id is not None:
@@ -34983,61 +35071,55 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
             "deleted, client_id, version FROM decks "
         )
-        if include_deleted:
-            if workspace_id is not None:
-                query = select_sql + "WHERE workspace_id = ? ORDER BY name LIMIT ? OFFSET ?"
-                params: tuple[Any, ...] = (workspace_id, limit, offset)
-            elif include_workspace_items:
-                query = select_sql + "ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-            else:
-                query = select_sql + "WHERE workspace_id IS NULL ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-        else:
-            if workspace_id is not None:
-                query = select_sql + "WHERE deleted = 0 AND workspace_id = ? ORDER BY name LIMIT ? OFFSET ?"
-                params = (workspace_id, limit, offset)
-            elif include_workspace_items:
-                query = select_sql + "WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-            else:
-                query = select_sql + "WHERE deleted = 0 AND workspace_id IS NULL ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query = select_sql + "WHERE 1 = 1" + owner_filter
+        params = list(owner_params)
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if workspace_id is not None:
+            query += " AND workspace_id = ?"
+            params.append(workspace_id)
+        elif not include_workspace_items:
+            query += " AND workspace_id IS NULL"
+        query += " ORDER BY name LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         try:
-            cursor = self.execute_query(query, params, read_only=True)
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
     def get_deck(self, deck_id: int) -> dict[str, Any] | None:
         """Fetch a single deck row by id."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         query = (
             "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
-            "FROM decks WHERE id = ?"
+            "FROM decks WHERE id = ?" + owner_filter  # nosec B608 -- Fixed owner clauses; all data values are bound.
         )
         try:
-            cursor = self.execute_query(query, (deck_id,), read_only=True)
+            cursor = self.execute_query(query, (deck_id, *owner_params), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
     def get_deck_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
-        """Fetch one deck row by name using the repository-wide unique-name invariant."""
+        """Fetch one deck row by name in the selected owner's repository."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         if include_deleted:
             query = (
                 "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? "
-                "ORDER BY id LIMIT 1"
+                + owner_filter + " ORDER BY id LIMIT 1"  # nosec B608 -- Fixed owner clauses; all data values are bound.
             )
         else:
             query = (
                 "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? AND deleted = 0 "
-                "ORDER BY id LIMIT 1"
+                + owner_filter + " ORDER BY id LIMIT 1"  # nosec B608 -- Fixed owner clauses; all data values are bound.
             )
         try:
-            cursor = self.execute_query(query, (name,), read_only=True)
+            cursor = self.execute_query(query, (name, *owner_params), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -35063,11 +35145,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         normalized_role = _normalize_deck_share_role(role)
         now = self._get_current_utc_timestamp_iso()
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         try:
             with self.transaction() as conn:
                 deck = conn.execute(
-                    "SELECT id FROM decks WHERE id = ? AND deleted = 0",
-                    (int(deck_id),),
+                    "SELECT id FROM decks WHERE id = ? AND deleted = 0" + owner_filter + lock_clause,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (int(deck_id), *owner_params),
                 ).fetchone()
                 if deck is None:
                     raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
@@ -35119,15 +35203,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
         """List all per-user share records for a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
                   FROM deck_shares
-                 WHERE deck_id = ?
+                 WHERE deck_id = ?{owner_filter}
                  ORDER BY user_id
-                """,
-                (int(deck_id),),
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(deck_id), *owner_params),
                 read_only=True,
             )
             return [dict(row) for row in cursor.fetchall()]
@@ -35136,14 +35225,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
         """Fetch one per-user share record for a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
                   FROM deck_shares
-                 WHERE deck_id = ? AND user_id = ?
-                """,
-                (int(deck_id), int(user_id)),
+                 WHERE deck_id = ? AND user_id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(deck_id), int(user_id), *owner_params),
                 read_only=True,
             )
             row = cursor.fetchone()
@@ -35153,11 +35247,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
         """Remove one per-user share record from a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             with self.transaction() as conn:
                 rowcount = conn.execute(
-                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?",
-                    (int(deck_id), int(user_id)),
+                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (int(deck_id), int(user_id), *owner_params),
                 ).rowcount
                 return rowcount > 0
         except sqlite3.Error as exc:
@@ -35180,6 +35279,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         expected_version: int | None = None,
     ) -> bool:
         """Update mutable deck fields with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         set_parts: list[str] = []
         params: list[Any] = []
         if name is not None:
@@ -35207,12 +35307,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             set_parts.append("parent_deck_id = ?")
             params.append(self._normalize_deck_parent_id(parent_deck_id))
         if not set_parts:
-            if expected_version is None:
+            if expected_version is None and self.backend_type != BackendType.POSTGRESQL:
                 return True
             deck = self.get_deck(deck_id)
             if not deck:
                 raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
-            if int(deck["version"]) != expected_version:
+            if expected_version is not None and int(deck["version"]) != expected_version:
                 raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
             return True
 
@@ -35223,14 +35323,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 row = conn.execute(
-                    "SELECT version FROM decks WHERE id = ? AND deleted = 0",
-                    (deck_id,),
+                    "SELECT version FROM decks WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (deck_id, *owner_params),
                 ).fetchone()
                 if not row:
                     raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
                 current_version = int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if workspace_id is not ...:
+                    self._validate_flashcard_workspace_locked(conn, workspace_id)
                 if parent_deck_id is not ...:
                     params[set_parts.index("parent_deck_id = ?")] = self._validate_deck_parent_locked(
                         conn,
@@ -35238,8 +35340,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         parent_deck_id=parent_deck_id,
                     )
 
-                params_final = params + [deck_id]
-                query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                params_final = params + [deck_id, *owner_params]
+                query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0{owner_filter}"  # nosec B608
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.IntegrityError as exc:
@@ -35798,6 +35900,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             reverse_flag = 1 if model_type == 'basic_reverse' else 0
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
                 insert_sql = (
                     """
                     INSERT INTO flashcards(
@@ -35860,7 +35963,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         uuids: list[str] = []
         try:
-            with self.transaction() as _:
+            with self.transaction() as conn:
                 insert_sql = (
                     """
                     INSERT INTO flashcards(
@@ -35880,6 +35983,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     now = self._get_current_utc_timestamp_iso()
 
                     deck_id = card_data.get('deck_id')
+                    self._validate_flashcard_deck_locked(conn, deck_id)
                     front = card_data['front']
                     back = card_data['back']
                     notes = card_data.get('notes')
@@ -36015,6 +36119,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """List flashcards with filters. due_status in {'new','learning','due','all'}."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("f.client_id = ?")
+            params.append(self.client_id)
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         keyword_table = self._map_table_for_backend("keywords")
         if not include_deleted:
             if self.backend_type == BackendType.POSTGRESQL:
@@ -36045,6 +36153,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         join_tag = ""
         if tag:
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
+            if self.backend_type == BackendType.POSTGRESQL:
+                join_tag += " AND kw.client_id = f.client_id"
             where_clauses.append("kw.keyword = ?")
             params.append(tag)
 
@@ -36078,7 +36188,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    f.queue_state, f.step_index, f.suspended_reason,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
             FROM flashcards f
-            LEFT JOIN decks d ON d.id = f.deck_id
+            LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
             {join_tag}
             WHERE {where_sql} {fts_filter}
             {order_sql}
@@ -36102,6 +36212,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Count flashcards matching filters. Mirrors list_flashcards filters."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("f.client_id = ?")
+            params.append(self.client_id)
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         keyword_table = self._map_table_for_backend("keywords")
         if not include_deleted:
             if self.backend_type == BackendType.POSTGRESQL:
@@ -36113,7 +36227,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         if visibility_clause:
             where_clauses.append(visibility_clause)
             params.extend(visibility_params)
@@ -36132,6 +36246,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         join_tag = ""
         if tag:
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
+            if self.backend_type == BackendType.POSTGRESQL:
+                join_tag += " AND kw.client_id = f.client_id"
             where_clauses.append("kw.keyword = ?")
             params.append(tag)
 
@@ -36196,6 +36312,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ]
             )
 
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.extend(["f.client_id = ?", "kw.client_id = f.client_id", "(d.id IS NULL OR d.client_id = f.client_id)"])
+            params.append(self.client_id)
+
         if normalized_q:
             where_clauses.append("LOWER(kw.keyword) LIKE ?")
             params.append(f"%{normalized_q.lower()}%")
@@ -36232,18 +36352,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return []
         placeholders = ",".join(["?"] * len(uuids))
         deleted_clause = "f.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "f.deleted = 0"
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
               FROM flashcards f
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE f.uuid IN ({placeholders}) AND {deleted_clause}
-        """.format_map(locals())  # nosec B608
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE f.uuid IN ({placeholders}) AND {deleted_clause}{owner_filter}
+        """  # nosec B608
         try:
-            cursor = self.execute_query(query, tuple(uuids), read_only=True)
+            cursor = self.execute_query(query, (*uuids, *owner_params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -36317,8 +36439,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         visibility_suffix = f" AND {visibility_clause}" if visibility_clause else ""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        visibility_suffix += owner_filter
+        visibility_params = (*visibility_params, *owner_params)
         if deck_id is None:
             selections: tuple[tuple[str, str, tuple[Any, ...]], ...] = (
                 (
@@ -36358,29 +36484,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (
                         "SELECT uuid FROM flashcards f "
                         "WHERE f.deleted = ? AND f.queue_state IN ('learning', 'relearning') "
-                        "AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ? "
-                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"
+                        f"AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, now_iso, deck_id),
+                    (deleted_value, now_iso, deck_id, *owner_params),
                 ),
                 (
                     "review_due",
                     (
                         "SELECT uuid FROM flashcards f "
                         "WHERE f.deleted = ? AND f.queue_state = 'review' "
-                        "AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ? "
-                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"
+                        f"AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, now_iso, deck_id),
+                    (deleted_value, now_iso, deck_id, *owner_params),
                 ),
                 (
                     "new",
                     (
                         "SELECT uuid FROM flashcards f "
-                        "WHERE f.deleted = ? AND f.queue_state = 'new' AND f.deck_id = ? "
-                        "ORDER BY f.created_at ASC, f.id ASC LIMIT 1"
+                        f"WHERE f.deleted = ? AND f.queue_state = 'new' AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.created_at ASC, f.id ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, deck_id),
+                    (deleted_value, deck_id, *owner_params),
                 ),
             )
         try:
@@ -36476,7 +36602,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Return the current deck name to snapshot when a review session starts."""
         if deck_id is None:
             return None
-        row = conn.execute("SELECT name FROM decks WHERE id = ?", (int(deck_id),)).fetchone()
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        row = conn.execute("SELECT name FROM decks WHERE id = ?" + owner_filter, (int(deck_id), *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
         if not row:
             return None
         try:
@@ -36486,27 +36613,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return self._normalize_nullable_text(raw_name)
 
     def _get_flashcard_review_session_row_for_conn(self, conn: Any, session_id: int) -> dict[str, Any] | None:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         row = conn.execute(
-            """
+            f"""
             SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
-             WHERE id = ?
-            """,
-            (int(session_id),),
+             WHERE id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
         ).fetchone()
         return self._deserialize_flashcard_review_session_row(row) if row else None
 
     def _get_flashcard_review_session_reconstructed_aggregates(self, conn: Any, session_id: int) -> tuple[int, int]:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS cards_reviewed,
                    COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0) AS correct_count
               FROM flashcard_reviews
-             WHERE review_session_id = ?
-            """,
-            (int(session_id),),
+             WHERE review_session_id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
         ).fetchone()
         if not row:
             return 0, 0
@@ -36522,19 +36651,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         repaired_cards_reviewed: int,
         repaired_correct_count: int,
     ) -> bool:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         cursor = conn.execute(
-            """
+            f"""
             UPDATE flashcard_review_sessions
                SET cards_reviewed = ?,
                    correct_count = ?
-             WHERE id = ?
+             WHERE id = ?{owner_filter}
                AND ((cards_reviewed IS NULL AND ? IS NULL) OR cards_reviewed = ?)
                AND ((correct_count IS NULL AND ? IS NULL) OR correct_count = ?)
-            """,
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
             (
                 repaired_cards_reviewed,
                 repaired_correct_count,
                 int(session_id),
+                *owner_params,
                 expected_cards_reviewed,
                 expected_cards_reviewed,
                 expected_correct_count,
@@ -36554,7 +36685,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND last_activity_at < ?
             """
         )
-        params: list[Any] = [cutoff]
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query += owner_filter
+        params: list[Any] = [cutoff, *owner_params]
         if scope_key:
             query += " AND scope_key = ?"
             params.append(scope_key)
@@ -36581,7 +36714,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE 1 = 1
             """
         ]
-        params: list[Any] = []
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query_parts.append(owner_filter)
+        params: list[Any] = list(owner_params)
         if deck_id is not None:
             query_parts.append("AND deck_id = ?")
             params.append(int(deck_id))
@@ -36615,20 +36750,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_mode = self._normalize_flashcard_review_mode(review_mode)
         normalized_tag_filter = self._normalize_nullable_text(tag_filter)
         self.abandon_stale_flashcard_review_sessions(scope_key=normalized_scope_key)
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
 
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
-                     WHERE scope_key = ? AND status = 'active'
+                     WHERE scope_key = ? AND status = 'active'{owner_filter}
                      ORDER BY last_activity_at DESC, started_at DESC, id DESC
-                    """,
-                    (normalized_scope_key,),
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (normalized_scope_key, *owner_params),
                 ).fetchall()
                 if rows:
                     authoritative = self._deserialize_flashcard_review_session_row(rows[0]) or {}
@@ -36636,16 +36773,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         duplicate_ids = [int(row["id"]) for row in rows[1:]]
                         placeholders = ", ".join("?" for _ in duplicate_ids)
                         conn.execute(
-                            f"UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id IN ({placeholders})",  # nosec B608
-                            tuple(duplicate_ids),
+                            f"UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id IN ({placeholders}){owner_filter}",  # nosec B608
+                            (*duplicate_ids, *owner_params),
                         )
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_review_sessions
                            SET last_activity_at = ?
-                        WHERE id = ?
-                        """,
-                        (now, int(authoritative["id"])),
+                        WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, int(authoritative["id"]), *owner_params),
                     )
                     authoritative["last_activity_at"] = now
                     return authoritative
@@ -36703,14 +36840,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if session_id is None:
                     raise CharactersRAGDBError("Failed to determine flashcard review session ID after insert")  # noqa: TRY003
                 row = conn.execute(
-                    """
+                    f"""
                     SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
-                     WHERE id = ?
-                    """,
-                    (session_id,),
+                     WHERE id = ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (session_id, *owner_params),
                 ).fetchone()
                 return self._deserialize_flashcard_review_session_row(row) or {}
         except sqlite3.Error as exc:
@@ -36720,15 +36857,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_review_session(self, session_id: int) -> dict[str, Any] | None:
         """Fetch a single flashcard review session by id, or None if not found."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         cursor = self.execute_query(
-            """
+            f"""
             SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
-             WHERE id = ?
-            """,
-            (int(session_id),),
+             WHERE id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
             read_only=True,
         )
         row = cursor.fetchone()
@@ -36736,30 +36874,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def mark_flashcard_review_session_completed(self, session_id: int) -> dict[str, Any]:
         """Mark a persisted review session as completed."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 UPDATE flashcard_review_sessions
                    SET status = 'completed',
                        last_activity_at = ?,
                        completed_at = ?
-                 WHERE id = ?
-                """,
-                (now, now, int(session_id)),
+                 WHERE id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (now, now, int(session_id), *owner_params),
                 commit=True,
             )
             if getattr(cursor, "rowcount", 0) == 0:
                 raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", entity_id=session_id)  # noqa: TRY003
             row = self.execute_query(
-                """
+                f"""
                 SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                        started_at, last_activity_at, completed_at, client_id,
                        cards_reviewed, correct_count, source_bundle_json, study_pack_id
                   FROM flashcard_review_sessions
-                 WHERE id = ?
-                """,
-                (int(session_id),),
+                 WHERE id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(session_id), *owner_params),
                 read_only=True,
             ).fetchone()
             return self._deserialize_flashcard_review_session_row(row) or {}
@@ -36847,8 +36986,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_reviewed_cards(self, session_id: int) -> list[dict[str, Any]]:
         """Return reviewed flashcard metadata for a session in review order."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND fr.client_id = f.client_id AND EXISTS (SELECT 1 FROM flashcard_review_sessions s WHERE s.id = fr.review_session_id AND s.client_id = f.client_id)"
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         cursor = self.execute_query(
-            """
+            f"""
             SELECT f.uuid,
                    MAX(f.tags_json) AS tags_json,
                    MAX(f.source_ref_type) AS source_ref_type,
@@ -36856,31 +36999,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    MAX(d.name) AS deck_name
               FROM flashcard_reviews fr
               JOIN flashcards f ON f.id = fr.card_id
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE fr.review_session_id = ?
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE fr.review_session_id = ?{owner_filter}
              GROUP BY f.uuid
              ORDER BY MIN(fr.id)
-            """,
-            (int(session_id),),
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
             read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
     def get_latest_flashcard_review(self, card_uuid: str) -> dict[str, Any] | None:
         """Return the most recent review row for a flashcard, including nullable session linkage."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND fr.client_id = f.client_id"
         cursor = self.execute_query(
-            """
+            f"""
             SELECT fr.id, fr.card_id, fr.reviewed_at, fr.rating, fr.answer_time_ms,
                    fr.scheduled_interval_days, fr.new_ef, fr.new_repetitions, fr.was_lapse,
                    fr.client_id, fr.scheduler_type, fr.previous_queue_state, fr.next_queue_state,
                    fr.previous_due_at, fr.next_due_at, fr.review_session_id
               FROM flashcard_reviews fr
               JOIN flashcards f ON f.id = fr.card_id
-             WHERE f.uuid = ?
+             WHERE f.uuid = ?{owner_filter}
              ORDER BY fr.id DESC
              LIMIT 1
-            """,
-            (card_uuid,),
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (card_uuid, *owner_params),
             read_only=True,
         )
         row = cursor.fetchone()
@@ -36904,22 +37050,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         per-card deck scope. Acknowledged session IDs must still be active and
         match that explicit context before any review or scheduling write.
         """
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        card_owner_filter, _ = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         now_dt = datetime.now(timezone.utc)
         now = to_iso_z(now_dt) or self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 card = conn.execute(
-                    """
+                    f"""
                     SELECT f.id, f.uuid, f.deck_id, f.ef, f.interval_days, f.repetitions, f.lapses,
                            f.due_at, f.last_reviewed_at, f.queue_state, f.step_index, f.suspended_reason,
                            f.scheduler_state_json,
                            COALESCE(d.scheduler_type, 'sm2_plus') AS scheduler_type,
                            COALESCE(d.scheduler_settings_json, ?) AS scheduler_settings_json
                       FROM flashcards f
-                      LEFT JOIN decks d ON d.id = f.deck_id
-                     WHERE f.uuid = ? AND f.deleted = 0
-                    """,
-                    (scheduler_settings_to_json(None), card_uuid),
+                      LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+                     WHERE f.uuid = ? AND f.deleted = 0{card_owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (scheduler_settings_to_json(None), card_uuid, *owner_params),
                 ).fetchone()
                 if not card:
                     raise ConflictError(
@@ -36939,14 +37088,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if explicit_scope and scope_deck_id is not None and scope_deck_id != card_deck_id:
                     raise InputError("Review context must include the flashcard deck")  # noqa: TRY003
                 if scope_tag:
+                    tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
                     keyword_table = self._map_table_for_backend("keywords")
                     matching_tag = conn.execute(
                         f"""
                         SELECT 1 FROM flashcard_keywords fk
                         JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-                        WHERE fk.card_id = ? AND kw.keyword = ?
+                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
                         """,  # nosec B608 -- keyword table comes from the backend mapping
-                        (card_id, scope_tag),
+                        (card_id, scope_tag, *tag_owner_params),
                     ).fetchone()
                     if not matching_tag:
                         raise InputError("Flashcard does not match the review tag filter")  # noqa: TRY003
@@ -36961,13 +37111,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     resolved_review_session_id = int(auto_session["id"])
                 if resolved_review_session_id is not None:
                     session_row = conn.execute(
-                        """
+                        f"""
                         SELECT id, deck_id, status, review_mode, tag_filter, scope_key,
                                CASE WHEN last_activity_at < ? THEN 1 ELSE 0 END AS is_stale
                           FROM flashcard_review_sessions
-                         WHERE id = ?
-                        """,
-                        (to_iso_z(now_dt - _FLASHCARD_REVIEW_SESSION_TIMEOUT), resolved_review_session_id),
+                         WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (to_iso_z(now_dt - _FLASHCARD_REVIEW_SESSION_TIMEOUT), resolved_review_session_id, *owner_params),
                     ).fetchone()
                     if not session_row:
                         raise ConflictError(
@@ -37004,13 +37154,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcards
                        SET ef = ?, interval_days = ?, repetitions = ?, lapses = ?,
                            due_at = ?, last_reviewed_at = ?, queue_state = ?, step_index = ?,
                            suspended_reason = ?, scheduler_state_json = ?, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE id = ? AND deleted = 0
-                    """,
+                     WHERE id = ? AND deleted = 0{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
                     (
                         upd["ef"],
                         upd["interval_days"],
@@ -37025,6 +37175,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         now,
                         self.client_id,
                         card_id,
+                        *owner_params,
                     )
                 )
                 conn.execute(
@@ -37057,23 +37208,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if resolved_review_session_id is not None:
                     correct_increment = 1 if int(rating) >= 3 else 0
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_review_sessions
                            SET last_activity_at = ?,
                                cards_reviewed = COALESCE(cards_reviewed, 0) + 1,
                                correct_count = COALESCE(correct_count, 0) + ?
-                         WHERE id = ?
-                        """,
-                        (now, correct_increment, resolved_review_session_id),
+                         WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, correct_increment, resolved_review_session_id, *owner_params),
                     )
                 updated = conn.execute(
-                    """
+                    f"""
                     SELECT uuid, ef, interval_days, repetitions, lapses, due_at, last_reviewed_at,
                            last_modified, version, queue_state, step_index, suspended_reason, scheduler_state_json
                       FROM flashcards
-                     WHERE id = ?
-                    """,
-                    (card_id,)
+                     WHERE id = ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_id, *owner_params)
                 ).fetchone()
                 updated_payload = dict(updated)
                 updated_payload["scheduler_type"] = scheduler_type
@@ -37107,10 +37258,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         visibility_suffix = f" AND {visibility_clause}" if visibility_clause else ""
-        metrics_join = visibility_join or " LEFT JOIN decks d ON d.id = f.deck_id"
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        visibility_suffix += owner_filter
+        visibility_params = (*visibility_params, *owner_params)
+        metrics_join = visibility_join or f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}"
         metrics_suffix = f"{visibility_suffix} AND (d.id IS NULL OR d.deleted = 0)"
+        if self.backend_type == BackendType.POSTGRESQL:
+            metrics_suffix += " AND fr.client_id = f.client_id"
         deck_rows_clause, deck_rows_params, _ = self._flashcard_visibility_filter(
             deck_id=normalized_deck_id,
             workspace_id=workspace_id,
@@ -37119,6 +37276,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             deck_id_column="d.id",
         )
         deck_rows_suffix = f" AND {deck_rows_clause}" if deck_rows_clause else ""
+        deck_owner_filter, deck_owner_params = self._flashcard_owner_filter("d")
+        deck_rows_suffix += deck_owner_filter
+        deck_rows_params = (*deck_rows_params, *deck_owner_params)
 
         try:
             # Daily review metrics
@@ -37194,7 +37354,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 FROM decks d
                 LEFT JOIN flashcards f
                     ON f.deck_id = d.id
-                   AND f.deleted = 0
+                   AND f.deleted = 0{deck_owner_join}
                 WHERE d.deleted = 0{deck_rows_suffix}
                 GROUP BY d.id, d.name
                 ORDER BY d.name ASC
@@ -37290,18 +37450,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard(self, card_uuid: str) -> dict[str, Any] | None:
         """Fetch a single flashcard by uuid (active only)."""
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason, f.scheduler_state_json, d.scheduler_type,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
               FROM flashcards f
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE f.uuid = ? AND f.deleted = 0
-        """
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE f.uuid = ? AND f.deleted = 0{owner_filter}
+        """  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (card_uuid,), read_only=True)
+            cur = self.execute_query(query, (card_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -37358,16 +37520,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_asset(self, asset_uuid: str) -> dict[str, Any] | None:
         """Fetch flashcard asset metadata by UUID."""
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("fa")
+        card_owner_join = " AND f.client_id = fa.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT fa.uuid, fa.mime_type, fa.original_filename, fa.byte_size, fa.sha256,
                    fa.width, fa.height, fa.created_at, fa.last_modified, fa.deleted,
                    fa.client_id, fa.version, f.uuid AS card_uuid
               FROM flashcard_assets fa
-              LEFT JOIN flashcards f ON f.id = fa.card_id
-             WHERE fa.uuid = ? AND fa.deleted = 0
-        """
+              LEFT JOIN flashcards f ON f.id = fa.card_id{card_owner_join}
+             WHERE fa.uuid = ? AND fa.deleted = 0{owner_filter}
+        """  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (asset_uuid,), read_only=True)
+            cur = self.execute_query(query, (asset_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -37375,9 +37539,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_asset_content(self, asset_uuid: str) -> bytes | None:
         """Fetch raw bytes for a flashcard asset by UUID."""
-        query = "SELECT image_data FROM flashcard_assets WHERE uuid = ? AND deleted = 0"
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query = "SELECT image_data FROM flashcard_assets WHERE uuid = ? AND deleted = 0" + owner_filter  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (asset_uuid,), read_only=True)
+            cur = self.execute_query(query, (asset_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -37398,6 +37563,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         notes: str | None,
     ) -> list[str]:
         """Attach referenced assets to a card and detach removed assets."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         referenced_asset_uuids: list[str] = []
         for text in (front, back, extra, notes):
             for asset_uuid in extract_flashcard_asset_uuids(text):
@@ -37407,15 +37573,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 card_row = conn.execute(
-                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
-                    (card_uuid,),
+                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_uuid, *owner_params),
                 ).fetchone()
                 if not card_row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
                 card_id = int(card_row["id"])
 
                 existing_asset_rows = conn.execute(
-                    "SELECT id, uuid, card_id FROM flashcard_assets WHERE deleted = 0"
+                    "SELECT id, uuid, card_id FROM flashcard_assets WHERE deleted = 0" + owner_filter, owner_params  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 ).fetchall()
                 assets_by_uuid = {str(row["uuid"]): row for row in existing_asset_rows}
                 for asset_uuid in referenced_asset_uuids:
@@ -37433,17 +37599,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 now = self._get_current_utc_timestamp_iso()
                 for asset_uuid in referenced_asset_uuids:
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_assets
                            SET card_id = ?, last_modified = ?, version = version + 1, client_id = ?
-                         WHERE uuid = ? AND deleted = 0
-                        """,
-                        (card_id, now, self.client_id, asset_uuid),
+                         WHERE uuid = ? AND deleted = 0{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (card_id, now, self.client_id, asset_uuid, *owner_params),
                     )
 
                 existing_attached_rows = conn.execute(
-                    "SELECT uuid FROM flashcard_assets WHERE card_id = ? AND deleted = 0",
-                    (card_id,),
+                    "SELECT uuid FROM flashcard_assets WHERE card_id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_id, *owner_params),
                 ).fetchall()
                 referenced_set = set(referenced_asset_uuids)
                 for row in existing_attached_rows:
@@ -37451,12 +37617,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if existing_uuid in referenced_set:
                         continue
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_assets
                            SET card_id = NULL, last_modified = ?, version = version + 1, client_id = ?
-                         WHERE uuid = ? AND deleted = 0
-                        """,
-                        (now, self.client_id, existing_uuid),
+                         WHERE uuid = ? AND deleted = 0{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, self.client_id, existing_uuid, *owner_params),
                     )
             return referenced_asset_uuids
         except (BackendDatabaseError, sqlite3.Error) as exc:
@@ -37464,13 +37630,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def cleanup_stale_flashcard_assets(self, *, older_than: timedelta | None = None) -> int:
         """Soft-delete unattached flashcard assets older than the provided age."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         age = older_than or timedelta(hours=24)
         cutoff = (datetime.now(timezone.utc) - age).strftime("%Y-%m-%dT%H:%M:%SZ")
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 cursor = conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_assets
                        SET deleted = 1,
                            last_modified = ?,
@@ -37478,9 +37645,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                            client_id = ?
                      WHERE card_id IS NULL
                        AND deleted = 0
-                       AND created_at <= ?
-                    """,
-                    (now, self.client_id, cutoff),
+                       AND created_at <= ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, self.client_id, cutoff, *owner_params),
                 )
                 return int(cursor.rowcount or 0)
         except (BackendDatabaseError, sqlite3.Error) as exc:
@@ -37497,6 +37664,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Update mutable fields: deck_id, front, back, notes, is_cloze, tags_json.
         If expected_version is provided, enforce optimistic locking.
         """
+        owner_filter, owner_params = self._flashcard_owner_filter()
         allowed = {"deck_id", "front", "back", "notes", "extra", "is_cloze", "tags_json", "model_type", "reverse"}
         set_parts = []
         params: list[Any] = []
@@ -37519,18 +37687,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             set_parts.append("tags_json = ?")
             params.append(json.dumps(norm_tags))
         if not set_parts:
-            if expected_version is None:
+            if expected_version is None and self.backend_type != BackendType.POSTGRESQL:
                 return True
             try:
                 with self.transaction() as conn:
                     row = conn.execute(
-                        "SELECT version FROM flashcards WHERE uuid = ? AND deleted = 0",
-                        (card_uuid,),
+                        "SELECT version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (card_uuid, *owner_params),
                     ).fetchone()
                     if not row:
                         raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
                     current_version = int(row["version"])
-                    if current_version != expected_version:
+                    if expected_version is not None and current_version != expected_version:
                         raise ConflictError(  # noqa: TRY003
                             "Version mismatch updating flashcard",
                             entity="flashcards",
@@ -37546,16 +37714,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 # get id and (optionally) version
-                row = conn.execute("SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
                 card_id, current_version = int(row["id"]), int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating flashcard", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
+                if "deck_id" in updates:
+                    self._validate_flashcard_deck_locked(conn, updates["deck_id"])
                 if norm_tags is not None:
                     self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
-                params_final = params + [card_id]
-                query = f"UPDATE flashcards SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                params_final = params + [card_id, *owner_params]
+                query = f"UPDATE flashcards SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0{owner_filter}"  # nosec B608
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -37563,10 +37733,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def soft_delete_flashcard(self, card_uuid: str, expected_version: int) -> bool:
         """Soft delete a flashcard with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM flashcards WHERE uuid = ?", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id, version, deleted FROM flashcards WHERE uuid = ?" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
                 card_id, cur_ver, deleted = int(row["id"]), int(row["version"]), int(row["deleted"])
@@ -37575,8 +37746,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if cur_ver != expected_version:
                     raise ConflictError("Version mismatch deleting flashcard", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
                 rc = conn.execute(
-                    "UPDATE flashcards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0",
-                    (now, expected_version + 1, self.client_id, card_id)
+                    "UPDATE flashcards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, expected_version + 1, self.client_id, card_id, *owner_params)
                 ).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -37584,12 +37755,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def reset_flashcard_scheduling(self, card_uuid: str, expected_version: int | None = None) -> bool:
         """Reset scheduling fields to new-card defaults with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 row = conn.execute(
-                    "SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0",
-                    (card_uuid,),
+                    "SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_uuid, *owner_params),
                 ).fetchone()
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
@@ -37601,7 +37773,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         identifier=card_uuid,
                     )  # noqa: TRY003
                 rc = conn.execute(
-                    """
+                    f"""
                     UPDATE flashcards
                        SET ef = 2.5,
                            interval_days = 0,
@@ -37610,15 +37782,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                            queue_state = 'new',
                            step_index = NULL,
                            suspended_reason = NULL,
-                           scheduler_state_json = '{}',
+                           scheduler_state_json = '{{}}',
                            due_at = ?,
                            last_reviewed_at = NULL,
                            last_modified = ?,
                            version = version + 1,
                            client_id = ?
-                     WHERE id = ? AND deleted = 0
-                    """,
-                    (now, now, self.client_id, card_id),
+                     WHERE id = ? AND deleted = 0{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, now, self.client_id, card_id, *owner_params),
                 ).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -37626,6 +37798,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_keywords_for_flashcard(self, card_uuid: str) -> list[dict[str, Any]]:
         """Return keywords linked to a flashcard."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND kw.client_id = f.client_id"
         keyword_table = self._map_table_for_backend("keywords")
         order_clause = self._case_insensitive_order_clause("kw.keyword")
         query = """
@@ -37633,11 +37808,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM flashcards f
               JOIN flashcard_keywords fk ON fk.card_id = f.id
               JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-             WHERE f.uuid = ? AND f.deleted = 0 AND kw.deleted = 0
+             WHERE f.uuid = ? AND f.deleted = 0 AND kw.deleted = 0{owner_filter}
              {order_clause}
         """.format_map(locals())  # nosec B608
         try:
-            cur = self.execute_query(query, (card_uuid,), read_only=True)
+            cur = self.execute_query(query, (card_uuid, *owner_params), read_only=True)
             return [dict(r) for r in cur.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -37648,18 +37823,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Ensures keywords exist, links missing, removes extra.
         Also updates flashcards.tags_json accordingly.
         """
+        owner_filter, owner_params = self._flashcard_owner_filter()
         norm_tags = [t.strip() for t in tags if t and t.strip()]
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
                 card_id = int(row["id"])
                 self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
                 # update tags_json mirror
                 conn.execute(
-                    "UPDATE flashcards SET tags_json = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?",
-                    (json.dumps(norm_tags), self._get_current_utc_timestamp_iso(), self.client_id, card_id),
+                    "UPDATE flashcards SET tags_json = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (json.dumps(norm_tags), self._get_current_utc_timestamp_iso(), self.client_id, card_id, *owner_params),
                 )
                 return True
         except sqlite3.Error as e:
@@ -37677,8 +37853,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # ensure keywords exist and collect ids
         desired_kw_ids = set()
         for t in tags:
-            kw = self.get_keyword_by_text(t)
-            kid = self.add_keyword(t) if not kw else kw['id']
+            if self.backend_type == BackendType.POSTGRESQL:
+                kid = self._flashcard_owned_keyword_id(conn, t)
+            else:
+                kw = self.get_keyword_by_text(t)
+                kid = self.add_keyword(t) if not kw else kw['id']
             if kid is not None:
                 desired_kw_ids.add(int(kid))
         # link missing
@@ -37697,6 +37876,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # unlink extras
         for kid in cur_kw_ids - desired_kw_ids:
             conn.execute("DELETE FROM flashcard_keywords WHERE card_id = ? AND keyword_id = ?", (card_id, int(kid)))
+
+    def _flashcard_owned_keyword_id(self, conn: Any, text: str) -> int:
+        """Resolve an owner-local PostgreSQL tag without changing generic keyword APIs."""
+        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+        now = self._get_current_utc_timestamp_iso()
+        conn.execute(
+            "INSERT INTO chacha_keywords(sync_id, keyword, created_at, last_modified, deleted, client_id, version) "
+            "VALUES (?, ?, ?, ?, FALSE, ?, 1) "
+            "ON CONFLICT (client_id, LOWER(keyword)) DO NOTHING",
+            (new_organization_sync_id(), text, now, now, self.client_id),
+        )
+        row = conn.execute(
+            "SELECT id, deleted FROM chacha_keywords WHERE client_id = ? AND LOWER(keyword) = LOWER(?) FOR UPDATE",
+            (self.client_id, text),
+        ).fetchone()
+        if not row:
+            raise CharactersRAGDBError("Flashcard keyword could not be resolved")  # noqa: TRY003
+        if row["deleted"]:
+            conn.execute(
+                "UPDATE chacha_keywords SET deleted = FALSE, last_modified = ?, version = version + 1 "
+                "WHERE id = ? AND client_id = ? AND deleted = TRUE",
+                (now, row["id"], self.client_id),
+            )
+        return int(row["id"])
 
     # ==========================
     # Source Review Plans
@@ -38827,6 +39031,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def soft_delete_deck_by_id(self, deck_id: int, expected_version: int | None = None) -> None:
         """Best-effort soft-delete of a deck by id, optionally with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
@@ -38840,18 +39045,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if expected_version is not None:
                     version_clause = " AND version = ?"
                     params.append(int(expected_version))
+                params.extend(owner_params)
                 rowcount = conn.execute(
                     f"""
                     UPDATE decks
                        SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE id = ? AND deleted = 0{version_clause}
+                     WHERE id = ? AND deleted = 0{version_clause}{owner_filter}
                     """,  # nosec B608
                     tuple(params),
                 ).rowcount
                 if rowcount == 0 and expected_version is not None:
                     existing = conn.execute(
-                        "SELECT id FROM decks WHERE id = ? AND deleted = 0",
-                        (int(deck_id),),
+                        "SELECT id FROM decks WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (int(deck_id), *owner_params),
                     ).fetchone()
                     if existing is None:
                         raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003

@@ -12,7 +12,7 @@ from PIL import Image
 
 from tldw_Server_API.app.api.v1.endpoints import flashcards
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
 
 
 def _build_png_bytes():
@@ -104,6 +104,8 @@ def test_unavailable_asset_returns_none_and_actual_http_404(asset_db, state):
 def test_named_binary_row_preserves_conversion_and_defensive_null(monkeypatch, blob):
     """NULL is defensive only: both real database schemas require image_data."""
     db = object.__new__(CharactersRAGDB)
+    db.client_id = "row-owner"
+    monkeypatch.setattr(CharactersRAGDB, "backend_type", property(lambda _self: BackendType.POSTGRESQL))
     monkeypatch.setattr(
         db, "execute_query", lambda *_args, **_kwargs: SimpleNamespace(fetchone=lambda: {"image_data": blob})
     )
