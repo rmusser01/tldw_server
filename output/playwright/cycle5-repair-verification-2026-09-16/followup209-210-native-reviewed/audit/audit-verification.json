@@ -1,0 +1,31 @@
+{
+  "notes_api_requests": 23,
+  "notes_api_passed": true,
+  "original_source_unchanged_version": 1,
+  "bidirectional_foreign_get_patch_404": true,
+  "own_patch_read_versions": 2,
+  "reloads": {
+    "Alice": {
+      "catalog_at": "2026-09-17T08:32:03.587Z",
+      "owner": "2",
+      "count": 4,
+      "saved_version": 4,
+      "keyword_count": 6,
+      "editor_after_reload": "New note"
+    },
+    "Bob": {
+      "catalog_at": "2026-09-17T08:37:39.959Z",
+      "owner": "3",
+      "count": 3,
+      "saved_version": 2,
+      "keyword_count": 7,
+      "editor_after_reload": "New note"
+    }
+  },
+  "admin_graph_focused_all_200": true,
+  "graph_original_harness_prefix_failure_preserved": true,
+  "graph_note_id": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+  "application_ownership_only": true,
+  "restricted_role_RLS_native_acceptance": false,
+  "no_browser_or_network_actions_by_reviewer": true
+}

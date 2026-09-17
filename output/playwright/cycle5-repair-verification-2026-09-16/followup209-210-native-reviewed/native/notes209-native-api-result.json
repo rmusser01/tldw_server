@@ -1,0 +1,1177 @@
+{
+  "at": "2026-09-17T08:15:47.171Z",
+  "passed": true,
+  "scope": "Running PostgreSQL API; fresh synthetic Alice/Bob sessions, no browser credential access. Test-created Notes plus read-only original source control. Existing native service role remains privileged; this verifies application ownership.",
+  "aliceId": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+  "bobId": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+  "records": [
+    {
+      "at": "2026-09-17T08:15:46.297Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T08:15:46.316Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "username": "alice"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.365Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "status": 200
+    },
+    {
+      "at": "2026-09-17T08:15:46.377Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "username": "bob"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.415Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+      "status": 200,
+      "body": {
+        "title": "Alice UAT151 Citrine study",
+        "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "created_at": "2026-09-16T22:24:06.233000Z",
+        "last_modified": "2026-09-16T22:24:06.233000Z",
+        "version": 1,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.631Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.654Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/?include_keywords=true&results_per_page=100",
+      "status": 200,
+      "body": {
+        "notes": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "items": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "results": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "count": 3,
+        "limit": 100,
+        "offset": 0,
+        "total": 3,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 3,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.677Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/notes/?include_keywords=true&results_per_page=100",
+      "status": 200,
+      "body": {
+        "notes": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "items": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "results": [
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "count": 2,
+        "limit": 100,
+        "offset": 0,
+        "total": 2,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 2,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.748Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/notes/",
+      "request": {
+        "title": "UAT209 owned note 20260917 0815 Alice",
+        "content": "Synthetic private Alice teal lantern.",
+        "keywords": [
+          "uat209-alice+tag"
+        ]
+      },
+      "status": 201,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Alice",
+        "content": "Synthetic private Alice teal lantern.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+        "created_at": "2026-09-17T08:15:46.704000Z",
+        "last_modified": "2026-09-17T08:15:46.704000Z",
+        "version": 1,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-alice+tag",
+            "id": 12,
+            "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+            "created_at": "2026-09-17T08:15:46.723000Z",
+            "last_modified": "2026-09-17T08:15:46.723000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.834Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/notes/",
+      "request": {
+        "title": "UAT209 owned note 20260917 0815 Bob",
+        "content": "Synthetic private Bob orange compass.",
+        "keywords": [
+          "uat209-bob+tag"
+        ]
+      },
+      "status": 201,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Bob",
+        "content": "Synthetic private Bob orange compass.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+        "created_at": "2026-09-17T08:15:46.809000Z",
+        "last_modified": "2026-09-17T08:15:46.809000Z",
+        "version": 1,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-bob+tag",
+            "id": 13,
+            "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+            "created_at": "2026-09-17T08:15:46.814000Z",
+            "last_modified": "2026-09-17T08:15:46.814000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.856Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/?include_keywords=true&results_per_page=100",
+      "status": 200,
+      "body": {
+        "notes": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Alice",
+            "content": "Synthetic private Alice teal lantern.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+            "created_at": "2026-09-17T08:15:46.704000Z",
+            "last_modified": "2026-09-17T08:15:46.704000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-alice+tag",
+                "id": 12,
+                "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+                "created_at": "2026-09-17T08:15:46.723000Z",
+                "last_modified": "2026-09-17T08:15:46.723000Z",
+                "version": 1,
+                "client_id": "2",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "items": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Alice",
+            "content": "Synthetic private Alice teal lantern.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+            "created_at": "2026-09-17T08:15:46.704000Z",
+            "last_modified": "2026-09-17T08:15:46.704000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-alice+tag",
+                "id": 12,
+                "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+                "created_at": "2026-09-17T08:15:46.723000Z",
+                "last_modified": "2026-09-17T08:15:46.723000Z",
+                "version": 1,
+                "client_id": "2",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "results": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Alice",
+            "content": "Synthetic private Alice teal lantern.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+            "created_at": "2026-09-17T08:15:46.704000Z",
+            "last_modified": "2026-09-17T08:15:46.704000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-alice+tag",
+                "id": 12,
+                "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+                "created_at": "2026-09-17T08:15:46.723000Z",
+                "last_modified": "2026-09-17T08:15:46.723000Z",
+                "version": 1,
+                "client_id": "2",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+            "created_at": "2026-09-17T07:37:42.654000Z",
+            "last_modified": "2026-09-17T07:37:42.654000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_064702)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+            "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+            "id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+            "created_at": "2026-09-17T07:33:39.230000Z",
+            "last_modified": "2026-09-17T07:33:39.230000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Alice UAT151 Citrine study",
+            "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "created_at": "2026-09-16T22:24:06.233000Z",
+            "last_modified": "2026-09-16T22:24:06.233000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "count": 4,
+        "limit": 100,
+        "offset": 0,
+        "total": 4,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 4,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.882Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/66bc499c-7942-40f9-846d-3a35e52c6f74",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.909Z",
+      "actor": "Alice",
+      "method": "PATCH",
+      "path": "/api/v1/notes/66bc499c-7942-40f9-846d-3a35e52c6f74",
+      "request": {
+        "content": "Unauthorized synthetic attempt",
+        "expected_version": 1
+      },
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.955Z",
+      "actor": "Alice",
+      "method": "PATCH",
+      "path": "/api/v1/notes/87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+      "request": {
+        "content": "Saved own Alice UAT209 body.",
+        "expected_version": 1
+      },
+      "status": 200,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Alice",
+        "content": "Saved own Alice UAT209 body.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+        "created_at": "2026-09-17T08:15:46.704000Z",
+        "last_modified": "2026-09-17T08:15:46.940000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-alice+tag",
+            "id": 12,
+            "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+            "created_at": "2026-09-17T08:15:46.723000Z",
+            "last_modified": "2026-09-17T08:15:46.723000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:46.983Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+      "status": 200,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Alice",
+        "content": "Saved own Alice UAT209 body.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+        "created_at": "2026-09-17T08:15:46.704000Z",
+        "last_modified": "2026-09-17T08:15:46.940000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-alice+tag",
+            "id": 12,
+            "sync_id": "8d5b23e7-fa12-47c4-8d0d-05b7b92a8d93",
+            "created_at": "2026-09-17T08:15:46.723000Z",
+            "last_modified": "2026-09-17T08:15:46.723000Z",
+            "version": 1,
+            "client_id": "2",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.005Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/notes/?include_keywords=true&results_per_page=100",
+      "status": 200,
+      "body": {
+        "notes": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Bob",
+            "content": "Synthetic private Bob orange compass.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+            "created_at": "2026-09-17T08:15:46.809000Z",
+            "last_modified": "2026-09-17T08:15:46.809000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-bob+tag",
+                "id": 13,
+                "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+                "created_at": "2026-09-17T08:15:46.814000Z",
+                "last_modified": "2026-09-17T08:15:46.814000Z",
+                "version": 1,
+                "client_id": "3",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "items": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Bob",
+            "content": "Synthetic private Bob orange compass.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+            "created_at": "2026-09-17T08:15:46.809000Z",
+            "last_modified": "2026-09-17T08:15:46.809000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-bob+tag",
+                "id": 13,
+                "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+                "created_at": "2026-09-17T08:15:46.814000Z",
+                "last_modified": "2026-09-17T08:15:46.814000Z",
+                "version": 1,
+                "client_id": "3",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "results": [
+          {
+            "title": "UAT209 owned note 20260917 0815 Bob",
+            "content": "Synthetic private Bob orange compass.",
+            "conversation_id": null,
+            "message_id": null,
+            "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+            "created_at": "2026-09-17T08:15:46.809000Z",
+            "last_modified": "2026-09-17T08:15:46.809000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [
+              {
+                "keyword": "uat209-bob+tag",
+                "id": 13,
+                "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+                "created_at": "2026-09-17T08:15:46.814000Z",
+                "last_modified": "2026-09-17T08:15:46.814000Z",
+                "version": 1,
+                "client_id": "3",
+                "deleted": false,
+                "note_count": null
+              }
+            ],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+            "created_at": "2026-09-17T06:06:32.552000Z",
+            "last_modified": "2026-09-17T06:06:32.552000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          },
+          {
+            "title": "Snippet: Helpful AI Assistant Chat (20260917_043517)",
+            "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+            "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+            "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+            "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+            "created_at": "2026-09-17T06:03:14.175000Z",
+            "last_modified": "2026-09-17T06:03:14.175000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "studio": null,
+            "keywords": [],
+            "folders": [],
+            "keyword_sync": null
+          }
+        ],
+        "count": 3,
+        "limit": 100,
+        "offset": 0,
+        "total": 3,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 100,
+          "offset": 0,
+          "total": 3,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.031Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/notes/87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.050Z",
+      "actor": "Bob",
+      "method": "PATCH",
+      "path": "/api/v1/notes/87c1d02b-0514-4400-bd7b-71be2dcb14f4",
+      "request": {
+        "content": "Unauthorized synthetic attempt",
+        "expected_version": 1
+      },
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.081Z",
+      "actor": "Bob",
+      "method": "PATCH",
+      "path": "/api/v1/notes/66bc499c-7942-40f9-846d-3a35e52c6f74",
+      "request": {
+        "content": "Saved own Bob UAT209 body.",
+        "expected_version": 1
+      },
+      "status": 200,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Bob",
+        "content": "Saved own Bob UAT209 body.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+        "created_at": "2026-09-17T08:15:46.809000Z",
+        "last_modified": "2026-09-17T08:15:47.068000Z",
+        "version": 2,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-bob+tag",
+            "id": 13,
+            "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+            "created_at": "2026-09-17T08:15:46.814000Z",
+            "last_modified": "2026-09-17T08:15:46.814000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.112Z",
+      "actor": "Bob",
+      "method": "GET",
+      "path": "/api/v1/notes/66bc499c-7942-40f9-846d-3a35e52c6f74",
+      "status": 200,
+      "body": {
+        "title": "UAT209 owned note 20260917 0815 Bob",
+        "content": "Saved own Bob UAT209 body.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "66bc499c-7942-40f9-846d-3a35e52c6f74",
+        "created_at": "2026-09-17T08:15:46.809000Z",
+        "last_modified": "2026-09-17T08:15:47.068000Z",
+        "version": 2,
+        "client_id": "3",
+        "deleted": false,
+        "studio": null,
+        "keywords": [
+          {
+            "keyword": "uat209-bob+tag",
+            "id": 13,
+            "sync_id": "8d2f694a-a3aa-40dd-95e5-ec8becbd0dbb",
+            "created_at": "2026-09-17T08:15:46.814000Z",
+            "last_modified": "2026-09-17T08:15:46.814000Z",
+            "version": 1,
+            "client_id": "3",
+            "deleted": false,
+            "note_count": null
+          }
+        ],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.139Z",
+      "actor": "Alice",
+      "method": "GET",
+      "path": "/api/v1/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+      "status": 200,
+      "body": {
+        "title": "Alice UAT151 Citrine study",
+        "content": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+        "created_at": "2026-09-16T22:24:06.233000Z",
+        "last_modified": "2026-09-16T22:24:06.233000Z",
+        "version": 1,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.155Z",
+      "actor": "Alice",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 2
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T08:15:47.171Z",
+      "actor": "Bob",
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "request": {
+        "all_devices": false
+      },
+      "status": 200,
+      "body": {
+        "message": "Successfully logged out",
+        "details": {
+          "user_id": 3
+        }
+      }
+    }
+  ]
+}

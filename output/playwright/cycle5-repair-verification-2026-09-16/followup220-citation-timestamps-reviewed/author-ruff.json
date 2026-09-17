@@ -1,0 +1,56 @@
+[
+  {
+    "cell": null,
+    "code": "F811",
+    "end_location": {
+      "column": 91,
+      "row": 52
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/StudyPacks/test_citation_response_timestamps.py",
+    "fix": null,
+    "location": {
+      "column": 83,
+      "row": 52
+    },
+    "message": "Redefinition of unused `pack_api` from line 14: `pack_api` redefined here",
+    "noqa_row": 52,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/redefined-while-unused"
+  },
+  {
+    "cell": null,
+    "code": "F811",
+    "end_location": {
+      "column": 61,
+      "row": 85
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/StudyPacks/test_citation_response_timestamps.py",
+    "fix": null,
+    "location": {
+      "column": 53,
+      "row": 85
+    },
+    "message": "Redefinition of unused `pack_api` from line 14: `pack_api` redefined here",
+    "noqa_row": 85,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/redefined-while-unused"
+  },
+  {
+    "cell": null,
+    "code": "F811",
+    "end_location": {
+      "column": 71,
+      "row": 96
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/StudyPacks/test_citation_response_timestamps.py",
+    "fix": null,
+    "location": {
+      "column": 63,
+      "row": 96
+    },
+    "message": "Redefinition of unused `pack_api` from line 14: `pack_api` redefined here",
+    "noqa_row": 96,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/redefined-while-unused"
+  }
+]

@@ -1,0 +1,47 @@
+{
+  "source_manifests": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed218-before-restart.json",
+      "sha256": "cb34ddd74a020785832564a7b61f7330380c9968f0759520f27ab32ebeaa8e0d"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed218-after-health.json",
+      "sha256": "cbddaa6d5afdda3c42880fcd8b699852758a93fcdb99e697a1e0f63ce2ca89a3"
+    }
+  ],
+  "revision": "6d06aae9bd03364f1ce68940c41b14f12fb5febe",
+  "before_at": "2026-09-17T08:12:04.990Z",
+  "after_at": "2026-09-17T08:13:09.374Z",
+  "all_3668_source_hashes_equal": true,
+  "relevant_files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/notes.py",
+      "sha256": "b39f809cbaa7bcbca6479ec5cf47f5e40b14f86a1d38ee37e3c69ed526d8f12a"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "d1cfb0b2fe7aae3b1763f7a26cdb3f2b2ae2bbf685b97854e686f6960e4fb652"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "sha256": "d3df23bb98750cd2ab4499938dfa47a80fc14c0b0d24e6081c2d026b0cf8e059"
+    }
+  ],
+  "health": {
+    "oldPid": 56113,
+    "newPid": 76778,
+    "startedAt": "2026-09-17T08:12:33.057Z",
+    "rows": [
+      {
+        "at": "2026-09-17T08:12:45.278Z",
+        "oldAlive": true,
+        "newAlive": true,
+        "status": 200
+      }
+    ]
+  }
+}

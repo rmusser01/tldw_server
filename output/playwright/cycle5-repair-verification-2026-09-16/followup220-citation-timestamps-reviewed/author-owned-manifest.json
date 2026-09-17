@@ -1,0 +1,13 @@
+{
+  "baseline": "Released UAT219 schema SHA26b5919233ef56eb2f84211fbff8b911b751039f2ad91876b1e51b40f7866be8",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/study_packs.py",
+      "sha256": "96843579f5f1c87a855dcb7ab4220bd8114c44ab5ce6ae60188c7add0705349a"
+    },
+    {
+      "path": "tldw_Server_API/tests/StudyPacks/test_citation_response_timestamps.py",
+      "sha256": "d10286fb8dc07d3b41267f67bd687735cdf0c5c35b07b2a6f479609f068dd09d"
+    }
+  ]
+}

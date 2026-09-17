@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-17T08:21:53.154Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    ".tmp/uat219-repair-20260917/test_citation_timestamp_probe.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
