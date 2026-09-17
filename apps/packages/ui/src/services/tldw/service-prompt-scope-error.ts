@@ -109,6 +109,8 @@ export const isServicePromptRequestPath = (
   }
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/chats/") return true
+  if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
+  if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)
 }

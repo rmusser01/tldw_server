@@ -1,3 +1,4 @@
+import { sanitizeImportedHistory, sanitizeImportedMessage, stripHistoryAuthority } from "./history-selection"
 import {
   ChatHistory,
   HistoryInfo,
@@ -285,7 +286,7 @@ export class PageAssistDatabase {
   }
 
   async addChatHistory(history: HistoryInfo) {
-    await db.chatHistories.add(history);
+    await db.chatHistories.add(sanitizeImportedHistory(history));
   }
 
   async updateChatHistoryCreatedAt(id: string, createdAt: number) {
@@ -297,7 +298,7 @@ export class PageAssistDatabase {
   }
 
   async addMessage(message: Message) {
-    await db.messages.add(message);
+    await db.messages.add(stripHistoryAuthority(message));
   }
 
   async updateMessage(history_id: string, message_id: string, content: string) {
@@ -722,7 +723,10 @@ export class PageAssistDatabase {
   }
 
   async setUserID(id: string) {
-    await db.userSettings.put({ id: 'main', user_id: id });
+    await db.transaction('rw', [db.userSettings], async () => {
+      const previous = await db.userSettings.get('main');
+      await db.userSettings.put({ ...previous, id: 'main', user_id: id });
+    });
   }
 
 
@@ -740,8 +744,8 @@ export class PageAssistDatabase {
     // Use transaction for atomic batch operations
     await db.transaction('rw', [db.chatHistories, db.messages], async () => {
       // Collect all histories and messages for bulk operations
-      const histories = data.filter(item => item.history).map(item => item.history);
-      const allMessages = data.flatMap(item => item.messages || []);
+      const histories = data.filter(item => item.history).map(item => sanitizeImportedHistory(item.history));
+      const allMessages = data.flatMap(item => (item.messages || []).map(sanitizeImportedMessage));
 
       // Bulk put histories
       if (histories.length > 0) {

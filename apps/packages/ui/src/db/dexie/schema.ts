@@ -1,3 +1,5 @@
+import type { HistoryBookmark } from "./types";
+import type { LegacyHistoryProjectionV1 } from "@/types/history-selection";
 
 import Dexie, { type Table } from 'dexie';
 import {
@@ -26,6 +28,8 @@ import {
 } from "./types"
 
 export class PageAssistDexieDB extends Dexie {
+  historySelections!: Table<HistoryBookmark>;
+  historyProjections!: Table<LegacyHistoryProjectionV1>;
   chatHistories!: Table<HistoryInfo>;
   messages!: Table<Message>;
   prompts!: Table<Prompt>;
@@ -391,6 +395,11 @@ export class PageAssistDexieDB extends Dexie {
       ttsClips: 'id, createdAt, historyId, serverChatId, messageId, serverMessageId, provider',
       sttRecordings: 'id, createdAt',
       mediaReadAlongAudioCache: 'id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash'
+    });
+    // Structure only: existing mirrors remain unbound; no ancestry rewrite.
+    this.version(15).stores({
+      historySelections: "[profile_id+client_session_id+owner_key+conversation_id], owner_key, conversation_id",
+      historyProjections: "[owner_key+conversation_id+projection_id], owner_key, conversation_id"
     });
   }
 }

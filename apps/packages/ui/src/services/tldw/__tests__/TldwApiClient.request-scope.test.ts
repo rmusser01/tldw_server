@@ -206,3 +206,18 @@ describe("TldwApiClient captured request scope", () => {
     })
   })
 })
+
+describe('H1 native owner scope', () => {
+  it('carries captured lease and independent workspace through both history routes and settlement', async () => {
+    mocks.bgRequest.mockResolvedValue({})
+    const client = new TldwApiClient()
+    const options = { requestScope, scope: { type: 'workspace', workspaceId: '7' }, signal: new AbortController().signal }
+    await client.captureHistorySelection('chat', { view: {} as any, purpose: 'send' }, options as any)
+    await client.confirmHistoryProjection('chat', {} as any, options as any)
+    await client.persistCharacterCompletion('chat', { assistant_message_id: 'reply' }, options as any)
+    for (const [init] of mocks.bgRequest.mock.calls.slice(-3)) {
+      expect(init).toMatchObject({ ...expectedScopeFields, abortSignal: options.signal })
+      expect(init.path).toContain('workspace_id=7')
+    }
+  })
+})

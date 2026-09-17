@@ -1,3 +1,4 @@
+import type { HistoryAdmissionV1, HistoryViewSelectionV1, LegacyHistoryProjectionConfirmV1 } from "@/types/history-selection";
 import { ChatDocuments } from '@/models/ChatTypes';
 import type { DiscoSkillComment } from '@/types/disco-skills';
 
@@ -14,6 +15,8 @@ export type HistoryInfo = {
   last_used_prompt?: LastUsedModelType;
   model_id?: string;
   server_chat_id?: string;
+  server_scope_key?: string;
+  local_owner_key?: string;
   // Timeline/branching fields (server-compatible with ChaChaDB)
   root_id?: string;                    // All forks share same root_id
   parent_conversation_id?: string;     // Parent in fork tree
@@ -119,12 +122,16 @@ export type SessionFiles = {
 };
 
 export type Message = {
+  history_admission?: HistoryAdmissionV1;
+  history_provenance?: { version: 1; owner_key: string; projection_id: string | null };
+  history_settlement?: { input_message_id: string; selection_digest: string; result_revision: string };
   id: string;
   history_id: string;
   name: string;
   role: string;
   content: string;
   images?: string[];
+  image?: string; // Historical singular inline image; selection normalizes to images.
   sources?: string[];
   search?: WebSearch;
   createdAt: number;
@@ -250,7 +257,11 @@ export type Prompt = {
   serverParentVersionId?: number | null; // Server's parent_version_id
 };
 
+export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
+export type HistoryBookmark = HistoryBookmarkScope & { owner_key: string; conversation_id: string; view: HistoryViewSelectionV1; pending_view_session_id?: string; pending_confirmation?: LegacyHistoryProjectionConfirmV1 };
+
 export type UserSettings = {
+  history_profile_id?: string;
   id: string;
   user_id: string;
 };

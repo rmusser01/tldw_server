@@ -1,3 +1,4 @@
+import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
@@ -1215,6 +1216,8 @@ export type ConversationState =
   | "non-viable"
 
 export interface ServerChatMessage {
+  tldw_history_admission_v1?: HistoryAdmissionV1
+  parent_message_id?: string | null
   id: string
   role: "system" | "user" | "assistant"
   sender?: string
@@ -6003,25 +6006,9 @@ export class TldwApiClientBase {
   async persistCharacterCompletion(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
-    const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    try {
-      const res = await bgRequest<any>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      })
-      this.invalidateChatMessagesCache(cid)
-      return res
-    } catch (error) {
-      if (isSavedDegradedCharacterPersistError(error)) {
-        this.invalidateChatMessagesCache(cid)
-      }
-      throw error
-    }
+    return chatRagMethods.persistCharacterCompletion.call(this as any, chat_id, payload, options)
   }
 
   async *streamCharacterChatCompletion(

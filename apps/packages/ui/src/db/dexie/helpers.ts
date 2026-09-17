@@ -1,3 +1,4 @@
+import { ensureLocalProfileId } from "./history-selection"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -355,15 +356,15 @@ export const restoreChat = async (data: {
   historyInfo: HistoryInfo
   messages: Message[]
 }) => {
-  const db = new PageAssistDatabase()
-
-  // Restore the history record
-  await db.addChatHistory(data.historyInfo)
-
-  // Restore all messages
-  for (const msg of data.messages) {
-    await db.addMessage(msg)
+  // Trusted same-owner undo only; imports use the sanitizing import API.
+  const profile = await ensureLocalProfileId()
+  if (data.messages.some(message => message.history_provenance && message.history_provenance.owner_key !== `local-history-v1:${profile}`)) {
+    throw new Error("Undo history owner mismatch")
   }
+  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages], async () => {
+    await chatDB.chatHistories.add(data.historyInfo)
+    for (const message of data.messages) await chatDB.messages.add(message)
+  })
 
   return data.historyInfo.id
 }
@@ -821,19 +822,7 @@ export const saveWebshare = async ({
 }
 
 // User Functions
-export const getUserId = async () => {
-  const db = new PageAssistDatabase()
-  const id = await db.getUserID()
-  if (!id || id?.trim() === "") {
-    const user_id = "user_xxxx-xxxx-xxx-xxxx-xxxx".replace(/[x]/g, () => {
-      const r = Math.floor(Math.random() * 16)
-      return r.toString(16)
-    })
-    await db.setUserID(user_id)
-    return user_id
-  }
-  return id
-}
+export const getUserId = ensureLocalProfileId
 
 // Export/Import Functions
 export const exportChatHistory = async () => {

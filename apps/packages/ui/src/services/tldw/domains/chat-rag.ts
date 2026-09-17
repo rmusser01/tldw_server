@@ -1,3 +1,4 @@
+import type { HistoryCaptureRequestV1, LegacyHistoryProjectionConfirmV1 } from "@/types/history-selection"
 import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { createJsonResponseLike } from '../json-response-like'
@@ -1213,6 +1214,46 @@ export const chatRagMethods = {
     }
   },
 
+  async captureHistorySelection(
+    this: TldwApiClientCore,
+    chatId: string,
+    request: HistoryCaptureRequestV1,
+    options: { scope?: ChatScope; signal?: AbortSignal; requestScope: ServicePromptRequestScope }
+  ): Promise<unknown> {
+    const scoped = requestScopeFields(options.requestScope)
+    return bgRequest({
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/selection`,
+        buildQuery(toChatScopeParams(options.scope))
+      ),
+      method: "POST",
+      body: request,
+      headers: { "Content-Type": "application/json", ...scoped.headers },
+      abortSignal: options.signal,
+      servicePromptConfig: scoped.servicePromptConfig
+    })
+  },
+
+  async confirmHistoryProjection(
+    this: TldwApiClientCore,
+    chatId: string,
+    confirmation: LegacyHistoryProjectionConfirmV1,
+    options: { scope?: ChatScope; signal?: AbortSignal; requestScope: ServicePromptRequestScope }
+  ): Promise<unknown> {
+    const scoped = requestScopeFields(options.requestScope)
+    return bgRequest({
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/legacy-projection`,
+        buildQuery(toChatScopeParams(options.scope))
+      ),
+      method: "POST",
+      body: { confirmation },
+      headers: { "Content-Type": "application/json", ...scoped.headers },
+      abortSignal: options.signal,
+      servicePromptConfig: scoped.servicePromptConfig
+    })
+  },
+
   async addChatMessage(
     this: TldwApiClientCore,
     chat_id: string | number,
@@ -1283,16 +1324,19 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
+    const scoped = requestScopeFields(options?.requestScope)
     try {
       const res = await bgRequest<any>({
         path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
+        headers: { "Content-Type": "application/json", ...scoped.headers },
+        body: payload,
+        abortSignal: options?.signal,
+        ...(scoped.servicePromptConfig ? { servicePromptConfig: scoped.servicePromptConfig } : {})
       })
       this.invalidateChatMessagesCache(cid)
       return res
