@@ -1,0 +1,20 @@
+{
+  "ruff": {
+    "returncode": 0,
+    "findings": 0
+  },
+  "bandit-production": {
+    "returncode": 0,
+    "findings": 0,
+    "parse_errors": 0
+  },
+  "bandit-tests": {
+    "returncode": 0,
+    "findings": 0,
+    "parse_errors": 0
+  },
+  "compile": {
+    "files": 16,
+    "status": "PASS"
+  }
+}

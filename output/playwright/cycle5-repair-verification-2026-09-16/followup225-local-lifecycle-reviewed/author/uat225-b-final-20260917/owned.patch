@@ -1,0 +1,2606 @@
+diff --git a/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py b/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
+index 14fb33deec..2e8378bd8e 100644
+--- a/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py
+@@ -272,6 +272,10 @@ class NoteGraphSuggestionStore:
+     def _require_dataset_scope(
+         self, conn: SuggestionConnection, dataset_id: str, *, allow_unbound_legacy_read: bool = False
+     ) -> None:
++        if dataset_id == f"legacy:{self.owner_user_id}" and self.is_postgres:
++            # Serialize local work with the existing canonical authority binder.
++            # Take this before run, suggestion, note, or keyword row locks.
++            conn.execute("LOCK TABLE note_task_scope_authority IN SHARE MODE")
+         row = conn.execute(
+             "SELECT 1 FROM note_task_scope_authority "
+             "WHERE owner_user_id = ? AND dataset_id = ?",
+@@ -279,8 +283,9 @@ class NoteGraphSuggestionStore:
+         ).fetchone()
+         if row is not None:
+             return
+-        if allow_unbound_legacy_read and dataset_id == f"legacy:{self.owner_user_id}":
+-            # Read-only legacy access must never create or replace immutable authority.
++        if dataset_id == f"legacy:{self.owner_user_id}":
++            # Local authority is absence of a canonical binding, never a legacy
++            # row inserted into the shared immutable authority table.
+             owner_scope = conn.execute(
+                 "SELECT 1 FROM note_task_scope_authority WHERE owner_user_id = ?",
+                 (self.owner_user_id,),
+@@ -289,6 +294,77 @@ class NoteGraphSuggestionStore:
+                 return
+         raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+
++    def is_local_scope_available(self, *, dataset_id: str) -> bool:
++        """Validate exact owner-local authority without creating a binding."""
++
++        dataset = self._scope(dataset_id)
++        if dataset != f"legacy:{self.owner_user_id}":
++            return False
++        try:
++            return self._with_dataset_scope(dataset, lambda _conn: True)
++        except NotesGraphDatasetScopeError:
++            return False
++
++    def is_local_scope_retired(self, *, dataset_id: str) -> bool:
++        """Identify only this owner's obsolete local review namespace."""
++
++        dataset = self._scope(dataset_id)
++        with self._db.transaction() as conn:
++            return self._is_local_scope_retired(conn, dataset)
++
++    def _is_local_scope_retired(self, conn: SuggestionConnection, dataset: str) -> bool:
++        if dataset != f"legacy:{self.owner_user_id}":
++            return False
++        row = conn.execute(
++            "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
++            (self.owner_user_id,),
++        ).fetchone()
++        return row is not None and str(row["dataset_id"]) != dataset
++
++    def _with_maintenance_scope(
++        self,
++        dataset: str,
++        fn: Callable[[SuggestionConnection], SuggestionReadT],
++        *,
++        retired_only: bool = False,
++    ) -> SuggestionReadT:
++        """Authorize closed cleanup only; never admission, publication or products."""
++
++        with self._db.transaction() as conn:
++            if self.is_postgres:
++                conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
++                if dataset == f"legacy:{self.owner_user_id}":
++                    conn.execute("LOCK TABLE note_task_scope_authority IN SHARE MODE")
++            if not self._is_local_scope_retired(conn, dataset):
++                if retired_only:
++                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++                self._require_dataset_scope(conn, dataset)
++            return fn(conn)
++
++    def reserve_canonical_scope(self, *, dataset_id: str) -> None:
++        """Fence local suggestions with the actual validated canonical dataset."""
++
++        dataset = self._scope(dataset_id)
++        if dataset == "local-unbound" or dataset.startswith("legacy:"):
++            raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++        with self._db.transaction() as conn:
++            if self.is_postgres:
++                conn.execute("LOCK TABLE note_task_scope_authority IN SHARE ROW EXCLUSIVE MODE")
++            current = conn.execute(
++                "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
++                (self.owner_user_id,),
++            ).fetchone()
++            if current is not None:
++                if current["dataset_id"] != dataset:
++                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++                return
++            conn.execute(
++                "INSERT INTO note_task_scope_authority("
++                "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound) "
++                "VALUES (?,?,?,?,?)",
++                (self.owner_user_id, dataset, False, False, False),
++            )
++
+     def is_dataset_scope_registered(self, *, dataset_id: str) -> bool:
+         """Check cancellation authority without registering an unbound read scope."""
+
+@@ -697,15 +773,18 @@ class NoteGraphSuggestionStore:
+                 "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+                 "SELECT 1 FROM note_graph_suggestion_rejection_sets WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
+             )
+-            for row in rows:
+-                dataset = str(row["dataset_id"])
+-                self._set_dataset_scope(conn, dataset)
++            candidates = dict.fromkeys([f"legacy:{self.owner_user_id}", *(str(row["dataset_id"]) for row in rows)])
++            for dataset in candidates:
++                # Discovery reads only exact owner-local keys. Retired local
++                # cleanup must remain discoverable without reviving authority.
++                if self.is_postgres:
++                    conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
+                 if any(
+                     conn.execute(query, (self.owner_user_id, dataset)).fetchone() is not None
+                     for query in authority_queries
+                 ):
+                     datasets.append(dataset)
+-            return tuple(datasets)
++            return tuple(datasets[:limit])
+
+     @classmethod
+     def _require_run_transition(cls, expected_state: str, new_state: str) -> None:
+@@ -1579,6 +1658,12 @@ class NoteGraphSuggestionStore:
+         sync_id = row["keyword_sync_id"]
+         if sync_id is None:
+             return str(row["normalized_tag"]), str(row["display_tag"])
++        if row["dataset_id"] == f"legacy:{self.owner_user_id}":
++            keyword = self._db.keyword_store.resolve_merge_survivor(str(sync_id), conn=conn)
++            if keyword is None:
++                return None
++            display = str(keyword["keyword"]).strip()
++            return display.casefold(), display
+         keyword_table = self._db._map_table_for_backend("keywords")
+         keyword = conn.execute(
+             f"SELECT keyword FROM {keyword_table} WHERE client_id=? AND sync_id=? AND deleted=?",  # nosec B608
+@@ -1593,15 +1678,19 @@ class NoteGraphSuggestionStore:
+         self,
+         conn: SuggestionConnection,
+         *,
++        dataset_id: str,
+         source_note_id: str,
+         normalized_tag: str,
+     ) -> bool:
+         keyword_table = self._db._map_table_for_backend("keywords")
++        local_sqlite = self._db.backend_type == BackendType.SQLITE and dataset_id == f"legacy:{self.owner_user_id}"
++        owner_clause = "" if local_sqlite else " AND keyword.client_id=?"
++        owner_params = () if local_sqlite else (self.owner_user_id,)
+         rows = conn.execute(
+             f"SELECT keyword.keyword FROM {keyword_table} keyword "  # nosec B608
+             "JOIN note_keywords membership ON membership.keyword_id=keyword.id "
+-            "WHERE membership.note_id=? AND keyword.client_id=? AND keyword.deleted=?",
+-            (source_note_id, self.owner_user_id, self._deleted_value()),
++            f"WHERE membership.note_id=?{owner_clause} AND keyword.deleted=?",
++            (source_note_id, *owner_params, self._deleted_value()),
+         ).fetchall()
+         return any(str(row["keyword"]).strip().casefold() == normalized_tag for row in rows)
+
+@@ -1887,6 +1976,7 @@ class NoteGraphSuggestionStore:
+                 else:
+                     filtered = filtered or self._source_has_tag(
+                         conn,
++                        dataset_id=dataset,
+                         source_note_id=str(row["source_note_id"]),
+                         normalized_tag=str(row["normalized_tag"]),
+                     )
+@@ -3215,13 +3305,18 @@ class NoteGraphSuggestionStore:
+         if not secrets.compare_digest(accepted_resource_identity, expected_identity):
+             return None
+         keyword_table = self._db._map_table_for_backend("keywords")
++        local_sqlite = (
++            self._db.backend_type == BackendType.SQLITE and suggestion.dataset_id == f"legacy:{self.owner_user_id}"
++        )
++        owner_clause = "" if local_sqlite else "keyword.client_id=? AND "
++        owner_params = () if local_sqlite else (self.owner_user_id,)
+         row = conn.execute(
+             f"SELECT 1 FROM {keyword_table} keyword "  # nosec B608
+             "JOIN note_keywords membership ON membership.keyword_id=keyword.id "
+-            "WHERE keyword.client_id=? AND keyword.sync_id=? AND keyword.deleted=? "
++            f"WHERE {owner_clause}keyword.sync_id=? AND keyword.deleted=? "
+             "AND membership.note_id=?",
+             (
+-                self.owner_user_id,
++                *owner_params,
+                 resolved_keyword_sync_id,
+                 self._deleted_value(),
+                 suggestion.source_note_id,
+@@ -4030,12 +4125,24 @@ class NoteGraphSuggestionStore:
+                 "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?) "
+                 "ORDER BY created_at,id LIMIT ?"
+             )
++            params = (self.owner_user_id, dataset, now_value, limit)
++            if self._is_local_scope_retired(conn, dataset):
++                # A producer can enqueue after missing-Job grace. Retain that
++                # lookup obligation for the original run retention, rotating
++                # already-checked missing records behind untouched work.
++                query = (
++                    "SELECT id,state,revision FROM note_graph_suggestion_runs "
++                    "WHERE owner_user_id=? AND dataset_id=? AND ("
++                    "(state IN ('admitting','queued','running','cancelling','publishing') "
++                    "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?)) OR "
++                    "(state='failed' AND job_id IS NULL AND error_code='notes_graph_capabilities_changed_before_queue' "
++                    "AND expires_at>? AND (maintenance_lease_expires_at IS NULL OR maintenance_lease_expires_at<=?))) "
++                    "ORDER BY COALESCE(maintenance_lease_expires_at,created_at),created_at,id LIMIT ?"
++                )
++                params = (self.owner_user_id, dataset, now_value, now_value, now_value, limit)
+             if self.is_postgres:
+                 query += " FOR UPDATE SKIP LOCKED"
+-            candidates = conn.execute(
+-                query,
+-                (self.owner_user_id, dataset, now_value, limit),
+-            ).fetchall()
++            candidates = conn.execute(query, params).fetchall()
+             claimed: list[NoteGraphSuggestionRun] = []
+             for candidate in candidates:
+                 token = f"ml_{secrets.token_urlsafe(32)}"
+@@ -4059,7 +4166,7 @@ class NoteGraphSuggestionStore:
+                     claimed.append(self._load_run(conn, dataset, str(candidate["id"])))
+             return tuple(claimed)
+
+-        return self._with_dataset_scope(dataset, mutate)
++        return self._with_maintenance_scope(dataset, mutate)
+
+     def release_run_maintenance_lease(
+         self,
+@@ -4074,7 +4181,7 @@ class NoteGraphSuggestionStore:
+         """Release one live exact maintenance lease without changing run state."""
+
+         if (
+-            expected_state not in self._ACTIVE_RUN_STATES
++            expected_state not in self._ACTIVE_RUN_STATES | {"failed"}
+             or not isinstance(maintenance_lease_token, str)
+             or not self._SAFE_ID_PATTERN.fullmatch(maintenance_lease_token)
+         ):
+@@ -4083,12 +4190,22 @@ class NoteGraphSuggestionStore:
+         now_utc = self._aware_utc(now)
+
+         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
++            next_lookup = None
++            if expected_state == "failed":
++                if not self._is_local_scope_retired(conn, dataset):
++                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
++                run = self._load_run(conn, dataset, run_id)
++                if run.job_id is not None or run.error_code != "notes_graph_capabilities_changed_before_queue":
++                    raise RuntimeError("notes_graph_maintenance_lease_conflict")
++                next_lookup = self._db_datetime(now_utc + self._MAINTENANCE_LEASE_DURATION)
+             updated = conn.execute(
+-                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=NULL,"
+-                "maintenance_lease_expires_at=NULL,revision=revision+1 "
++                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=?,"
++                "maintenance_lease_expires_at=?,revision=revision+1 "
+                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=? "
+                 "AND maintenance_lease_token=? AND maintenance_lease_expires_at>?",
+                 (
++                    maintenance_lease_token if next_lookup is not None else None,
++                    next_lookup,
+                     self.owner_user_id,
+                     dataset,
+                     run_id,
+@@ -4102,7 +4219,135 @@ class NoteGraphSuggestionStore:
+                 raise RuntimeError("notes_graph_maintenance_lease_conflict")
+             return self._load_run(conn, dataset, run_id)
+
+-        return self._with_dataset_scope(dataset, mutate)
++        return self._with_maintenance_scope(dataset, mutate)
++
++    def retire_claimed_local_run(
++        self,
++        *,
++        dataset_id: str,
++        run_id: str,
++        expected_revision: int,
++        maintenance_lease_token: str,
++        now: datetime,
++    ) -> NoteGraphSuggestionRun:
++        """Retire one fenced run after Jobs cancellation or definitive absence."""
++
++        dataset = self._scope(dataset_id)
++        now_utc = self._aware_utc(now)
++
++        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
++            row = conn.execute(
++                "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
++                "AND id=? AND revision=? AND maintenance_lease_token=? AND maintenance_lease_expires_at>?",
++                (
++                    self.owner_user_id,
++                    dataset,
++                    run_id,
++                    expected_revision,
++                    maintenance_lease_token,
++                    self._db_datetime(now_utc),
++                ),
++            ).fetchone()
++            if row is None:
++                raise RuntimeError("notes_graph_maintenance_lease_conflict")
++            run = self._run_from_row(row)
++            if (
++                run.state.value == "failed"
++                and run.job_id is None
++                and run.error_code == "notes_graph_capabilities_changed_before_queue"
++            ):
++                # Exact late Job cancellation succeeded. Do not mutate the
++                # terminal receipt or extend the original retention deadline.
++                conn.execute(
++                    "UPDATE note_graph_suggestion_runs SET "
++                    "maintenance_lease_expires_at=expires_at,revision=revision+1 "
++                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND revision=? AND maintenance_lease_token=?",
++                    (self.owner_user_id, dataset, run.id, run.revision, maintenance_lease_token),
++                )
++                return self._load_run(conn, dataset, run.id)
++            if run.state.value not in self._ACTIVE_RUN_STATES:
++                raise RuntimeError("notes_graph_maintenance_lease_conflict")
++            # Admission envelopes already have a closed failed-result contract;
++            # keep it rather than introducing a new replay shape for retirement.
++            admission = run.state.value == "admitting"
++            state = "failed" if admission else "stale"
++            error = "notes_graph_capabilities_changed_before_queue" if admission else "notes_graph_source_changed"
++            self._require_run_transition(run.state.value, state)
++            self._delete_staged_for_run(conn, dataset_id=dataset, run_id=run.id)
++            conn.execute(
++                "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,guidance_key=?,"
++                "completed_at=?,expires_at=?,maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
++                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND revision=? AND maintenance_lease_token=?",
++                (
++                    state,
++                    error,
++                    "retry_generation" if admission else None,
++                    self._db_datetime(now_utc),
++                    self._db_datetime(now_utc + timedelta(days=30)),
++                    self.owner_user_id,
++                    dataset,
++                    run.id,
++                    run.revision,
++                    maintenance_lease_token,
++                ),
++            )
++            retired = self._load_run(conn, dataset, run.id)
++            receipts = conn.execute(
++                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? AND dataset_id=? "
++                "AND state='in_progress' AND ((operation_kind='run_cancel' AND resource_identity=?) "
++                "OR (operation_kind='run_admit' AND id=?)) ORDER BY id",
++                (self.owner_user_id, dataset, run.id, run.admission_receipt_id),
++            ).fetchall()
++            for receipt in receipts:
++                if receipt["operation_kind"] == "run_admit":
++                    envelope = self._run_replay_envelope(retired)
++                else:
++                    envelope = {"run_id": retired.id, "state": retired.state.value, "revision": retired.revision}
++                self._complete_receipt(
++                    conn,
++                    dataset_id=dataset,
++                    receipt=receipt,
++                    envelope=envelope,
++                    http_status=503 if receipt["operation_kind"] == "run_admit" else 200,
++                    now_utc=now_utc,
++                )
++                if receipt["operation_kind"] == "run_admit":
++                    conn.execute(
++                        "UPDATE note_graph_suggestion_operation_receipts SET state='failed' "
++                        "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='completed'",
++                        (self.owner_user_id, dataset, receipt["id"]),
++                    )
++            return retired
++
++        return self._with_maintenance_scope(dataset, mutate, retired_only=True)
++
++    def retire_local_suggestions(self, *, dataset_id: str, now: datetime, limit: int) -> int:
++        """Stale a bounded obsolete review batch, preserving accepted products."""
++
++        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
++            raise ValueError("notes_graph_maintenance_limit_invalid")
++        dataset = self._scope(dataset_id)
++        now_utc = self._aware_utc(now)
++
++        def mutate(conn: SuggestionConnection) -> int:
++            query = (
++                "SELECT * FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
++                "AND state IN ('pending','accepting') ORDER BY id LIMIT ?"
++            )
++            if self.is_postgres:
++                query += " FOR UPDATE SKIP LOCKED"
++            rows = conn.execute(query, (self.owner_user_id, dataset, limit)).fetchall()
++            for row in rows:
++                self._invalidate_suggestion_row(
++                    conn,
++                    dataset_id=dataset,
++                    suggestion=self._suggestion_from_row(row),
++                    reason="source_changed",
++                    now_utc=now_utc,
++                )
++            return len(rows)
++
++        return self._with_maintenance_scope(dataset, mutate, retired_only=True)
+
+     def reconcile_run_after_job_lookup(
+         self,
+@@ -4400,9 +4645,16 @@ class NoteGraphSuggestionStore:
+             "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=? ORDER BY dataset_id",
+             (self.owner_user_id,),
+         ).fetchall()
+-        for dataset_row in datasets:
+-            dataset = str(dataset_row["dataset_id"])
+-            self._set_dataset_scope(conn, dataset)
++        scope_ids = dict.fromkeys([f"legacy:{self.owner_user_id}", *(str(row["dataset_id"]) for row in datasets)])
++        for dataset in scope_ids:
++            if dataset == f"legacy:{self.owner_user_id}":
++                # Invalidation only retires review work. It never authorizes new
++                # work, including after canonical enrollment. The caller already
++                # holds the note lock, so do not invert the authority lock order.
++                if self.is_postgres:
++                    conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
++            else:
++                self._set_dataset_scope(conn, dataset)
+             run_rows = conn.execute(
+                 "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
+                 "AND source_note_id=? AND state IN ('admitting','queued','running','publishing') "
+@@ -4667,7 +4919,7 @@ class NoteGraphSuggestionStore:
+                     counts["rejection_sets"] += int(deleted or 0)
+             return counts
+
+-        return self._with_dataset_scope(dataset, mutate)
++        return self._with_maintenance_scope(dataset, mutate)
+
+     @staticmethod
+     def _normalized_sql(value: str) -> str:
+diff --git a/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py b/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py
+index 70cd2a3201..8eccdabf87 100644
+--- a/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py
++++ b/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py
+@@ -17,8 +17,10 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store i
+     MutationResult,
+ )
+ from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
++    GuardedKeywordIdentityCollision,
+     NotesOrganizationSyncStore,
+ )
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
+ from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+     GuardedProductMutation,
+ )
+@@ -47,15 +49,23 @@ class SuggestionDecisionService:
+         self,
+         *,
+         store: Any,
+-        link_coordinator: Any,
+-        organization_coordinator: Any,
++        link_coordinator: Any = None,
++        organization_coordinator: Any = None,
++        local_mutations: Any = None,
+         clock: Callable[[], datetime] | None = None,
+     ) -> None:
+         self.store = store
+         self.links = link_coordinator
+         self.organization = organization_coordinator
++        self.local = local_mutations
+         self._clock = clock or (lambda: datetime.now(timezone.utc))
+
++    @property
++    def note_db(self) -> Any:
++        """Resolve product storage only when a keyword decision needs it."""
++
++        return self.local.note_db if self.local is not None else self.organization.note_db
++
+     @staticmethod
+     def _step_key(suggestion_id: str, step: str) -> str:
+         return f"notes-graph:{suggestion_id}:{step}"
+@@ -219,16 +229,24 @@ class SuggestionDecisionService:
+             after=self._after(fence, finalized),
+         )
+         try:
+-            self.links.create(
+-                source_note_id=fence.source_note_id,
+-                target_note_id=str(fence.target_note_id),
+-                directed=False,
+-                weight=1.0,
+-                label=None,
+-                properties={},
+-                idempotency_key=key,
+-                guarded_mutation=guard,
+-            )
++            if self.local is not None:
++                self.local.create_related_link(
++                    edge_id=expected_edge_id,
++                    source_note_id=fence.source_note_id,
++                    target_note_id=str(fence.target_note_id),
++                    guarded_mutation=guard,
++                )
++            else:
++                self.links.create(
++                    source_note_id=fence.source_note_id,
++                    target_note_id=str(fence.target_note_id),
++                    directed=False,
++                    weight=1.0,
++                    label=None,
++                    properties={},
++                    idempotency_key=key,
++                    guarded_mutation=guard,
++                )
+         except SyncServerOriginBatchMaterializationError as exc:
+             try:
+                 existing = self.store.finalize_existing_acceptance(
+@@ -257,6 +275,11 @@ class SuggestionDecisionService:
+         conn: Any | None = None,
+         for_update: bool = False,
+     ) -> tuple[str | None, bool]:
++        if self.local is not None and fence.keyword_sync_id:
++            resource = self.note_db.keyword_store.resolve_merge_survivor(
++                fence.keyword_sync_id, conn=conn, for_update=for_update
++            )
++            return (str(resource["sync_id"]), False) if resource is not None else (None, True)
+         if fence.keyword_sync_id:
+             dataset = self.organization.active_dataset()
+             resources = NotesOrganizationSyncStore(self.organization.note_db)
+@@ -297,9 +320,9 @@ class SuggestionDecisionService:
+                 sync_id = str(target["sync_id"])
+             return None, True
+         display = fence.normalized_tag or fence.display_tag or ""
+-        resource = NotesOrganizationSyncStore(
+-            self.organization.note_db
+-        ).find_keyword_by_normalized_identity(
++        if self.local is not None:
++            return self.local.find_keyword_identity(display, conn=conn, for_update=for_update), False
++        resource = NotesOrganizationSyncStore(self.note_db).find_keyword_by_normalized_identity(
+             display,
+             conn=conn,
+             for_update=for_update,
+@@ -331,6 +354,8 @@ class SuggestionDecisionService:
+         )
+
+     def _accept_tag(self, fence: NoteGraphSuggestion) -> MutationResult:
++        if self.local is not None:
++            return self._accept_local_tag(fence)
+         keyword_sync_id, stale = self._resolve_keyword(fence)
+         if stale:
+             stale_result = self._mark_keyword_acceptance_stale(
+@@ -437,6 +462,68 @@ class SuggestionDecisionService:
+             raise RuntimeError("notes_graph_acceptance_finalization_missing")
+         return finalized[0]
+
++    def _accept_local_tag(self, fence: NoteGraphSuggestion) -> MutationResult:
++        """Reuse decision fences while applying the ordinary local tag stores."""
++
++        keyword_sync_id, stale = self._resolve_keyword(fence)
++        if stale:
++            return self._mark_keyword_acceptance_stale(fence, now=self._clock())
++        identity = self._keyword_link_identity(fence, keyword_sync_id) if keyword_sync_id else None
++        existing = self.store.finalize_existing_acceptance(
++            fence=fence,
++            accepted_resource_identity=identity,
++            resolved_keyword_sync_id=keyword_sync_id,
++            now=self._clock(),
++        )
++        if existing.disposition != "in_progress":
++            return existing
++        if keyword_sync_id is None:
++            key = self._step_key(fence.id, "keyword")
++            digest = hashlib.sha256(f"{fence.dataset_id}:notes.keyword:{key}".encode()).digest()[:16]
++            keyword_sync_id = str(uuid.UUID(bytes=digest, version=4))
++            fence = self.store.renew_acceptance(fence=fence, now=self._clock())
++            try:
++                self.local.create_keyword(
++                    keyword_sync_id=keyword_sync_id,
++                    display=str(fence.display_tag),
++                    guarded_mutation=GuardedProductMutation(
++                        expected_domain="notes.keyword",
++                        expected_object_id=keyword_sync_id,
++                        before=self._before(fence),
++                        after=None,
++                    ),
++                )
++            except GuardedKeywordIdentityCollision as exc:
++                keyword_sync_id = exc.canonical_sync_id
++        identity = self._keyword_link_identity(fence, keyword_sync_id)
++        fence = self.store.renew_acceptance(fence=fence, now=self._clock())
++        finalized: list[MutationResult] = []
++
++        def before_membership(conn: Any) -> None:
++            self._before(fence)(conn)
++            current, missing = self._resolve_keyword(fence, conn=conn, for_update=True)
++            if missing or current != keyword_sync_id:
++                raise ConflictError("Suggestion keyword changed before membership")
++
++        try:
++            self.local.link_keyword(
++                note_id=fence.source_note_id,
++                keyword_sync_id=keyword_sync_id,
++                guarded_mutation=GuardedProductMutation(
++                    expected_domain="notes.keyword_link",
++                    expected_object_id=identity,
++                    before=before_membership,
++                    after=self._after(fence, finalized),
++                ),
++            )
++        except (ConflictError, InputError):
++            # Resolution changed under the product guard. Do not finalize using
++            # the earlier target, even if it already has an unrelated membership.
++            return self._release(fence)
++        if len(finalized) != 1:
++            raise RuntimeError("notes_graph_acceptance_finalization_missing")
++        return finalized[0]
++
+     def _release(self, fence: NoteGraphSuggestion) -> MutationResult:
+         return self.store.release_acceptance(
+             dataset_id=fence.dataset_id,
+diff --git a/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py b/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py
+index f799ba5cf1..fa19754a46 100644
+--- a/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py
++++ b/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py
+@@ -9,9 +9,12 @@ from dataclasses import dataclass
+ from datetime import datetime, timedelta, timezone
+ from typing import Any, Callable
+
++from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import NotesGraphDatasetScopeError
++
+ from .suggestion_jobs import (
+     PublicationReceiptError,
+     SuggestionCancellationCoordinator,
++    _payload,
+     validate_publication_receipt,
+ )
+ from .suggestion_observability import (
+@@ -146,6 +149,64 @@ class SuggestionMaintenance:
+             now=now,
+         )
+
++    @staticmethod
++    def _retired(scope: MaintenanceScope) -> bool:
++        check = getattr(scope.store, "is_local_scope_retired", None)
++        return bool(check is not None and check(dataset_id=scope.dataset_id))
++
++    def _retire_run(self, scope: MaintenanceScope, run: Any, now: datetime) -> bool:
++        """Cancel an exact old Job, including enqueue-before-bind, without publishing."""
++
++        if run.job_id:
++            job = self._jobs.get_job_or_archived_by_uuid(
++                run.job_id,
++                domain="notes",
++                owner_user_id=run.owner_user_id,
++            )
++        else:
++            job = self._jobs.get_job_or_archived_by_idempotency_key(
++                idempotency_key=run.id,
++                domain="notes",
++                queue="graph-suggestions",
++                job_type="note_graph_suggestions",
++                owner_user_id=run.owner_user_id,
++            )
++        if job is not None:
++            if (
++                str(job.get("owner_user_id") or "") != run.owner_user_id
++                or job.get("domain") != "notes"
++                or job.get("queue") != "graph-suggestions"
++                or job.get("job_type") != "note_graph_suggestions"
++                or (run.job_id and str(job.get("uuid") or "") != run.job_id)
++                or job.get("payload") != _payload(run, scope.dataset_id)
++            ):
++                raise RuntimeError("notes_graph_admission_job_contract_invalid")
++            if job.get("status") not in _TERMINAL_JOB_STATUSES:
++                accepted = self._jobs.cancel_job(
++                    int(job["id"]),
++                    reason="requested",
++                    expected_uuid=str(job["uuid"]),
++                    expected_domain="notes",
++                    expected_job_type="note_graph_suggestions",
++                    cascade_dependents=False,
++                )
++                if not accepted:
++                    self._release(scope, run, now)
++                    return False
++        elif run.state.value == "failed" or classify_job_observation(run=run, job=None, now=now) is None:
++            # An admitted producer may still enqueue. Keep its immutable run ID
++            # discoverable during the existing missing-Job recovery window.
++            self._release(scope, run, now)
++            return False
++        scope.store.retire_claimed_local_run(
++            dataset_id=scope.dataset_id,
++            run_id=run.id,
++            expected_revision=run.revision,
++            maintenance_lease_token=run.maintenance_lease_token,
++            now=now,
++        )
++        return True
++
+     def _reconcile(
+         self,
+         *,
+@@ -309,6 +370,12 @@ class SuggestionMaintenance:
+             for run in runs:
+                 cancellation_context = None
+                 try:
++                    if self._retired(scope):
++                        if self._retire_run(scope, run, now):
++                            reconciled += 1
++                        else:
++                            released += 1
++                        continue
+                     if run.state.value == "cancelling":
+                         cancellation_context = scope.store.get_run_cancellation_maintenance_context(
+                             dataset_id=scope.dataset_id,
+@@ -352,13 +419,22 @@ class SuggestionMaintenance:
+                     self._release(scope, run, now)
+                     released += 1
+                     continue
+-                reconciled_run = self._reconcile(
+-                    scope=scope,
+-                    run=run,
+-                    job=job,
+-                    observation=observation,
+-                    now=now,
+-                )
++                try:
++                    reconciled_run = self._reconcile(
++                        scope=scope,
++                        run=run,
++                        job=job,
++                        observation=observation,
++                        now=now,
++                    )
++                except NotesGraphDatasetScopeError:
++                    # Enrollment may win after the Jobs read. Its store fence
++                    # denies publication; a later pass performs closed cleanup.
++                    if not self._retired(scope):
++                        raise
++                    self._release(scope, run, now)
++                    released += 1
++                    continue
+                 reconciled += 1
+                 self._record_reconciliation(run, reconciled_run)
+
+@@ -366,6 +442,18 @@ class SuggestionMaintenance:
+         for scope in self._scopes:
+             if acceptance_remaining == 0:
+                 break
++            if self._retired(scope):
++                count = scope.store.retire_local_suggestions(
++                    dataset_id=scope.dataset_id,
++                    now=now,
++                    limit=acceptance_remaining,
++                )
++                claimed += count
++                reconciled += count
++                acceptance_remaining -= count
++                if count and on_claimed is not None:
++                    on_claimed(count)
++                continue
+             if scope.decision_service is None:
+                 continue
+             reconciliation_kwargs = {
+@@ -375,7 +463,14 @@ class SuggestionMaintenance:
+             }
+             if on_claimed is not None:
+                 reconciliation_kwargs["on_claimed"] = on_claimed
+-            decisions = scope.decision_service.reconcile_expired(**reconciliation_kwargs)
++            try:
++                decisions = scope.decision_service.reconcile_expired(**reconciliation_kwargs)
++            except NotesGraphDatasetScopeError:
++                # Enrollment may win between the readiness check and the
++                # acceptance claim. The next pass uses closed retirement.
++                if not self._retired(scope):
++                    raise
++                continue
+             claimed += len(decisions)
+             reconciled += len(decisions)
+             acceptance_remaining -= min(acceptance_remaining, len(decisions))
+diff --git a/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py b/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py
+index d4cc06baa0..b3f81528ce 100644
+--- a/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py
++++ b/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py
+@@ -42,7 +42,7 @@ def build_suggestion_decision_service(
+     owner_user_id: str,
+     dataset_id: str,
+ ) -> Any | None:
+-    """Build owner/dataset-bound decision coordinators when canonical Sync is active."""
++    """Build decisions for the selected canonical or exact unbound local scope."""
+
+     from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import NotesLinkCoordinator
+     from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
+@@ -53,10 +53,18 @@ def build_suggestion_decision_service(
+     )
+
+     from .suggestion_decisions import SuggestionDecisionService
++    from .suggestion_local_mutations import LocalSuggestionMutations
+
++    if str(note_db.client_id) != str(owner_user_id):
++        return None
+     sync = get_active_server_origin_sync_service_for_user(owner_user_id)
+     if sync is None:
+-        return None
++        if not note_db.note_graph_suggestion_store.is_local_scope_available(dataset_id=dataset_id):
++            return None
++        return SuggestionDecisionService(
++            store=note_db.note_graph_suggestion_store,
++            local_mutations=LocalSuggestionMutations(note_db),
++        )
+     dataset = sync.store.get_dataset(dataset_id)
+     if dataset is None or dataset.owner_user_id != owner_user_id:
+         return None
+diff --git a/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py b/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py
+index 7d766bf416..5e35b2699a 100644
+--- a/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py
++++ b/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py
+@@ -47,6 +47,7 @@ class NotesLinkBootstrapper:
+         if batch_size < 1 or batch_size > 1000:
+             raise ValueError("Notes link bootstrap batch_size must be 1..1000")
+         self._links = NotesLinkStore(note_db)
++        self.note_db = note_db
+         self._batch_size = batch_size
+         self._after_group = after_group
+
+@@ -61,6 +62,7 @@ class NotesLinkBootstrapper:
+
+         if dataset.owner_user_id != user_id:
+             raise SyncStoreError("Sync dataset was not found or is not accessible")
++        service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset, note_db=self.note_db)
+         metadata = dataset.metadata.get("notes_link_v1")
+         if not isinstance(metadata, Mapping):
+             raise SyncStoreError("notes_link_sync_not_ready")
+diff --git a/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py b/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py
+index f53536a1db..04aaa06576 100644
+--- a/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py
++++ b/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py
+@@ -73,6 +73,7 @@ class NotesOrganizationBootstrapper:
+         if batch_size < 1 or batch_size > 1000:
+             raise ValueError("Notes organization bootstrap batch_size must be 1..1000")
+         self._projection = NotesOrganizationSyncStore(note_db)
++        self.note_db = note_db
+         self._batch_size = batch_size
+         self._after_group = after_group
+
+@@ -87,6 +88,7 @@ class NotesOrganizationBootstrapper:
+
+         if dataset.owner_user_id != user_id:
+             raise SyncStoreError("Sync dataset was not found or is not accessible")
++        service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset, note_db=self.note_db)
+         metadata = dataset.metadata.get("notes_organization_v1")
+         if not isinstance(metadata, Mapping):
+             raise SyncStoreError("notes_organization_sync_not_ready")
+diff --git a/tldw_Server_API/app/core/Sync/v2/profile.py b/tldw_Server_API/app/core/Sync/v2/profile.py
+index 82abd5acbc..6bf7b5083d 100644
+--- a/tldw_Server_API/app/core/Sync/v2/profile.py
++++ b/tldw_Server_API/app/core/Sync/v2/profile.py
+@@ -356,6 +356,7 @@ class SyncV2ProfileManager:
+             )
+         )
+         dataset = self.store.get_or_create_default_personal_dataset(user_id)
++        self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
+         if organization_requested:
+             dataset = self.store.begin_notes_organization_bootstrap(
+                 dataset.dataset_id,
+@@ -702,6 +703,8 @@ class SyncV2ProfileManager:
+             or existing_state.get("authority_id") != authority_id
+         ):
+             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
++        if self.service is not None:
++            self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
+         selected_store = store or self.store
+         try:
+             return selected_store.bind_personal_context_dataset(
+diff --git a/tldw_Server_API/app/core/Sync/v2/service.py b/tldw_Server_API/app/core/Sync/v2/service.py
+index c24246fae5..de46bd0363 100644
+--- a/tldw_Server_API/app/core/Sync/v2/service.py
++++ b/tldw_Server_API/app/core/Sync/v2/service.py
+@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
+ from dataclasses import dataclass, field, replace
+ from datetime import datetime, timezone
+ from time import monotonic_ns
+-from typing import TYPE_CHECKING, Literal
++from typing import TYPE_CHECKING, Any, Literal
+ from uuid import RFC_4122, UUID, uuid4
+
+ from loguru import logger
+@@ -2469,6 +2469,28 @@ class SyncV2Service:
+             raise SyncStoreError("Personal Context authority cancellation raced")
+         return outcome
+
++    def prepare_notes_suggestion_authority(
++        self, *, user_id: str, dataset: SyncDataset, note_db: Any | None = None
++    ) -> None:
++        """Fence prior local review state before a real Notes default snapshot."""
++
++        actual = self.store.get_dataset(dataset.dataset_id)
++        if (
++            actual is None
++            or actual.owner_user_id != user_id
++            or actual.scope_type != "personal"
++            or actual.metadata.get("default_personal") is not True
++            or actual.metadata.get("client_family") != "chatbook"
++        ):
++            raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
++        product_db = note_db if note_db is not None else getattr(self.materializers.get("notes.note"), "note_db", None)
++        if product_db is None:
++            # A service without a Notes materializer owns no local Notes state.
++            return
++        if str(product_db.client_id) != str(user_id):
++            raise SyncStoreError("Notes suggestion product owner does not match")
++        product_db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id=actual.dataset_id)
++
+     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
+         """Return the single service-level task/activity activation predicate."""
+
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py
+index cea3ddea5a..63e7db67b0 100644
+--- a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py
+@@ -125,6 +125,7 @@ def test_fresh_route_retains_source_safety(fresh_suggestions, kind, expected):
+
+
+ def test_missing_decision_authority_removes_actions_and_changes_etag(fresh_suggestions, monkeypatch):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     db, client, note, _ = fresh_suggestions
+     base = _ready_provider(monkeypatch)
+     monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
+@@ -144,6 +145,7 @@ def test_missing_decision_authority_removes_actions_and_changes_etag(fresh_sugge
+
+
+ def test_readiness_precedence_and_revision_transition(fresh_suggestions, monkeypatch):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     db, client, note, _ = fresh_suggestions
+     _register(db)
+     base = _ready_provider(monkeypatch)
+@@ -167,14 +169,21 @@ def test_readiness_precedence_and_revision_transition(fresh_suggestions, monkeyp
+     assert ready["generation_available"] is True and ready["revision"] == base.revision
+
+
+-def test_unbound_reads_do_not_authorize_admission_or_lifecycle_writes(fresh_suggestions, monkeypatch):
++def test_missing_coordinator_blocks_http_admission_and_retired_scope_blocks_store_writes(
++    fresh_suggestions, monkeypatch
++):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     db, client, note, _ = fresh_suggestions
+     _ready_provider(monkeypatch)
+     monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
+
+     class NoJobs:
+-        def __getattr__(self, name):
+-            pytest.fail(f"unbound path reached Jobs: {name}")
++        def get_job_or_archived_by_idempotency_key(self, **scope):
++            # The established coordinator checks idempotency before readiness.
++            return None
++
++        def create_job(self, **kwargs):
++            raise AssertionError("unavailable coordinator must not enqueue")
+
+     client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: NoJobs()
+     before = _counts(db)
+@@ -186,6 +195,13 @@ def test_unbound_reads_do_not_authorize_admission_or_lifecycle_writes(fresh_sugg
+         headers={"If-Match": response.headers["etag"], "Idempotency-Key": "unbound-rejected"},
+     )
+     assert admission.status_code == 503
++    with chacha_operation(independent=True), db.transaction() as conn:
++        assert [row["state"] for row in conn.execute("SELECT state FROM note_graph_suggestion_runs").fetchall()] == [
++            "failed"
++        ]
++        assert conn.execute("SELECT COUNT(*) AS n FROM note_graph_suggestions").fetchone()["n"] == 0
++    _register(db, dataset="canonical-one")
++    before = _counts(db)
+     with chacha_operation(independent=True):
+         store = db.note_graph_suggestion_store
+         with pytest.raises(NotesGraphDatasetScopeError):
+@@ -282,8 +298,9 @@ def test_expected_fts_unavailability_is_distinct_from_unexpected_storage_error(f
+
+
+ @pytest.mark.parametrize("operation", ["reject", "reset", "cancel"])
+-def test_unbound_write_helpers_remain_strict(fresh_suggestions, operation):
++def test_retired_local_write_helpers_remain_strict(fresh_suggestions, operation):
+     db, _, note, _ = fresh_suggestions
++    _register(db, dataset="canonical-one")
+     before = _counts(db)
+     with chacha_operation(independent=True):
+         store = db.note_graph_suggestion_store
+@@ -351,6 +368,7 @@ def test_unbound_eligibility_is_rechecked_after_owner_binding(fresh_suggestions)
+
+ @pytest.mark.parametrize("reason", ["disabled", "provider"])
+ def test_missing_decisions_preserve_higher_priority_unavailability(fresh_suggestions, monkeypatch, reason):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     from tldw_Server_API.app.core.Notes_Graph import graph_service
+
+     db, client, note, _ = fresh_suggestions
+@@ -368,6 +386,7 @@ def test_missing_decisions_preserve_higher_priority_unavailability(fresh_suggest
+
+
+ def test_registration_storage_error_is_not_unbound_capability(fresh_suggestions, monkeypatch):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     db, client, note, _ = fresh_suggestions
+     _register(db)
+
+@@ -382,6 +401,7 @@ def test_registration_storage_error_is_not_unbound_capability(fresh_suggestions,
+
+ @pytest.mark.parametrize("dataset", ["legacy:1", "canonical-one"])
+ def test_registered_scope_can_cancel_without_decision_coordinator(fresh_suggestions, monkeypatch, dataset):
++    monkeypatch.setattr(suggestion_service, "build_suggestion_decision_service", lambda **_: None)
+     from tldw_Server_API.app.core.Notes_Graph.suggestion_api import build_notes_graph_suggestions_api
+
+     db, _, note, _ = fresh_suggestions
+diff --git a/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py b/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py
+new file mode 100644
+index 0000000000..28580d8584
+--- /dev/null
++++ b/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py
+@@ -0,0 +1,138 @@
++"""Guarded local suggestion mutations through the existing Notes stores.
++
++This adapter performs no admission or authority selection. Its caller supplies a
++fresh acceptance guard; that guard runs before product locks and again inside
++the existing store mutation. Canonical Sync uses its existing coordinators.
++"""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Any
++
++from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
++from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLink
++from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
++    NotesOrganizationSyncStore,
++    OrganizationResource,
++)
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
++from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
++    GuardedProductMutation,
++)
++from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
++from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
++
++if TYPE_CHECKING:
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++
++class LocalSuggestionMutations:
++    """Apply only the three review-approved local Notes mutation shapes."""
++
++    def __init__(self, note_db: CharactersRAGDB) -> None:
++        self.note_db = note_db
++        self._organization = NotesOrganizationSyncStore(note_db)
++
++    def create_related_link(
++        self,
++        *,
++        edge_id: str,
++        source_note_id: str,
++        target_note_id: str,
++        guarded_mutation: GuardedProductMutation,
++    ) -> NotesLink:
++        """Create one ordinary undirected link and finalize in its transaction."""
++
++        guarded_mutation.require_identity("notes.link", edge_id)
++        source, target = sorted((source_note_id, target_note_id))
++        timestamp = normalize_sync_timestamp(self.note_db._get_current_utc_timestamp_iso())
++        with self.note_db.transaction() as conn:
++            guarded_mutation.before(conn)
++            result = self.note_db.notes_link_store.upsert(
++                edge_id=edge_id,
++                payload={
++                    "source_note_id": source,
++                    "target_note_id": target,
++                    "type": "manual",
++                    "directed": False,
++                    "weight": 1.0,
++                    "label": None,
++                    "properties": {},
++                    "created_at": timestamp,
++                    "last_modified": timestamp,
++                    "created_by": f"user:{self.note_db.client_id}",
++                },
++                expected_version=None,
++                conn=conn,
++                before=guarded_mutation.before,
++                after=guarded_mutation.after,
++            )
++            return result.link
++
++    def create_keyword(
++        self,
++        *,
++        keyword_sync_id: str,
++        display: str,
++        guarded_mutation: GuardedProductMutation,
++    ) -> OrganizationResource:
++        """Create or replay the guarded keyword step without finalizing it."""
++
++        guarded_mutation.require_identity("notes.keyword", keyword_sync_id)
++        with self.note_db.transaction() as conn:
++            guarded_mutation.before(conn)
++            return self._organization.apply_resource(
++                domain="notes.keyword",
++                object_id=keyword_sync_id,
++                operation="upsert",
++                payload={"keyword": display},
++                before=guarded_mutation.before,
++            )
++
++    def find_keyword_identity(self, display: str, *, conn: Any | None = None, for_update: bool = False) -> str | None:
++        """Reuse local keyword identities without treating SQLite device labels as owners."""
++
++        if self.note_db.backend_type == BackendType.POSTGRESQL:
++            resource = self._organization.find_keyword_by_normalized_identity(display, conn=conn, for_update=for_update)
++            return resource.sync_id if resource is not None else None
++        normalized = self._organization.normalize_keyword_identity(display)
++        with self.note_db.transaction():
++            for row in self.note_db.list_keywords(limit=self.note_db.count_keywords()):
++                if self._organization.normalize_keyword_identity(row["keyword"]) == normalized:
++                    return str(row["sync_id"])
++        return None
++
++    def link_keyword(
++        self,
++        *,
++        note_id: str,
++        keyword_sync_id: str,
++        guarded_mutation: GuardedProductMutation,
++    ) -> None:
++        """Apply the owner-checked membership and its acceptance finalizer."""
++
++        identity = organization_link_id("notes.keyword_link", ["note", note_id, keyword_sync_id])
++        guarded_mutation.require_identity("notes.keyword_link", identity)
++        with self.note_db.transaction() as conn:
++            guarded_mutation.before(conn)
++            if self.note_db.backend_type == BackendType.SQLITE:
++                keyword = self.note_db.keyword_store.resolve_merge_survivor(keyword_sync_id, conn=conn, for_update=True)
++                if keyword is None or keyword["sync_id"] != keyword_sync_id:
++                    raise InputError("Suggestion keyword is missing or deleted")
++                self.note_db.link_note_to_keyword(note_id, keyword["id"])
++                if guarded_mutation.after is not None:
++                    guarded_mutation.after(conn, identity)
++                return
++            self._organization.apply_relationship(
++                domain="notes.keyword_link",
++                object_id=identity,
++                operation="upsert",
++                payload={
++                    "subject_type": "note",
++                    "subject_id": note_id,
++                    "keyword_sync_id": keyword_sync_id,
++                },
++                routing_metadata={},
++                before=guarded_mutation.before,
++                after=guarded_mutation.after,
++            )
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py
+new file mode 100644
+index 0000000000..c2cccc91ba
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py
+@@ -0,0 +1,287 @@
++"""Real product-store controls for the inactive-Sync suggestion adapter.
++
++The registered scope isolates guarded product mutations. Fresh unbound admission
++and factory integration are separate controls and must not be inferred from it.
++"""
++
++from importlib import import_module
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
++from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
++    GuardedKeywordIdentityCollision,
++)
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
++from tldw_Server_API.app.core.Notes_Graph.suggestion_service import build_suggestion_decision_service
++from tldw_Server_API.app.core.Sync.v2 import server_origin
++from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
++    GuardedProductMutation,
++    GuardedProductMutationIdentityError,
++)
++from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_acceptance import (
++    DATASET_ID,
++    NOW,
++    OWNER_ID,
++    SOURCE_ID,
++    TARGET_ID,
++    _fingerprint,
++    _publish,
++)
++
++pytestmark = pytest.mark.integration
++EDGE_ID = "33333333-3333-4333-8333-333333333333"
++KEYWORD_ID = "44444444-4444-4444-8444-444444444444"
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def local_product_db(request, tmp_path, monkeypatch):
++    backend = (
++        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++        if request.param == "postgres"
++        else None
++    )
++    db = CharactersRAGDB(tmp_path / "local-suggestions.db", client_id=OWNER_ID, backend=backend)
++    monkeypatch.setattr(server_origin, "get_active_server_origin_sync_service_for_user", lambda _owner: None)
++    try:
++        with chacha_operation(independent=True):
++            db.add_note("Source", "source body", note_id=SOURCE_ID)
++            db.add_note("Target", "target body", note_id=TARGET_ID)
++            yield db
++    finally:
++        db.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++def _adapter(db):
++    module = import_module("tldw_Server_API.app.core.Notes_Graph.suggestion_local_mutations")
++    return module.LocalSuggestionMutations(db)
++
++
++def _claim(db, *, kind="related_note"):
++    # Existing canonical storage setup is intentional for this adapter-only
++    # boundary; it does not assert that a fresh local scope is authorized yet.
++    with db.transaction() as conn:
++        conn.execute(
++            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
++            (OWNER_ID, DATASET_ID),
++        )
++    _publish(db, suggestion_id="local-mutation", kind=kind)
++    return db.note_graph_suggestion_store.claim_acceptance(
++        dataset_id=DATASET_ID,
++        suggestion_id="local-mutation",
++        expected_revision=1,
++        expected_source_fingerprint=_fingerprint(db, SOURCE_ID),
++        expected_target_fingerprint=_fingerprint(db, TARGET_ID) if kind == "related_note" else None,
++        idempotency_key="local-mutation-decision",
++        now=NOW,
++    ).suggestion
++
++
++def _guard(db, fence, domain, identity, *, fail_after=False):
++    finalized = []
++
++    def before(conn):
++        db.note_graph_suggestion_store.guard_acceptance_in_transaction(conn=conn, fence=fence, now=NOW)
++
++    def after(conn, result_id):
++        finalized.append(
++            db.note_graph_suggestion_store.finalize_acceptance_in_transaction(
++                conn=conn,
++                fence=fence,
++                accepted_resource_identity=result_id,
++                now=NOW,
++            )
++        )
++        if fail_after:
++            raise RuntimeError("synthetic finalizer interruption")
++
++    return GuardedProductMutation(
++        expected_domain=domain,
++        expected_object_id=identity,
++        before=before,
++        after=None if domain == "notes.keyword" else after,
++    ), finalized
++
++
++def test_fresh_inactive_factory_provides_real_decisions(local_product_db):
++    db = local_product_db
++    decisions = build_suggestion_decision_service(
++        note_db=db,
++        owner_user_id=OWNER_ID,
++        dataset_id=f"legacy:{OWNER_ID}",
++    )
++    assert decisions is not None
++
++
++def test_local_adapter_commits_link_and_exact_acceptance_together(local_product_db):
++    db = local_product_db
++    fence = _claim(db)
++    guard, finalized = _guard(db, fence, "notes.link", EDGE_ID)
++    link = _adapter(db).create_related_link(
++        edge_id=EDGE_ID,
++        source_note_id=TARGET_ID,
++        target_note_id=SOURCE_ID,
++        guarded_mutation=guard,
++    )
++    assert (link.edge_id, link.directed, link.weight, link.label, link.properties) == (
++        EDGE_ID,
++        False,
++        1.0,
++        None,
++        {},
++    )
++    assert finalized[0].envelope["state"] == "accepted"
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=DATASET_ID, suggestion_id=fence.id).state.value
++        == "accepted"
++    )
++
++
++def test_local_adapter_finalizer_failure_rolls_back_product_and_decision(local_product_db):
++    db = local_product_db
++    fence = _claim(db)
++    guard, _ = _guard(db, fence, "notes.link", EDGE_ID, fail_after=True)
++    with pytest.raises(RuntimeError, match="synthetic finalizer interruption"):
++        _adapter(db).create_related_link(
++            edge_id=EDGE_ID,
++            source_note_id=SOURCE_ID,
++            target_note_id=TARGET_ID,
++            guarded_mutation=guard,
++        )
++    assert db.notes_link_store.get(EDGE_ID) is None
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=DATASET_ID, suggestion_id=fence.id).state.value
++        == "accepting"
++    )
++
++
++def test_local_adapter_keyword_alone_never_finalizes_acceptance(local_product_db):
++    db = local_product_db
++    fence = _claim(db, kind="tag")
++    adapter = _adapter(db)
++    keyword_guard, _ = _guard(db, fence, "notes.keyword", KEYWORD_ID)
++    resource = adapter.create_keyword(keyword_sync_id=KEYWORD_ID, display="Research", guarded_mutation=keyword_guard)
++    assert resource.sync_id == KEYWORD_ID
++    assert db.get_keywords_for_note(SOURCE_ID) == []
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=DATASET_ID, suggestion_id=fence.id).state.value
++        == "accepting"
++    )
++    identity = organization_link_id("notes.keyword_link", ["note", SOURCE_ID, KEYWORD_ID])
++    membership_guard, finalized = _guard(db, fence, "notes.keyword_link", identity)
++    adapter.link_keyword(note_id=SOURCE_ID, keyword_sync_id=KEYWORD_ID, guarded_mutation=membership_guard)
++    assert finalized[0].envelope["state"] == "accepted"
++    assert [row["sync_id"] for row in db.get_keywords_for_note(SOURCE_ID)] == [KEYWORD_ID]
++
++
++def test_local_adapter_identity_mismatch_cannot_create_product(local_product_db):
++    db = local_product_db
++    fence = _claim(db)
++    guard, _ = _guard(db, fence, "notes.link", EDGE_ID)
++    with pytest.raises(GuardedProductMutationIdentityError):
++        _adapter(db).create_related_link(
++            edge_id=KEYWORD_ID,
++            source_note_id=SOURCE_ID,
++            target_note_id=TARGET_ID,
++            guarded_mutation=guard,
++        )
++    assert db.notes_link_store.snapshot() == ()
++
++
++def test_local_adapter_preserves_outer_caller_rollback(local_product_db):
++    db = local_product_db
++    fence = _claim(db)
++    guard, _ = _guard(db, fence, "notes.link", EDGE_ID)
++    with pytest.raises(RuntimeError, match="caller rollback"):
++        with db.transaction():
++            _adapter(db).create_related_link(
++                edge_id=EDGE_ID,
++                source_note_id=SOURCE_ID,
++                target_note_id=TARGET_ID,
++                guarded_mutation=guard,
++            )
++            raise RuntimeError("caller rollback")
++    assert db.notes_link_store.get(EDGE_ID) is None
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=DATASET_ID, suggestion_id=fence.id).state.value
++        == "accepting"
++    )
++
++
++def test_local_adapter_failed_membership_preserves_only_prior_keyword(local_product_db):
++    db = local_product_db
++    fence = _claim(db, kind="tag")
++    adapter = _adapter(db)
++    keyword_guard, _ = _guard(db, fence, "notes.keyword", KEYWORD_ID)
++    adapter.create_keyword(keyword_sync_id=KEYWORD_ID, display="Research", guarded_mutation=keyword_guard)
++    identity = organization_link_id("notes.keyword_link", ["note", SOURCE_ID, KEYWORD_ID])
++    membership_guard, _ = _guard(db, fence, "notes.keyword_link", identity, fail_after=True)
++    with pytest.raises(RuntimeError, match="synthetic finalizer interruption"):
++        adapter.link_keyword(note_id=SOURCE_ID, keyword_sync_id=KEYWORD_ID, guarded_mutation=membership_guard)
++    assert db.get_keyword_by_text("Research")["sync_id"] == KEYWORD_ID
++    assert db.get_keywords_for_note(SOURCE_ID) == []
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=DATASET_ID, suggestion_id=fence.id).state.value
++        == "accepting"
++    )
++
++
++def test_local_adapter_keyword_replay_preserves_identity_and_version(local_product_db):
++    db = local_product_db
++    fence = _claim(db, kind="tag")
++    adapter = _adapter(db)
++    guard, _ = _guard(db, fence, "notes.keyword", KEYWORD_ID)
++    first = adapter.create_keyword(keyword_sync_id=KEYWORD_ID, display="Research", guarded_mutation=guard)
++    replay = adapter.create_keyword(keyword_sync_id=KEYWORD_ID, display="Research", guarded_mutation=guard)
++    assert (replay.local_id, replay.sync_id, replay.version) == (first.local_id, KEYWORD_ID, first.version)
++    assert len(db.list_keywords()) == 1
++
++
++def test_local_adapter_reports_normalized_collision_without_replacing_keyword(local_product_db):
++    db = local_product_db
++    existing_id = db.add_keyword("Research")
++    existing = db.get_keyword_by_id(existing_id)
++    fence = _claim(db, kind="tag")
++    guard, _ = _guard(db, fence, "notes.keyword", KEYWORD_ID)
++    with pytest.raises(GuardedKeywordIdentityCollision) as caught:
++        _adapter(db).create_keyword(keyword_sync_id=KEYWORD_ID, display="RESEARCH", guarded_mutation=guard)
++    assert caught.value.canonical_sync_id == existing["sync_id"]
++    assert db.get_keyword_by_id(existing_id) == existing
++    assert len(db.list_keywords()) == 1
++    assert db.get_keywords_for_note(SOURCE_ID) == []
++
++
++def test_local_adapter_same_tag_label_is_owner_scoped(local_product_db, tmp_path):
++    db = local_product_db
++    # PostgreSQL owners share physical tables; SQLite retains its per-owner file.
++    other = CharactersRAGDB(
++        tmp_path / "foreign-owner.db",
++        client_id="other-owner",
++        backend=db.backend if db.backend_type == BackendType.POSTGRESQL else None,
++    )
++    try:
++        foreign_local_id = other.add_keyword("Research")
++        foreign = other.get_keyword_by_id(foreign_local_id)
++        fence = _claim(db, kind="tag")
++        adapter = _adapter(db)
++        keyword_guard, _ = _guard(db, fence, "notes.keyword", KEYWORD_ID)
++        owned = adapter.create_keyword(keyword_sync_id=KEYWORD_ID, display="research", guarded_mutation=keyword_guard)
++        assert owned.sync_id != foreign["sync_id"]
++        foreign_identity = organization_link_id("notes.keyword_link", ["note", SOURCE_ID, foreign["sync_id"]])
++        foreign_guard, _ = _guard(db, fence, "notes.keyword_link", foreign_identity)
++        with pytest.raises(InputError, match="missing or deleted"):
++            adapter.link_keyword(note_id=SOURCE_ID, keyword_sync_id=foreign["sync_id"], guarded_mutation=foreign_guard)
++        assert db.get_keywords_for_note(SOURCE_ID) == []
++        owned_identity = organization_link_id("notes.keyword_link", ["note", SOURCE_ID, KEYWORD_ID])
++        owned_guard, finalized = _guard(db, fence, "notes.keyword_link", owned_identity)
++        adapter.link_keyword(note_id=SOURCE_ID, keyword_sync_id=KEYWORD_ID, guarded_mutation=owned_guard)
++        assert finalized[0].envelope["state"] == "accepted"
++        assert [row["sync_id"] for row in db.get_keywords_for_note(SOURCE_ID)] == [KEYWORD_ID]
++        assert other.get_keyword_by_id(foreign_local_id) == foreign
++    finally:
++        other.close_all_connections()
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py
+new file mode 100644
+index 0000000000..43f568677d
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py
+@@ -0,0 +1,158 @@
++"""Fresh local admission through the actual store and Jobs coordinator."""
++
++import pytest
++
++from tldw_Server_API.app.core.Jobs.manager import JobManager
++from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
++from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
++    JOB_PAYLOAD_KEYS,
++    JOB_QUEUE,
++    SuggestionAdmissionService,
++)
++from tldw_Server_API.app.core.Notes_Graph.suggestion_service import build_suggestion_decision_service
++from tldw_Server_API.tests.Notes_Graph.integration import test_suggestion_acceptance as acceptance_fixture
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_acceptance import NOW, SOURCE_ID
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_mutations import (
++    local_product_db as local_product_db,
++)
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.mark.parametrize("scope", ["fresh-local", "canonical-control"])
++def test_actual_admission_preserves_content_free_job_and_replay(local_product_db, tmp_path, monkeypatch, scope):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}" if scope == "fresh-local" else "canonical-control"
++    if scope == "canonical-control":
++        with db.transaction() as conn:
++            conn.execute(
++                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
++                (db.client_id, dataset),
++            )
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "local-jobs.db")
++    source = db.get_note_by_id(SOURCE_ID)
++    service = SuggestionAdmissionService(store=db.note_graph_suggestion_store, jobs=jobs, owner_user_id=db.client_id)
++    arguments = {
++        "dataset_id": dataset,
++        "source_note_id": SOURCE_ID,
++        "source_fingerprint": content_fingerprint(source["title"], source["content"]),
++        "provider": "openai",
++        "model": "synthetic-no-provider-call",
++        "capability_revision": f"sha256:{'a' * 64}",
++        "prompt_contract_version": "notes-graph-suggestions-v1",
++        "idempotency_key": "local-lifecycle-admission",
++        "now": NOW,
++    }
++    admitted = service.admit(**arguments)
++    replay = service.admit(**arguments)
++    assert admitted.run.job_id == admitted.job["uuid"]
++    assert admitted.job["payload"]["dataset_id"] == dataset
++    assert set(admitted.job["payload"]) == JOB_PAYLOAD_KEYS
++    assert admitted.job["idempotency_key"] == admitted.run.id
++    assert admitted.job["owner_user_id"] == db.client_id
++    assert admitted.job["max_retries"] == 0
++    assert replay.disposition == "terminal_replay"
++    assert replay.replay_envelope["run_id"] == admitted.run.id
++    assert jobs.count_jobs(domain="notes", owner_user_id=db.client_id) == 1
++    with db.transaction() as conn:
++        authority = conn.execute(
++            "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
++            (db.client_id,),
++        ).fetchall()
++    assert [row["dataset_id"] for row in authority] == ([] if scope == "fresh-local" else [dataset])
++
++
++@pytest.mark.parametrize("kind", ["related_note", "tag"])
++def test_actual_local_factory_accepts_published_product_and_replays(local_product_db, monkeypatch, kind):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    # Reuse the actual admit/start/stage/publish fixture under its explicit local
++    # dataset. No shared authority is inserted and no production method is mocked.
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(db, suggestion_id="fresh-local-decision", kind=kind)
++    decisions = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++    assert decisions is not None
++    decisions._clock = lambda: NOW
++    arguments = {
++        "dataset_id": dataset,
++        "suggestion_id": "fresh-local-decision",
++        "expected_revision": 1,
++        "expected_source_fingerprint": acceptance_fixture._fingerprint(db, SOURCE_ID),
++        "expected_target_fingerprint": (
++            acceptance_fixture._fingerprint(db, acceptance_fixture.TARGET_ID) if kind == "related_note" else None
++        ),
++        "idempotency_key": "accept-fresh-local",
++    }
++    result = decisions.accept(**arguments)
++    replay = decisions.accept(**arguments)
++    assert result.envelope["state"] == "accepted"
++    assert replay.envelope == result.envelope
++    if kind == "tag":
++        assert [item["keyword"].casefold() for item in db.get_keywords_for_note(SOURCE_ID)] == ["research"]
++    else:
++        assert db.notes_link_store.get(result.envelope["accepted_resource_identity"]) is not None
++    with db.transaction() as conn:
++        assert (
++            conn.execute("SELECT 1 FROM note_task_scope_authority WHERE owner_user_id=?", (db.client_id,)).fetchone()
++            is None
++        )
++
++
++@pytest.mark.parametrize("mismatch", ["owner", "dataset", "canonical-reserved"])
++def test_local_factory_does_not_authorize_mismatched_or_retired_scope(local_product_db, mismatch):
++    db = local_product_db
++    owner = "another-owner" if mismatch == "owner" else db.client_id
++    dataset = "legacy:another-owner" if mismatch == "dataset" else f"legacy:{db.client_id}"
++    if mismatch == "canonical-reserved":
++        with db.transaction() as conn:
++            conn.execute(
++                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
++                (db.client_id, "real-canonical"),
++            )
++    assert build_suggestion_decision_service(note_db=db, owner_user_id=owner, dataset_id=dataset) is None
++
++
++@pytest.mark.parametrize("changed", ["source", "target"])
++@pytest.mark.parametrize("mutation", ["edit", "trash"])
++def test_local_note_mutation_invalidates_review_in_its_transaction(local_product_db, monkeypatch, changed, mutation):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(db, suggestion_id="local-note-change", kind="related_note")
++    note_id = SOURCE_ID if changed == "source" else acceptance_fixture.TARGET_ID
++    with pytest.raises(RuntimeError, match="caller rollback"):
++        with db.transaction() as conn:
++            if mutation == "edit":
++                db.update_note(note_id, {"content": "rolled back edit"}, expected_version=1, conn=conn)
++            else:
++                db.soft_delete_note(note_id, expected_version=1)
++            assert (
++                db.note_graph_suggestion_store.get_suggestion(
++                    dataset_id=dataset, suggestion_id="local-note-change"
++                ).state.value
++                == "stale"
++            )
++            raise RuntimeError("caller rollback")
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=dataset, suggestion_id="local-note-change").state.value
++        == "pending"
++    )
++    assert db.get_note_by_id(note_id)["version"] == 1
++    if mutation == "edit":
++        db.update_note(note_id, {"content": "committed edit"}, expected_version=1)
++    else:
++        db.soft_delete_note(note_id, expected_version=1)
++    assert (
++        db.note_graph_suggestion_store.get_suggestion(dataset_id=dataset, suggestion_id="local-note-change").state.value
++        == "stale"
++    )
++
++
++def test_local_maintenance_discovers_durable_scope_without_authority_row(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    assert db.note_graph_suggestion_store.list_maintenance_dataset_ids() == ()
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(db, suggestion_id="local-maintenance", kind="tag")
++    assert db.note_graph_suggestion_store.list_maintenance_dataset_ids() == (dataset,)
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py
+new file mode 100644
+index 0000000000..6c21cf3c66
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py
+@@ -0,0 +1,199 @@
++"""Actual default-dataset creation must fence prior local review authority."""
++
++from types import SimpleNamespace
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import NotesGraphDatasetScopeError
++from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
++from tldw_Server_API.app.core.Sync.v2.store import SyncStoreError
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_mutations import (
++    local_product_db as local_product_db,
++)
++from tldw_Server_API.tests.Sync.test_sync_v2_profile_bootstrap import _service
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.mark.parametrize("entry", ["profile", "personal-context", "personal-context-supplied"])
++def test_default_creation_reserves_only_real_canonical_authority(local_product_db, tmp_path, entry):
++    db = local_product_db
++    service, sync_store = _service(tmp_path)
++    service.materializers["notes.note"] = NotesMaterializer(db)
++    if entry == "profile":
++        result = service.bootstrap_profile(
++            user_id=db.client_id,
++            mode="offline_sync",
++            device_id="local-transition-device",
++            requested_domains=["notes.note"],
++        )
++        dataset_id = result.dataset.dataset_id
++    else:
++        supplied = (
++            sync_store.get_or_create_default_personal_dataset(db.client_id)
++            if entry == "personal-context-supplied"
++            else None
++        )
++        result = service._profile_manager()._bind_personal_context_dataset(
++            user_id=db.client_id,
++            manifest=SimpleNamespace(profile_id="local-transition-profile"),
++            authority_id="local-transition-authority",
++            integrity_key_id="local-transition-key",
++            purge_generation=0,
++            dataset=supplied,
++        )
++        dataset_id = result.dataset_id
++    with db.transaction() as conn:
++        rows = conn.execute(
++            "SELECT owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound "
++            "FROM note_task_scope_authority WHERE owner_user_id=?",
++            (db.client_id,),
++        ).fetchall()
++    assert [dict(row) for row in rows] == [
++        {
++            "owner_user_id": db.client_id,
++            "dataset_id": dataset_id,
++            "task_graph_bound": False,
++            "moodboard_graph_bound": False,
++            "studio_graph_bound": False,
++        }
++    ]
++
++
++@pytest.mark.parametrize("existing", ["none", "same", "different"])
++def test_reservation_preserves_existing_authority_and_caller_rollback(local_product_db, tmp_path, existing):
++    db = local_product_db
++    service, sync_store = _service(tmp_path)
++    service.materializers["notes.note"] = NotesMaterializer(db)
++    dataset = sync_store.get_or_create_default_personal_dataset(db.client_id)
++    if existing != "none":
++        with db.transaction() as conn:
++            conn.execute(
++                "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound) VALUES (?,?,?,?,?)",
++                (db.client_id, dataset.dataset_id if existing == "same" else "another-dataset", True, False, True),
++            )
++    with db.transaction() as conn:
++        before = [
++            dict(row)
++            for row in conn.execute(
++                "SELECT * FROM note_task_scope_authority WHERE owner_user_id=?", (db.client_id,)
++            ).fetchall()
++        ]
++    if existing == "different":
++        with pytest.raises(NotesGraphDatasetScopeError):
++            service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=dataset)
++    else:
++        with pytest.raises(RuntimeError, match="caller rollback"):
++            with db.transaction():
++                service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=dataset)
++                raise RuntimeError("caller rollback")
++    with db.transaction() as conn:
++        after = [
++            dict(row)
++            for row in conn.execute(
++                "SELECT * FROM note_task_scope_authority WHERE owner_user_id=?", (db.client_id,)
++            ).fetchall()
++        ]
++    assert after == before
++    if existing == "same":
++        service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=dataset)
++        with db.transaction() as conn:
++            assert [
++                dict(row)
++                for row in conn.execute(
++                    "SELECT * FROM note_task_scope_authority WHERE owner_user_id=?", (db.client_id,)
++                ).fetchall()
++            ] == before
++
++
++def test_reservation_rejects_foreign_default_before_product_binding(local_product_db, tmp_path):
++    db = local_product_db
++    service, sync_store = _service(tmp_path)
++    service.materializers["notes.note"] = NotesMaterializer(db)
++    foreign = sync_store.get_or_create_default_personal_dataset("foreign-owner")
++    with pytest.raises(SyncStoreError):
++        service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=foreign)
++    with db.transaction() as conn:
++        assert conn.execute("SELECT 1 FROM note_task_scope_authority").fetchone() is None
++
++
++def test_later_task_binding_reuses_real_reservation_without_rekeying_review(local_product_db, tmp_path):
++    db = local_product_db
++    service, sync_store = _service(tmp_path)
++    service.materializers["notes.note"] = NotesMaterializer(db)
++    dataset = sync_store.get_or_create_default_personal_dataset(db.client_id)
++    service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=dataset)
++    db.bind_local_task_graph_to_dataset(owner_user_id=db.client_id, target_dataset_id=dataset.dataset_id)
++    service.prepare_notes_suggestion_authority(user_id=db.client_id, dataset=dataset)
++    with db.transaction() as conn:
++        row = conn.execute("SELECT * FROM note_task_scope_authority WHERE owner_user_id=?", (db.client_id,)).fetchone()
++    assert row["dataset_id"] == dataset.dataset_id and row["task_graph_bound"]
++
++
++@pytest.mark.postgres
++@pytest.mark.parametrize("first", ["local-product-transaction", "canonical-reservation"])
++def test_pg_authority_lock_serializes_local_work_with_enrollment(pg_database_config, tmp_path, first):
++    from concurrent.futures import ThreadPoolExecutor
++    from threading import Event
++    from time import monotonic, sleep
++
++    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++    backend = DatabaseBackendFactory.create_backend(pg_database_config)
++    db = CharactersRAGDB(tmp_path / "concurrent.db", client_id="owner-1", backend=backend)
++    store = db.note_graph_suggestion_store
++    entered, release, second_ready = Event(), Event(), Event()
++    pids = []
++
++    def transaction_one():
++        with chacha_operation(independent=True), db.transaction():
++            if first == "canonical-reservation":
++                store.reserve_canonical_scope(dataset_id="real-canonical")
++            else:
++                assert store.is_local_scope_available(dataset_id="legacy:owner-1")
++            entered.set()
++            assert release.wait(10)
++
++    def transaction_two():
++        with chacha_operation(independent=True), db.transaction() as conn:
++            pids.append(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
++            second_ready.set()
++            if first == "canonical-reservation":
++                return store.is_local_scope_available(dataset_id="legacy:owner-1")
++            store.reserve_canonical_scope(dataset_id="real-canonical")
++            return True
++
++    try:
++        with ThreadPoolExecutor(max_workers=2) as executor:
++            one = executor.submit(transaction_one)
++            assert entered.wait(10)
++            two = executor.submit(transaction_two)
++            assert second_ready.wait(10)
++            try:
++                deadline = monotonic() + 5
++                blocked = False
++                while monotonic() < deadline:
++                    with chacha_operation(independent=True), db.transaction() as conn:
++                        blocked = (
++                            conn.execute(
++                                "SELECT 1 FROM pg_locks WHERE pid=? AND relation='note_task_scope_authority'::regclass AND NOT granted",
++                                (pids[0],),
++                            ).fetchone()
++                            is not None
++                        )
++                    if blocked:
++                        break
++                    sleep(0.01)
++                assert blocked and not two.done()
++            finally:
++                release.set()
++            one.result(timeout=10)
++            assert two.result(timeout=10) is (first != "canonical-reservation")
++        with chacha_operation(independent=True):
++            assert not store.is_local_scope_available(dataset_id="legacy:owner-1")
++    finally:
++        release.set()
++        db.close_all_connections()
++        backend.get_pool().close_all()
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py
+new file mode 100644
+index 0000000000..33a69ce2cb
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py
+@@ -0,0 +1,223 @@
++"""Actual local publication/decision controls for durable merge survivors."""
++
++import pytest
++
++from tldw_Server_API.app.core.Notes_Graph.suggestion_service import build_suggestion_decision_service
++from tldw_Server_API.tests.Notes_Graph.integration import test_suggestion_acceptance as acceptance_fixture
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_mutations import (
++    local_product_db as local_product_db,
++)
++
++pytestmark = pytest.mark.integration
++
++
++def _setup(db, monkeypatch):
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    source = db.get_keyword_by_id(db.add_keyword("Before merge"))
++    target = db.get_keyword_by_id(db.add_keyword("Surviving keyword"))
++    return dataset, source, target
++
++
++def _merge(db, source, target):
++    return db.merge_keywords(
++        source_keyword_id=source["id"],
++        target_keyword_id=target["id"],
++        expected_source_version=source["version"],
++        expected_target_version=target["version"],
++    )
++
++
++def _accept(db, dataset, suggestion_id):
++    decisions = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++    assert decisions is not None
++    decisions._clock = lambda: acceptance_fixture.NOW
++    return decisions.accept(
++        dataset_id=dataset,
++        suggestion_id=suggestion_id,
++        expected_revision=1,
++        expected_source_fingerprint=acceptance_fixture._fingerprint(db, acceptance_fixture.SOURCE_ID),
++        expected_target_fingerprint=None,
++        idempotency_key=f"accept-{suggestion_id}",
++    )
++
++
++def test_pending_local_tag_follows_real_merge_at_acceptance(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset, source, target = _setup(db, monkeypatch)
++    acceptance_fixture._publish(
++        db,
++        suggestion_id="merge-pending",
++        kind="tag",
++        keyword_sync_id=source["sync_id"],
++        normalized_tag="before merge",
++        display_tag="Before merge",
++    )
++    _merge(db, source, target)
++    result = _accept(db, dataset, "merge-pending")
++    assert result.envelope["state"] == "accepted"
++    assert [row["sync_id"] for row in db.get_keywords_for_note(acceptance_fixture.SOURCE_ID)] == [target["sync_id"]]
++
++
++def test_inflight_local_tag_snapshot_survives_merge_before_publication(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset, source, target = _setup(db, monkeypatch)
++    original = db.note_graph_suggestion_store.stage_suggestions
++
++    def merge_after_candidate_snapshot(**kwargs):
++        # The generated candidate has already captured the old portable ID.
++        # Interleave a real ordinary merge before the actual stage/publish path.
++        assert kwargs["candidates"][0]["keyword_sync_id"] == source["sync_id"]
++        _merge(db, source, target)
++        return original(**kwargs)
++
++    monkeypatch.setattr(db.note_graph_suggestion_store, "stage_suggestions", merge_after_candidate_snapshot)
++    acceptance_fixture._publish(
++        db,
++        suggestion_id="merge-inflight",
++        kind="tag",
++        keyword_sync_id=source["sync_id"],
++        normalized_tag="before merge",
++        display_tag="Before merge",
++    )
++    page = db.note_graph_suggestion_store.list_suggestions(
++        dataset_id=dataset,
++        source_note_id=acceptance_fixture.SOURCE_ID,
++        source_fingerprint=acceptance_fixture._fingerprint(db, acceptance_fixture.SOURCE_ID),
++        states=("pending",),
++        limit=20,
++        after=None,
++    )
++    assert len(page.items) == 1
++    assert page.items[0].display_tag == target["keyword"]
++    assert page.items[0].keyword_sync_id == source["sync_id"]
++    assert _accept(db, dataset, "merge-inflight").envelope["state"] == "accepted"
++    assert [row["sync_id"] for row in db.get_keywords_for_note(acceptance_fixture.SOURCE_ID)] == [target["sync_id"]]
++
++
++def test_local_acceptance_rechecks_survivor_after_source_restore(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset, source, target = _setup(db, monkeypatch)
++    acceptance_fixture._publish(db, suggestion_id="merge-restore-race", kind="tag", keyword_sync_id=source["sync_id"])
++    _merge(db, source, target)
++    decisions = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++    decisions._clock = lambda: acceptance_fixture.NOW
++    original = decisions.local.link_keyword
++
++    def restore_before_product_guard(**kwargs):
++        assert kwargs["keyword_sync_id"] == target["sync_id"]
++        assert db.add_keyword(source["keyword"]) == source["id"]
++        return original(**kwargs)
++
++    monkeypatch.setattr(decisions.local, "link_keyword", restore_before_product_guard)
++    result = decisions.accept(
++        dataset_id=dataset,
++        suggestion_id="merge-restore-race",
++        expected_revision=1,
++        expected_source_fingerprint=acceptance_fixture._fingerprint(db, acceptance_fixture.SOURCE_ID),
++        expected_target_fingerprint=None,
++        idempotency_key="restore-race",
++    )
++    assert result.envelope["state"] == "pending"
++    assert db.get_keywords_for_note(acceptance_fixture.SOURCE_ID) == []
++
++
++@pytest.mark.parametrize("local_product_db", ["sqlite"], indirect=True)
++@pytest.mark.parametrize("candidate", ["existing", "merged", "new-same-label", "new-unicode-label"])
++def test_sqlite_local_acceptance_preserves_prior_device_keyword_identity(local_product_db, monkeypatch, candidate):
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++    db = local_product_db
++    prior = CharactersRAGDB(db.db_path, client_id="prior-device")
++    try:
++        source = prior.get_keyword_by_id(
++            prior.add_keyword("Café STRASSE" if candidate == "new-unicode-label" else "Prior Research")
++        )
++        target = prior.get_keyword_by_id(prior.add_keyword("Surviving Research")) if candidate == "merged" else source
++        if candidate == "merged":
++            _merge(prior, source, target)
++    finally:
++        prior.close_all_connections()
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(
++        db,
++        suggestion_id="prior-device-tag",
++        kind="tag",
++        keyword_sync_id=None if candidate.startswith("new-") else source["sync_id"],
++        normalized_tag="café strasse" if candidate == "new-unicode-label" else "prior research",
++        display_tag="Cafe\u0301 Straße" if candidate == "new-unicode-label" else "Prior Research",
++    )
++    before = db.get_keyword_by_id(target["id"])
++    result = _accept(db, dataset, "prior-device-tag")
++    assert result.envelope["state"] == "accepted"
++    assert [row["sync_id"] for row in db.get_keywords_for_note(acceptance_fixture.SOURCE_ID)] == [target["sync_id"]]
++    assert db.get_keyword_by_id(target["id"]) == before
++
++
++@pytest.mark.parametrize("local_product_db", ["sqlite"], indirect=True)
++def test_sqlite_local_publication_suppresses_already_linked_prior_device_keyword(local_product_db, monkeypatch):
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++    db = local_product_db
++    prior = CharactersRAGDB(db.db_path, client_id="prior-device")
++    try:
++        keyword = prior.get_keyword_by_id(prior.add_keyword("Prior Research"))
++        prior.link_note_to_keyword(acceptance_fixture.SOURCE_ID, keyword["id"])
++    finally:
++        prior.close_all_connections()
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(
++        db,
++        suggestion_id="prior-device-duplicate",
++        kind="tag",
++        keyword_sync_id=keyword["sync_id"],
++        normalized_tag="prior research",
++        display_tag="Prior Research",
++    )
++    page = db.note_graph_suggestion_store.list_suggestions(
++        dataset_id=dataset,
++        source_note_id=acceptance_fixture.SOURCE_ID,
++        source_fingerprint=acceptance_fixture._fingerprint(db, acceptance_fixture.SOURCE_ID),
++        states=("pending",),
++        limit=20,
++        after=None,
++    )
++    assert not page.items
++    assert [row["sync_id"] for row in db.get_keywords_for_note(acceptance_fixture.SOURCE_ID)] == [keyword["sync_id"]]
++
++
++@pytest.mark.parametrize("local_product_db", ["sqlite"], indirect=True)
++def test_prior_device_keyword_membership_and_finalizer_roll_back_together(local_product_db, monkeypatch):
++    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++    db = local_product_db
++    prior = CharactersRAGDB(db.db_path, client_id="prior-device")
++    try:
++        keyword = prior.get_keyword_by_id(prior.add_keyword("Prior Research"))
++    finally:
++        prior.close_all_connections()
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(acceptance_fixture, "DATASET_ID", dataset)
++    acceptance_fixture._publish(
++        db,
++        suggestion_id="prior-device-rollback",
++        kind="tag",
++        keyword_sync_id=keyword["sync_id"],
++        normalized_tag="prior research",
++        display_tag="Prior Research",
++    )
++    store = db.note_graph_suggestion_store
++    original = store.finalize_acceptance_in_transaction
++
++    def fail_after_finalization(**kwargs):
++        assert original(**kwargs).envelope["state"] == "accepted"
++        raise RuntimeError("synthetic finalizer interruption")
++
++    monkeypatch.setattr(store, "finalize_acceptance_in_transaction", fail_after_finalization)
++    with pytest.raises(RuntimeError, match="synthetic finalizer interruption"):
++        _accept(db, dataset, "prior-device-rollback")
++    assert db.get_keywords_for_note(acceptance_fixture.SOURCE_ID) == []
++    assert db.get_keyword_by_id(keyword["id"]) == keyword
++    assert store.get_suggestion(dataset_id=dataset, suggestion_id="prior-device-rollback").state.value == "accepting"
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py
+new file mode 100644
+index 0000000000..052b97f4d3
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py
+@@ -0,0 +1,338 @@
++"""Retired local review work is fenced, cancelled and cleaned without rekeying."""
++
++from datetime import timedelta
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import NotesGraphDatasetScopeError
++from tldw_Server_API.app.core.Jobs.manager import JobManager
++from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import JOB_QUEUE, SuggestionAdmissionService, _payload
++from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import MaintenanceScope, SuggestionMaintenance
++from tldw_Server_API.app.core.Notes_Graph.suggestion_service import build_suggestion_decision_service
++from tldw_Server_API.tests.Notes_Graph.integration import test_suggestion_acceptance as fixture
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_mutations import (
++    local_product_db as local_product_db,
++)
++
++pytestmark = pytest.mark.integration
++
++
++def _rows(db, table):
++    assert table in {"note_graph_suggestions", "note_graph_suggestion_runs", "note_graph_suggestion_operation_receipts"}
++    with db.transaction() as conn:
++        # The identifier is the fixed test-helper allowlist above.
++        return [dict(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()]  # nosec B608
++
++
++def _arguments(db):
++    return {
++        "dataset_id": f"legacy:{db.client_id}",
++        "source_note_id": fixture.SOURCE_ID,
++        "source_fingerprint": fixture._fingerprint(db, fixture.SOURCE_ID),
++        "provider": "openai",
++        "model": "synthetic-no-provider",
++        "capability_revision": "cap-v1",
++        "prompt_contract_version": "prompt-v1",
++        "idempotency_key": "retirement-admission",
++        "now": fixture.NOW,
++    }
++
++
++def _maintenance(db, jobs):
++    return SuggestionMaintenance(
++        jobs=jobs, scopes=[MaintenanceScope(store=db.note_graph_suggestion_store, dataset_id=f"legacy:{db.client_id}")]
++    )
++
++
++@pytest.mark.parametrize("decision", ["pending", "accepting", "accepted", "rejected"])
++def test_retirement_stales_only_unfinished_review_and_preserves_terminal_receipts(
++    local_product_db, monkeypatch, decision
++):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(fixture, "DATASET_ID", dataset)
++    fixture._publish(db, suggestion_id="retire-review", kind="related_note")
++    store = db.note_graph_suggestion_store
++    args = {
++        "dataset_id": dataset,
++        "suggestion_id": "retire-review",
++        "expected_revision": 1,
++        "expected_source_fingerprint": fixture._fingerprint(db, fixture.SOURCE_ID),
++        "expected_target_fingerprint": fixture._fingerprint(db, fixture.TARGET_ID),
++        "idempotency_key": "decision",
++    }
++    if decision == "accepted":
++        service = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++        service._clock = lambda: fixture.NOW
++        service.accept(**args)
++    elif decision == "accepting":
++        store.claim_acceptance(**args, now=fixture.NOW)
++    elif decision == "rejected":
++        store.reject_suggestion(**args, now=fixture.NOW)
++    before_receipts = {
++        row["id"]: row for row in _rows(db, "note_graph_suggestion_operation_receipts") if row["state"] != "in_progress"
++    }
++    store.reserve_canonical_scope(dataset_id="real-canonical")
++    with pytest.raises(NotesGraphDatasetScopeError):
++        store.get_suggestion(dataset_id=dataset, suggestion_id="retire-review")
++    result = _maintenance(db, object()).run_pass(now=fixture.NOW + timedelta(seconds=1))
++    row = _rows(db, "note_graph_suggestions")[0]
++    assert row["state"] == ("stale" if decision in {"pending", "accepting"} else decision)
++    assert result.claimed <= 100
++    after = {row["id"]: row for row in _rows(db, "note_graph_suggestion_operation_receipts")}
++    assert all(after[key] == value for key, value in before_receipts.items())
++    assert all(row["state"] != "in_progress" for row in after.values())
++    assert all(row["dataset_id"] == dataset for row in after.values())
++    if decision == "accepted":
++        assert db.notes_link_store.get(row["accepted_resource_identity"]) is not None
++
++
++@pytest.mark.parametrize(
++    "timing", ["queued", "enqueue-before-bind", "enqueue-after-first-maintenance", "enqueue-after-grace"]
++)
++def test_retired_jobs_are_discovered_and_cancelled_without_binding_or_publication(
++    local_product_db, tmp_path, monkeypatch, timing
++):
++    db = local_product_db
++    store = db.note_graph_suggestion_store
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "retired-jobs.db")
++    service = SuggestionAdmissionService(store=store, jobs=jobs, owner_user_id=db.client_id)
++    create = jobs.create_job
++    first_pass = []
++
++    def enrolling_create(**kwargs):
++        store.reserve_canonical_scope(dataset_id="real-canonical")
++        if timing in {"enqueue-after-first-maintenance", "enqueue-after-grace"}:
++            elapsed = timedelta(minutes=11) if timing == "enqueue-after-grace" else timedelta(seconds=1)
++            first_pass.append(_maintenance(db, jobs).run_pass(now=fixture.NOW + elapsed))
++            assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == (
++                "failed" if timing == "enqueue-after-grace" else "admitting"
++            )
++        return create(**kwargs)
++
++    if timing == "queued":
++        service.admit(**_arguments(db))
++        store.reserve_canonical_scope(dataset_id="real-canonical")
++    else:
++        monkeypatch.setattr(jobs, "create_job", enrolling_create)
++        with pytest.raises(NotesGraphDatasetScopeError):
++            service.admit(**_arguments(db))
++    run_before = _rows(db, "note_graph_suggestion_runs")[0]
++    job_before = jobs.get_job_or_archived_by_idempotency_key(
++        idempotency_key=run_before["id"],
++        domain="notes",
++        queue=JOB_QUEUE,
++        job_type="note_graph_suggestions",
++        owner_user_id=db.client_id,
++    )
++    _maintenance(db, jobs).run_pass(
++        now=fixture.NOW + (timedelta(minutes=12) if timing == "enqueue-after-grace" else timedelta(seconds=2))
++    )
++    run = _rows(db, "note_graph_suggestion_runs")[0]
++    job = jobs.get_job_or_archived_by_uuid(job_before["uuid"], domain="notes", owner_user_id=db.client_id)
++    assert job["status"] == "cancelled"
++    assert job["payload"] == job_before["payload"]
++    assert run["state"] == ("stale" if timing == "queued" else "failed")
++    assert run["dataset_id"] == f"legacy:{db.client_id}"
++    assert run["job_id"] == run_before["job_id"]
++    assert _rows(db, "note_graph_suggestions") == []
++    receipts = _rows(db, "note_graph_suggestion_operation_receipts")
++    assert all(row["state"] != "in_progress" for row in receipts)
++    if first_pass:
++        assert first_pass[0].released == (0 if timing == "enqueue-after-grace" else 1)
++
++
++def test_retired_missing_job_keeps_existing_grace_then_closes_without_product(local_product_db, tmp_path, monkeypatch):
++    db = local_product_db
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "missing-jobs.db")
++    db.note_graph_suggestion_store.admit_run(**_arguments(db))
++    db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id="real-canonical")
++    maintenance = _maintenance(db, jobs)
++    maintenance.run_pass(now=fixture.NOW + timedelta(minutes=9))
++    assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == "admitting"
++    maintenance.run_pass(now=fixture.NOW + timedelta(minutes=10))
++    assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == "failed"
++    assert _rows(db, "note_graph_suggestions") == []
++
++
++def test_enrollment_between_keyword_and_membership_never_reports_acceptance(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(fixture, "DATASET_ID", dataset)
++    fixture._publish(db, suggestion_id="keyword-before-enrollment", kind="tag")
++    decisions = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++    decisions._clock = lambda: fixture.NOW
++    create = decisions.local.create_keyword
++    created = []
++
++    def create_then_enroll(**kwargs):
++        resource = create(**kwargs)
++        created.append(resource.sync_id)
++        db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id="real-canonical")
++        return resource
++
++    monkeypatch.setattr(decisions.local, "create_keyword", create_then_enroll)
++    with pytest.raises(NotesGraphDatasetScopeError):
++        decisions.accept(
++            dataset_id=dataset,
++            suggestion_id="keyword-before-enrollment",
++            expected_revision=1,
++            expected_source_fingerprint=fixture._fingerprint(db, fixture.SOURCE_ID),
++            expected_target_fingerprint=None,
++            idempotency_key="enrollment-keyword",
++        )
++    assert len(created) == 1
++    assert db.keyword_store.resolve_merge_survivor(created[0]) is not None
++    assert db.get_keywords_for_note(fixture.SOURCE_ID) == []
++    _maintenance(db, object()).run_pass(now=fixture.NOW + timedelta(seconds=1))
++    assert _rows(db, "note_graph_suggestions")[0]["state"] == "stale"
++    receipt = next(
++        row
++        for row in _rows(db, "note_graph_suggestion_operation_receipts")
++        if row["operation_kind"] == "suggestion_accept"
++    )
++    assert receipt["state"] == "completed" and receipt["http_status"] == 409
++
++
++def test_enrollment_after_maintenance_scope_check_defers_acceptance_reconciliation(local_product_db, monkeypatch):
++    db = local_product_db
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(fixture, "DATASET_ID", dataset)
++    fixture._publish(db, suggestion_id="retire-between-maintenance-checks", kind="related_note")
++    maintenance = _maintenance(db, object())
++    decisions = maintenance._scopes[0].decision_service
++    reconcile = decisions.reconcile_expired
++
++    def enroll_before_claim(**kwargs):
++        db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id="real-canonical")
++        return reconcile(**kwargs)
++
++    monkeypatch.setattr(decisions, "reconcile_expired", enroll_before_claim)
++    maintenance.run_pass(now=fixture.NOW + timedelta(seconds=1))
++    maintenance.run_pass(now=fixture.NOW + timedelta(seconds=2))
++    assert _rows(db, "note_graph_suggestions")[0]["state"] == "stale"
++
++
++def test_late_job_discovery_rotates_under_budget_without_extending_retention(local_product_db, tmp_path, monkeypatch):
++    db = local_product_db
++    store = db.note_graph_suggestion_store
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "fair-jobs.db")
++    runs = []
++    for index in range(4):
++        args = {**_arguments(db), "idempotency_key": f"older-{index}", "now": fixture.NOW + timedelta(seconds=index)}
++        run = store.admit_run(**args).run
++        runs.append(
++            store.fail_admission(
++                dataset_id=args["dataset_id"],
++                run_id=run.id,
++                expected_state="admitting",
++                expected_revision=run.revision,
++                error_code="notes_graph_capabilities_changed_before_queue",
++                guidance_key="retry_generation",
++                now=args["now"],
++            )
++        )
++    store.reserve_canonical_scope(dataset_id="real-canonical")
++    receipt_before = _rows(db, "note_graph_suggestion_operation_receipts")
++    expiry_before = {row["id"]: row["expires_at"] for row in _rows(db, "note_graph_suggestion_runs")}
++    late = jobs.create_job(
++        domain="notes",
++        queue=JOB_QUEUE,
++        job_type="note_graph_suggestions",
++        owner_user_id=db.client_id,
++        payload=_payload(runs[-1], f"legacy:{db.client_id}"),
++        max_retries=0,
++        idempotency_key=runs[-1].id,
++    )
++    maintenance = _maintenance(db, jobs)
++    for _ in range(4):
++        result = maintenance.run_pass(now=fixture.NOW + timedelta(hours=1), limit=1)
++        assert result.claimed == 1
++    assert (
++        jobs.get_job_or_archived_by_uuid(late["uuid"], domain="notes", owner_user_id=db.client_id)["status"]
++        == "cancelled"
++    )
++    assert {row["id"]: row["expires_at"] for row in _rows(db, "note_graph_suggestion_runs")} == expiry_before
++    assert _rows(db, "note_graph_suggestion_operation_receipts") == receipt_before
++    assert maintenance.run_pass(now=fixture.NOW + timedelta(hours=1), limit=1).claimed == 0
++    maintenance.run_pass(now=fixture.NOW + timedelta(days=31))
++    assert _rows(db, "note_graph_suggestion_runs") == []
++    assert _rows(db, "note_graph_suggestion_operation_receipts") == receipt_before
++
++
++def test_retired_jobs_lookup_outage_preserves_retry_and_terminal_receipts(local_product_db, tmp_path, monkeypatch):
++    db = local_product_db
++    store = db.note_graph_suggestion_store
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "outage-jobs.db")
++    admitted = SuggestionAdmissionService(store=store, jobs=jobs, owner_user_id=db.client_id).admit(**_arguments(db))
++    store.reserve_canonical_scope(dataset_id="real-canonical")
++    before = _rows(db, "note_graph_suggestion_operation_receipts")
++    lookup = jobs.get_job_or_archived_by_uuid
++
++    def unavailable(*args, **kwargs):
++        raise ConnectionError("synthetic temporary Jobs outage")
++
++    monkeypatch.setattr(jobs, "get_job_or_archived_by_uuid", unavailable)
++    assert _maintenance(db, jobs).run_pass(now=fixture.NOW + timedelta(seconds=1)).released == 1
++    assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == "queued"
++    assert _rows(db, "note_graph_suggestion_operation_receipts") == before
++
++    monkeypatch.setattr(jobs, "get_job_or_archived_by_uuid", lookup)
++    _maintenance(db, jobs).run_pass(now=fixture.NOW + timedelta(seconds=2))
++    assert lookup(admitted.job["uuid"], domain="notes", owner_user_id=db.client_id)["status"] == "cancelled"
++    assert _rows(db, "note_graph_suggestion_operation_receipts") == before
++
++
++@pytest.mark.parametrize("local_product_db", ["postgres"], indirect=True)
++def test_restricted_role_local_acceptance_and_retirement_use_only_exact_owner(local_product_db, monkeypatch):
++    from uuid import uuid4
++
++    db = local_product_db
++    store = db.note_graph_suggestion_store
++    dataset = f"legacy:{db.client_id}"
++    monkeypatch.setattr(fixture, "DATASET_ID", dataset)
++    role = db.backend.escape_identifier(f"uat225_{uuid4().hex[:12]}")
++    created = False
++    try:
++        with db.backend.transaction() as conn:
++            db.backend.execute(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)
++            db.backend.execute(f"GRANT USAGE ON SCHEMA public TO {role}", connection=conn)
++            db.backend.execute(
++                f"GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO {role}", connection=conn
++            )
++            db.backend.execute(f"GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}", connection=conn)
++            db.backend.execute(f"GRANT {role} TO CURRENT_USER", connection=conn)
++        created = True
++        with db.transaction() as conn:
++            conn.execute(f"SET LOCAL ROLE {role}")
++            flags = conn.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
++            assert not flags["rolsuper"] and not flags["rolbypassrls"]
++            fixture._publish(db, suggestion_id="restricted-product", kind="tag")
++            decisions = build_suggestion_decision_service(note_db=db, owner_user_id=db.client_id, dataset_id=dataset)
++            decisions._clock = lambda: fixture.NOW
++            result = decisions.accept(
++                dataset_id=dataset,
++                suggestion_id="restricted-product",
++                expected_revision=1,
++                expected_source_fingerprint=fixture._fingerprint(db, fixture.SOURCE_ID),
++                expected_target_fingerprint=None,
++                idempotency_key="restricted-accept",
++            )
++            assert result.envelope["state"] == "accepted"
++            fixture._publish(db, suggestion_id="restricted-retire", kind="related_note")
++            store.reserve_canonical_scope(dataset_id="real-canonical")
++            _maintenance(db, object()).run_pass(now=fixture.NOW + timedelta(seconds=1))
++            rows = {row["id"]: row["state"] for row in _rows(db, "note_graph_suggestions")}
++            assert rows == {"restricted-product": "accepted", "restricted-retire": "stale"}
++            for foreign_scope in ("legacy:another-owner", "another-canonical"):
++                with pytest.raises(NotesGraphDatasetScopeError):
++                    store.retire_local_suggestions(dataset_id=foreign_scope, now=fixture.NOW, limit=1)
++    finally:
++        if created:
++            with db.backend.transaction() as conn:
++                db.backend.execute(f"DROP OWNED BY {role}", connection=conn)
++                db.backend.execute(f"DROP ROLE {role}", connection=conn)
+diff --git a/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py
+new file mode 100644
+index 0000000000..3e134a8c54
+--- /dev/null
++++ b/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py
+@@ -0,0 +1,222 @@
++"""Real local HTTP admission and worker pipeline with a synthetic provider reply."""
++
++import json
++from datetime import timedelta
++from types import SimpleNamespace
++
++import pytest
++
++from tldw_Server_API.app.api.v1.endpoints import notes_graph_suggestions as endpoint
++from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
++from tldw_Server_API.app.core.Jobs.manager import JobManager
++from tldw_Server_API.app.core.Notes_Graph.suggestion_generation import parse_and_validate_generation
++from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
++    JOB_QUEUE,
++    SuggestionAdmissionService,
++    SuggestionPublisher,
++)
++from tldw_Server_API.app.core.Notes_Graph.suggestion_service import SuggestionWorker, SuggestionWorkerError
++from tldw_Server_API.tests.Notes_Graph.integration import test_suggestion_acceptance as acceptance
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_acceptance import NOW
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_fresh_reads import (
++    fresh_suggestions as fresh_suggestions,
++)
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_mutations import (
++    local_product_db as local_product_db,
++)
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_legacy_retirement import (
++    _arguments,
++    _maintenance,
++    _rows,
++)
++from tldw_Server_API.tests.Notes_Graph.integration.test_suggestion_unbound_scope import _ready_provider
++
++pytestmark = pytest.mark.integration
++
++
++def test_local_http_evidence_reject_reset_accept_and_receipt_replay(fresh_suggestions, monkeypatch):
++    db, client, _, _ = fresh_suggestions
++    dataset = "legacy:1"
++    monkeypatch.setattr(acceptance, "DATASET_ID", dataset)
++    with chacha_operation(independent=True):
++        db.add_note("Source", "source body", note_id=acceptance.SOURCE_ID)
++        db.add_note("Target", "target body", note_id=acceptance.TARGET_ID)
++        acceptance._publish(db, suggestion_id="local-http-review", kind="related_note", include_evidence=True)
++    url = f"/api/v1/notes/{acceptance.SOURCE_ID}/graph/suggestions"
++    page = client.get(url).json()
++    suggestion = page["items"][0]
++    assert {item["side"] for item in suggestion["evidence"]} == {"source", "target"}
++    body = {
++        "expected_revision": suggestion["revision"],
++        "expected_source_fingerprint": suggestion["source_fingerprint"],
++        "expected_target_fingerprint": suggestion["target_fingerprint"],
++    }
++    rejected = client.post(url + "/local-http-review/reject", json=body, headers={"Idempotency-Key": "local-reject"})
++    assert rejected.status_code == 200 and rejected.json()["state"] == "rejected", rejected.text
++    replay = client.post(url + "/local-http-review/reject", json=body, headers={"Idempotency-Key": "local-reject"})
++    assert replay.json() == rejected.json()
++    rejected_page = client.get(url + "?state=rejected").json()
++    reset = client.post(
++        url + "/rejections/reset",
++        json={
++            "expected_rejection_revision": rejected_page["rejection_set_revision"],
++            "source_fingerprint": page["current_source_fingerprint"],
++            "confirm": True,
++        },
++        headers={"Idempotency-Key": "local-reset"},
++    )
++    assert reset.status_code == 200, reset.text
++    # Reset permits new generation rather than silently accepting old content.
++    with chacha_operation(independent=True):
++        acceptance._publish(db, suggestion_id="local-http-accept", kind="related_note", include_evidence=True)
++    accepted = client.post(
++        url + "/local-http-accept/accept",
++        json={**body, "expected_revision": 1},
++        headers={"Idempotency-Key": "local-accept"},
++    )
++    assert accepted.status_code == 200 and accepted.json()["state"] == "accepted", accepted.text
++    with chacha_operation(independent=True), db.transaction() as conn:
++        assert (
++            db.note_graph_suggestion_store.get_suggestion(
++                dataset_id=dataset, suggestion_id="local-http-accept"
++            ).state.value
++            == "accepted"
++        )
++        assert (
++            db.notes_link_store.get(
++                db.note_graph_suggestion_store.get_suggestion(
++                    dataset_id=dataset, suggestion_id="local-http-accept"
++                ).accepted_resource_identity
++            )
++            is not None
++        )
++        assert conn.execute("SELECT 1 FROM note_task_scope_authority").fetchone() is None
++
++
++def test_fresh_http_capabilities_admit_replay_cancel_without_authority_binding(
++    fresh_suggestions, tmp_path, monkeypatch
++):
++    db, client, note, _ = fresh_suggestions
++    _ready_provider(monkeypatch)
++    monkeypatch.setenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", "1")
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "route-jobs.db")
++    client.app.dependency_overrides[endpoint.try_get_job_manager] = lambda: jobs
++    url = f"/api/v1/notes/{note}/graph/suggestions"
++    caps = client.get(url + "/capabilities")
++    assert caps.status_code == 200 and caps.json()["generation_available"] is True
++    headers = {"If-Match": caps.headers["etag"], "Idempotency-Key": "actual-local-http"}
++    admitted = client.post(url + "/runs", json={}, headers=headers)
++    assert admitted.status_code == 202, admitted.text
++    replay = client.post(url + "/runs", json={}, headers=headers)
++    assert replay.status_code == 202 and replay.json() == admitted.json()
++    run = admitted.json()
++    read = client.get(url + "/runs/" + run["id"])
++    assert read.status_code == 200 and read.json()["state"] == "queued"
++    cancel = client.post(
++        url + "/runs/" + run["id"] + "/cancel",
++        json={"expected_revision": run["revision"]},
++        headers={"Idempotency-Key": "local-cancel"},
++    )
++    assert cancel.status_code == 200 and cancel.json()["state"] == "cancelling", cancel.text
++    assert jobs.count_jobs(domain="notes", owner_user_id="1") == 1
++    with chacha_operation(independent=True), db.transaction() as conn:
++        assert conn.execute("SELECT 1 FROM note_task_scope_authority").fetchone() is None
++        assert conn.execute("SELECT 1 FROM note_graph_suggestions").fetchone() is None
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "outcome", ["publish", "retire-during-provider", "retire-after-completion", "cancel-before-provider"]
++)
++async def test_actual_local_worker_retrieval_preparation_and_jobs_publication(
++    local_product_db, tmp_path, monkeypatch, outcome
++):
++    db = local_product_db
++    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
++    jobs = JobManager(tmp_path / "worker-jobs.db")
++    store = db.note_graph_suggestion_store
++    args = _arguments(db)
++    admitted = SuggestionAdmissionService(store=store, jobs=jobs, owner_user_id=db.client_id).admit(**args)
++    job = jobs.acquire_next_job(
++        domain="notes", queue=JOB_QUEUE, job_type="note_graph_suggestions", worker_id="local-worker", lease_seconds=120
++    )
++    assert job is not None
++    calls = []
++
++    def synthetic_reply(*, prepared, provider):
++        # Preserve real retrieval, prompt/evidence construction and strict output
++        # validation. Only the external model reply is synthetic.
++        calls.append(prepared.source_evidence_ids)
++        reply = json.dumps(
++            {
++                "relationships": [],
++                "tags": [
++                    {
++                        "existing_tag_id": None,
++                        "new_tag": "Research",
++                        "rationale": "A useful research category.",
++                        "source_evidence_ids": [prepared.source_evidence_ids[0]],
++                    }
++                ],
++            }
++        )
++        result = parse_and_validate_generation(reply, prepared=prepared)
++        if outcome == "retire-during-provider":
++            store.reserve_canonical_scope(dataset_id="real-canonical")
++        return result
++
++    worker = SuggestionWorker(
++        store_factory=lambda owner: store,
++        resolve_capability=lambda **kwargs: (
++            SimpleNamespace(revision=args["capability_revision"], generation_available=True),
++            object(),
++        ),
++        cancellation_requested=lambda _: outcome == "cancel-before-provider",
++        generate=synthetic_reply,
++        now=lambda: NOW,
++    )
++    if outcome in {"retire-during-provider", "cancel-before-provider"}:
++        with pytest.raises(SuggestionWorkerError):
++            await worker.handle(job)
++        assert _rows(db, "note_graph_suggestions") == []
++        assert bool(calls) == (outcome == "retire-during-provider")
++        if outcome == "retire-during-provider":
++            _maintenance(db, jobs).run_pass(now=NOW + timedelta(seconds=1))
++            assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == "stale"
++        return
++    result = await worker.handle(job)
++    assert len(calls) == 1 and result["candidate_count"] == 1
++    publishing = store.get_run(dataset_id=args["dataset_id"], run_id=admitted.run.id)
++    assert publishing.state.value == "publishing"
++    assert jobs.complete_job(
++        int(job["id"]),
++        result=result,
++        worker_id="local-worker",
++        lease_id=job["lease_id"],
++        completion_token=job["lease_id"],
++    )
++    if outcome == "retire-after-completion":
++        from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
++            NotesGraphDatasetScopeError,
++        )
++
++        store.reserve_canonical_scope(dataset_id="real-canonical")
++        with pytest.raises(NotesGraphDatasetScopeError):
++            SuggestionPublisher(jobs=jobs, store_factory=lambda owner: store).publish(
++                run=publishing, job_uuid=job["uuid"], owner_user_id=db.client_id, dataset_id=args["dataset_id"], now=NOW
++            )
++        _maintenance(db, jobs).run_pass(now=NOW + timedelta(seconds=1))
++        assert _rows(db, "note_graph_suggestion_runs")[0]["state"] == "stale"
++        assert _rows(db, "note_graph_suggestions") == []
++        assert (
++            jobs.get_job_or_archived_by_uuid(job["uuid"], domain="notes", owner_user_id=db.client_id)["status"]
++            == "completed"
++        )
++        return
++    published = SuggestionPublisher(jobs=jobs, store_factory=lambda owner: store).publish(
++        run=publishing, job_uuid=job["uuid"], owner_user_id=db.client_id, dataset_id=args["dataset_id"], now=NOW
++    )
++    assert published.state.value == "succeeded"
++    assert _rows(db, "note_graph_suggestions")[0]["state"] == "pending"
++    assert db.get_keywords_for_note(args["source_note_id"]) == []

@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T11:01:06.742Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

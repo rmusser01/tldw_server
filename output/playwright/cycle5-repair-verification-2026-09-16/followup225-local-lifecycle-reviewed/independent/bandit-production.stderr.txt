@@ -1,0 +1,34 @@
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 731
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1505
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1629
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1669
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1690
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1690
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1713
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2069
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2130
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2157
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2157
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 3314
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 3314
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 3349
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 4694
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 4802
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5024
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5037
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5095
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5095
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5113
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5113
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5142
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5142
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5204
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 5204
+[manager]	WARNING	Test in comment: predicate is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: is is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: selected is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: from is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: fixed is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: literals is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: above is not a test name or id, ignoring
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 8083

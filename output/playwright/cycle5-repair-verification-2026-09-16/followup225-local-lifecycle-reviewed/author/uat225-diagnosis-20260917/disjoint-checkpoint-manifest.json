@@ -1,0 +1,133 @@
+{
+  "task": "TASK13260.164",
+  "status": "disjoint checkpoint only; not runtime wired, fresh factory/admission/enrollment tests remain RED",
+  "final_adapter_controls": "18 passed, 2 deselected (held factory controls), 0 skips",
+  "compile": {
+    "files": 4,
+    "result": "pass"
+  },
+  "owned": [
+    {
+      "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+      "sha256": "d1a99cd143c6823001799204639e8c5511f9046bc003d62bfb3713eb573f30ab",
+      "snapshot": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py",
+      "sha256": "977763b488bde66387b4ae63cccb39a6dad7dcded9869598d84d1d0c2c647c77",
+      "snapshot": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py",
+      "sha256": "6f279ef3af7100cf4520d9921ddc380d2a261e50e42d53794e4a1ca4d08c3a53",
+      "snapshot": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+      "sha256": "b616b6e9cf2c9ab48f267ca5210123099299f21b1dc97ada1b64d3f43b2c5951",
+      "snapshot": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py"
+    }
+  ],
+  "receipts": [
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-red.redacted.log",
+      "sha256": "cb81efe6e7c24241950d7b4968aa8ecb057ed3dea5cd8710afde080b6477b713",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-red.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-first-green.redacted.log",
+      "sha256": "9575f1f8d49301d7931b9f0c966cd8acdcb65386284ca41add2186fa37b1fed9",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-first-green.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-green.redacted.log",
+      "sha256": "975d222923a13265021e2eb0c10533aa7c694226cd11c69f4d6491eefbd4f5e1",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-green.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-controls.redacted.log",
+      "sha256": "391d713402b1d2b6b5589f81d94d3b94d8f50807507e7c8840960397a7f2d820",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-controls.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-owner-controls.redacted.log",
+      "sha256": "aa0e9910b64a71b0464f3bf6e5f1f6140b5a095d0855b9784b83f8945c57d862",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-owner-controls.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-enrollment-entrypoints-red.redacted.log",
+      "sha256": "c9b9eac39100e63c012639beb20facd616e0356f90c49caa00fd310a3780d289",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-enrollment-entrypoints-red.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-admission-red.redacted.log",
+      "sha256": "c494bfa3f578fdac447bf7cf411b0ba10da69348da7e361f17c6d044719b585e",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-admission-red.redacted.log"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-final-disjoint.redacted.log",
+      "sha256": "1f495ee4e4e99f17855cc20030f145c5f338b38342a3409710415ebf95f662ec",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-final-disjoint.redacted.log"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/FULL-LIFECYCLE-DESIGN225.md",
+      "sha256": "72841cf40e56bb72e7737beee4bcce8501ff84ca5c8b07958388af792234c2d6"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/PLAN225-full-legacy-lifecycle.md",
+      "sha256": "eff9dbd6e3f1ad122767043b76c9e5c569da6e1aafaf3c76c31d7197d9f1c900"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/PROGRESS225-disjoint-adapter.md",
+      "sha256": "c867e7fa8f724053dbb36c507adcaf54177892c364d9458cbd44819dbeb101fb"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/local-adapter-bandit.json",
+      "sha256": "6654c38b2e90938aff734923d705ba7c4d684990e8a0ea4dc810d900c204b511"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/local-tests-bandit.json",
+      "sha256": "11bc3150aa3b49cbb66b48e41b1f8b9f571e44f751e6a6104fae1a12454c42dc"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-red-command.json",
+      "sha256": "bc8663f6cc98458c80f5d5774c9363b3fd2495b540f1c6c56dee6dfc5da9485a",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-red-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-first-green-command.json",
+      "sha256": "adba4bb7f282919eabe4e684dacea1d5526dae1d5fc6d9d0b34d0758d501af2e",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-first-green-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-green-command.json",
+      "sha256": "d3cd2bf355d8f01ae41cf5d808451fc0ea433ec1298eefd34dfecceeef032013",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-green-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-controls-command.json",
+      "sha256": "dd292f9673e83719f0d2275840cace5a668e5f173668fa990b94902a7246833e",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-controls-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-owner-controls-command.json",
+      "sha256": "df2997cbe79f497f4dd81d753639c9641155ff7d29ffcef10326184225ccab02",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-owner-controls-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-enrollment-entrypoints-red-command.json",
+      "sha256": "9278ec4d1c81440ccd1b51cbc7e4466b5d1962141057a5ceea32fef1d45a7f74",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-enrollment-entrypoints-red-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-admission-red-command.json",
+      "sha256": "ce3a49b362269215bc907a2650eacae0e4f338c6f46cfca7d838d10ddd86fba3",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-admission-red-command.json"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-final-disjoint-command.json",
+      "sha256": "e16ec399a515b220bd03baddb0eb2c5843b149c76207751c5f193b706fbd3621",
+      "retained": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-final-disjoint-command.json"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "owned_manifest_sha256": "916e17df1a977d7531265736b3b031ab6f21abb3d67e6ae9affa2f0c93af2e7b",
+  "focused": {
+    "label": "uat225-b-reviewed-focused",
+    "passed": 173,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 5,
+    "seconds": 193.45
+  },
+  "adjacent": {
+    "label": "uat225-b-reviewed-adjacent",
+    "passed": 200,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 4,
+    "seconds": 99.89
+  },
+  "targeted_sqlite_review": {
+    "label": "uat225-b-sqlite-device-final-green",
+    "passed": 32,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 30.85
+  },
+  "ruff": {
+    "findings": 0
+  },
+  "bandit_production": {
+    "findings": 0,
+    "errors": 0
+  },
+  "bandit_tests": {
+    "findings": 0,
+    "errors": 0,
+    "excludes": [
+      "B101"
+    ]
+  },
+  "compile": {
+    "files": 16,
+    "passed": true
+  },
+  "diff_check": {
+    "exit": 0
+  },
+  "native_acceptance": "pending parent",
+  "independent_review": "in progress"
+}

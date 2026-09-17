@@ -1,0 +1,901 @@
+{
+  "task": "TASK13260.164",
+  "scope": "UAT225 Stage B safe evidence allowlist; raw private logs/configs excluded",
+  "owned_manifest_sha256": "916e17df1a977d7531265736b3b031ab6f21abb3d67e6ae9affa2f0c93af2e7b",
+  "files": [
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-final-adjacent-command.json",
+      "sha256": "abdec9601e85a831e738a4fe15a912dd3adba0bf80201c863dba73a831884384",
+      "bytes": 985
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-final-adjacent.redacted.log",
+      "sha256": "562cd2fd7bb9d45c3110ba050e108869b188c58eaa7e2e094f81bf464527b549",
+      "bytes": 67962
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-final-focused-command.json",
+      "sha256": "c10123c99c909c18622e8fcfc9c7b3b0e2c6d229638c23c1c0017923c0db6164",
+      "bytes": 990
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-final-focused.redacted.log",
+      "sha256": "6e4d1df36b0b37a4566004f554df2ae233094e98379132a9ae0b56a77facb6c2",
+      "bytes": 10328
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-frozen-adjacent-command.json",
+      "sha256": "4ac136a9636959959d270d613fdca2683e94bf16ae6f4437d1eb534e4111142e",
+      "bytes": 985
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-frozen-adjacent.redacted.log",
+      "sha256": "15a3c8f5d15d526512c188a56efb37c1984472883ad998fed9ea8f9a99b38994",
+      "bytes": 10352
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-frozen-focused-command.json",
+      "sha256": "ffb144b462bc76ed49e2e4d599239a489e862623af64524c110b5c2c291c66c2",
+      "bytes": 990
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-frozen-focused.redacted.log",
+      "sha256": "05a1c0fba51cd48d5c581918f9160960cccec20c1c61c4575cb759739176edff",
+      "bytes": 10327
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-privacy-lazy-collaborator-green-command.json",
+      "sha256": "b26a75aca2dec8e37aeb5ad73a21ee9ad6713fc97f1b3317467da65802d94508",
+      "bytes": 379
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-privacy-lazy-collaborator-green.redacted.log",
+      "sha256": "95ebdf8504230aea8c47894ae167de0a82bb7a2fa858fbb87786f703a3fb28e5",
+      "bytes": 7522
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-reviewed-adjacent-command.json",
+      "sha256": "2a66c65272b5f92671635964f5041e524ee809227d2cd23907935c8767bac149",
+      "bytes": 985
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-reviewed-adjacent.redacted.log",
+      "sha256": "a5e7936aafe8d05d18bd8b02bfaced3d87d2e51e88371c46b5e77e4cf266926f",
+      "bytes": 10353
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-reviewed-focused-command.json",
+      "sha256": "129faeac624f89a132d929dc538db7c67268fefdca000593cbb2ca4e141be7d7",
+      "bytes": 990
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-reviewed-focused.redacted.log",
+      "sha256": "a223de09929c4cb041ffcf2ed58a21a15f10ec01956301b3f42e27d1a51210a9",
+      "bytes": 10327
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-adjacent-command.json",
+      "sha256": "03755e1690341cc568438e9b9eb4a60ef0dcb6a805b2bc5fda209b8dc743ec35",
+      "bytes": 985
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-adjacent.redacted.log",
+      "sha256": "202d87c29801fd2d370cd23f1e8414f15a0fa19259824ee0efe6472a442cbfe7",
+      "bytes": 10353
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-focused-command.json",
+      "sha256": "52eda5802c50a07a469918d4bc2d5d5e6bee9e00e149ee555343ae73e3864be8",
+      "bytes": 990
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-consumer-red-command.json",
+      "sha256": "4da65c2b078fb0fbbd6a61423cc3bd610e3e1c4e1a78ce06f5f84897b0e4209a",
+      "bytes": 399
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-consumer-red.redacted.log",
+      "sha256": "1e2c8e29ef7d12d2fa4e8df0e078d07fc94eb2d59e807162cc90935fff19a63e",
+      "bytes": 160859
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-dedup-red-command.json",
+      "sha256": "4a1356f2a3a3de97277770bf35a3175d86b0badf4a7559484a81c51a3524ab72",
+      "bytes": 399
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-dedup-red.redacted.log",
+      "sha256": "a5b355f5e98e4678313dec1280aae9f8040e40eea077e3dfa7dd6fef8c3fe6e9",
+      "bytes": 209346
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-final-green-command.json",
+      "sha256": "33601848d25f403e315fe49c3ca58f44bc1a6054d9716da5f60e9989f39bcc2e",
+      "bytes": 458
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-final-green.redacted.log",
+      "sha256": "730f4883f6d7f9c9aa88d15af08065234ea280e45361df6637ff5837ce4f36e4",
+      "bytes": 9302
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-green-command.json",
+      "sha256": "1d283c6d4f6288f800ed8b66ef9d85c3b0d63bd60b305cd0c22a8298481c994f",
+      "bytes": 458
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-green.redacted.log",
+      "sha256": "9dacf9eca25ee9d53c0641b951564750890c70c0ec7e3819f70abd2adb819564",
+      "bytes": 134539
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-factory-products-red-command.json",
+      "sha256": "663258eb4e2ac2200dbce9e6c622a1a23a5348ba9c22ba5d7a069c29de694e6d",
+      "bytes": 391
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-factory-products-red.redacted.log",
+      "sha256": "f91d046ffc4dedf7bc976bceeedbc7d45ba1919c250c4b157607afec1da0b4b2",
+      "bytes": 103043
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-first-green-command.json",
+      "sha256": "5e49f67b308b79e5e88f76ac7d0f9a7d97032ca4c91f6548b05f9b78668f214f",
+      "bytes": 455
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-first-green.redacted.log",
+      "sha256": "61f302b3772c74cca72e1ae369e2fa4fb141ca963449245e492dfdff5d339054",
+      "bytes": 60549
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-invalidation-discovery-red-command.json",
+      "sha256": "463c4af82ce8c141d0578cd10ca6ac98b6adc44ba7d2bf6449a911a2650b0025",
+      "bytes": 422
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-invalidation-discovery-red.redacted.log",
+      "sha256": "091939d176d87fd29d0aa18db77debd32ca1fb58b647c9d5c409b07a942dbb60",
+      "bytes": 153233
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-invalidation-merge-green-command.json",
+      "sha256": "4707a955ce52fd83ab97fab88c671543c20857303ed054c516ca338b1b23e252",
+      "bytes": 458
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-invalidation-merge-green.redacted.log",
+      "sha256": "bd41150402f43b81bf0ba5c4687469fb0f7429888bb4521c7e3a90292b2798f5",
+      "bytes": 9303
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-local-green-command.json",
+      "sha256": "09abeccb19e175a726cae17a89ce48438a379ee8edc61fc57003fbe211597b22",
+      "bytes": 538
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-local-green.redacted.log",
+      "sha256": "8765578873b33d694096ad7c705ed5bbf78a838b4bbe4073e469d1548069328b",
+      "bytes": 9464
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-real-route-worker-command.json",
+      "sha256": "d0aada79ab7b5cdef20a3aa47d1edf4fb6116a40cbf3947ae72eaf1751d032f9",
+      "bytes": 370
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-real-route-worker.redacted.log",
+      "sha256": "80c0514941b06a69cd86b5fb7b5c5267fb34491bb8db42757d0619b0913fef1c",
+      "bytes": 70947
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-shared-red-command.json",
+      "sha256": "563876a5539f5f6ab6842e98495898758cd05ada049752f1651a0a8f8f7528c9",
+      "bytes": 455
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-shared-red.redacted.log",
+      "sha256": "6ebed79c8d70351a420b730391e30f8e7fcf756ef08591f41d11b4b4512f8372",
+      "bytes": 109346
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-stage-a-aligned-command.json",
+      "sha256": "4c7b9327147315944d3b6369059b13d965386a2e1a150ab889704bde8e79d9a6",
+      "bytes": 447
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-stage-a-aligned.redacted.log",
+      "sha256": "85b294334b9fc0664e189ab89b2f7df25ac0d1fe909e81af4d0f63045f042ebc",
+      "bytes": 110988
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-stage-a-compatibility-command.json",
+      "sha256": "1a895390371449cb968e3beb0f0187375689d2abe358fad71c374d7e6f940eb2",
+      "bytes": 447
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b1-stage-a-compatibility.redacted.log",
+      "sha256": "e9ca566611d29cbd122632afde8e9e5c4085a09bcb715392035b5cd2985e38a4",
+      "bytes": 535909
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-bootstrap-adjacent-command.json",
+      "sha256": "22369e51952b2744bd5dbf1650a60d207724c5e024f2d7ac65e7a3592502ca01",
+      "bytes": 647
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-bootstrap-adjacent.redacted.log",
+      "sha256": "17fa740de6b5571d5009232b1624db8dd1fdc23273c7bf5176ad8ce9d8a62c3f",
+      "bytes": 9680
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-concurrent-and-worker-command.json",
+      "sha256": "d38793d64d0f8afe13b7cdbb10ace7ee013f1d764ece0fcfb51de41956fb0bfc",
+      "bytes": 460
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-concurrent-and-worker.redacted.log",
+      "sha256": "9d762e6a76ba6e2be51c29d7d2365bac1ee60f3eee49ce5f4dd2cd4d4758efbc",
+      "bytes": 55791
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-late-enqueue-after-grace-red-command.json",
+      "sha256": "079a8b6210edfefe82d285aeb97e16fc17812ff892173e2be52c7b33ee4b1438",
+      "bytes": 404
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-late-enqueue-after-grace-red.redacted.log",
+      "sha256": "116f50d088e0f9fc064808092db992d5b1c7254765114ba909877784fea38cbb",
+      "bytes": 68318
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-maintenance-enrollment-race-green-command.json",
+      "sha256": "8545d4a092dc449f2c10d726716e8d97c76cfdf22f4308be8d3909d3723e434b",
+      "bytes": 414
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-maintenance-enrollment-race-green.redacted.log",
+      "sha256": "dbae3b58186d052e947a153e53a89010a2be70619fc2482cec2a9a73edea9cc3",
+      "bytes": 9159
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-maintenance-enrollment-race-red-command.json",
+      "sha256": "e433059b5026ae44cceaca7a7f60299c28ed43bebcbe4fbf8448d138b572e9fd",
+      "bytes": 414
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-maintenance-enrollment-race-red.redacted.log",
+      "sha256": "bd3516ae80b14e29fb60686276d141606541e8791a04fcd68f84d21eeba3ea8b",
+      "bytes": 59985
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-reservation-first-green-command.json",
+      "sha256": "32392516682eaf61fe724e1d6626ab66b4c4effdc03d575898ccc383c8c08a1c",
+      "bytes": 435
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-reservation-first-green.redacted.log",
+      "sha256": "fcfa7abc94f3ed44d7293d43213713e9d3e34165ffe081a77aa53b2f6bd11aef",
+      "bytes": 9289
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-reservation-red-command.json",
+      "sha256": "fda0226739d43ef849302b4328016c181ad62b359a78f710559718226adcc29f",
+      "bytes": 367
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-reservation-red.redacted.log",
+      "sha256": "4c811767b4b40fd2b02af51ad8d135e5e04ab16694fb6ba97d047b96de89942d",
+      "bytes": 332370
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retention-fairness-green-command.json",
+      "sha256": "05442155854d3357cb14730982e50fcb9885a3d2f2b06ebb0b2fe207477c72b0",
+      "bytes": 550
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retention-fairness-green.redacted.log",
+      "sha256": "8775005022a5d7aa8585119fd4876a34b8954426eeeaba47da2a22c482e176f2",
+      "bytes": 195675
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retention-paired-lease-green-command.json",
+      "sha256": "fd54de2db11afb2183b3aeacd41ecb3f0da752dcef647b17c630147dfc4c428d",
+      "bytes": 460
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retention-paired-lease-green.redacted.log",
+      "sha256": "4718333c86d23507b986b59eb08746cf4dbdfddb15180c8538674f2ed02d6228",
+      "bytes": 9305
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-first-green-command.json",
+      "sha256": "befabe5b91b824f156bc8c405833ad327b2fe44e77501764b1c9d78c7da431c3",
+      "bytes": 451
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-first-green.redacted.log",
+      "sha256": "8a5c2f7472721fdd22c8cbf27248844a49f748b2d838533267c552e8fecc1112",
+      "bytes": 43370
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-green-command.json",
+      "sha256": "d88007e105b8cffe6a03b7bd175d81bbab90e3f8baaf3de3f84aa58724da128a",
+      "bytes": 453
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-green.redacted.log",
+      "sha256": "88e48bf7e5cceb28731bd52e7985f91e05ee21a080f80af26ad2130c8c639bf6",
+      "bytes": 9298
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-red-command.json",
+      "sha256": "41fc1995180a7764482cb2b5081438b9ab5a72a7977c98915889aef9d8677fc9",
+      "bytes": 367
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-b2-retirement-red.redacted.log",
+      "sha256": "b073b1eb00c556945b7828a74b8b574f25f8e178ebb07035a24657573753f978",
+      "bytes": 430886
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-enrollment-entrypoints-red-command.json",
+      "sha256": "9278ec4d1c81440ccd1b51cbc7e4466b5d1962141057a5ceea32fef1d45a7f74",
+      "bytes": 367
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-enrollment-entrypoints-red.redacted.log",
+      "sha256": "c9b9eac39100e63c012639beb20facd616e0356f90c49caa00fd310a3780d289",
+      "bytes": 146700
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-controls-command.json",
+      "sha256": "dd292f9673e83719f0d2275840cace5a668e5f173668fa990b94902a7246833e",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-controls.redacted.log",
+      "sha256": "391d713402b1d2b6b5589f81d94d3b94d8f50807507e7c8840960397a7f2d820",
+      "bytes": 9158
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-final-disjoint-command.json",
+      "sha256": "e16ec399a515b220bd03baddb0eb2c5843b149c76207751c5f193b706fbd3621",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-final-disjoint.redacted.log",
+      "sha256": "1f495ee4e4e99f17855cc20030f145c5f338b38342a3409710415ebf95f662ec",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-first-green-command.json",
+      "sha256": "adba4bb7f282919eabe4e684dacea1d5526dae1d5fc6d9d0b34d0758d501af2e",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-first-green.redacted.log",
+      "sha256": "9575f1f8d49301d7931b9f0c966cd8acdcb65386284ca41add2186fa37b1fed9",
+      "bytes": 120289
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-green-command.json",
+      "sha256": "d3cd2bf355d8f01ae41cf5d808451fc0ea433ec1298eefd34dfecceeef032013",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-green.redacted.log",
+      "sha256": "975d222923a13265021e2eb0c10533aa7c694226cd11c69f4d6491eefbd4f5e1",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-owner-controls-command.json",
+      "sha256": "df2997cbe79f497f4dd81d753639c9641155ff7d29ffcef10326184225ccab02",
+      "bytes": 398
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-owner-controls.redacted.log",
+      "sha256": "aa0e9910b64a71b0464f3bf6e5f1f6140b5a095d0855b9784b83f8945c57d862",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-red-command.json",
+      "sha256": "bc8663f6cc98458c80f5d5774c9363b3fd2495b540f1c6c56dee6dfc5da9485a",
+      "bytes": 366
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-adapter-red.redacted.log",
+      "sha256": "cb81efe6e7c24241950d7b4968aa8ecb057ed3dea5cd8710afde080b6477b713",
+      "bytes": 252129
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-admission-red-command.json",
+      "sha256": "ce3a49b362269215bc907a2650eacae0e4f338c6f46cfca7d838d10ddd86fba3",
+      "bytes": 366
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-local-admission-red.redacted.log",
+      "sha256": "c494bfa3f578fdac447bf7cf411b0ba10da69348da7e361f17c6d044719b585e",
+      "bytes": 65507
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-consumer-red-command.json",
+      "sha256": "ea184883d702ef275ec804a6ec84568be0d96c4350dc9c34d28f25fba943ef4f",
+      "bytes": 369
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-consumer-red.redacted.log",
+      "sha256": "995bbe4cec70b6f19aa121faf861c93699a3a79f75dcadf8d50e372ff2bcd23d",
+      "bytes": 110338
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-final-guard-green-command.json",
+      "sha256": "a7c32c3f05331a6667d4d0a0234a960f4de2ce3e8a056b00048dd422a792e060",
+      "bytes": 369
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-final-guard-green.redacted.log",
+      "sha256": "99d8df45da89022d730d53247dcfcdb4bda678914e659fb7daca8a340b54c7ee",
+      "bytes": 9131
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-restore-guard-red-command.json",
+      "sha256": "eaf28a62531920cb65f903158d96dab784de846a9f0746a4f7f28cef22196701",
+      "bytes": 395
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat225-merge-restore-guard-red.redacted.log",
+      "sha256": "d7b177178f659a36faf5b02285cb1f260c6d845fb66c8a2733f6c6b7dec994ed",
+      "bytes": 62128
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/FINAL-VERIFICATION.json",
+      "sha256": "bde3e1c8753d66386222c13824ff78392405fe3bf382855ab7f762712d5ff934",
+      "bytes": 944
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/IMPLEMENTATION225B.md",
+      "sha256": "33d9f56bb69a3c70e8351abb0fa3877797dcbfee3a12da9297bb08256e2773bc",
+      "bytes": 12429
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/bandit-production.json",
+      "sha256": "bdea3a443a9701d9a8bc3e5c23f0b99bf0d575692a472ebcc041938d22b594ff",
+      "bytes": 3717
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/bandit-tests.json",
+      "sha256": "1a42b7d2c34273bf9adfe588d402ac9489e588dc38cbb6588b70d7edff5bd03e",
+      "bytes": 3139
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/compile-final.json",
+      "sha256": "4d0de4d6eed593822f8a003727599aec0dfa67f8659fc6e08a1a69b3644f66b4",
+      "bytes": 1267
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/diff-check.txt",
+      "sha256": "19eaf43821a7660ec323a87c8457bf74823beb296c39f5e01aa8a683aa50f061",
+      "bytes": 7
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/format-attribution.json",
+      "sha256": "21b162990d9a3b012ef206a9cbe2d11c6fefb500165ecdc9451638db3c4d307b",
+      "bytes": 990
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/freeze-verification.json",
+      "sha256": "e51b8f2ca7064a85363c107c98df8bd98388a19d6fafa05151d2ea9649199dd5",
+      "bytes": 2079
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/owned-manifest.json",
+      "sha256": "916e17df1a977d7531265736b3b031ab6f21abb3d67e6ae9affa2f0c93af2e7b",
+      "bytes": 3358
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/owned-paths.json",
+      "sha256": "f3ce996dd400f9c696a53415b8c9a2af663a91069bec8c2c7306de43fad7a7cf",
+      "bytes": 1271
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/owned.patch",
+      "sha256": "0ebcf3c7c3acf9cbe9874c65b167195f99dca0cb27b0ad50e2542e4ff4f24cab",
+      "bytes": 126477
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/owned-manifest.json",
+      "sha256": "7b48ea2a5c31e621873a89c2171e8063e4a2dccc39cf249270582cdae1ff99f4",
+      "bytes": 3358
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/owned.patch",
+      "sha256": "3be22bab5377bf77b0f71f6eeebf26a435978e0326ae415e7ef8999062cd4443",
+      "bytes": 112193
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/retained-hashes.json",
+      "sha256": "ad1a6175ec74e2c92dcd4df9782582d6208d4094b08021702e5b6978db101ef6",
+      "bytes": 2722
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "sha256": "1316c9e24fa67d99a3edcf17b3f4034957b5c57b582c95480fa95345a5b700b5",
+      "bytes": 228451
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py",
+      "sha256": "27112119a77a2071b0bedebc61dd29c3a4df297e0a4d377908266a7b5bd40f62",
+      "bytes": 23415
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+      "sha256": "d1a99cd143c6823001799204639e8c5511f9046bc003d62bfb3713eb573f30ab",
+      "bytes": 4363
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py",
+      "sha256": "9281c52dc44017a09bae69c2070a32f0b8e38926e400d71ed5f86af031c8bb05",
+      "bytes": 19449
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py",
+      "sha256": "2fabe4fa462facff29137d9447dc00383b4a0e169cdeaedd38e98230ce83e854",
+      "bytes": 18529
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py",
+      "sha256": "c5d7d5bf99bb3e89f21f2c2e91b455913b2e43b88e6e5a034dcfd11f9bac28ec",
+      "bytes": 12330
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py",
+      "sha256": "a453d23020deee50349f37e76beee3a22a80f47114fb1b874439c7fd43f4e799",
+      "bytes": 34969
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Sync/v2/profile.py",
+      "sha256": "01123f6cbd29c313462db2154e3afada1b724bfb2811f5768ba18ba52485d2ec",
+      "bytes": 64041
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/app/core/Sync/v2/service.py",
+      "sha256": "ce58c845537a079d78340f5d1ee00375258aeb4f51ad2483fe539834190cf77c",
+      "bytes": 466547
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py",
+      "sha256": "496e546b4145dac4bc8f603e7caf0f455decffce2b73894b472b2100dc7d3946",
+      "bytes": 7763
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py",
+      "sha256": "977763b488bde66387b4ae63cccb39a6dad7dcded9869598d84d1d0c2c647c77",
+      "bytes": 12357
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py",
+      "sha256": "f2d17c1dcdc6285e8dae8fd502e714c0bbd772dabc9994f1dfd6ae14f4a542f3",
+      "bytes": 16877
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py",
+      "sha256": "28db16f9ec0f526348914d1a2469511cb9cd4df4dec85c668296be30efeec7e5",
+      "bytes": 10559
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+      "sha256": "7a9a3661cd6f90e45dcae1ee85df389a92caf6b014c56a563264e4f6566c1ae8",
+      "bytes": 9093
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py",
+      "sha256": "682a270ac7fe6697aed4be858620d3662b707f4de27ad5ff924c3e9ef1a1cc8d",
+      "bytes": 5137
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/provisional-before-sqlite-review/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py",
+      "sha256": "3cf12e46b6170c6bbd7b8832a508e51200d838b34193ebb84c33b2c17d8bd8b3",
+      "bytes": 22344
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "sha256": "007e8d70e5a05869cf578fc5ba389533dadce8afdc1d33a1cc9745fdcadf0a05",
+      "bytes": 229045
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py",
+      "sha256": "fb71c76a024f7be0ff1b80f5bad384f448850eeaf1ad7bbe123205823f358bad",
+      "bytes": 23650
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+      "sha256": "028f2489b289942fc8391557110350d7276f2e1b56ff8b50ba1d9c9c765d66c7",
+      "bytes": 5914
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py",
+      "sha256": "9281c52dc44017a09bae69c2070a32f0b8e38926e400d71ed5f86af031c8bb05",
+      "bytes": 19449
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py",
+      "sha256": "2fabe4fa462facff29137d9447dc00383b4a0e169cdeaedd38e98230ce83e854",
+      "bytes": 18529
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py",
+      "sha256": "c5d7d5bf99bb3e89f21f2c2e91b455913b2e43b88e6e5a034dcfd11f9bac28ec",
+      "bytes": 12330
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py",
+      "sha256": "a453d23020deee50349f37e76beee3a22a80f47114fb1b874439c7fd43f4e799",
+      "bytes": 34969
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Sync/v2/profile.py",
+      "sha256": "01123f6cbd29c313462db2154e3afada1b724bfb2811f5768ba18ba52485d2ec",
+      "bytes": 64041
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/app/core/Sync/v2/service.py",
+      "sha256": "ce58c845537a079d78340f5d1ee00375258aeb4f51ad2483fe539834190cf77c",
+      "bytes": 466547
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py",
+      "sha256": "496e546b4145dac4bc8f603e7caf0f455decffce2b73894b472b2100dc7d3946",
+      "bytes": 7763
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py",
+      "sha256": "977763b488bde66387b4ae63cccb39a6dad7dcded9869598d84d1d0c2c647c77",
+      "bytes": 12357
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py",
+      "sha256": "f2d17c1dcdc6285e8dae8fd502e714c0bbd772dabc9994f1dfd6ae14f4a542f3",
+      "bytes": 16877
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py",
+      "sha256": "28db16f9ec0f526348914d1a2469511cb9cd4df4dec85c668296be30efeec7e5",
+      "bytes": 10559
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+      "sha256": "7a9a3661cd6f90e45dcae1ee85df389a92caf6b014c56a563264e4f6566c1ae8",
+      "bytes": 9093
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py",
+      "sha256": "9318254f9addceef8577ba2fee6445dab83e3f99a4eb8a0c0573a5464198912a",
+      "bytes": 9825
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/review-snapshot/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py",
+      "sha256": "3cf12e46b6170c6bbd7b8832a508e51200d838b34193ebb84c33b2c17d8bd8b3",
+      "bytes": 22344
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/ruff-final.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "path": ".tmp/uat225-b-final-20260917/verification-history.json",
+      "sha256": "7a0cc3939750fdba20c111bc4d5f12c6b81b61ca53aaf0cb868d5362b4b95d87",
+      "bytes": 5037
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+      "sha256": "c97f5cdc8ac39ce31bd7214193d9cecdc3217efe24fba45949519babe258cad0",
+      "bytes": 215558
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_api.py",
+      "sha256": "0ef8dd91d5890d47bc7478744f7f9f0bdc9ce2e8a5138edfed34d14f74d88524",
+      "bytes": 27774
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py",
+      "sha256": "f0bce89b277e75a7718937156b274750f739214f22d3b5dfc8bac0f894e0d865",
+      "bytes": 19348
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+      "sha256": "d1a99cd143c6823001799204639e8c5511f9046bc003d62bfb3713eb573f30ab",
+      "bytes": 4363
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_service.py",
+      "sha256": "3c709e80028fea40be3a85a35f26c9914e67b3512eea615d98077a49cf7c6b73",
+      "bytes": 18119
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py",
+      "sha256": "a32fe61729106bfcd7722fd4f3c2976fb34075a313dcbbb9bb73e86a5e0b5f63",
+      "bytes": 21098
+    },
+    {
+      "path": ".tmp/uat225-b1-local-lifecycle-20260917/baseline-manifest.json",
+      "sha256": "29bcc206bf6b22a60979aa2da96386275b4db2900f179b2a3cb21484d2c01f96",
+      "bytes": 847
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_jobs.py",
+      "sha256": "b33245e91b65a388a901b664166e4e07013a441961032524ea5f79a0d2b1ecc3",
+      "bytes": 16719
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py",
+      "sha256": "97213633a9e7de4042c8a56060514bee1627d3752ea99a34eddea10c9c1d4fa3",
+      "bytes": 15242
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py",
+      "sha256": "62e0157e0325fa9a966511a0c05d5ee0160a638fbd8d139dd839a2198b949e16",
+      "bytes": 12192
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py",
+      "sha256": "f3dc27e75f14d45a7da18b3a0e83decb357db038ec06f49978ec2f4fb91cb05c",
+      "bytes": 34831
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Sync/v2/profile.py",
+      "sha256": "7276813d86f0e597e3014765d1fea746070d4af1be586de4689ca1399b9b6cd9",
+      "bytes": 63820
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline/tldw_Server_API/app/core/Sync/v2/service.py",
+      "sha256": "914d871b3fe298fb213456b1644e220e0f336b7cd9ae8109b208f7a02779e498",
+      "bytes": 465395
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/baseline-manifest.json",
+      "sha256": "82d80dbfb568e6dfe450e237a44aeb08a670fb688b5982d8383760e1cb2e374f",
+      "bytes": 962
+    },
+    {
+      "path": ".tmp/uat225-b2-retirement-20260917/ruff-first.json",
+      "sha256": "26f793b870ff3dafc161dc30abca4c114531e6f16f336eb29949fa1fd0569544",
+      "bytes": 10347
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/FULL-LIFECYCLE-DESIGN225.md",
+      "sha256": "72841cf40e56bb72e7737beee4bcce8501ff84ca5c8b07958388af792234c2d6",
+      "bytes": 20604
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/LOCAL-KEYWORD-MERGE-DESIGN.md",
+      "sha256": "9aa2fe7b0441fa7c313157f70dd2bee48880f5a41f29a842821d364e66776725",
+      "bytes": 14021
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/PLAN225-full-legacy-lifecycle.md",
+      "sha256": "f28be6eafe5f8bfe947721f57f785f34a5fbe14aae61f5cbd1c3ff66aa96dbff",
+      "bytes": 5182
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/PROGRESS225-disjoint-adapter.md",
+      "sha256": "c867e7fa8f724053dbb36c507adcaf54177892c364d9458cbd44819dbeb101fb",
+      "bytes": 4125
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+      "sha256": "d1a99cd143c6823001799204639e8c5511f9046bc003d62bfb3713eb573f30ab",
+      "bytes": 4363
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py",
+      "sha256": "6f279ef3af7100cf4520d9921ddc380d2a261e50e42d53794e4a1ca4d08c3a53",
+      "bytes": 2848
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py",
+      "sha256": "977763b488bde66387b4ae63cccb39a6dad7dcded9869598d84d1d0c2c647c77",
+      "bytes": 12357
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+      "sha256": "b616b6e9cf2c9ab48f267ca5210123099299f21b1dc97ada1b64d3f43b2c5951",
+      "bytes": 2250
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-enrollment-entrypoints-red-command.json",
+      "sha256": "9278ec4d1c81440ccd1b51cbc7e4466b5d1962141057a5ceea32fef1d45a7f74",
+      "bytes": 367
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-enrollment-entrypoints-red.redacted.log",
+      "sha256": "c9b9eac39100e63c012639beb20facd616e0356f90c49caa00fd310a3780d289",
+      "bytes": 146700
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-controls-command.json",
+      "sha256": "dd292f9673e83719f0d2275840cace5a668e5f173668fa990b94902a7246833e",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-controls.redacted.log",
+      "sha256": "391d713402b1d2b6b5589f81d94d3b94d8f50807507e7c8840960397a7f2d820",
+      "bytes": 9158
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-final-disjoint-command.json",
+      "sha256": "e16ec399a515b220bd03baddb0eb2c5843b149c76207751c5f193b706fbd3621",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-final-disjoint.redacted.log",
+      "sha256": "1f495ee4e4e99f17855cc20030f145c5f338b38342a3409710415ebf95f662ec",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-first-green-command.json",
+      "sha256": "adba4bb7f282919eabe4e684dacea1d5526dae1d5fc6d9d0b34d0758d501af2e",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-first-green.redacted.log",
+      "sha256": "9575f1f8d49301d7931b9f0c966cd8acdcb65386284ca41add2186fa37b1fed9",
+      "bytes": 120289
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-green-command.json",
+      "sha256": "d3cd2bf355d8f01ae41cf5d808451fc0ea433ec1298eefd34dfecceeef032013",
+      "bytes": 397
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-green.redacted.log",
+      "sha256": "975d222923a13265021e2eb0c10533aa7c694226cd11c69f4d6491eefbd4f5e1",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-owner-controls-command.json",
+      "sha256": "df2997cbe79f497f4dd81d753639c9641155ff7d29ffcef10326184225ccab02",
+      "bytes": 398
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-owner-controls.redacted.log",
+      "sha256": "aa0e9910b64a71b0464f3bf6e5f1f6140b5a095d0855b9784b83f8945c57d862",
+      "bytes": 9157
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-red-command.json",
+      "sha256": "bc8663f6cc98458c80f5d5774c9363b3fd2495b540f1c6c56dee6dfc5da9485a",
+      "bytes": 366
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-adapter-red.redacted.log",
+      "sha256": "cb81efe6e7c24241950d7b4968aa8ecb057ed3dea5cd8710afde080b6477b713",
+      "bytes": 252129
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-admission-red-command.json",
+      "sha256": "ce3a49b362269215bc907a2650eacae0e4f338c6f46cfca7d838d10ddd86fba3",
+      "bytes": 366
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint/uat225-local-admission-red.redacted.log",
+      "sha256": "c494bfa3f578fdac447bf7cf411b0ba10da69348da7e361f17c6d044719b585e",
+      "bytes": 65507
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/disjoint-checkpoint-manifest.json",
+      "sha256": "faf8474c328d7db17b494dc3d49c9b0dcbaa7bc5ac9e2ae758df8398afcc9acd",
+      "bytes": 7451
+    }
+  ],
+  "file_count": 177,
+  "total_bytes": 7696606,
+  "notes": [
+    "Exact originals; no whitespace normalization performed in this private packet.",
+    "Only official runner redacted logs and credential-free command receipts are included.",
+    "Original provisional candidate and pre-edit baselines are historical, not final source.",
+    "Independent review report to be retained separately when reviewer freezes it.",
+    "Parent performs durable-retention known-secret scan; this manifest does not claim that scan has run."
+  ]
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_decisions.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_local_mutations.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_maintenance.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Notes_Graph/suggestion_service.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Sync/v2/profile.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Sync/v2/service.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Sync/v2/notes_link_bootstrap.py",
+    "ast_unchanged": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/Sync/v2/notes_organization_bootstrap.py",
+    "ast_unchanged": true
+  }
+]

@@ -1,6 +1,6 @@
 # Cycle 5 repair and verification plan
 
-Current Stage3 checkpoint (2026-09-17): 229 unique findings — 228 verified, 1 unresolved (225). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-rollback-verified.json. Keyword persistence168 and historical fixture228 are committed; SQLite rollback229 is independently verified47/0skip.225 lifecycle review requires the same-file SQLite prior-device keyword consumer correction and final native acceptance. Stage4 full matrix remains Not Started; harness166 is reviewed.
+Current Stage3 checkpoint (2026-09-17): 229 unique findings — 228 verified, 1 awaiting native acceptance (225), 0 unresolved implementations. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-all-repairs-reviewed.json. Complete225B independently passes173focused+200adjacent tests with zero skips and static/hash checks clear. Task168 is Done. Original administrator native reads on the committed repair remain the final acceptance gate. Stage4 full matrix remains Not Started; harness166 is reviewed.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 

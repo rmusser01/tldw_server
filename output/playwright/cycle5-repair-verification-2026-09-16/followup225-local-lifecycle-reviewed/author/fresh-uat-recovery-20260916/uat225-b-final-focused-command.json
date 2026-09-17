@@ -1,0 +1,22 @@
+{
+  "at": "2026-09-17T11:07:12.207Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_mutations.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_lifecycle.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_transition.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_local_keyword_merge.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_retirement.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_legacy_routes_worker.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_unbound_scope.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_fresh_reads.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

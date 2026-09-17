@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T10:55:38.713Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Sync/test_sync_v2_notes_link_bootstrap.py",
+    "tldw_Server_API/tests/Sync/test_sync_v2_notes_organization_bootstrap.py",
+    "tldw_Server_API/tests/Sync/test_sync_v2_profile_bootstrap.py",
+    "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_jobs.py",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_suggestion_decisions.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

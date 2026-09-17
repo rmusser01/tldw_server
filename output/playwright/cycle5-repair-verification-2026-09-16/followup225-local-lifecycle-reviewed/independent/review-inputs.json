@@ -1,0 +1,94 @@
+[
+  {
+    "path": ".tmp/uat225-b-final-20260917/owned-manifest.json",
+    "sha256": "916e17df1a977d7531265736b3b031ab6f21abb3d67e6ae9affa2f0c93af2e7b",
+    "bytes": 3358
+  },
+  {
+    "path": ".tmp/uat225-b-final-20260917/owned.patch",
+    "sha256": "0ebcf3c7c3acf9cbe9874c65b167195f99dca0cb27b0ad50e2542e4ff4f24cab",
+    "bytes": 126477
+  },
+  {
+    "path": ".tmp/uat225-b-final-20260917/IMPLEMENTATION225B.md",
+    "sha256": "33d9f56bb69a3c70e8351abb0fa3877797dcbfee3a12da9297bb08256e2773bc",
+    "bytes": 12429
+  },
+  {
+    "path": ".tmp/uat225-b-final-20260917/evidence-manifest.json",
+    "sha256": "0b8d80ecec896aec021eeffbc430ad42f9fe0df1d9d6d5c26a3391edb6febe5d",
+    "bytes": 40211
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-focused-command.json",
+    "copy": "uat225-b-sidebar-focused-command.json",
+    "sha256": "52eda5802c50a07a469918d4bc2d5d5e6bee9e00e149ee555343ae73e3864be8",
+    "bytes": 990
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-focused.redacted.log",
+    "copy": "uat225-b-sidebar-focused.redacted.log",
+    "sha256": "ce3f410c73fd3b0d70163a7eae2dd6f0253ebf840211f2040f526ced61ee729a",
+    "bytes": 10328
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-adjacent-command.json",
+    "copy": "uat225-b-sidebar-adjacent-command.json",
+    "sha256": "03755e1690341cc568438e9b9eb4a60ef0dcb6a805b2bc5fda209b8dc743ec35",
+    "bytes": 985
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sidebar-adjacent.redacted.log",
+    "copy": "uat225-b-sidebar-adjacent.redacted.log",
+    "sha256": "202d87c29801fd2d370cd23f1e8414f15a0fa19259824ee0efe6472a442cbfe7",
+    "bytes": 10353
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-consumer-red-command.json",
+    "copy": "uat225-b-sqlite-device-consumer-red-command.json",
+    "sha256": "4da65c2b078fb0fbbd6a61423cc3bd610e3e1c4e1a78ce06f5f84897b0e4209a",
+    "bytes": 399
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-consumer-red.redacted.log",
+    "copy": "uat225-b-sqlite-device-consumer-red.redacted.log",
+    "sha256": "1e2c8e29ef7d12d2fa4e8df0e078d07fc94eb2d59e807162cc90935fff19a63e",
+    "bytes": 160859
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-dedup-red-command.json",
+    "copy": "uat225-b-sqlite-device-dedup-red-command.json",
+    "sha256": "4a1356f2a3a3de97277770bf35a3175d86b0badf4a7559484a81c51a3524ab72",
+    "bytes": 399
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-dedup-red.redacted.log",
+    "copy": "uat225-b-sqlite-device-dedup-red.redacted.log",
+    "sha256": "a5b355f5e98e4678313dec1280aae9f8040e40eea077e3dfa7dd6fef8c3fe6e9",
+    "bytes": 209346
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-green-command.json",
+    "copy": "uat225-b-sqlite-device-green-command.json",
+    "sha256": "1d283c6d4f6288f800ed8b66ef9d85c3b0d63bd60b305cd0c22a8298481c994f",
+    "bytes": 458
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-green.redacted.log",
+    "copy": "uat225-b-sqlite-device-green.redacted.log",
+    "sha256": "9dacf9eca25ee9d53c0641b951564750890c70c0ec7e3819f70abd2adb819564",
+    "bytes": 134539
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-final-green-command.json",
+    "copy": "uat225-b-sqlite-device-final-green-command.json",
+    "sha256": "33601848d25f403e315fe49c3ca58f44bc1a6054d9716da5f60e9989f39bcc2e",
+    "bytes": 458
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat225-b-sqlite-device-final-green.redacted.log",
+    "copy": "uat225-b-sqlite-device-final-green.redacted.log",
+    "sha256": "730f4883f6d7f9c9aa88d15af08065234ea280e45361df6637ff5837ce4f36e4",
+    "bytes": 9302
+  }
+]
