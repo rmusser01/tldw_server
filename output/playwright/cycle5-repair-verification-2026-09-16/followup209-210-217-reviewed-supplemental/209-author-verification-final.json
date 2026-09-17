@@ -1,0 +1,60 @@
+{
+  "at": "2026-09-17T07:37:17.933239+00:00",
+  "task": "TASK13260.147",
+  "focused": {
+    "label": "uat209-210-217-frozen-green",
+    "passed": 202,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 2,
+    "seconds": 284.51,
+    "postgres_required": true,
+    "cases": {
+      "209": 156,
+      "210": 24,
+      "217": 22
+    }
+  },
+  "adjacent": [
+    {
+      "label": "uat209-adjacent-notes-green",
+      "passed": 176,
+      "skipped": 0,
+      "seconds": 167.34
+    },
+    {
+      "label": "uat209-adjacent-sync-green",
+      "passed": 69,
+      "skipped": 0,
+      "seconds": 61.16
+    }
+  ],
+  "static": {
+    "ruff_baseline": 0,
+    "ruff_current": 0,
+    "bandit_production_baseline": 0,
+    "bandit_production_current": 0,
+    "bandit_test_findings": 0,
+    "bandit_test_exclusion": [
+      "B101"
+    ],
+    "bandit_parse_errors": 0,
+    "compile_exit": 0,
+    "diff_check_exit": 0,
+    "test_format_exit": 0
+  },
+  "hashes_unchanged": {
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": true,
+    "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": true,
+    "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py": true,
+    "tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py": true,
+    "tldw_Server_API/tests/DB_Management/test_note_graph_query_backends.py": true,
+    "tldw_Server_API/tests/DB_Management/test_keyword_literal_search_backends.py": true
+  },
+  "limits": [
+    "Independent review/native pending",
+    "RLS role tested after normal fixture bootstrap; no cold restricted-role bootstrap claim",
+    "UAT216 shared method attributed separately",
+    "Adjacent suites preceded final message-parent branch; final202 includes six actual-parent controls"
+  ]
+}

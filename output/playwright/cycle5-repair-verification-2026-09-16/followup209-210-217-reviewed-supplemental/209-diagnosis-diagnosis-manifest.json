@@ -1,0 +1,87 @@
+{
+  "head": "713778d9ecc8f4a92ebc5319fbccb466662563d0",
+  "source": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "sha256": "6dd5a2b86caaf2f04135d56b115bbbe4863bab2d63e7122307eaf9305d64902a"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "2bd4ee82e97d9d046f4f7f736f2e19a41d1fb73fe665d650b860fc9d9c72be45"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "6089c5e0cac45fd0dd2c5253ad906b20108746e35a9189bf3934fc1eca9506b7"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py",
+      "sha256": "deab1710097b472b595ccad93f22862e30ffb299a5df39eacae0f9e5cba19bef"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py",
+      "sha256": "517a2d6332f8ed3fbdd4ceedceae130f2690dde42101469e8467ed2df64b9917"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Sync/v2/materializers/notes.py",
+      "sha256": "5f47b1a89d946a5ffff15b26d84dc8dadba32d4836733630d6a0f26e62eceb48"
+    }
+  ],
+  "evidence": [
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owned-reads-red.redacted.log",
+      "sha256": "41f90157733f140828c073006525e3db9b9c9fafe8666bf94867ac8aba2e5b26"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owned-reads-red-command.json",
+      "sha256": "6d4082dba334a63d9e6b1e13da6aa433fc6678d478b7212f3b28def69f8244b4"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owner-edges-red.redacted.log",
+      "sha256": "6349163a0b54a88918bdd1fd9e86f39e3f22c311b3534e79b3efc97d0a7133fa"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owner-edges-red-command.json",
+      "sha256": "05205afaff8ae3a9be242d76974b15711ad70be0c50154ba412fe9fcf1156a0a"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owner-edges-corrected-red.redacted.log",
+      "sha256": "00b7afdd3545233bbb8e06690bfb7620d10d825c502433e74c404020870cb8c5"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-owner-edges-corrected-red-command.json",
+      "sha256": "b465f1b9719e7bfcc0990dfd60307fbad022feadb6c9a2286a894c276969e1fc"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-organization-role-red.redacted.log",
+      "sha256": "5fe6b0c7c21c2a3966604a40f4c906708f0e19478a26a0359737d0f7575b5487"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat209-organization-role-red-command.json",
+      "sha256": "f16e49a0f14ba5f0d5df1f99ce1837f4c8a52296cdf950f0a27d0c31a77df6dd"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/DESIGN209.md",
+      "sha256": "088a266298ff73861bd785bbdbb86f2136b46d09aa2a7a329a77fa31a94ab2e9"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/harness-correction.md",
+      "sha256": "2a73d6658bbedcfa59002194bb8b3a9b1fb4d1d93bd3fd080aa68f1eb6dfa55c"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/proposed-method-inventory.json",
+      "sha256": "57b36afc63389863460978f40ebcdfd9c448dd16d93a3967a6d9652d827c379b"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/test_note_organization_probe.py",
+      "sha256": "260557c8f1c4499d64d0b3474f110f216bc94e964b5a2146c61b0839f05bc456"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/test_note_owner_edges_initial.py.txt",
+      "sha256": "5aec52802dee4c7b0ecf89bfadfb54105779e3320eb72c0af778f486f44808eb"
+    },
+    {
+      "path": ".tmp/uat209-diagnosis-20260917/test_note_owner_edges_probe.py",
+      "sha256": "720468d4735003094b1b13a60f6f6ab5bbdfc6ce898ab327ee396c43836cfa76"
+    }
+  ]
+}

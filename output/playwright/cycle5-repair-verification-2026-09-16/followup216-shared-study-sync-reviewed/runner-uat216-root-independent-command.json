@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T07:38:44.783Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_shared_sync_schema.py",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_worker_operation_lifecycle.py",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_membership_count_backends.py",
+    "tldw_Server_API/tests/StudyPacks/test_study_pack_storage.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

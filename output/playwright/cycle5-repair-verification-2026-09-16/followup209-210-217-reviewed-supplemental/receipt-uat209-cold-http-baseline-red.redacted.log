@@ -1,0 +1,215 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=574792365
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 2 items
+
+.tmp/uat209-diagnosis-20260917/test_cold_baseline_replay.py F.           [100%]
+
+=================================== FAILURES ===================================
+_____ test_real_cold_notes_dependency_keeps_two_http_owners_separate[True] _____
+tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py:526: in test_real_cold_notes_dependency_keeps_two_http_owners_separate
+    assert cold.json()["notes"] == []
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-09-17 00:04:54.786 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 00:04:54.789 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 00:04:54.792 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-17 00:04:54.794 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-17 00:04:54.805 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-17 00:04:54.805 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-17 00:04:54.805 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 00:04:54.809 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 00:04:54.813 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-17 00:04:54.825 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-17 00:04:54.825 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-17 00:04:54.825 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 00:04:54.825 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:<module>:356 - Using LRUCache for ChaChaNotes DB instances (maxsize=20).
+2026-09-17 00:04:54.857 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:55.097 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:1131 - Logging configured (Loguru + stdlib interception)
+2026-09-17 00:04:55.102 | WARNING  | trace= span= tp= req= job= ps=: | warnings:_deprecated:515 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+  from crypt import crypt as _crypt
+2026-09-17 00:04:55.193 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.csrf_protection:add_csrf_protection:532 - CSRF Protection enabled
+2026-09-17 00:04:55.198 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2622 - TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)
+2026-09-17 00:04:55.199 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2826 - Docs mounted at /docs-static from /Users/macbook-dev/Documents/GitHub/tldw_server2/Docs
+2026-09-17 00:04:55.253 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:55.254 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:55.254 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:55.255 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:55.297 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/monitoring.py:141: DeprecationWarning:
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+  @router.on_event("startup")
+2026-09-17 00:04:55.310 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-17 00:04:55.349 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "ResponseFormatJsonSchemaSpec" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-17 00:04:55.375 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:201 - Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates
+2026-09-17 00:04:55.375 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Chat.prompt_template_manager:<module>:202 - Available templates found: []
+2026-09-17 00:04:55.492 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+2026-09-17 00:04:55.622 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/UserProfiles/command_service.py:11: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+2026-09-17 00:04:55.786 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create:exponential_backoff:1166 - ExponentialBackoff decorator configured with max_retries=3, base_delay=1s.
+2026-09-17 00:04:56.160 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:04:56.702 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_groups.content:iter_content_router_specs:214 - Skipping audio router imports in pytest (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)
+2026-09-17 00:04:57.065 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_apply_environment_overrides:235 - Applying development environment overrides
+2026-09-17 00:04:57.065 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_parse_rate_limit_configs:274 - Loaded 5 rate limit tier configurations
+2026-09-17 00:04:57.065 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:_parse_circuit_breaker_configs:289 - Loaded 6 circuit breaker configurations
+2026-09-17 00:04:57.065 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:load_config:221 - Configuration loaded successfully from /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/evaluations_config.yaml
+2026-09-17 00:04:57.065 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.config_manager:load_config:222 - Environment: development
+2026-09-17 00:04:57.068 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:57.069 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simpleqa_verified
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bullshit_benchmark
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mmlu_pro
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: gpqa_diamond
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: simple_bench
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: aider_polyglot
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: bfcl
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: mask
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: vending_bench
+2026-09-17 00:04:57.256 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Evaluations.benchmark_registry:register:315 - Registered benchmark: swe_bench
+2026-09-17 00:04:57.415 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+2026-09-17 00:04:57.415 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+2026-09-17 00:04:57.428 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+2026-09-17 00:04:57.428 | WARNING  | trace= span= tp= req= job= ps=: | importlib._bootstrap:_call_with_frames_removed:241 - <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+2026-09-17 00:04:57.961 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:04:58.016 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:04:58.016 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:04:58.300 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: slack
+2026-09-17 00:04:58.300 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: discord
+2026-09-17 00:04:58.300 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: telegram
+2026-09-17 00:04:58.301 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: meetings
+2026-09-17 00:04:58.325 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:138: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("tags", pre=True, each_item=True)
+2026-09-17 00:04:58.328 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:196: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("name")
+2026-09-17 00:04:58.328 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:200: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("query", pre=True)
+2026-09-17 00:04:58.328 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:204: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("sort")
+2026-09-17 00:04:58.329 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:219: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("name")
+2026-09-17 00:04:58.329 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:225: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("query", pre=True)
+2026-09-17 00:04:58.329 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:231: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("sort")
+2026-09-17 00:04:58.331 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:339: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("status", pre=True)
+2026-09-17 00:04:58.331 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:345: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("exclude_tags", pre=True)
+2026-09-17 00:04:58.331 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:351: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("exclude_tags", pre=True, each_item=True)
+2026-09-17 00:04:58.332 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:371: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("status", pre=True)
+2026-09-17 00:04:58.332 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:377: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("tags", pre=True)
+2026-09-17 00:04:58.332 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:383: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("tags", pre=True, each_item=True)
+2026-09-17 00:04:58.336 | WARNING  | trace= span= tp= req= job= ps=: | pydantic.deprecated.class_validators:validator:112 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/schemas/reading_schemas.py:583: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  @validator("tags", pre=True, each_item=True)
+2026-09-17 00:04:58.888 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "register" in "CharacterExemplarLabels" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+2026-09-17 00:04:59.000 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: audiobooks
+2026-09-17 00:04:59.212 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: connectors
+2026-09-17 00:04:59.278 | WARNING  | trace= span= tp= req= job= ps=: | fastapi.params:__init__:520 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/notes_graph_suggestions.py:20: FastAPIDeprecationWarning: `example` has been deprecated, please use `examples` instead
+  from tldw_Server_API.app.api.v1.endpoints.notes_graph import _normalize_note_id
+2026-09-17 00:05:00.201 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sharing.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from ..utils.prototype_error_contract import (
+2026-09-17 00:05:00.201 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/sharing.py:120: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  from ..utils.prototype_error_contract import (
+2026-09-17 00:05:00.243 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:00.244 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:00.245 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:00.526 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: personalization
+2026-09-17 00:05:00.575 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: companion
+2026-09-17 00:05:01.090 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: integrations
+2026-09-17 00:05:01.107 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.107 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.107 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.107 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.107 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.108 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.108 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.108 | WARNING  | trace= span= tp= req= job= ps=: | starlette.status:__getattr__:198 - /Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/importlib/__init__.py:126: DeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+  return _bootstrap._gcd_import(name[level:], package, level)
+2026-09-17 00:05:01.347 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_NarrativeDialogueOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-17 00:05:01.348 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_ChoiceSetOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-17 00:05:01.348 | WARNING  | trace= span= tp= req= job= ps=: | pydantic._internal._fields:collect_model_fields:198 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "_SceneUpdateOutput" shadows an attribute in parent "_StrictModel"
+  warnings.warn(
+2026-09-17 00:05:01.469 | WARNING  | trace= span= tp= req= job= ps=: | typing_extensions:wrapper:3003 - /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/admin/admin_monitoring.py:192: DeprecationWarning:
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+  @router.on_event("startup")
+2026-09-17 00:05:01.661 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.admin:_mount_admin_webhook_routes:135 - Canonical admin webhook mode is off; historical webhook CRUD, test, delivery, and incident-notify routes are disabled. Explicitly select temporary compatibility or migration before use.
+2026-09-17 00:05:01.806 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: guardian
+2026-09-17 00:05:01.806 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: guardian
+2026-09-17 00:05:01.806 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: self-monitoring
+2026-09-17 00:05:01.806 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: sandbox
+2026-09-17 00:05:01.808 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.router_registry:register_router_specs:49 - Route disabled by policy: benchmarks
+2026-09-17 00:05:02.329 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2910 - Registered 140 routers from router groups
+2026-09-17 00:05:02.329 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:<module>:2912 - Auth router consolidated: endpoints/auth.py
+2026-09-17 00:05:02.358 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-17 00:05:02.424 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:840 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
+2026-09-17 00:05:02.424 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_get_chacha_db_path_for_user:395 - Ensured ChaChaNotes DB directory for user 2: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-633/test_real_cold_notes_dependenc0/2
+2026-09-17 00:05:02.424 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_create_and_prepare_db:479 - Initializing CharactersRAGDB instance for user 2 (ChaChaNotes.db)
+2026-09-17 00:05:02.425 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:02.427 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-633/test_real_cold_notes_dependenc0/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-17 00:05:05.230 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:initialize:943 - Using SQLite database
+2026-09-17 00:05:05.240 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:554 - Default character 'Helpful AI Assistant' not found. Creating now...
+2026-09-17 00:05:05.241 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:_create_sqlite_schema:1152 - SQLite schema harmonization: ensuring AuthNZ tables
+2026-09-17 00:05:05.244 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Helpful AI Assistant' with ID: 2.
+2026-09-17 00:05:05.245 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:577 - Successfully created default character 'Helpful AI Assistant' with ID: 2.
+2026-09-17 00:05:05.292 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.database:initialize:949 - Database pool initialized successfully
+2026-09-17 00:05:05.306 | INFO     | trace= span= tp= req= job= ps=: | httpx._client:_send_handling_redirects:1694 - HTTP Request: GET http://fixture/api/v1/notes/ "HTTP/1.1 200 OK"
+2026-09-17 00:05:05.313 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:840 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
+2026-09-17 00:05:05.323 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.notes:create_note:2096 - User (via DB instance client_id: 2) creating note: Title='Owner 2 fixture'
+2026-09-17 00:05:05.354 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Owner 2 fixture' with ID: 19b754a4-6886-4b0d-aa76-995676ec11be.
+2026-09-17 00:05:05.361 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.399 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.422 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.423 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.425 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.444 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.endpoints.notes:create_note:2318 - Note '19b754a4-6886-4b0d-aa76-995676ec11be' created successfully for user (DB client_id: 2).
+2026-09-17 00:05:05.445 | INFO     | trace= span= tp= req= job= ps=: | httpx._client:_send_handling_redirects:1694 - HTTP Request: POST http://fixture/api/v1/notes/ "HTTP/1.1 201 Created"
+2026-09-17 00:05:05.447 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:840 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
+2026-09-17 00:05:05.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_get_chacha_db_path_for_user:395 - Ensured ChaChaNotes DB directory for user 3: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-633/test_real_cold_notes_dependenc0/3
+2026-09-17 00:05:05.448 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_create_and_prepare_db:479 - Initializing CharactersRAGDB instance for user 3 (ChaChaNotes.db)
+2026-09-17 00:05:05.450 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-0b7d96f4
+2026-09-17 00:05:05.451 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-633/test_real_cold_notes_dependenc0/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-17 00:05:05.997 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:554 - Default character 'Helpful AI Assistant' not found. Creating now...
+2026-09-17 00:05:06.000 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Helpful AI Assistant' with ID: 3.
+2026-09-17 00:05:06.001 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:577 - Successfully created default character 'Helpful AI Assistant' with ID: 3.
+2026-09-17 00:05:06.011 | INFO     | trace= span= tp= req= job= ps=: | httpx._client:_send_handling_redirects:1694 - HTTP Request: GET http://fixture/api/v1/notes/ "HTTP/1.1 200 OK"
+=========================== short test summary info ============================
+FAILED .tmp/uat209-diagnosis-20260917/test_cold_baseline_replay.py::test_real_cold_notes_dependency_keeps_two_http_owners_separate[True]
+=================== 1 failed, 1 passed, 1 warning in 14.64s ====================

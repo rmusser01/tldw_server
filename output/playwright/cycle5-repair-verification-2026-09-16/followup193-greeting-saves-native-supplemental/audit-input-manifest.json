@@ -1,0 +1,109 @@
+{
+  "captured_at": "2026-09-17T07:28:05.064257+00:00",
+  "scope": "18 explicit safe native inputs plus two official read-only task snapshots",
+  "normalization": "none; hashes cover original bytes; native inputs were not copied or changed",
+  "inputs": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-fault-installed.txt",
+      "bytes": 1031,
+      "sha256": "fa6cda8a25e69b7144e92602e9108b8d38789ff27db6def7337e13364cb46849"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-prompt.txt",
+      "bytes": 165,
+      "sha256": "efd2687727c52e491f0df0b7860d7da2787a312d8db7928997c585a17b1b77b0"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-send.txt",
+      "bytes": 18825,
+      "sha256": "6d7bc6ac2e0faf7ab88c49290661cfbbb1c35355a21df3f0d23531939d937e54"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-error.txt",
+      "bytes": 18582,
+      "sha256": "f01cfaf384d1efa10a26cf8b873ea65cd54ab702f655f4f5b79fed76dd6b0154"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-error-events.txt",
+      "bytes": 38881,
+      "sha256": "a33a08c1b7e303025594705ae858feb7e4be24c4c4bf4d947cdb7cb7e425ca6b"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry.txt",
+      "bytes": 17981,
+      "sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-fault-receipt.txt",
+      "bytes": 538,
+      "sha256": "93815da48dcc34167ef20bee91760d3f2676988fa283d3d6269c689d41afd45f"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-settled.txt",
+      "bytes": 18079,
+      "sha256": "3262042ee1dd5deb9cea877d9034a1aa3a93cc39d4dfc1510a7c6c55127b8f0f"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-events.txt",
+      "bytes": 46929,
+      "sha256": "3524808821a67076329fcae57bc8ef9d1b9c619fe359892a05cbb1b7f3a00f19"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload.txt",
+      "bytes": 1644,
+      "sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-settled.txt",
+      "bytes": 17735,
+      "sha256": "2fe8fabbec301aaef5f28b0cec1ca3fc5f7586bb4ec8c68fb7e5d800821a9dbf"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-events.txt",
+      "bytes": 58233,
+      "sha256": "2deda95a09613484b8e8fc61ea4f8a422a89119f5415b6530d95db1764bb6e29"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/character212-open.txt",
+      "bytes": 9637,
+      "sha256": "dadaf8655203fa7fffe9d4965bd69c787abc6173ba605d9b3ef067ca8d26a0db"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/character212-settled.txt",
+      "bytes": 9610,
+      "sha256": "41fec11c3f7fdbf277f4ed017c25aa274063821e4387bce68b1cabaeedb68384"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/character212-events.txt",
+      "bytes": 61194,
+      "sha256": "b0100b0d65d2f6206e06379bb0b71c2c3dc7479e565b942642545137b6fe3bb5"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-reviewed-characters.txt",
+      "bytes": 9558,
+      "sha256": "5af50af635eda29c4d391655726ab3bfb0d5fb6461881e4f56ae3bbf23b209dd"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-reviewed-chat-open.txt",
+      "bytes": 15825,
+      "sha256": "9edc0efe203975fb282ef20c55aa7b2405e9cb6b35380775c73cd3a5bc4fa8ed"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-reviewed-chat-initial-events.txt",
+      "bytes": 12228,
+      "sha256": "8972a12b2e934458d470cb81a3bf5aba9d3599e3d08dcf19e1dd07ef384f2f21"
+    }
+  ],
+  "task_snapshots": [
+    {
+      "path": ".tmp/uat193-212-native-audit-20260917/task13260.131.txt",
+      "bytes": 3227,
+      "sha256": "08f023efc6a257e70fe5cb8398ae9b6fc3de07af39734cc4bd8adbf24f79ed0d"
+    },
+    {
+      "path": ".tmp/uat193-212-native-audit-20260917/task13260.150.txt",
+      "bytes": 2099,
+      "sha256": "d9491eb140426a125905154b3d4f12a543316e5625a8baa85ac702d6585d8319"
+    }
+  ]
+}

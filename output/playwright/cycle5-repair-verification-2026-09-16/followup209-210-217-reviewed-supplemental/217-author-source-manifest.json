@@ -1,0 +1,18 @@
+{
+  "task": "TASK13260.151",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "d1cfb0b2fe7aae3b1763f7a26cdb3f2b2ae2bbf685b97854e686f6960e4fb652",
+      "snapshot": ".tmp/uat209-repair-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_keyword_literal_search_backends.py",
+      "sha256": "ab7fde836e9a7fecf73a336fd477a9d2d4cac974137b9ba014b352769e83d370",
+      "snapshot": ".tmp/uat209-repair-20260917/review-snapshot/tldw_Server_API/tests/DB_Management/test_keyword_literal_search_backends.py"
+    }
+  ],
+  "integrated_manifest": ".tmp/uat209-repair-20260917/owned-manifest.json",
+  "patch_sha256": "d0867d3aaf2e650528e6287ef9bb80699ee4aa6b81ab83d2c8549395794bf8ff",
+  "source_attribution": "Integrated snapshot contains separately reviewed owner scope; owned.patch isolates this repair."
+}

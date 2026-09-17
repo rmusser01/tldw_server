@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T07:28:57.863Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "uat216_baseline",
+    "tldw_Server_API/tests/DB_Management/test_study_pack_shared_sync_schema.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

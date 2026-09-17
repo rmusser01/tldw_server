@@ -1,0 +1,11 @@
+{
+  "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": {
+    "module_and_class_nonmethod_AST_identical": true
+  },
+  "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": {
+    "module_and_class_nonmethod_AST_identical": true
+  },
+  "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py": {
+    "module_and_class_nonmethod_AST_identical": true
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "task": "TASK13260.131",
+  "literal_AC3_greeting_actions": "pass",
+  "prior_accepted_audit_inputs_verified": 20,
+  "canonical_pre_save_history_at": "2026-09-17T07:32:21.099Z",
+  "receipts": [
+    {
+      "request_at": "2026-09-17T07:33:39.200Z",
+      "response_at": "2026-09-17T07:33:39.236Z",
+      "status": 201,
+      "actor_id": 2,
+      "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+      "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+      "make_flashcard": false,
+      "note_id": "72e2e192-c099-4829-af4b-c935e8ecf993",
+      "flashcard_id": null,
+      "source_text_matches_canonical_greeting": true
+    },
+    {
+      "request_at": "2026-09-17T07:37:42.619Z",
+      "response_at": "2026-09-17T07:37:42.662Z",
+      "status": 201,
+      "actor_id": 2,
+      "conversation_id": "471f52fa-22c5-4eba-a3d6-ee5e6982884f",
+      "message_id": "1e23f18b-4842-4799-931f-df2b2ea75448",
+      "make_flashcard": true,
+      "note_id": "029a74d1-1de1-4283-99ff-5a816f275fa7",
+      "flashcard_id": "082ec63a-124e-4c47-ac23-c11a2deba70b",
+      "source_text_matches_canonical_greeting": true
+    }
+  ],
+  "post_save_reload_capture_at": "2026-09-17T07:40:22.307Z",
+  "post_save_reload_identity_ids": [
+    2,
+    2
+  ],
+  "saved_resource_GET_readbacks_present": false,
+  "completed_post_save_history_reload_present": false,
+  "input_bytes_unchanged": true
+}

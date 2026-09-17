@@ -1,0 +1,261 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=2856018362
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 13 items
+
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py ..F.FFFF. [ 69%]
+F...                                                                     [100%]
+
+=================================== FAILURES ===================================
+___________ test_organization_owner_edges[postgres-collection-list] ____________
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:23: in test_organization_owner_edges
+    assert f.bob.list_keyword_collections() == []
+E   AssertionError: assert [{'client_id'...'id': 1, ...}] == []
+E
+E     Left contains one more item: {'client_id': '2', 'created_at': datetime.datetime(2026, 9, 17, 6, 27, 33, 224000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC')), 'deleted': False, 'id': 1, ...}
+E     Use -v to get more diff
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:31.724 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:31.724 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:31.724 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_1/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:33.056 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_1/2/ChaChaNotes.db
+2026-09-16 23:27:33.056 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:33.056 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_1/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:33.207 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_1/3/ChaChaNotes.db
+2026-09-16 23:27:33.209 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:33.211 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: 20364449-7d26-489c-9ea7-7aba03d19b1f.
+2026-09-16 23:27:33.212 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: 8320f564-92f7-43d9-85e7-185a37918f16.
+2026-09-16 23:27:33.215 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 8320f564-92f7-43d9-85e7-185a37918f16 (was v1), new version 2.
+2026-09-16 23:27:33.220 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:33.223 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: 818fea67-e356-423a-a921-086dff9749aa.
+2026-09-16 23:27:33.223 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:33.223 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:33.225 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:33.226 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added keyword_collections 'Private collection' with ID: 1.
+2026-09-16 23:27:33.228 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:33.228 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT * FROM keyword_collections WHERE deleted = 0 ORDER BY LOWER(name) LIMIT ? OFFSET ?... Params: (100, 0)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:33.256 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:33.256 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_____________ test_organization_owner_edges[postgres-folder-list] ______________
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:14: in test_organization_owner_edges
+    if operation == 'folder-list': assert f.bob.list_note_folders() == []
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert [{'id': 1, 'n...folder', ...}] == []
+E
+E     Left contains one more item: {'id': 1, 'name': 'Private amber folder', 'parent_id': None, 'path': 'Private amber folder', ...}
+E     Use -v to get more diff
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:34.501 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:34.501 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:34.501 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_3/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:35.942 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_3/2/ChaChaNotes.db
+2026-09-16 23:27:35.942 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:35.943 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_3/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:36.104 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_3/3/ChaChaNotes.db
+2026-09-16 23:27:36.105 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:36.107 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: d44fba13-668a-41fe-a5c3-01714342cf7d.
+2026-09-16 23:27:36.109 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: ca79b1a5-769a-4a07-97f5-40705be09e18.
+2026-09-16 23:27:36.111 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID ca79b1a5-769a-4a07-97f5-40705be09e18 (was v1), new version 2.
+2026-09-16 23:27:36.117 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:36.120 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: 608df0e1-bac5-41bb-80a4-2c48d03d9cff.
+2026-09-16 23:27:36.120 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:36.120 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:36.122 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:36.126 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('d44fba13-668a-41fe-a5c3-01714342cf7d', 'd44fba13-668a-41fe-a5c3-01714342cf7d', 'd44fba13-668a-41fe-a5c3-01714342cf7d')...
+2026-09-16 23:27:36.129 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:36.129 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT id, sync_id, name, path, parent_id FROM note_folders WHERE deleted = ? ORDER BY LOWER(path) LIMIT ? OFFSET ?... Params: (False, 1000, 0)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:36.131 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:36.131 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+______ test_organization_owner_edges[postgres-foreign-note-folder-write] _______
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:20: in test_organization_owner_edges
+    assert result == []
+E   AssertionError: assert [{'id': 2, 'n...folder', ...}] == []
+E
+E     Left contains one more item: {'id': 2, 'name': 'Foreign mutation folder', 'parent_id': None, 'path': 'Foreign mutation folder', ...}
+E     Use -v to get more diff
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:36.166 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:36.167 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:36.167 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_4/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:37.510 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_4/2/ChaChaNotes.db
+2026-09-16 23:27:37.510 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:37.510 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_4/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:37.667 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_4/3/ChaChaNotes.db
+2026-09-16 23:27:37.668 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:37.670 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: ff5d9019-7b39-454f-86c7-e5020afffbce.
+2026-09-16 23:27:37.672 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: 735c1324-8c7b-41e1-830c-8f32e9be235c.
+2026-09-16 23:27:37.675 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 735c1324-8c7b-41e1-830c-8f32e9be235c (was v1), new version 2.
+2026-09-16 23:27:37.680 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:37.683 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: b44dd4c2-723d-427d-8578-9187ea5cf47a.
+2026-09-16 23:27:37.684 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:37.684 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:37.685 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:37.689 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('ff5d9019-7b39-454f-86c7-e5020afffbce', 'ff5d9019-7b39-454f-86c7-e5020afffbce', 'ff5d9019-7b39-454f-86c7-e5020afffbce')...
+2026-09-16 23:27:37.692 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:37.694 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('ff5d9019-7b39-454f-86c7-e5020afffbce', 'ff5d9019-7b39-454f-86c7-e5020afffbce', 'ff5d9019-7b39-454f-86c7-e5020afffbce')...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:37.697 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:37.697 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_____________ test_organization_owner_edges[postgres-folder-name] ______________
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:15: in test_organization_owner_edges
+    elif operation == 'folder-name': assert f.bob.get_note_folder_by_path('Private amber folder') is None
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert {'id': 1, 'name': 'Private amber folder', 'parent_id': None, 'path': 'Private amber folder', ...} is None
+E    +  where {'id': 1, 'name': 'Private amber folder', 'parent_id': None, 'path': 'Private amber folder', ...} = get_note_folder_by_path('Private amber folder')
+E    +    where get_note_folder_by_path = <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x10f0c3390>.get_note_folder_by_path
+E    +      where <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x10f0c3390> = namespace(alice=<tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x10f3a8a10>, bob=<tl...97-4482-89b1-08413a09eaea', deleted='30976b6d-42b6-4eeb-a5b6-93b2e4784913', own='077e9446-2bb0-48cb-a91c-25d3116550a0').bob
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:37.730 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:37.731 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:37.731 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_5/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:39.076 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_5/2/ChaChaNotes.db
+2026-09-16 23:27:39.076 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:39.076 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_5/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:39.234 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_5/3/ChaChaNotes.db
+2026-09-16 23:27:39.235 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:39.237 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: 47ec4521-fa97-4482-89b1-08413a09eaea.
+2026-09-16 23:27:39.239 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: 30976b6d-42b6-4eeb-a5b6-93b2e4784913.
+2026-09-16 23:27:39.242 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 30976b6d-42b6-4eeb-a5b6-93b2e4784913 (was v1), new version 2.
+2026-09-16 23:27:39.247 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:39.250 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: 077e9446-2bb0-48cb-a91c-25d3116550a0.
+2026-09-16 23:27:39.251 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:39.251 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:39.252 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:39.256 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('47ec4521-fa97-4482-89b1-08413a09eaea', '47ec4521-fa97-4482-89b1-08413a09eaea', '47ec4521-fa97-4482-89b1-08413a09eaea')...
+2026-09-16 23:27:39.259 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:39.259 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+            SELECT id, sync_id, name, path, parent_id
+              FROM note_folders
+             WHERE LOWER(path) = LOWER(?) AND deleted = ?
+            ... Params: ('Private amber folder', False)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:39.261 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:39.261 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_________ test_organization_owner_edges[postgres-foreign-note-folders] _________
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:16: in test_organization_owner_edges
+    elif operation == 'foreign-note-folders': assert f.bob.get_note_folders_for_note(f.private) == []
+                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert [{'id': 1, 'n...folder', ...}] == []
+E
+E     Left contains one more item: {'id': 1, 'name': 'Private amber folder', 'parent_id': None, 'path': 'Private amber folder', ...}
+E     Use -v to get more diff
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:39.295 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:39.295 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:39.295 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_6/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:40.544 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_6/2/ChaChaNotes.db
+2026-09-16 23:27:40.545 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:40.545 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_6/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:40.685 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_6/3/ChaChaNotes.db
+2026-09-16 23:27:40.686 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:40.688 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: 25e63fc2-9228-41d7-b4a0-2c5842c8d40b.
+2026-09-16 23:27:40.690 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: f26cfc78-542e-45ac-8d55-3d91626e670c.
+2026-09-16 23:27:40.693 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID f26cfc78-542e-45ac-8d55-3d91626e670c (was v1), new version 2.
+2026-09-16 23:27:40.698 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:40.701 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: d43a7216-f129-4f65-b445-fd81cddbcd81.
+2026-09-16 23:27:40.701 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:40.701 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:40.703 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:40.706 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('25e63fc2-9228-41d7-b4a0-2c5842c8d40b', '25e63fc2-9228-41d7-b4a0-2c5842c8d40b', '25e63fc2-9228-41d7-b4a0-2c5842c8d40b')...
+2026-09-16 23:27:40.709 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:40.710 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
+                  FROM note_folders f
+                  JOIN (
+                        SELECT folder_id
+                          FROM note_folder_memberships
+                         WHERE note_id = ?
+                        UNION... Params: ('25e63fc2-9228-41d7-b4a0-2c5842c8d40b', '25e63fc2-9228-41d7-b4a0-2c5842c8d40b', '25e63fc2-9228-41d7-b4a0-2c5842c8d40b')...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:40.712 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:40.712 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+__________ test_organization_owner_edges[postgres-keyword-same-text] ___________
+.tmp/uat209-diagnosis-20260917/test_note_organization_probe.py:27: in test_organization_owner_edges
+    assert f.bob.get_keyword_by_id(own)['client_id'] == '3'
+E   AssertionError: assert '2' == '3'
+E
+E     - 3
+E     + 2
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:27:41.946 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:27:41.947 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:41.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_8/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 23:27:43.309 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_8/2/ChaChaNotes.db
+2026-09-16 23:27:43.309 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e302583d
+2026-09-16 23:27:43.309 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_8/3/ChaChaNotes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:27:43.464 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-602/test_organization_owner_edges_8/3/ChaChaNotes.db
+2026-09-16 23:27:43.466 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:43.468 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice private Citrine' with ID: a08e7333-6afe-4b5f-96c0-33f1ada8aecb.
+2026-09-16 23:27:43.470 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Alice deleted Citrine' with ID: 68ae9e53-1352-4e2d-aff7-2e18337a4d9f.
+2026-09-16 23:27:43.473 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 68ae9e53-1352-4e2d-aff7-2e18337a4d9f (was v1), new version 2.
+2026-09-16 23:27:43.479 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:43.481 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Bob private Indigo' with ID: bc286cd8-8fcb-4866-9f4e-b00e72555d4d.
+2026-09-16 23:27:43.482 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:43.482 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:27:43.484 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:43.485 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'Same ordinary keyword' with ID: 1.
+2026-09-16 23:27:43.487 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:27:43.488 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'Same ordinary keyword' with ID: 1.
+2026-09-16 23:27:43.488 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT * FROM chacha_keywords WHERE id = ? AND deleted = 0... Params: (1,)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:27:43.491 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+2026-09-16 23:27:43.491 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+=========================== short test summary info ============================
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-collection-list]
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-folder-list]
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-foreign-note-folder-write]
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-folder-name]
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-foreign-note-folders]
+FAILED .tmp/uat209-diagnosis-20260917/test_note_organization_probe.py::test_organization_owner_edges[postgres-keyword-same-text]
+=================== 6 failed, 7 passed, 1 warning in 18.57s ====================

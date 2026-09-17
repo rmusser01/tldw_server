@@ -1,6 +1,6 @@
 # Cycle 5 repair and verification plan
 
-Current Stage3 checkpoint: 218 unique findings — 201 verified, 12 awaiting targeted acceptance, 5 unresolved (209, 210, 216, 217, 218). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-profile-visual-accepted.json. Stage4 full matrix remains Not Started.
+Current Stage3 checkpoint: 218 unique findings — 203 verified, 14 awaiting targeted acceptance, 1 unresolved (218). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-notes-reviewed.json. Stage4 full matrix remains Not Started.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 

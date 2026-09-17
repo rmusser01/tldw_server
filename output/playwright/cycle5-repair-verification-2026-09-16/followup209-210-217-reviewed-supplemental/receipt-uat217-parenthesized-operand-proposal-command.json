@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-17T07:15:47.146Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    ".tmp/uat217-repair-20260917/test_parenthesized_operand_proposal.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

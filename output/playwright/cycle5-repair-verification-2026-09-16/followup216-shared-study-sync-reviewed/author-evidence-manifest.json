@@ -1,0 +1,158 @@
+[
+  {
+    "path": "IMPLEMENTATION216.md",
+    "sha256": "e240a2b992f9c94afa14284d14593fe4e6c06e3a565a89c6f95fd5cbb9380cfb"
+  },
+  {
+    "path": "bandit-production-first.json",
+    "sha256": "3c8d807527491f73dc2ba0076180d7717e8a6b5b41f2e58a8a0ec4121f9eac9a"
+  },
+  {
+    "path": "bandit-production-first.log",
+    "sha256": "2d7d33bf2b344d1cc1d7ae7a107ae393bf825a467ee98447ffc0524e85c1d7ff"
+  },
+  {
+    "path": "bandit-production.json",
+    "sha256": "187cb11d6565e2ce4fa7c1f0bcab69763b4acad047e2545b2ae1d39a491994d5"
+  },
+  {
+    "path": "bandit-production.log",
+    "sha256": "279ae3a1c28636eb225c36f2c5f0da282a9ddf37e652177158c86a4da7caac30"
+  },
+  {
+    "path": "bandit-test-cleanup.json",
+    "sha256": "47d437ec3b747972823c7f5c06b9e9edff41e306fa75f6c607dfa95a96d3ea45"
+  },
+  {
+    "path": "bandit-test-cleanup.log",
+    "sha256": "e4a2fb96e1133b354a02d69d7adfe847386c5138d5e4060c88188adc5f82e66f"
+  },
+  {
+    "path": "bandit-test.json",
+    "sha256": "99f113a70ce147a253db539207c9116c16bfa927553cb707a2ca18e8fb251c11"
+  },
+  {
+    "path": "bandit-test.log",
+    "sha256": "74f28f803fc5c4ceaeac5540fb4436a765219f922cbf8c85a2fa481ea1b9ee91"
+  },
+  {
+    "path": "baseline-ChaChaNotes_DB.py",
+    "sha256": "68ae2657f9abb29a7982d97028d873ed7bab5159c192e4c48d0c2caff7737dc2"
+  },
+  {
+    "path": "baseline-method.py.txt",
+    "sha256": "29d727a561c516960cfdb2b8040e6f2a8545df72578b527301a38c7d88cfd62b"
+  },
+  {
+    "path": "baseline-source.json",
+    "sha256": "d0f89cbc662f9448ea94e3bb13e2a99fd2aa623999d7031c2f43c0fe264aa27b"
+  },
+  {
+    "path": "both-orders-red-command.json",
+    "sha256": "e463689ee2bc6d8d233f027ab729b7609233a277ed0b15223f141fe131f8ffdc"
+  },
+  {
+    "path": "both-orders-red.log",
+    "sha256": "9543e3eb6b7cc6c345fb389f939449b0e915690013d1b9ddc7d5dd9735d00217"
+  },
+  {
+    "path": "current-method.py.txt",
+    "sha256": "ed682318fa4cf77681446231e3fecdd470c108ab1f46a8fd6e7bc301d2173e81"
+  },
+  {
+    "path": "diff-check.txt",
+    "sha256": "bde294368bfed77c2cddf8cec271d398aee9cdbab3b26e1059281bd33adb0120"
+  },
+  {
+    "path": "expanded-red-test.py",
+    "sha256": "e1a4e956cfd64ce7915a40b8b70f094520daeddb517f8a3b7d1a6e49552ff139"
+  },
+  {
+    "path": "expanded-red.log",
+    "sha256": "f5c20c13c071ca250b27c9c026ba08b6cd1b6479a9c38f9e01b1160976fe88a2"
+  },
+  {
+    "path": "final-baseline-red-command.json",
+    "sha256": "e54bc773aa50704637243016d48a10b18fc2deef002effb3c587e89af4788ef7"
+  },
+  {
+    "path": "final-baseline-red.log",
+    "sha256": "504f07851bbd19c8ac9da91f46ee02bfb1e6f5ac71fdc7dbdd7f99764c6b188e"
+  },
+  {
+    "path": "final-cleanup-green-command.json",
+    "sha256": "c4268eedaafbb91538ac0d1d3fdf058eae6b366f5243bfab51d36becc77a8adf"
+  },
+  {
+    "path": "final-cleanup-green.log",
+    "sha256": "897989ebf38673445c26e09b797f9335ee7f296bca7f74511cd9cb89547a4fa1"
+  },
+  {
+    "path": "final-green-command.json",
+    "sha256": "f95bf6ae6916ceb3b3e812a1c4ad55a8257d92f03482bd530742f811a3db34ef"
+  },
+  {
+    "path": "final-green.log",
+    "sha256": "dfc2273e0426b0b0a1351b11894181bc49a21ba7a215bb9c4713621638faf5db"
+  },
+  {
+    "path": "first-green-fixture-failure-command.json",
+    "sha256": "258a9d6c8097ec5c6c7aa6b42033bb336a23e3390e85e140c82ce5c7a634a626"
+  },
+  {
+    "path": "first-green-fixture-failure.log",
+    "sha256": "07d60f535d738bc985fbd976fd1446b7635708397abedb838469f271bbea98cc"
+  },
+  {
+    "path": "initial-red/test_study_pack_shared_sync_schema.py",
+    "sha256": "f705e2e06ad84b6924841b58ac34c40f2fce86cd722af70b9e205de9c4820566"
+  },
+  {
+    "path": "initial-red/worker-red.log",
+    "sha256": "6ff61e40911d0cd9526fd46ab7a5669989cea9eb960f9d74b22bf542f32138a9"
+  },
+  {
+    "path": "owned-manifest.json",
+    "sha256": "7d47fbb3913444cfe4b74a02ea8caca248a4fcac239f7e4da704b88ed1af1505"
+  },
+  {
+    "path": "owned-method.patch",
+    "sha256": "a10cfb0904c0be96b867521e82403b999500e8e5815f9e0adeab89d498d60570"
+  },
+  {
+    "path": "owned.patch",
+    "sha256": "0515f2a4a943300728dac866b757de494b7abe58d68858e0bf43ae85f9158726"
+  },
+  {
+    "path": "pre-cleanup-test.py",
+    "sha256": "5a26ecfd5d2f5c2d767fbeb11a6765ebeeb100716972943c8e31f426105d219a"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "245ee8718d6d7ba118b88e02efb75f473abcc74f28abe2b9ee27034cfd34b025"
+  },
+  {
+    "path": "review-snapshot/tldw_Server_API/tests/DB_Management/test_study_pack_shared_sync_schema.py",
+    "sha256": "65cb83597c9cfa63a36b631c82b8f42bd359250f5a6acd43c7a3c6899b031504"
+  },
+  {
+    "path": "ruff-cleanup.json",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": "ruff-final.json",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": "ruff-tests-first.json",
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": "uat216_baseline.py",
+    "sha256": "5073ed1a3f8886890cfdfd8461cb49a4b617171d5b783ef78e43e422e348397f"
+  },
+  {
+    "path": "verification.json",
+    "sha256": "157254652e447549c4b8f3bcd11604099583ef8770ad861783ffa2de5d86a0c7"
+  }
+]

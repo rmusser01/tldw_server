@@ -1,0 +1,14 @@
+[
+  {
+    "path": ".tmp/uat217-repair-20260917/source-manifest.json",
+    "sha256": "5aba761a4dbc7babb3cbd4eb97c46ef2b6c69322124b7a2b15b9257c4d8b6d8a"
+  },
+  {
+    "path": ".tmp/uat217-repair-20260917/IMPLEMENTATION217.md",
+    "sha256": "ac26514267f7302df6ef5a548e406db1373c7e79475aeead159dd0fb49e160d5"
+  },
+  {
+    "path": ".tmp/uat217-repair-20260917/owned.patch",
+    "sha256": "d0867d3aaf2e650528e6287ef9bb80699ee4aa6b81ab83d2c8549395794bf8ff"
+  }
+]

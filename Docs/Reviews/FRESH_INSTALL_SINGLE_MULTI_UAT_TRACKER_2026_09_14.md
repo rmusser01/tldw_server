@@ -1,6 +1,8 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint: 218 unique findings — 201 verified, 12 awaiting targeted acceptance, 5 unresolved (209, 210, 216, 217, 218).** Alice and Bob Persona catalogues, optional visual fallback, and the singular Character announcement passed native acceptance. Notes isolation and shared PostgreSQL schema repairs remain under review. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-profile-visual-accepted.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
+- **Latest checkpoint: 218 unique findings — 203 verified, 14 awaiting targeted acceptance, 1 unresolved (218).** Notes ownership, residual graph mapping and Study Pack triggers are independently reviewed and committed. Keyword literal-search criteria and original greeting saves are accepted. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-notes-reviewed.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
+
+- **Prior checkpoint: 218 unique findings — 201 verified, 12 awaiting targeted acceptance, 5 unresolved (209, 210, 216, 217, 218).** Alice and Bob Persona catalogues, optional visual fallback, and the singular Character announcement passed native acceptance. Notes isolation and shared PostgreSQL schema repairs remain under review. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-profile-visual-accepted.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
 
 - **Prior checkpoint:218 unique findings —198 verified,15 awaiting targeted acceptance,5 unresolved (209/210/216/217/218).** Reviewgap211, Charactercontext213/214 andStudyPackstatus215 arecommittedafterindependentreview. AliceRetryreload and212one-characterannouncementpassnativeobservations; Bob207defaultcoldcreate/reload and208fallback200observed, auditsinprogress. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-context-reviewed.json). Fullfreshmatrix hasnotrestarted.
 
@@ -2096,7 +2098,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Required official PostgreSQL191 fixture exposes set_flashcard_tags KeyError0 before scheduler checks. Root actual route/database tests independently reproduce HTTP PUT/PATCH500 and HTTP POST200 with missing keyword links; SQLite controls pass. A second tuple read in the shared keyword-link synchronizer fails when existing links are present. No native tag failure is claimed yet.
 - TASK13260.130 precedes edits. Exact two named-column reads preserve SQL, versions, normalized tags_json, actual link membership, missing/deleted behavior and caller rollback. Corrected causalRED8fail12controls0skip; GREEN28pass0skip; scoped Ruff/Bandit0. Independent review/native targeted acceptance pending. Private evidence .tmp/uat192-repair-20260917; separate from181 transaction ownership and191 scheduler preview.
 
-## UAT-193 — P1, implemented; targeted acceptance pending — visible PostgreSQL character cannot start its conversation
+## UAT-193 — P1, verified — visible PostgreSQL character cannot start its conversation
+
+- Current status: **verified**. Independent native audit accepts fresh Alice Character Chat, controlled failed-provider Retry with prior canonical reload, and both original greeting saves201. No new post-save Chat reload or saved-resource GET claim. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-greeting-saves-native-supplemental/README.md). Earlier status statements below are historical.
 
 - Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
@@ -2233,12 +2237,16 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Normal authenticated Bob Character chat load, Retry and reload call visual-identities/bindings/resolve for neutral/thinking. Backend raises NotImplementedError: Visual identity metadata currently supports SQLite ChaChaNotes databases only. Core model completion/persistence succeed, but optional expression requests log server exceptions and console errors. TASK13260.146 owns a truthful capability/fallback boundary, preserving supported SQLite behavior; no PostgreSQL visual-metadata support is claimed. Original console and owned runtime evidence are preserved with207.
 
 
-## UAT-209 — P1, unresolved — Bob receives Alice private Notes through PostgreSQL catalogue
+## UAT-209 — P1, implemented; targeted acceptance pending — Bob receives Alice private Notes through PostgreSQL catalogue
+
+- Current status: **implemented; targeted acceptance pending**. Reviewed selected-owner repair committed. Independent202 PASS/0skip includes156 ownership controls; original two-account native Notes acceptance remains pending. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup209-210-217-reviewed-supplemental/README.md). Earlier status statements below are historical.
 
 - Normal auth/me identifies Bob3 at06:08:42UTC. GET /api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc returns200 with Alice owner2 Note b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8/title/content and two Bob owner3 greeting Notes. Actual visible Notes list corroborates the foreign fixture. Keyword catalogue also contains owner2 keyword; intended keyword ownership remains under diagnosis.
 - Native role is the already qualified privileged/BYPASSRLS service setup. No ordinary-role leakage or native foreign mutation is claimed. Private evidence `.tmp/uat198-181-native-20260917/bob-greeting-notes-events.txt`, `bob-notes-foreign-visible.png`. Task13260.147 precedes any repair, preserving SQLite per-file semantics, sharing, rollback/version and current-owner boundaries.
 
-## UAT-210 — P2, unresolved — PostgreSQL Notes graph seed reads named rows positionally
+## UAT-210 — P2, implemented; targeted acceptance pending — PostgreSQL Notes graph seed reads named rows positionally
+
+- Current status: **implemented; targeted acceptance pending**. Residual mapped keyword JOIN committed after independent202 PASS/0skip including24 graph controls. Earlier five-method repair47e23bd5f3 remains accepted; native graph acceptance pending. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup209-210-217-reviewed-supplemental/README.md). Earlier status statements below are historical.
 
 - Current checkpoint: unresolved. Five-method repair committed47e23bd5f3; residual get_note_tag_edges literal keyword table reproduced and approved for bounded mapper substitution. Native graph remains gated by209. Earlier status statements below are historical.
 
@@ -2291,13 +2299,17 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-216 — P1, unresolved — PostgreSQL Study Pack creation fails and job is quarantined
+## UAT-216 — P1, implemented; targeted acceptance pending — PostgreSQL Study Pack creation fails and job is quarantined
+
+- Current status: **implemented; targeted acceptance pending**. Three Study Pack trigger templates adapt to the existing shared identifier. Root independent55 PASS/0skip; native worker completion remains pending. Reverse initialization is separate218. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup216-shared-study-sync-reviewed/README.md). Earlier status statements below are historical.
 
 - Task: TASK13260.155. Worker56113 starts and processes job2; create study pack raises PostgreSQL query execution failed. Driver cause unconfirmed.
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-217 — P1, unresolved — PostgreSQL keyword literal search leaves a driver placeholder unconverted
+## UAT-217 — P1, verified — PostgreSQL keyword literal search leaves a driver placeholder unconverted
+
+- Current status: **verified**. Local ILIKE (?) correction preserves escaping and bound order/limit. Actual PostgreSQL/SQLite22 literal controls pass in independent202-case run; source review, Ruff and Bandit clear. Failed escape-only hypothesis remains retained. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup209-210-217-reviewed-supplemental/README.md). Earlier status statements below are historical.
 
 - Current checkpoint: unresolved. Corrected diagnosis: ILIKE ? operand followedbyESCAPE misclassified asJSONB; LIMIT convertscorrectly. InitialESCAPE! candidatefailed, bothnative%s andparenthesized(?) privateproposals22PASS. Chosenlocalparenthesesonly; reviewpending.
 

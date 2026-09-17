@@ -1,0 +1,14 @@
+{
+  "independent_tests": {
+    "passed": 202,
+    "skipped": 0,
+    "warnings": 2,
+    "seconds": 292.02,
+    "exit_code": 0,
+    "log_sha256": "891818919803bbd116a8a0d187eb2619b1967527f8c4d2e24e5171597bcdda17"
+  },
+  "source_frozen": true,
+  "source_files": 6,
+  "manifest_sha256": "18c31ef5d905b2916ebc38c3df5053a5937e85c5dd81dfdf4f12a04a097a956d",
+  "command": "source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=uat209-210-217-independent node .tmp/fresh-uat-recovery-20260916/run-pg-tests.mjs tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py tldw_Server_API/tests/DB_Management/test_note_graph_query_backends.py tldw_Server_API/tests/DB_Management/test_keyword_literal_search_backends.py -q --tb=short"
+}

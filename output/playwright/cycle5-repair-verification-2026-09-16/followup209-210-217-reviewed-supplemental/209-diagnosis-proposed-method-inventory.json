@@ -1,0 +1,360 @@
+{
+  "purpose": "Review boundary; not a commitment to edit every method. Exact production changes remain held pending parent review.",
+  "groups": {
+    "NoteStore private CRUD/read/search": {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "methods": [
+        {
+          "name": "add_note",
+          "line": 79
+        },
+        {
+          "name": "get_note_by_id",
+          "line": 540
+        },
+        {
+          "name": "list_notes",
+          "line": 1719
+        },
+        {
+          "name": "list_deleted_notes",
+          "line": 1780
+        },
+        {
+          "name": "get_notes_batch",
+          "line": 1784
+        },
+        {
+          "name": "count_notes",
+          "line": 1954
+        },
+        {
+          "name": "count_deleted_notes",
+          "line": 1977
+        },
+        {
+          "name": "update_note",
+          "line": 2044
+        },
+        {
+          "name": "soft_delete_note",
+          "line": 2167
+        },
+        {
+          "name": "delete_note",
+          "line": 2229
+        },
+        {
+          "name": "restore_note",
+          "line": 2272
+        },
+        {
+          "name": "search_notes",
+          "line": 2376
+        },
+        {
+          "name": "search_notes_with_keywords",
+          "line": 2449
+        },
+        {
+          "name": "count_notes_matching_keywords",
+          "line": 2536
+        }
+      ]
+    },
+    "NoteStore graph seed and keyword joins": {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "methods": [
+        {
+          "name": "get_all_note_ids_for_graph",
+          "line": 1811
+        },
+        {
+          "name": "get_note_ids_by_tag_for_graph",
+          "line": 1839
+        },
+        {
+          "name": "get_note_ids_by_source_for_graph",
+          "line": 1878
+        },
+        {
+          "name": "get_note_tag_edges",
+          "line": 1928
+        },
+        {
+          "name": "count_user_notes",
+          "line": 1981
+        },
+        {
+          "name": "count_notes_per_tag",
+          "line": 1992
+        },
+        {
+          "name": "get_note_counts_for_keywords",
+          "line": 2686
+        },
+        {
+          "name": "link_note_to_keyword",
+          "line": 2619
+        },
+        {
+          "name": "unlink_note_from_keyword",
+          "line": 2622
+        },
+        {
+          "name": "get_keywords_for_note",
+          "line": 2629
+        },
+        {
+          "name": "get_keywords_for_notes",
+          "line": 2643
+        }
+      ]
+    },
+    "KeywordStore CRUD/collection authority": {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "methods": [
+        {
+          "name": "add_keyword",
+          "line": 44
+        },
+        {
+          "name": "get_keyword_by_id",
+          "line": 73
+        },
+        {
+          "name": "get_keyword_by_text",
+          "line": 85
+        },
+        {
+          "name": "list_keywords",
+          "line": 98
+        },
+        {
+          "name": "count_keywords",
+          "line": 111
+        },
+        {
+          "name": "soft_delete_keyword",
+          "line": 126
+        },
+        {
+          "name": "rename_keyword",
+          "line": 152
+        },
+        {
+          "name": "merge_keywords",
+          "line": 444
+        },
+        {
+          "name": "_merge_keyword_links_for_table",
+          "line": 240
+        },
+        {
+          "name": "search_keywords",
+          "line": 575
+        },
+        {
+          "name": "add_keyword_collection",
+          "line": 668
+        },
+        {
+          "name": "get_keyword_collection_by_id",
+          "line": 697
+        },
+        {
+          "name": "get_keyword_collection_by_name",
+          "line": 709
+        },
+        {
+          "name": "list_keyword_collections",
+          "line": 721
+        },
+        {
+          "name": "count_keyword_collections",
+          "line": 734
+        },
+        {
+          "name": "update_keyword_collection",
+          "line": 749
+        },
+        {
+          "name": "soft_delete_keyword_collection",
+          "line": 779
+        },
+        {
+          "name": "search_keyword_collections",
+          "line": 804
+        }
+      ]
+    },
+    "KeywordStore link relations": {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "methods": [
+        {
+          "name": "get_notes_for_keyword",
+          "line": 999
+        },
+        {
+          "name": "link_collection_to_keyword",
+          "line": 890
+        },
+        {
+          "name": "unlink_collection_from_keyword",
+          "line": 894
+        },
+        {
+          "name": "get_keywords_for_collection",
+          "line": 906
+        },
+        {
+          "name": "count_collection_keyword_links",
+          "line": 921
+        },
+        {
+          "name": "get_collections_for_keyword",
+          "line": 928
+        },
+        {
+          "name": "link_conversation_to_keyword",
+          "line": 814
+        },
+        {
+          "name": "unlink_conversation_from_keyword",
+          "line": 818
+        },
+        {
+          "name": "get_keywords_for_conversation",
+          "line": 822
+        },
+        {
+          "name": "get_keywords_for_conversations",
+          "line": 844
+        },
+        {
+          "name": "count_conversation_keyword_links",
+          "line": 837
+        },
+        {
+          "name": "get_conversations_for_keyword",
+          "line": 872
+        }
+      ]
+    },
+    "ChaCha generic seams only for explicitly selected keyword/collection callers": {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "methods": [
+        {
+          "name": "_add_generic_item",
+          "line": 32500
+        },
+        {
+          "name": "_get_generic_item_by_id",
+          "line": 32630
+        },
+        {
+          "name": "_get_generic_item_by_unique_text",
+          "line": 32654
+        },
+        {
+          "name": "_list_generic_items",
+          "line": 32693
+        },
+        {
+          "name": "_update_generic_item",
+          "line": 32728
+        },
+        {
+          "name": "_soft_delete_generic_item",
+          "line": 32857
+        },
+        {
+          "name": "_manage_link",
+          "line": 34279
+        }
+      ]
+    },
+    "ChaCha Note folders": {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "methods": [
+        {
+          "name": "_ensure_note_exists_for_folder_sync",
+          "line": 34433
+        },
+        {
+          "name": "_lookup_note_folder_row_locked",
+          "line": 34438
+        },
+        {
+          "name": "_ensure_note_folder_path_locked",
+          "line": 34455
+        },
+        {
+          "name": "create_note_folder_path",
+          "line": 34519
+        },
+        {
+          "name": "get_note_folder_by_path",
+          "line": 34542
+        },
+        {
+          "name": "list_note_folders",
+          "line": 34559
+        },
+        {
+          "name": "sync_note_folders",
+          "line": 34578
+        },
+        {
+          "name": "sync_note_source_folders",
+          "line": 34620
+        },
+        {
+          "name": "get_note_folders_for_note",
+          "line": 34728
+        },
+        {
+          "name": "get_note_folders_for_notes",
+          "line": 34755
+        }
+      ]
+    },
+    "Preservation controls, not automatic edits": {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "methods": [
+        {
+          "name": "get_source_note_projection",
+          "line": 458
+        },
+        {
+          "name": "get_note_source_info",
+          "line": 2004
+        },
+        {
+          "name": "list_note_ids_page",
+          "line": 1750
+        },
+        {
+          "name": "owns_note_id",
+          "line": 1770
+        },
+        {
+          "name": "upsert_note_from_sync",
+          "line": 149
+        },
+        {
+          "name": "tombstone_note_from_sync",
+          "line": 386
+        },
+        {
+          "name": "_fetch_note_studio_document_row",
+          "line": 585
+        },
+        {
+          "name": "_write_note_studio_document",
+          "line": 1088
+        }
+      ]
+    }
+  }
+}

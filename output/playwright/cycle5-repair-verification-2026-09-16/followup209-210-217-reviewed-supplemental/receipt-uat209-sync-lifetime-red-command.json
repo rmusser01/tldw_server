@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T06:37:43.067Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py",
+    "-k",
+    "sync_projection or lifecycle_and_rollback or device_labeled",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

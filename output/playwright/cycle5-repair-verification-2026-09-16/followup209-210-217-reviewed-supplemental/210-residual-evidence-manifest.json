@@ -1,0 +1,14 @@
+[
+  {
+    "path": ".tmp/uat210-repair-20260917/residual-tag-edges/source-manifest.json",
+    "sha256": "88eb5780ab46d2df884b40848fa788fe9e0bea8a35fa3065b2de9bf959540f11"
+  },
+  {
+    "path": ".tmp/uat210-repair-20260917/residual-tag-edges/owned.patch",
+    "sha256": "5b9b90ffacbe0a6eb94181d9a6b25e7458f4623e812d81caa5a63f8c8b20bd56"
+  },
+  {
+    "path": ".tmp/uat210-repair-20260917/residual-tag-edges/IMPLEMENTATION210-residual.md",
+    "sha256": "bc36f5afca836825e1a6134178155138f6cea3419df240995847156ad85ee9a8"
+  }
+]

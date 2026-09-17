@@ -1,0 +1,18 @@
+{
+  "bandit-production.json": {
+    "findings": 0,
+    "errors": 0
+  },
+  "bandit-tests.json": {
+    "findings": 0,
+    "errors": 0
+  },
+  "ruff-current.json": {
+    "findings": 0
+  },
+  "ast": {
+    "inventory_methods": 84,
+    "production_files": 3,
+    "all_checks": "pass"
+  }
+}

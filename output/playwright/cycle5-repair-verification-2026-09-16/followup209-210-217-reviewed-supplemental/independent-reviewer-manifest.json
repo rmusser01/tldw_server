@@ -1,0 +1,62 @@
+[
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/REVIEW209-210-217.md",
+    "bytes": 7157,
+    "sha256": "cebd009d2b8a3634a70da3f10e9cea3ab59cf1260c759a36e100b4d0c6bd1359"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/after-source-hashes.json",
+    "bytes": 2152,
+    "sha256": "89e4ec3236b39b2d8b2a846690c8da6b878922d197720b8c5aabde23b44ba79a"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/bandit-production.json",
+    "bytes": 1521,
+    "sha256": "9a1e7e614e4f4ae6389b603871193c44ba969dd4546018d33cd59b2b2029c990"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/bandit-tests.json",
+    "bytes": 1545,
+    "sha256": "7a3dee553198cb16b29e13483a7e599124bf1426a28fc8e1d7c08a55b723d91c"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/before-source-hashes.json",
+    "bytes": 2152,
+    "sha256": "89e4ec3236b39b2d8b2a846690c8da6b878922d197720b8c5aabde23b44ba79a"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/independent-ast-review.json",
+    "bytes": 3416,
+    "sha256": "40dbf1e5504e86e15dabb6550cf98aed714c5a582d7efb4533bffccefa993f80"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/required-pg-independent.redacted.log",
+    "bytes": 6747,
+    "sha256": "891818919803bbd116a8a0d187eb2619b1967527f8c4d2e24e5171597bcdda17"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/retained-causal-receipts.json",
+    "bytes": 1874,
+    "sha256": "88fe65a9b9113bf7c9068567922a4142ce2a3dee80f73e2c82233a3dad15617d"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/reviewed-inputs.json",
+    "bytes": 1594,
+    "sha256": "df215886521f9d488fab7ce40dcc4ba1bf04139cfd3e24efd8262044bf432c65"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/ruff-current.json",
+    "bytes": 2,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/static-summary.json",
+    "bytes": 283,
+    "sha256": "5430172775cfac4bc543fe2973cd18e6b2f402a21209aa7c9e0df75c503e5011"
+  },
+  {
+    "path": ".tmp/uat209-210-217-independent-20260917/verification.json",
+    "bytes": 734,
+    "sha256": "04125a3cbe376d9a189ddb2ef8a5e09e8f16544bc2cd663f8622346744a7afe8"
+  }
+]

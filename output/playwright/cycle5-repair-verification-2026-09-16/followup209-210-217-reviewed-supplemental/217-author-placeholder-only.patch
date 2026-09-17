@@ -1,0 +1,11 @@
+--- search_keywords.before217
++++ search_keywords.after217
+@@ -54,7 +54,7 @@
+                 SELECT k.*
+                 FROM {source_table} k
+                 WHERE k.deleted = FALSE{owner_clause}
+-                  AND k.keyword ILIKE ? ESCAPE '\\'
++                  AND k.keyword ILIKE (?) ESCAPE '\\'
+                 ORDER BY k.last_modified DESC
+                 LIMIT ?
+             """.format_map(locals())  # nosec B608

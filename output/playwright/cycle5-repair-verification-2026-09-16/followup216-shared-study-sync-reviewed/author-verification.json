@@ -1,0 +1,48 @@
+{
+  "final_tests": {
+    "passed": 55,
+    "skipped": 0,
+    "duration_seconds": 68.2,
+    "receipt": "final-green.log"
+  },
+  "original_method_final_tests": {
+    "expected_failed": 4,
+    "passed_controls": 5,
+    "skipped": 0,
+    "duration_seconds": 16.34,
+    "receipt": "final-baseline-red.log"
+  },
+  "new_tests": 9,
+  "compile": {
+    "paths": 2,
+    "errors": 0
+  },
+  "ruff": {
+    "findings": 0
+  },
+  "bandit": {
+    "production": {
+      "findings": 0,
+      "parse_errors": 0,
+      "excluded": null
+    },
+    "tests": {
+      "findings": 0,
+      "parse_errors": 0,
+      "excluded": "B101 expected test assertions"
+    }
+  },
+  "scope_limits": [
+    "Reverse-order initialization has separately retained failing regression underTASK13260.156/UAT218.",
+    "Two neighboring suggestion triggers are source candidates; no native defect or fix claimed.",
+    "Native original job2 remains untouched; parent owns native completion acceptance.",
+    "Model seam mocked; actual storage SQL, initialization, transactions, worker and generation service exercised."
+  ],
+  "final_test_cleanup": {
+    "passed": 9,
+    "skipped": 0,
+    "duration_seconds": 14.67,
+    "receipt": "final-cleanup-green.log",
+    "production_unchanged": true
+  }
+}
