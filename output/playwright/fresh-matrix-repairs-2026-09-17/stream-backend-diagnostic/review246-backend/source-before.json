@@ -1,0 +1,14 @@
+[
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+    "sha256": "a39b84a8e91d0caacaab1db321fc7e6980f453674bb3cb46c9aa511fe1b7c22b"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "sha256": "ba4153ec740b15703cb56e88cb3ebc5f8fa55538b5c2d27b08fc9371243da394"
+  },
+  {
+    "path": "tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py",
+    "sha256": "906543b6aed89fef19573957fa61bb10f8dd3c8542e7b22e44ae1d8bf799a2af"
+  }
+]

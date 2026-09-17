@@ -1,0 +1,32 @@
+{
+  "task": "TASK13260.188",
+  "finding": "UAT246",
+  "verdict": "CLEAR as bounded diagnostic coverage; UAT246 remains open",
+  "blocking_findings": [],
+  "test_sha256": "a39b84a8e91d0caacaab1db321fc7e6980f453674bb3cb46c9aa511fe1b7c22b",
+  "independent_tests": {
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 4,
+    "seconds": 9.19,
+    "postgres_required": true
+  },
+  "static": {
+    "ruff": 0,
+    "bandit_findings": 0,
+    "bandit_errors": 0,
+    "bandit_excluded": [
+      "B101"
+    ],
+    "compile": true,
+    "format": true
+  },
+  "limits": [
+    "Direct endpoint body iterator, not routed ASGI/HTTP or browser/proxy",
+    "Upstream transport, provider dispatch, credentials, rate limiter and strict model discovery are controlled",
+    "Cancellation cleanup verified after explicitly releasing upstream; no proof of interrupting blocked I/O",
+    "No diagnosis or fix of original native45-second failure",
+    "No native completion, reload or provider inference evidence"
+  ]
+}
