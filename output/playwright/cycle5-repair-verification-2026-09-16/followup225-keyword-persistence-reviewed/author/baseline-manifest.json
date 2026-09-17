@@ -1,0 +1,14 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "63b3ccd15b9ce19bd1d964821eb0d33b4f191ff1a329cd83356e8481a6423d97"
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+    "sha256": "d1cfb0b2fe7aae3b1763f7a26cdb3f2b2ae2bbf685b97854e686f6960e4fb652"
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py",
+    "sha256": "3d148d968d1482b7cba10c3fc1b9233355c3e1692181de4776a832155d8e2ca3"
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "task": "TASK13260.168",
+  "status": "Frozen core; adjacent fixture attribution pending",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "1e20679f6f7576a02b4e4aed5b12d8bd8eef60d647d7b2da6fc98947f2ae8172",
+      "snapshot": ".tmp/uat225-keyword-merge-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "a7b8bba6e299695d122773617937a1e9c9d591ff1707aeef70e887be952cdba4",
+      "snapshot": ".tmp/uat225-keyword-merge-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py",
+      "sha256": "3742eb2acc0a0eca57950b23f2b9b27433b7a9a2f06a0dae0888e0d4ec9d5b24",
+      "snapshot": ".tmp/uat225-keyword-merge-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py",
+      "sha256": "f3afb480c7887e3e4e5ca8e2cfb693086c1ccf4c32dd7e54f665417ea0cd82fd",
+      "snapshot": ".tmp/uat225-keyword-merge-20260917/review-snapshot/tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_local_keyword_survivor_migration.py",
+      "sha256": "33a7c92dc80c8ede2a5024f8e70fc2e1fd88406771239359393264a7ec0b7ee2",
+      "snapshot": ".tmp/uat225-keyword-merge-20260917/review-snapshot/tldw_Server_API/tests/DB_Management/test_local_keyword_survivor_migration.py"
+    }
+  ]
+}

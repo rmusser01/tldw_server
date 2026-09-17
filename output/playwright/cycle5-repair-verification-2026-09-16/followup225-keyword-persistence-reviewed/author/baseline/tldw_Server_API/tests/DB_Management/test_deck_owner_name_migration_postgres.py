@@ -20,10 +20,6 @@ class _RealV68Database(CharactersRAGDB):
     _POSTGRES_SCHEMA_VERSION = 68
 
 
-class _RealV69Database(CharactersRAGDB):
-    _POSTGRES_SCHEMA_VERSION = 69
-
-
 def _version(backend):
     return backend.execute("SELECT version FROM db_schema_version WHERE schema_name = %s", (CharactersRAGDB._SCHEMA_NAME,)).scalar
 
@@ -60,22 +56,15 @@ def historical(pg_database_config, tmp_path):
 
 def test_real_v68_upgrade_preserves_rows_and_owner_name_constraints(historical, tmp_path):
     backend, before, live, deleted = historical
-    exact_step = _RealV69Database(tmp_path / "exact-v69.db", client_id="2", backend=backend)
-    try:
-        assert _version(backend) == 69
-        assert _constraints(backend) == [{"conname": "decks_client_id_name_key", "columns": ["client_id", "name"]}]
-        assert _rows(backend) == before
-    finally:
-        exact_step.close_connection()
     instances = []
     try:
         for owner in ("2", "3", "2"):
             db = CharactersRAGDB(tmp_path / f"reopen-{owner}.db", client_id=owner, backend=backend)
             instances.append(db)
-            assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+            assert _version(backend) == 69
             assert _constraints(backend) == [{"conname": "decks_client_id_name_key", "columns": ["client_id", "name"]}]
             assert _rows(backend) == before
-            assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 68
+            assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 67
         first, second = instances[:2]
         with pytest.raises(ConflictError):
             first.add_deck("Citrine")
@@ -114,7 +103,7 @@ def test_deck_name_migration_failure_rolls_back_catalog_data_version(historical,
     assert _rows(backend) == before
     reopened = CharactersRAGDB(tmp_path / "retry.db", client_id="3", backend=backend)
     try:
-        assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+        assert _version(backend) == 69
         assert _rows(backend) == before
     finally:
         reopened.close_all_connections()
@@ -128,7 +117,7 @@ def test_deck_name_migration_validates_exact_catalog(historical, tmp_path, catal
         backend.execute("ALTER TABLE decks ADD CONSTRAINT fixture_description_key UNIQUE(description)")
         db = CharactersRAGDB(tmp_path / "valid.db", client_id="3", backend=backend)
         try:
-            assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+            assert _version(backend) == 69
             assert sorted(tuple(row["columns"]) for row in _constraints(backend)) == [("client_id", "name"), ("description",)]
             assert _rows(backend) == before
         finally:

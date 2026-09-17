@@ -763,8 +763,6 @@ class NotesOrganizationSyncStore:
                     return existing
                 set_parts = [f"{name_column} = ?"]
                 values = [name]
-                if domain == "notes.keyword":
-                    set_parts.append("merged_into_sync_id = NULL")
                 if domain == "notes.keyword_collection":
                     set_parts.append("parent_id = ?")
                     values.append(parent_id)

@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-17T10:35:29.162Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py::test_opposite_merges_serialize_without_deadlock",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

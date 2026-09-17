@@ -1,0 +1,64 @@
+{
+  "createdAt": "2026-09-17T10:59:38.795Z",
+  "verdict": "CLEAR — seven-file integration review",
+  "inputs": [
+    {
+      "path": ".tmp/uat225-keyword-merge-20260917/owned-manifest.json",
+      "sha256": "414c940622184bb028bb0e347be877bc3c1e8c87448251a97a7c5dc99c30e2ae"
+    },
+    {
+      "path": ".tmp/uat225-keyword-merge-20260917/owned.patch",
+      "sha256": "4552c65c49b88c2c2a12c6a9f6bf11f09cdb954d523c9f6db03e22d7c6b295d5"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/REVIEW168-CORE.md",
+      "sha256": "1bdbec3147e51a803b825c0f38f68c515b3c6a285d3253c40bfa54aa7d422f3e"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/reviewer-manifest.json",
+      "sha256": "67eb51af30e1ac7be933013567cbe59901ce605191e814238004432cf4a0cc3e"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/REVIEW168-FINAL.md",
+      "sha256": "18c3123da68db4ed22a5335d13678113d208074873c08971b1b2a6febaebb510"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/bandit.json",
+      "sha256": "e8a3b6448aaf41e1d778c9f45a22563c56f5431069dcf56ab1a1acca1e806adc"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/bandit.stderr",
+      "sha256": "436c1ab330c2f642b3a04713149a2655618caa97408157d3901674e3761db25c"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/bandit.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/independent-command.json",
+      "sha256": "7312cf9ba29990e500ee9b145375638a58b27726f17fb5e3c9220c5ff09330ed"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/independent.redacted.log",
+      "sha256": "71578eb76023ea294178722cf7f18100c3418ccd1bff7861259344282db8f2d8"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/source-after.json",
+      "sha256": "6e33538121f6040deb78636a7fd52d37d5ac5731c6b005b7d7d208eb12f9c140"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/source-before.json",
+      "sha256": "a3e86d24ba4d92f8c39187eb4910bac2a8b2fbcba7a2cc24b7f4a9cdab938d49"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/final-seven/static-summary.json",
+      "sha256": "25d9bafb938285bc0cf5bf178e6000d593a6eeca97d626aaab8dd7bd82a0727b"
+    }
+  ]
+}

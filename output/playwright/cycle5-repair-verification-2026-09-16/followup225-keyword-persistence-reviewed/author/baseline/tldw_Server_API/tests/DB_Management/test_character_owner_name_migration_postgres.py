@@ -81,7 +81,7 @@ def test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key(real_v67, 
         assert _rows(backend) == before
         assert _version(backend) == 68
         assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
-        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 68  # Independent SQLite keyword-survivor schema.
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 67  # SQLite contract stays unchanged.
     finally:
         upgraded.close_all_connections()
 

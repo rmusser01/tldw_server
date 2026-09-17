@@ -1,0 +1,14 @@
+{
+  "ruffFindings": 0,
+  "compiledFiles": 5,
+  "bandit": {
+    "production": {
+      "findings": 0,
+      "errors": 0
+    },
+    "tests": {
+      "findings": 0,
+      "errors": 0
+    }
+  }
+}

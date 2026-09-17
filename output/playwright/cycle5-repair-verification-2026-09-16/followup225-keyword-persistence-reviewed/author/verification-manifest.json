@@ -1,0 +1,114 @@
+[
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-persistence-red.redacted.log",
+    "sha256": "491b54d60a28ebd48b158fa110464520b96e61cb104d44f253ca6340587ba20b"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-persistence-red-command.json",
+    "sha256": "06b2d7572a4c54efe28993bd56109c397f8d764cb38076e2cb37dcb6701103ac"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-resolver-red.redacted.log",
+    "sha256": "532be0c9a24323b26e927c44aa7d9fd67c8c97408868fe2954e5b2e1ea401f1d"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-resolver-red-command.json",
+    "sha256": "f3fe86a31305d6164e7241bd58a67c0e72da5304c1ed36784a4c3b0a0d3b4178"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-migration-red.redacted.log",
+    "sha256": "f96ed131a75475765b00048092a12e4b2169d8bec24f4790222f4174d06ca56e"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-migration-red-command.json",
+    "sha256": "a87ddf83e8a900377ab4b69b9f88917486bae5ec452954c3967a7128ae4e74ea"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-lock-order-red.redacted.log",
+    "sha256": "1d40fd6b1d3c9eba8acd3379b398eff2c34c766c1e4900f9724a799138500355"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-lock-order-red-command.json",
+    "sha256": "d32b1c81948dcda923615ea9d7919e0bf456701c92d3480b359c49cff7de5801"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-first-green.redacted.log",
+    "sha256": "724e81ca8cc319ca204aff8339841cce1be82efb9704017c4a7f442e3e80a2f2"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-first-green-command.json",
+    "sha256": "9d8f07589b01218f77047df62c579f06b8e8ac97927409d3c3f89bb9b4bced74"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-expanded-green.redacted.log",
+    "sha256": "e10aadc370cc6dcf32328c14cb53f759b454d62f646f65829d9b19d391705949"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-expanded-green-command.json",
+    "sha256": "89040f5b9e0e38582e9c620324a9f1665b72ad40c9c1e2401b5a78b02b392ae6"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-race-gate-green.redacted.log",
+    "sha256": "c8aea2ed5584a4381792efc47799bc99fac8f682b50f16e03669ee7aa08da490"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-race-gate-green-command.json",
+    "sha256": "5ceb237ac683b49c97ab59ba14168af01d09f72de2a68a50d28495f8a401437b"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-complete-green.redacted.log",
+    "sha256": "d424460f52c19721ffbc333428075b3b9c0eb3b34815a565490d125ee52a9cf4"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-complete-green-command.json",
+    "sha256": "3fe454560cc0aac141e1181811f90e6d526d3948efbbf9e60e1e048b5eafb0b2"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-constraint-green.redacted.log",
+    "sha256": "7532a713ed0f35bfff3a002dd5239269c16dfad0a261e041b873e452a055ec91"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-constraint-green-command.json",
+    "sha256": "4e6067de384be0aa5d0aaa02657d5ba37071bfc00ecf0bd39d2bd70747bb634a"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-frozen-core-green.redacted.log",
+    "sha256": "8968a30132ef766cdcb40265551a322e05cb87dc85450081ec6dcebdac294c64"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-frozen-core-green-command.json",
+    "sha256": "3e2b90f1ffa3d9c9d3eb74dfe4a7c2252ad3a454b17a9a81021979dde1920ed5"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-adjacent-first.redacted.log",
+    "sha256": "721f1e0870d4e28171143677431c136302734cfc48cfe80f49655fd10922675d"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-adjacent-first-command.json",
+    "sha256": "b7fe3d113af1a06789e7b61fd0b4e57df27611c69c34fc6dc671d37ee988ef77"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-head-maintenance-green.redacted.log",
+    "sha256": "aa44eae0cc046ce6c9958edcb1e09f8c65e89517cf513cce71986766990fe097"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-head-maintenance-green-command.json",
+    "sha256": "7fb7b945225074231f877640e2846c101e528c365e771aefb0ce1991dcdeb03c"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-first.redacted.log",
+    "sha256": "b5864139747d35c9329046d5f5e45d408e449d60c5256dc3d03690163b5a8d95"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-first-command.json",
+    "sha256": "131b6e2f2c99e2aa5576d0ae66df3dd333af239c71b0c4ea64e8871d515644fb"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-baseline.redacted.log",
+    "sha256": "4275075721292cc6a524cdfcaf207c97b74e8f50b7fc6c33b49c59a907849f66"
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-baseline-command.json",
+    "sha256": "866eb229a530804dc24207c4c60ec4092dd0f074895cb6e4015cae2696e2c7d3"
+  }
+]

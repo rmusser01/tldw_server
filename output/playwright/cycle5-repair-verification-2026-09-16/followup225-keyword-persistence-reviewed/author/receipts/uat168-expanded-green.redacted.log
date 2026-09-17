@@ -1,0 +1,433 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=4258889053
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 58 items
+
+tldw_Server_API/tests/DB_Management/test_local_keyword_merge_survivor.py --- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=165711), 'exception': None, 'extra': {}, 'file': (name='ChaChaNotes_DB.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py'), 'function': 'close_connection', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 8110, 'message': 'Returned backend connection (postgresql) for thread 6183251968.', 'module': 'ChaChaNotes_DB', 'name': 'tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB', 'process': (id=2571, name='MainProcess'), 'thread': (id=6183251968, name='ThreadPoolExecutor-1_0'), 'time': datetime(2026, 9, 17, 3, 42, 48, 551013, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=337723), 'exception': None, 'extra': {}, 'file': (name='Audit_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/Audit_DB_Deps.py'), 'function': '<module>', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 532, 'message': 'Using cachetools.LRUCache for audit service instances (maxsize=20).', 'module': 'Audit_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 723025, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=338303), 'exception': None, 'extra': {}, 'file': (name='Audit_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/Audit_DB_Deps.py'), 'function': 'shutdown_all_audit_services', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 1034, 'message': 'Shutting down audit services for 0 instances...', 'module': 'Audit_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 723605, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=338434), 'exception': None, 'extra': {}, 'file': (name='Audit_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/Audit_DB_Deps.py'), 'function': 'shutdown_all_audit_services', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 1091, 'message': 'All audit services shut down successfully.', 'module': 'Audit_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 723736, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=349923), 'exception': None, 'extra': {}, 'file': (name='settings.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/settings.py'), 'function': '_ensure_jwt_secret', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 899, 'message': 'Single-user mode - skipping JWT secret initialization', 'module': 'settings', 'name': 'tldw_Server_API.app.core.AuthNZ.settings', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 735225, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=350214), 'exception': None, 'extra': {}, 'file': (name='settings.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/settings.py'), 'function': 'get_settings', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 1588, 'message': 'Settings initialized - Auth mode: single_user, profile=local-single-user', 'module': 'settings', 'name': 'tldw_Server_API.app.core.AuthNZ.settings', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 735516, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=350342), 'exception': None, 'extra': {}, 'file': (name='db_config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/db_config.py'), 'function': '_detect_backend', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 83, 'message': 'Detected database backend: sqlite', 'module': 'db_config', 'name': 'tldw_Server_API.app.core.AuthNZ.db_config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 735644, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=420114), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': '<module>', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 356, 'message': 'Using LRUCache for ChaChaNotes DB instances (maxsize=20).', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 805416, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=425775), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 210, 'message': 'load_and_log_configs(): Loading and logging configurations...', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 811077, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=432739), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 210, 'message': 'load_and_log_configs(): Loading and logging configurations...', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 818041, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=502339), 'exception': None, 'extra': {}, 'file': (name='prompt_template_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_template_manager.py'), 'function': '<module>', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 201, 'message': 'Prompt templates directory: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_templates', 'module': 'prompt_template_manager', 'name': 'tldw_Server_API.app.core.Chat.prompt_template_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 887641, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=502674), 'exception': None, 'extra': {}, 'file': (name='prompt_template_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/prompt_template_manager.py'), 'function': '<module>', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 202, 'message': 'Available templates found: []', 'module': 'prompt_template_manager', 'name': 'tldw_Server_API.app.core.Chat.prompt_template_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 887976, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=583872), 'exception': None, 'extra': {}, 'file': (name='registry.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Scheduler/base/registry.py'), 'function': 'decorator', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 81, 'message': 'Registered task handler: watchlist_run', 'module': 'registry', 'name': 'tldw_Server_API.app.core.Scheduler.base.registry', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 969174, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=584114), 'exception': None, 'extra': {}, 'file': (name='registry.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Scheduler/base/registry.py'), 'function': 'decorator', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 81, 'message': 'Registered task handler: watchlists_enrich_output', 'module': 'registry', 'name': 'tldw_Server_API.app.core.Scheduler.base.registry', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 969416, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=584226), 'exception': None, 'extra': {}, 'file': (name='registry.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Scheduler/base/registry.py'), 'function': 'decorator', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 81, 'message': 'Registered task handler: watchlists_deliver_briefing', 'module': 'registry', 'name': 'tldw_Server_API.app.core.Scheduler.base.registry', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 969528, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=584485), 'exception': None, 'extra': {}, 'file': (name='registry.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Scheduler/base/registry.py'), 'function': 'decorator', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 81, 'message': 'Registered task handler: acp_run', 'module': 'registry', 'name': 'tldw_Server_API.app.core.Scheduler.base.registry', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 969787, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=584922), 'exception': None, 'extra': {}, 'file': (name='registry.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Scheduler/base/registry.py'), 'function': 'decorator', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 81, 'message': 'Registered task handler: workflow_run', 'module': 'registry', 'name': 'tldw_Server_API.app.core.Scheduler.base.registry', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 970224, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=585366), 'exception': None, 'extra': {}, 'file': (name='db_path_utils.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/db_path_utils.py'), 'function': 'resolve_user_db_base_dir', 'level': (name='WARNING', no=30, icon='⚠️'), 'line': 491, 'message': 'USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-03371184', 'module': 'db_path_utils', 'name': 'tldw_Server_API.app.core.DB_Management.db_path_utils', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 970668, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=585635), 'exception': None, 'extra': {}, 'file': (name='factory.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/backends/factory.py'), 'function': '_get_or_create_shared_sqlite_backend', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 325, 'message': 'Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-03371184/1/workflows/workflows_scheduler.db', 'module': 'factory', 'name': 'tldw_Server_API.app.core.DB_Management.backends.factory', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 970937, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=587222), 'exception': None, 'extra': {}, 'file': (name='Workflows_Scheduler_DB.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py'), 'function': '__init__', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 210, 'message': 'WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-03371184/1/workflows/workflows_scheduler.db', 'module': 'Workflows_Scheduler_DB', 'name': 'tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 972524, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=587407), 'exception': None, 'extra': {}, 'file': (name='workflows_scheduler.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/services/workflows_scheduler.py'), 'function': 'stop', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 183, 'message': 'Workflows recurring scheduler stopped', 'module': 'workflows_scheduler', 'name': 'tldw_Server_API.app.services.workflows_scheduler', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 972709, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=587637), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 876, 'message': 'Closing all cached ChaChaNotesDB instances (0)...', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 972939, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=587782), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 892, 'message': 'All ChaChaNotesDB instances closed and cache cleared.', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 973084, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=592280), 'exception': None, 'extra': {}, 'file': (name='DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/DB_Deps.py'), 'function': '<module>', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 57, 'message': 'Using LRUCache for user DB instances (maxsize=100).', 'module': 'DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 48, 977582, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=690767), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_cache_get_total', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76069, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=690958), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_cache_put_total', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76260, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691057), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_process_total', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76359, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691156), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_frontmatter_duration_seconds', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76458, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691241), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_header_extract_seconds', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76543, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691320), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_chunking_duration_seconds', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76622, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691402), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_normalization_seconds', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76704, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691482), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_last_chunk_count', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76784, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691558), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_output_bytes', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76860, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691635), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_input_bytes', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 76937, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691768), 'exception': None, 'extra': {}, 'file': (name='metrics_manager.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Metrics/metrics_manager.py'), 'function': 'register_metric', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 1885, 'message': 'Registered metric: chunker_process_total_seconds', 'module': 'metrics_manager', 'name': 'tldw_Server_API.app.core.Metrics.metrics_manager', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 77070, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=691900), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 210, 'message': 'load_and_log_configs(): Loading and logging configurations...', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 77202, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=693994), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 210, 'message': 'load_and_log_configs(): Loading and logging configurations...', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 79296, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=742998), 'exception': None, 'extra': {}, 'file': (name='ChaChaNotes_DB.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py'), 'function': 'close_connection', 'level': (name='DEBUG', no=10, icon='🐞'), 'line': 8110, 'message': 'Returned backend connection (postgresql) for thread 8346099072.', 'module': 'ChaChaNotes_DB', 'name': 'tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 128300, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=939652), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 876, 'message': 'Closing all cached ChaChaNotesDB instances (0)...', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 324954, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=939952), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 892, 'message': 'All ChaChaNotesDB instances closed and cache cleared.', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 325254, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=941105), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 210, 'message': 'Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 326407, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=945503), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 210, 'message': 'Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 330805, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=950231), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 210, 'message': 'Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt', 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 335533, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=952233), 'exception': None, 'extra': {}, 'file': (name='config.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/config.py'), 'function': '_buffered_log', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 210, 'message': "load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']", 'module': 'config', 'name': 'tldw_Server_API.app.core.config', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 337535, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=954615), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 876, 'message': 'Closing all cached ChaChaNotesDB instances (0)...', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 339917, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+--- Logging error in Loguru Handler #0 ---
+Record was: {'elapsed': datetime.timedelta(seconds=228, microseconds=954862), 'exception': None, 'extra': {}, 'file': (name='ChaCha_Notes_DB_Deps.py', path='/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py'), 'function': 'close_all_chacha_db_instances', 'level': (name='INFO', no=20, icon='ℹ️'), 'line': 892, 'message': 'All ChaChaNotesDB instances closed and cache cleared.', 'module': 'ChaCha_Notes_DB_Deps', 'name': 'tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps', 'process': (id=2571, name='MainProcess'), 'thread': (id=8346099072, name='MainThread'), 'time': datetime(2026, 9, 17, 3, 42, 49, 340164, tzinfo=datetime.timezone(datetime.timedelta(days=-1, seconds=61200), 'PDT'))}
+Traceback (most recent call last):
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_handler.py", line 206, in emit
+    self._sink.write(str_record)
+  File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/loguru/_simple_sinks.py", line 16, in write
+    self._stream.write(message)
+ValueError: I/O operation on closed file.
+--- End of logging error ---
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/threading.py:1139: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
+======================= 4 warnings in 228.59s (0:03:48) ========================

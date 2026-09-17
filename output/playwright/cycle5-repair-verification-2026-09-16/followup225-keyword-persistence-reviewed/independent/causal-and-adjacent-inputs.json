@@ -1,0 +1,44 @@
+[
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-persistence-red.redacted.log",
+    "sha256": "491b54d60a28ebd48b158fa110464520b96e61cb104d44f253ca6340587ba20b",
+    "summaries": [
+      "=================== 2 failed, 4 passed, 4 warnings in 6.98s ===================="
+    ]
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-lock-order-red.redacted.log",
+    "sha256": "1d40fd6b1d3c9eba8acd3379b398eff2c34c766c1e4900f9724a799138500355",
+    "summaries": [
+      "======================== 1 failed, 4 warnings in 3.16s ========================="
+    ]
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-migration-red.redacted.log",
+    "sha256": "f96ed131a75475765b00048092a12e4b2169d8bec24f4790222f4174d06ca56e",
+    "summaries": [
+      "======================== 8 failed, 4 warnings in 8.89s ========================="
+    ]
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-adjacent-first.redacted.log",
+    "sha256": "721f1e0870d4e28171143677431c136302734cfc48cfe80f49655fd10922675d",
+    "summaries": [
+      "============ 4 failed, 309 passed, 2 warnings in 371.55s (0:06:11) ============="
+    ]
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-first.redacted.log",
+    "sha256": "b5864139747d35c9329046d5f5e45d408e449d60c5256dc3d03690163b5a8d95",
+    "summaries": [
+      "=================== 3 failed, 39 passed, 4 warnings in 4.84s ==================="
+    ]
+  },
+  {
+    "path": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-baseline.redacted.log",
+    "sha256": "4275075721292cc6a524cdfcaf207c97b74e8f50b7fc6c33b49c59a907849f66",
+    "summaries": [
+      "=================== 3 failed, 39 passed, 4 warnings in 5.40s ==================="
+    ]
+  }
+]

@@ -752,8 +752,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 68  # Schema v68 retains local keyword merge survivors
-    _POSTGRES_SCHEMA_VERSION = 70
+    _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
+    _POSTGRES_SCHEMA_VERSION = 69
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -8601,7 +8601,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (64, "_migrate_from_v64_to_v65"),
             (65, "_migrate_from_v65_to_v66"),
             (66, "_migrate_from_v66_to_v67"),
-            (67, "_migrate_from_v67_to_v68"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17697,39 +17696,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
         self._sync_postgres_sequences(conn)
 
-    def _migrate_from_v67_to_v68(self, conn: sqlite3.Connection) -> None:
-        """Retain local merge targets without changing historical keyword records."""
-        if self._get_db_version(conn) != 67:
-            raise SchemaError("Keyword survivor migration requires SQLite schema V67.")  # noqa: TRY003
-        conn.execute(
-            "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
-            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
-            "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 68 WHERE schema_name = ? AND version = 67",
-            (self._SCHEMA_NAME,),
-        )
-        if self._get_db_version(conn) != 68:
-            raise SchemaError("Keyword survivor SQLite migration failed version verification.")  # noqa: TRY003
-
-    def _migrate_from_v69_to_v70_postgres(self, conn: Any) -> None:
-        """Add local tombstone metadata in the existing PostgreSQL migration transaction."""
-        if self._get_schema_version_postgres(conn) != 69:
-            raise SchemaError("Keyword survivor migration requires PostgreSQL schema V69.")  # noqa: TRY003
-        self.backend.execute(
-            "ALTER TABLE chacha_keywords ADD COLUMN merged_into_sync_id TEXT "
-            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
-            "OR (deleted = TRUE AND merged_into_sync_id <> sync_id))",
-            connection=conn,
-        )
-        self.backend.execute(
-            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
-            (70, self._SCHEMA_NAME, 69), connection=conn,
-        )
-        if self._get_schema_version_postgres(conn) != 70:
-            raise SchemaError("Keyword survivor PostgreSQL migration failed version verification.")  # noqa: TRY003
-
     def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
         """Reserve character names per owner without changing existing rows or IDs."""
         if self._get_schema_version_postgres(conn) != 67:
@@ -20656,9 +20622,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 67 and current_db_version == 66:
                         self._migrate_from_v66_to_v67(conn)
                         current_db_version = self._get_db_version(conn)
-                    if target_version >= 68 and current_db_version == 67:
-                        self._migrate_from_v67_to_v68(conn)
-                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21108,9 +21071,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 67 and current_db_version == 66:
                     self._migrate_from_v66_to_v67(conn)
-                    current_db_version = self._get_db_version(conn)
-                if target_version >= 68 and current_db_version == 67:
-                    self._migrate_from_v67_to_v68(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25137,9 +25097,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 69 and current_version < 69:
                 self._migrate_from_v68_to_v69_postgres(conn)
                 current_version = 69
-            if target_version >= 70 and current_version < 70:
-                self._migrate_from_v69_to_v70_postgres(conn)
-                current_version = 70
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
@@ -38063,7 +38020,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError("Flashcard keyword could not be resolved")  # noqa: TRY003
         if row["deleted"]:
             conn.execute(
-                "UPDATE chacha_keywords SET deleted = FALSE, merged_into_sync_id = NULL, last_modified = ?, version = version + 1 "
+                "UPDATE chacha_keywords SET deleted = FALSE, last_modified = ?, version = version + 1 "
                 "WHERE id = ? AND client_id = ? AND deleted = TRUE",
                 (now, row["id"], self.client_id),
             )

@@ -18,9 +18,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     logger,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import (
-    NotesOrganizationValidationError,
     new_organization_sync_id,
-    validate_resource_sync_id,
 )
 
 if TYPE_CHECKING:
@@ -67,61 +65,11 @@ class KeywordStore:
         return self._db._add_generic_item(
             "keywords",
             "keyword",
-            {"sync_id": new_organization_sync_id(), "merged_into_sync_id": None},
+            {"sync_id": new_organization_sync_id()},
             keyword_text.strip(),
-            {"sync_id": "sync_id", "merged_into_sync_id": "merged_into_sync_id"},
+            {"sync_id": "sync_id"},
             owner_client_id=self._db.client_id,
         )
-
-    def resolve_merge_survivor(
-        self, sync_id: str, *, conn: Any | None = None, for_update: bool = False,
-    ) -> dict[str, Any] | None:
-        """Resolve current local identity; locked resolution belongs to the caller transaction.
-
-        PostgreSQL applies the selected owner at every hop. SQLite retains its
-        per-file/device-label contract. Invalid, deleted and cyclic chains have
-        no survivor. A changed chain after lock acquisition is retryable.
-        """
-        if for_update and conn is None:
-            raise InputError("Locked keyword resolution requires a caller transaction")  # noqa: TRY003
-        table = self._db._map_table_for_backend("keywords")
-        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
-        chain: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        current = sync_id
-        while len(chain) < 100:
-            try:
-                validate_resource_sync_id(current)
-            except NotesOrganizationValidationError:
-                return None
-            if current in seen:
-                return None
-            seen.add(current)
-            query = f"SELECT * FROM {table} WHERE sync_id = ?{owner_clause}"  # nosec B608
-            params = (current,) + owner_params
-            cursor = conn.execute(query, params) if conn is not None else self._db.execute_query(query, params, read_only=True)
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            item = dict(row)
-            chain.append(item)
-            if not item["deleted"]:
-                break
-            current = item["merged_into_sync_id"]
-        else:
-            return None
-
-        if for_update:
-            ids = sorted(item["id"] for item in chain)
-            placeholders = ", ".join("?" for _ in ids)
-            lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
-            locked = conn.execute(
-                f"SELECT * FROM {table} WHERE id IN ({placeholders}){owner_clause} ORDER BY id{lock}",  # nosec B608
-                tuple(ids) + owner_params,
-            ).fetchall()
-            if [dict(row) for row in locked] != sorted(chain, key=lambda item: item["id"]):
-                raise ConflictError("Keyword merge chain changed during resolution", entity="keywords", entity_id=sync_id)  # noqa: TRY003
-        return chain[-1]
 
     def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None:
         """
@@ -538,8 +486,8 @@ class KeywordStore:
 
         try:
             with self._db.transaction() as conn:
-                for keyword_id in sorted((source_keyword_id, target_keyword_id)):
-                    self._db._require_selected_owner_row(conn, "keywords", keyword_id, self._db.client_id)
+                self._db._require_selected_owner_row(conn, "keywords", source_keyword_id, self._db.client_id)
+                self._db._require_selected_owner_row(conn, "keywords", target_keyword_id, self._db.client_id)
                 source_version = self._db._get_current_db_version(
                     conn, keyword_table, "id", source_keyword_id
                 )
@@ -602,19 +550,13 @@ class KeywordStore:
                     now_iso=now_iso,
                 )
 
-                target_row = conn.execute(
-                    f"SELECT sync_id FROM {keyword_table} WHERE id = ?{owner_clause}",  # nosec B608
-                    (target_keyword_id,) + owner_params,
-                ).fetchone()
-                target_sync_id = validate_resource_sync_id(target_row["sync_id"])
                 soft_delete_cursor = conn.execute(
                     (
                         f"UPDATE {keyword_table} "  # nosec B608
-                        f"SET merged_into_sync_id = ?, deleted = {self._deleted_literal(True)}, last_modified = ?, version = ?, client_id = ? "
+                        f"SET deleted = {self._deleted_literal(True)}, last_modified = ?, version = ?, client_id = ? "
                         f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}{owner_clause}"
                     ),
                     (
-                        target_sync_id,
                         now_iso,
                         source_next_version,
                         self._db.client_id,

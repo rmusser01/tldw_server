@@ -1,0 +1,84 @@
+{
+  "createdAt": "2026-09-17T10:54:49.618Z",
+  "verdict": "CLEAR for frozen five-file persistence core; adjacent maintenance and Stage B/native gates separate",
+  "inputs": [
+    {
+      "path": ".tmp/uat225-keyword-merge-20260917/owned-core-manifest.json",
+      "sha256": "830b744fb6fbdd0f44574f69f611b402d3e352822e8976a1357c4f57b7bd0103"
+    },
+    {
+      "path": ".tmp/uat225-keyword-merge-20260917/CORE-REVIEW168.md",
+      "sha256": "b91f5c579a499660fe95152de2b76f148c74daaee0c98144ad87a569135dda4a"
+    },
+    {
+      "path": ".tmp/uat225-keyword-merge-20260917/owned-core.patch",
+      "sha256": "bf09f3319fc67034bb03abfc7112ef06c4df9929e2d3f7f6b4cba531e3e9bcc6"
+    },
+    {
+      "path": ".tmp/uat225-diagnosis-20260917/LOCAL-KEYWORD-MERGE-DESIGN.md",
+      "sha256": "9aa2fe7b0441fa7c313157f70dd2bee48880f5a41f29a842821d364e66776725"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".tmp/uat168-independent-20260917/REVIEW168-CORE.md",
+      "sha256": "1bdbec3147e51a803b825c0f38f68c515b3c6a285d3253c40bfa54aa7d422f3e"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-production.json",
+      "sha256": "e0263fff142d0724fd0e3311eee6a3165bcd490f3dcbd436c43ae6bd78ebac0a"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-production.stderr",
+      "sha256": "a0e8a63ee8e25889990b770231de00b7ce7b442827f141f6fe04535f4823475d"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-production.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-tests.json",
+      "sha256": "d90b4ddcd5769df9f25426c340d58300e4cb0a98f0ca85d03269881ff67c8daf"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-tests.stderr",
+      "sha256": "73bac54be95128102878214e7451142c5674de61668e47c209b1dcc38683e3f2"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/bandit-tests.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/causal-and-adjacent-inputs.json",
+      "sha256": "5a4a436f32f65dee2604063f0b6ea9025caefdb747a6494528e87bb57f30d116"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/independent-ast-scope.json",
+      "sha256": "e9922e6a8bb115a92416e61ef93b7dd3313fd24d151a40f366fe4049a07dc4de"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/independent-command.json",
+      "sha256": "bf2bb158bac427479e23249705a31c1b87fef8b9f1d70bd6587cd0d6946a4c10"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/independent.redacted.log",
+      "sha256": "74c04c32720a6ba50b6ceed1ed4b29e86d9370407a68c24e8fa4e79407632d29"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/source-after.json",
+      "sha256": "8b2a79a3866e97a0d66125f4c647f0bdba5c9d480ad77583e82169d5df9032ed"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/source-before.json",
+      "sha256": "ff025aa1a3ad0cbab7851bc8ec4012eeb0fb3a35be568cacbfda444bb49eb440"
+    },
+    {
+      "path": ".tmp/uat168-independent-20260917/static-summary.json",
+      "sha256": "bf90a3fa17542dcba0cf3c8ffdac1879a681e4882a2bd8ea4b7c2884789ef98c"
+    }
+  ]
+}

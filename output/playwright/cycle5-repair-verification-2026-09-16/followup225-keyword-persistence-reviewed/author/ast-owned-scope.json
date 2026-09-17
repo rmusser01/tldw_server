@@ -1,0 +1,30 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "1e20679f6f7576a02b4e4aed5b12d8bd8eef60d647d7b2da6fc98947f2ae8172",
+    "changed_functions": [
+      "_flashcard_owned_keyword_id",
+      "_initialize_schema_postgres",
+      "_initialize_schema_sqlite",
+      "_migrate_from_v67_to_v68",
+      "_migrate_from_v69_to_v70_postgres",
+      "_sqlite_linear_migration_steps"
+    ]
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+    "sha256": "a7b8bba6e299695d122773617937a1e9c9d591ff1707aeef70e887be952cdba4",
+    "changed_functions": [
+      "add_keyword",
+      "merge_keywords",
+      "resolve_merge_survivor"
+    ]
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py",
+    "sha256": "3742eb2acc0a0eca57950b23f2b9b27433b7a9a2f06a0dae0888e0d4ec9d5b24",
+    "changed_functions": [
+      "apply_resource"
+    ]
+  }
+]
