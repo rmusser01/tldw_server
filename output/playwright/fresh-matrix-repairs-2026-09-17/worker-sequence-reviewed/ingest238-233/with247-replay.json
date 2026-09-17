@@ -1,0 +1,20 @@
+{
+  "result": "48 passed, 0 skipped, 9.64s",
+  "ownedSourcesUnchanged": true,
+  "dependencyManifest": "ea50ce2285a2d4870b9b95bc422983ee265df96654f205bf148a7efc0e7ec254",
+  "dependencyHelperSha256": "20a6d438ee5d4406e6e0e008efcda0347d7007742a93b444a19f8daf9ef05d0b",
+  "receipts": [
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/uat238-233-with247-green.redacted.log",
+      "retained": "receipts/uat238-233-with247-green.redacted.log",
+      "originalSha256": "51a8f67c2f7f98e4e3fe18b46704c5b732c21ecf522477cdeea4115e8411f8b8",
+      "retainedSha256": "51a8f67c2f7f98e4e3fe18b46704c5b732c21ecf522477cdeea4115e8411f8b8"
+    },
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/uat238-233-with247-green-command.json",
+      "retained": "receipts/uat238-233-with247-green-command.json",
+      "originalSha256": "437c0bdcce1c6c3f9db2668cda2c2674a031ad47068f2c952e64bf45dd8bb9c4",
+      "retainedSha256": "437c0bdcce1c6c3f9db2668cda2c2674a031ad47068f2c952e64bf45dd8bb9c4"
+    }
+  ]
+}

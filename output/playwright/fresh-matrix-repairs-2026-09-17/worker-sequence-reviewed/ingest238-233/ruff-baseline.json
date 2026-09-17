@@ -1,0 +1,674 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 103,
+      "row": 34
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport asyncio\nimport contextlib\nimport json\nimport os\nimport re\nimport shutil\nimport tempfile\nfrom dataclasses import dataclass\nfrom typing import Any\n\nfrom loguru import logger\n\nfrom tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm\nfrom tldw_Server_API.app.core.Chunking.templates import TemplateClassifier\nfrom tldw_Server_API.app.core.config import settings\nfrom tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase\nfrom tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed\nfrom tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths\nfrom tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id\nfrom tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (\n    apply_chunking_template_if_any,\n    async_resolve_chunking_options_and_plan,\n    prepare_chunking_options_dict,\n)\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (\n    process_batch_media,\n    process_document_like_item,\n)\nfrom tldw_Server_API.app.core.Jobs.manager import JobManager\nfrom tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK\nfrom tldw_Server_API.app.core.Workspaces.status_projection import derive_workspace_source_media_status\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 36
+          },
+          "location": {
+            "column": 1,
+            "row": 1
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 1,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 34,
+      "row": 26
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (\n    async_resolve_chunking_options_and_plan,\n    apply_chunking_template_if_any,\n)",
+          "end_location": {
+            "column": 2,
+            "row": 27
+          },
+          "location": {
+            "column": 1,
+            "row": 23
+          }
+        }
+      ],
+      "message": "Remove unused import: `tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options.prepare_chunking_options_dict`"
+    },
+    "location": {
+      "column": 5,
+      "row": 26
+    },
+    "message": "`tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options.prepare_chunking_options_dict` imported but unused",
+    "noqa_row": 26,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "BLE001",
+    "end_location": {
+      "column": 21,
+      "row": 200
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 200
+    },
+    "message": "Do not catch blind exception: `Exception`",
+    "noqa_row": 200,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/blind-except"
+  },
+  {
+    "cell": null,
+    "code": "BLE001",
+    "end_location": {
+      "column": 21,
+      "row": 312
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 312
+    },
+    "message": "Do not catch blind exception: `Exception`",
+    "noqa_row": 312,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/blind-except"
+  },
+  {
+    "cell": null,
+    "code": "BLE001",
+    "end_location": {
+      "column": 21,
+      "row": 401
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": null,
+    "location": {
+      "column": 12,
+      "row": 401
+    },
+    "message": "Do not catch blind exception: `Exception`",
+    "noqa_row": 401,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/blind-except"
+  },
+  {
+    "cell": null,
+    "code": "BLE001",
+    "end_location": {
+      "column": 29,
+      "row": 555
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": null,
+    "location": {
+      "column": 20,
+      "row": 555
+    },
+    "message": "Do not catch blind exception: `Exception`",
+    "noqa_row": 555,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/blind-except"
+  },
+  {
+    "cell": null,
+    "code": "BLE001",
+    "end_location": {
+      "column": 25,
+      "row": 725
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/media_ingest_jobs_worker.py",
+    "fix": null,
+    "location": {
+      "column": 16,
+      "row": 725
+    },
+    "message": "Do not catch blind exception: `Exception`",
+    "noqa_row": 725,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/blind-except"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 2,
+      "row": 70
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport asyncio\nimport contextlib\nimport functools\nimport hashlib\nimport inspect\nimport json\nimport logging\nimport os\nimport sqlite3\nimport time\nfrom datetime import datetime, timezone\nfrom pathlib import Path as FilePath\nfrom typing import Any, Callable, Mapping\nfrom urllib.parse import urlparse\nfrom uuid import uuid4\n\nfrom fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status\nfrom loguru import logger\nfrom starlette.responses import JSONResponse\n\nfrom tldw_Server_API.app.core.Claims_Extraction.claims_utils import (\n    extract_claims_if_requested,\n    persist_claims_if_applicable,\n)\nfrom tldw_Server_API.app.core.config import loaded_config_data, settings\nfrom tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed\nfrom tldw_Server_API.app.core.DB_Management.media_db.api import (\n    create_media_database,\n    get_media_repository,\n)\nfrom tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (\n    media_dedupe_url_candidates,\n    normalize_media_dedupe_url,\n)\nfrom tldw_Server_API.app.core.DB_Management.media_db.errors import (\n    ConflictError,\n    DatabaseError,\n    InputError,\n)\nfrom tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (\n    upsert_transcript,\n)\nfrom tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository\nfrom tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (\n    read_persisted_email_content,\n)\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (\n    async_resolve_chunking_options_and_plan,\n    prepare_chunking_options_dict,\n    prepare_common_options,\n    resolve_chunking_options_and_plan,\n)\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (\n    open_safe_local_path,\n    open_safe_local_path_async,\n    resolve_safe_local_path,\n)\nfrom tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (\n    DEFAULT_MEDIA_TYPE_CONFIG,\n)\nfrom tldw_Server_API.app.core.Metrics import get_metrics_registry\nfrom tldw_Server_API.app.core.Metrics.stt_metrics import emit_stt_run_write_total\nfrom tldw_Server_API.app.core.testing import (\n    env_flag_enabled,\n    is_explicit_pytest_runtime,\n    is_test_mode,\n)\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 72
+          },
+          "location": {
+            "column": 1,
+            "row": 1
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 1,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "UP035",
+    "end_location": {
+      "column": 42,
+      "row": 15
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from typing import Any, Callable\nfrom collections.abc import Mapping",
+          "end_location": {
+            "column": 42,
+            "row": 15
+          },
+          "location": {
+            "column": 1,
+            "row": 15
+          }
+        }
+      ],
+      "message": "Import from `collections.abc`"
+    },
+    "location": {
+      "column": 1,
+      "row": 15
+    },
+    "message": "Import from `collections.abc` instead: `Mapping`",
+    "noqa_row": 15,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/deprecated-import"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 39,
+      "row": 137
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 26,
+      "row": 137
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 137,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "B009",
+    "end_location": {
+      "column": 71,
+      "row": 190
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "current_user.id",
+          "end_location": {
+            "column": 71,
+            "row": 190
+          },
+          "location": {
+            "column": 44,
+            "row": 190
+          }
+        }
+      ],
+      "message": "Replace `getattr` with attribute access"
+    },
+    "location": {
+      "column": 44,
+      "row": 190
+    },
+    "message": "Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.",
+    "noqa_row": 190,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/get-attr-with-constant"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 52,
+      "row": 1177
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 39,
+      "row": 1177
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 1177,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 22,
+      "row": 2403
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 2403
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 2403,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 22,
+      "row": 2678
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 2678
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 2678,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 22,
+      "row": 3584
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 9,
+      "row": 3584
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 3584,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F841",
+    "end_location": {
+      "column": 32,
+      "row": 4229
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "",
+          "end_location": {
+            "column": 35,
+            "row": 4229
+          },
+          "location": {
+            "column": 17,
+            "row": 4229
+          }
+        }
+      ],
+      "message": "Remove assignment to unused variable `model_for_check`"
+    },
+    "location": {
+      "column": 17,
+      "row": 4229
+    },
+    "message": "Local variable `model_for_check` is assigned to but never used",
+    "noqa_row": 4229,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-variable"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 64,
+      "row": 4240
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 51,
+      "row": 4240
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 4240,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 100,
+      "row": 4254
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 90,
+      "row": 4254
+    },
+    "message": "Function definition does not bind loop variable `url_clause`",
+    "noqa_row": 4254,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 45,
+      "row": 4257
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 35,
+      "row": 4257
+    },
+    "message": "Function definition does not bind loop variable `url_params`",
+    "noqa_row": 4257,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 58,
+      "row": 4257
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 47,
+      "row": 4257
+    },
+    "message": "Function definition does not bind loop variable `source_hash`",
+    "noqa_row": 4257,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 70,
+      "row": 4273
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 54,
+      "row": 4273
+    },
+    "message": "Function definition does not bind loop variable `url_clause_alias`",
+    "noqa_row": 4273,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 79,
+      "row": 4275
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 68,
+      "row": 4275
+    },
+    "message": "Function definition does not bind loop variable `source_hash`",
+    "noqa_row": 4275,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 55,
+      "row": 4278
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 39,
+      "row": 4278
+    },
+    "message": "Function definition does not bind loop variable `url_params_alias`",
+    "noqa_row": 4278,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 66,
+      "row": 4294
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 50,
+      "row": 4294
+    },
+    "message": "Function definition does not bind loop variable `url_clause_alias`",
+    "noqa_row": 4294,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 75,
+      "row": 4296
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 64,
+      "row": 4296
+    },
+    "message": "Function definition does not bind loop variable `source_hash`",
+    "noqa_row": 4296,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 51,
+      "row": 4299
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 35,
+      "row": 4299
+    },
+    "message": "Function definition does not bind loop variable `url_params_alias`",
+    "noqa_row": 4299,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 56,
+      "row": 4326
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 43,
+      "row": 4326
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 4326,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 96,
+      "row": 4335
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 86,
+      "row": 4335
+    },
+    "message": "Function definition does not bind loop variable `url_clause`",
+    "noqa_row": 4335,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "B023",
+    "end_location": {
+      "column": 39,
+      "row": 4338
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 29,
+      "row": 4338
+    },
+    "message": "Function definition does not bind loop variable `url_params`",
+    "noqa_row": 4338,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/function-uses-loop-variable"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 63,
+      "row": 5789
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 50,
+      "row": 5789
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 5789,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 84,
+      "row": 5989
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 71,
+      "row": 5989
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 5989,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  },
+  {
+    "cell": null,
+    "code": "F821",
+    "end_location": {
+      "column": 88,
+      "row": 6238
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/ingest238-233/baseline/persistence.py",
+    "fix": null,
+    "location": {
+      "column": 75,
+      "row": 6238
+    },
+    "message": "Undefined name `MediaDatabase`",
+    "noqa_row": 6238,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/undefined-name"
+  }
+]

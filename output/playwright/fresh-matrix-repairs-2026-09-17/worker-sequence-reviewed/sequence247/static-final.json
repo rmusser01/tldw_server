@@ -1,0 +1,64 @@
+{
+  "ruff_findings": 0,
+  "compile_files": 4,
+  "compile_pass": true,
+  "format_checks": [
+    {
+      "label": "current",
+      "path": "tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py",
+      "code": 1,
+      "output": "Would reformat: tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py\n1 file would be reformatted\n"
+    },
+    {
+      "label": "baseline",
+      "path": "tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py",
+      "code": 1,
+      "output": "Would reformat: .tmp/uat-repairs-231-246/sequence247/baseline/tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py\n1 file would be reformatted\n"
+    },
+    {
+      "label": "current",
+      "path": "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_monotonicity.py",
+      "code": 0,
+      "output": "1 file already formatted\n"
+    },
+    {
+      "label": "current",
+      "path": "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py",
+      "code": 1,
+      "output": "Would reformat: tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py\n1 file would be reformatted\n"
+    },
+    {
+      "label": "baseline",
+      "path": "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py",
+      "code": 1,
+      "output": "Would reformat: .tmp/uat-repairs-231-246/sequence247/baseline/tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py\n1 file would be reformatted\n"
+    },
+    {
+      "label": "current",
+      "path": "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "code": 1,
+      "output": "Would reformat: tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py\n1 file would be reformatted\n"
+    },
+    {
+      "label": "baseline",
+      "path": "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "code": 1,
+      "output": "Would reformat: .tmp/uat-repairs-231-246/sequence247/baseline/tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py\n1 file would be reformatted\n"
+    }
+  ],
+  "bandit": {
+    "production": {
+      "findings": 0,
+      "parse_errors": 0,
+      "excluded_checks": []
+    },
+    "tests": {
+      "findings": 0,
+      "parse_errors": 0,
+      "excluded_checks": [
+        "B101"
+      ]
+    }
+  },
+  "diff_added_trailing_whitespace": []
+}

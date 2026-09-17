@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T18:13:58.849Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_media_ingest_worker_content_scope.py",
+    "-q",
+    "--tb=short",
+    "-k",
+    "retires or direct_authorized or keyword_write"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

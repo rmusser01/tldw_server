@@ -38,10 +38,10 @@
 **Status:** In Progress
 
 - [x]245: extend canonical bootstrap and real quota/guard controls; retain partial-index upserts, FK/check constraints, fractional usage and fail-closed behavior. Independent52/0skip; native admission pending.
-- [ ]238/233: reproduce actual worker persistence with trusted owner in required PostgreSQL; carry scope through executor and reset it; deduplicate terminal warnings at their producer.
+- [x]238/233: reproduce actual worker persistence with trusted owner in required PostgreSQL; carry scope through executor and reset it; remove warning self-extension at its producer. Independent48/0skip within combined165; native pending.
 - [x]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle; independent32/0skip, native acceptance pending.
 - [x]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls; independent4/0skip, native acceptance pending.
-- [ ]247: prevent own Media sequence rewind under RLS-filtered tenant initialization, retaining high-water IDs and explicit-ID repair without weakening authority; separate from147's foreign-table allowlist.
+- [x]247: prevent own Media sequence rewind under RLS-filtered tenant initialization, retaining high-water IDs and explicit-ID repair without weakening authority; separate from147's foreign-table allowlist. Independent117/0skip within combined165, including lock lifetime/caller rollback; native pending.
 - [ ] Review and commit each independently testable unit; leave native acceptance pending until Stage4.
 
 ## Stage3: Repair UI, study and stream findings
@@ -52,7 +52,7 @@
 **Status:** In Progress
 
 - [x] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion. Independent100/0skip; native acceptance pending.
-- [ ] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit legacy fallback and owner/date filters.
+- [ ] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Causal28fail/45controls, initial73green; combined adjacent checks and review underway.
 - [ ] Media237/241/244: missing-auth initial render, late success/rejection after disconnect, delayed selection, actual wizard completion, preserved filters and old-owner rejection.
 - [ ] Chat/model231/232/236/243: correct surface copy, actionable sanitized400, qualified alias readiness/recovery and fresh ordinary-mode transition without private-state regressions.
 - [ ]246: correlate first-byte delivery using the existing actual stream path and bounded provider control; test a cause before changing budgets/forwarding. Repeat original TestBot with exact visible response and canonical reload on accepted source.

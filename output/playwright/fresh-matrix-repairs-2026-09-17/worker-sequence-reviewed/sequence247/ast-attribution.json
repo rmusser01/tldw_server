@@ -1,0 +1,11 @@
+{
+  "outside_sync_postgres_sequences_ast_identical": true,
+  "media_serial_allowlist_unchanged": true,
+  "owned_files": [
+    "tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py",
+    "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_monotonicity.py",
+    "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py",
+    "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py"
+  ],
+  "worker_and_persistence_not_owned": true
+}

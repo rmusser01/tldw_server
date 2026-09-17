@@ -1,0 +1,35 @@
+{
+  "task": "TASK-13260.189",
+  "finding": "UAT247",
+  "status": "source and tests frozen; independent review and native acceptance pending",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py",
+      "sha256": "20a6d438ee5d4406e6e0e008efcda0347d7007742a93b444a19f8daf9ef05d0b",
+      "bytes": 5991,
+      "snapshot": "review-snapshot/tldw_Server_API/app/core/DB_Management/media_db/schema/postgres_sequence_maintenance.py",
+      "baselineSha256": "43c96942a2ae2974ff20abcf885213696bde0fc499781486f03bdb4257406250"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_monotonicity.py",
+      "sha256": "d260555595bf7ad94691a0e001f92f80341e3ecded863566dd889022fc06a021",
+      "bytes": 16800,
+      "snapshot": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_monotonicity.py",
+      "baselineSha256": null
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py",
+      "sha256": "26a2844f7e6c6bc60adf22f17e651a592ff7c04e6b12d0b4e48781d3c44449a4",
+      "bytes": 5478,
+      "snapshot": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py",
+      "baselineSha256": "cc728a2e3ecf6ce2d2433aa24e01ea5e7a989c31ca4d06a562bf2a73c94dcbca"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "sha256": "a925c1dbc1f7f1a297008cb554360ad14b11f9f3be24a87af0f717cf07c9346b",
+      "bytes": 170882,
+      "snapshot": "review-snapshot/tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "baselineSha256": "9ed57f80b348d0ce690c5c5eb4d6f3ad3d36831f01538c83f00ce5de68ef3062"
+    }
+  ]
+}
