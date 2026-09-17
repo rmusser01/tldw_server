@@ -1,0 +1,25 @@
+### Result
+{"at":"2026-09-17T01:20:04.380Z","events":[{"event":"request","at":"2026-09-17T01:19:19.652Z","url":"http://127.0.0.1:18583/api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc","method":"GET"},{"event":"request","at":"2026-09-17T01:19:19.652Z","url":"http://127.0.0.1:18583/api/v1/notes/collections?limit=200&offset=0&include_keywords=true","method":"GET"},{"event":"request","at":"2026-09-17T01:19:19.652Z","url":"http://127.0.0.1:18583/api/v1/notes/keywords/?limit=1000&offset=0&include_note_counts=true","method":"GET"},{"event":"response","at":"2026-09-17T01:19:21.089Z","url":"http://127.0.0.1:18583/api/v1/notes/collections?limit=200&offset=0&include_keywords=true","status":500,"body":"{\"detail\":\"ChaChaNotes DB unavailable\"}"},{"event":"response","at":"2026-09-17T01:19:21.089Z","url":"http://127.0.0.1:18583/api/v1/notes/keywords/?limit=1000&offset=0&include_note_counts=true","status":500,"body":"{\"detail\":\"ChaChaNotes DB unavailable\"}"},{"event":"response","at":"2026-09-17T01:19:21.090Z","url":"http://127.0.0.1:18583/api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc","status":500,"body":"{\"detail\":\"ChaChaNotes DB unavailable\"}"},{"event":"request","at":"2026-09-17T01:19:22.091Z","url":"http://127.0.0.1:18583/api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc","method":"GET"},{"event":"response","at":"2026-09-17T01:19:26.195Z","url":"http://127.0.0.1:18583/api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc","status":500,"body":"{\"detail\":\"ChaChaNotes DB unavailable\"}"}],"text":"tldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nSkip to notes list\nSkip to editor\n\nKeyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.\n\nNOTES\nREFRESH FAILED\nVIEWS\nNotes\nTrash\nList\nTimeline\nInbox\nCollection\nGraph\nORGANIZE\nDate modified (newest first)\nFILTERS\nCaptured\nSearch tips\nFilter by tag\nBrowse tags\nFor in-note search, use browser Ctrl/Cmd+F.\nRECENT NOTES\nAlice UAT151 Citrine study\nRESULTS\nImport\nSync folder\nExport\nLoad error\nCould not load notes\n\nChaChaNotes DB unavailable (GET /api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc)\n\nRetry keeps your current search and filters.\nOpen diagnostics if the server keeps returning errors.\nRetry connection\nHealth & diagnostics\nNew note\nNo server save status yet\nSave\nSave & new\nEdit\nSplit\nPreview\nCreate study pack\nSelect or create a note\nChoose a note from the list to start editing, or create a new one.\nCreate note\nTip: Type [[ in a note to link to another note.\nGenerate title\nKeyboard shortcuts\nTags\nMarkdown\nWYSIWYG\nFORMATTING\nASSIST\nSummarize\nExpand outline\nSuggest tags\nMarkdown + LaTeX supported\n0 words · 0 chars · 0 mins read\nVersion pending · Not saved yet\nOrigin: Typed manually"}
+### Ran Playwright code
+```js
+await (async page => ({at:new Date().toISOString(),events:(page.__uat171Events||[]).filter(e=>e.at>="2026-09-17T01:19:00"),text:await page.locator("main").innerText()}))(page);
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Setup & Recovery | Settings | tldw](http://127.0.0.1:18583/settings)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Chat | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+- 11: (current) [Notes | tldw](http://127.0.0.1:18583/notes)
+### Page
+- Page URL: http://127.0.0.1:18583/notes
+- Page Title: Notes | tldw
+- Console: 10 errors, 12 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T23-46-59-546Z.log#L356-L377

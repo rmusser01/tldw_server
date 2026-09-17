@@ -1,0 +1,145 @@
+{
+  "observedAt": "2026-09-17T01:18:46.743836+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 7174,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 7205,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 7207,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 7208,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 7209,
+      "state": "idle"
+    },
+    {
+      "pid": 7210,
+      "state": "idle"
+    },
+    {
+      "pid": 7211,
+      "state": "idle"
+    },
+    {
+      "pid": 7212,
+      "state": "idle"
+    },
+    {
+      "pid": 7213,
+      "state": "idle"
+    },
+    {
+      "pid": 7214,
+      "state": "idle"
+    },
+    {
+      "pid": 7215,
+      "state": "idle"
+    },
+    {
+      "pid": 7216,
+      "state": "idle"
+    },
+    {
+      "pid": 7220,
+      "state": "idle"
+    },
+    {
+      "pid": 7225,
+      "state": "idle"
+    },
+    {
+      "pid": 7234,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 7235,
+      "state": "idle"
+    },
+    {
+      "pid": 7241,
+      "state": "idle"
+    },
+    {
+      "pid": 7242,
+      "state": "idle"
+    },
+    {
+      "pid": 7811,
+      "state": "idle"
+    },
+    {
+      "pid": 7819,
+      "state": "idle"
+    }
+  ],
+  "locks": [
+    {
+      "pid": 7174,
+      "relation": "character_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7205,
+      "relation": "character_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7207,
+      "relation": "character_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7208,
+      "relation": "character_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7234,
+      "relation": "character_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7234,
+      "relation": "conversations",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7234,
+      "relation": "note_folders",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7234,
+      "relation": "notes",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 7234,
+      "relation": "persona_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    }
+  ],
+  "transactionReadOnlyVerified": true
+}

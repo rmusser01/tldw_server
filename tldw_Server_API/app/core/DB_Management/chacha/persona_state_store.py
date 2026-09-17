@@ -1805,7 +1805,7 @@ class PersonaStateStore:
             "ORDER BY last_modified DESC, name ASC LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return [self._persona_profile_row_to_dict(row) for row in cursor.fetchall() if row]
 
     def get_persona_profiles_by_ids(
@@ -2068,7 +2068,7 @@ class PersonaStateStore:
             bool(include_deleted_personas),
             deleted_false,
         ]
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         buddies: dict[str, dict[str, Any] | None] = {
             persona_id: None for persona_id in normalized_persona_ids
         }

@@ -1,0 +1,71 @@
+[
+  {
+    "command": [
+      "python",
+      "-m",
+      "ruff",
+      "check",
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    ],
+    "exit_code": 1,
+    "stdout": "I001 [*] Import block is un-sorted or un-formatted\n  --> tldw_Server_API/app/core/DB_Management/chacha/character_store.py:8:1\n   |\n 6 |   \"\"\"\n 7 |\n 8 | / from __future__ import annotations\n 9 | |\n10 | | import json\n11 | | import sqlite3\n12 | | from datetime import datetime, timedelta, timezone\n13 | | from typing import TYPE_CHECKING, Any\n14 | |\n15 | | from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (\n16 | |     BackendType,\n17 | |     CharactersRAGDBError,\n18 | |     ConflictError,\n19 | |     FTSQueryTranslator,\n20 | |     InputError,\n21 | |     RestoreWindowExpiredError,\n22 | |     SchemaError,\n23 | |     _CHACHA_NONCRITICAL_EXCEPTIONS,\n24 | |     logger,\n25 | | )\n26 | | from tldw_Server_API.app.core.DB_Management.backends.base import (\n27 | |     DatabaseError as BackendDatabaseError,\n28 | | )\n29 | | from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization\n   | |________________________________________________________________________________^\n30 |\n31 |   if TYPE_CHECKING:\n   |\nhelp: Organize imports\n\nTRY203 Remove exception handler; error is immediately re-raised\n    --> tldw_Server_API/app/core/DB_Management/chacha/character_store.py:1855:9\n     |\n1853 |               row = cursor.fetchone()\n1854 |               return self._normalize_character_exemplar_row(row)\n1855 | /         except CharactersRAGDBError:\n1856 | |             raise\n     | |_________________^\n1857 |\n1858 |       def list_character_exemplars(self, character_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:\n     |\n\nTRY203 Remove exception handler; error is immediately re-raised\n    --> tldw_Server_API/app/core/DB_Management/chacha/character_store.py:1874:9\n     |\n1872 |               rows = cursor.fetchall()\n1873 |               return [self._normalize_character_exemplar_row(row) for row in rows if row]\n1874 | /         except CharactersRAGDBError:\n1875 | |             raise\n     | |_________________^\n1876 |\n1877 |       def update_character_exemplar(\n     |\n\nI001 [*] Import block is un-sorted or un-formatted\n  --> tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py:1:1\n   |\n 1 | / from __future__ import annotations\n 2 | |\n 3 | | import json\n 4 | | import sqlite3\n 5 | | from collections.abc import Iterable\n 6 | | from datetime import datetime, timedelta, timezone\n 7 | | from typing import TYPE_CHECKING, Any\n 8 | |\n 9 | | from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (\n10 | |     BackendType,\n11 | |     CharactersRAGDBError,\n12 | |     ConflictError,\n13 | |     InputError,\n14 | |     logger,\n15 | | )\n16 | | from tldw_Server_API.app.core.DB_Management.backends.base import (\n17 | |     DatabaseError as BackendDatabaseError,\n18 | | )\n19 | | from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization\n20 | | from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile\n21 | | from tldw_Server_API.app.core.Persona.visual_candidate_provenance import (\n22 | |     normalize_persona_visual_candidate_provenance,\n23 | | )\n   | |_^\n24 |\n25 |   if TYPE_CHECKING:\n   |\nhelp: Organize imports\n\nC420 [*] Unnecessary dict comprehension for iterable; use `dict.fromkeys` instead\n    --> tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py:2072:53\n     |\n2070 |           ]\n2071 |           cursor = self.execute_query(query, tuple(params), read_only=True)\n2072 |           buddies: dict[str, dict[str, Any] | None] = {\n     |  _____________________________________________________^\n2073 | |             persona_id: None for persona_id in normalized_persona_ids\n2074 | |         }\n     | |_________^\n2075 |           for row in cursor.fetchall():\n2076 |               buddy = self._persona_buddy_row_to_dict(row)\n     |\nhelp: Replace with `dict.fromkeys(iterable, value)`)\n\nFound 5 errors.\n[*] 3 fixable with the `--fix` option.\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "python",
+      "-m",
+      "ruff",
+      "check",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    ],
+    "exit_code": 0,
+    "stdout": "All checks passed!\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "python",
+      "-m",
+      "ruff",
+      "format",
+      "--check",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    ],
+    "exit_code": 0,
+    "stdout": "1 file already formatted\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "python",
+      "-m",
+      "py_compile",
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+      "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

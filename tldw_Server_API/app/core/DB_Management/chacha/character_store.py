@@ -315,7 +315,7 @@ class CharacterStore:
             query += " AND deleted = ?"
             params += (self._deleted_value(False),)
         try:
-            cursor = self._db.execute_query(query, params)
+            cursor = self._db.execute_query(query, params, read_only=True)
             row = cursor.fetchone()
             return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
         except CharactersRAGDBError as e:
@@ -325,7 +325,7 @@ class CharacterStore:
                 )
                 try:
                     self._db.ensure_character_tables_ready()
-                    cursor = self._db.execute_query(query, params)
+                    cursor = self._db.execute_query(query, params, read_only=True)
                     row = cursor.fetchone()
                     return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
                 except (CharactersRAGDBError, SchemaError):

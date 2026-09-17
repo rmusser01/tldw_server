@@ -1,0 +1,89 @@
+{
+  "at": "2026-09-17T01:30:08.833Z",
+  "files": [
+    {
+      "file": "before-bounded-replacement-32260.json",
+      "source": ".tmp/uat181-native-20260917/before-bounded-replacement-32260.json",
+      "original_sha256": "a3241cb179d531e49e37b8cdd669abecfe99cf430bd8ebda9e63e0935eb8a7aa",
+      "retained_sha256": "a3241cb179d531e49e37b8cdd669abecfe99cf430bd8ebda9e63e0935eb8a7aa",
+      "normalization": "none"
+    },
+    {
+      "file": "wait-port-release.mjs",
+      "source": ".tmp/uat181-native-20260917/wait-port-release.mjs",
+      "original_sha256": "0922042901ed180a90de3c024cdb430e86ea594a78e1da6f2b1f03f81f5ff2bb",
+      "retained_sha256": "0922042901ed180a90de3c024cdb430e86ea594a78e1da6f2b1f03f81f5ff2bb",
+      "normalization": "none"
+    },
+    {
+      "file": "bounded-replacement-stop-32260.json",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-stop-32260.json",
+      "original_sha256": "4aa781940dea2f64703204bddacd69967aa45c49adb0f036587221dd51e3885b",
+      "retained_sha256": "4aa781940dea2f64703204bddacd69967aa45c49adb0f036587221dd51e3885b",
+      "normalization": "none"
+    },
+    {
+      "file": "bounded-replacement-health-38457.json",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-health-38457.json",
+      "original_sha256": "f7cd9f23b5a3db8457e5746cfb02f91d7dd9a73bd6157e7aa0ceb00eb27d7110",
+      "retained_sha256": "f7cd9f23b5a3db8457e5746cfb02f91d7dd9a73bd6157e7aa0ceb00eb27d7110",
+      "normalization": "none"
+    },
+    {
+      "file": "bounded-replacement-notes-38457.json",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-notes-38457.json",
+      "original_sha256": "fc5c219a3e8959cc429dcb2dfbc705288d4f3a7de85356dde3492032f7f1d341",
+      "retained_sha256": "fc5c219a3e8959cc429dcb2dfbc705288d4f3a7de85356dde3492032f7f1d341",
+      "normalization": "none"
+    },
+    {
+      "file": "bounded-replacement-notes-events.txt",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-notes-events.txt",
+      "original_sha256": "283079be255be3d07e5dcab73eadc44061bdb642a1d6d55ad6189cd80304dafa",
+      "retained_sha256": "5a7ac9265513ec7278253f14e3b98eea0160d43cda12ed468b945b0d1db70dfd",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bounded-replacement-notes-snapshot.txt",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-notes-snapshot.txt",
+      "original_sha256": "d70bf504bf48b321c542e461b5a58e4e10907a145b3a1df235957dd3ac3577e2",
+      "retained_sha256": "6e0308394b165cc17f174acdefdfefe2f064b2a694cfd679829c2810caeb9d8b",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bounded-replacement-notes-error.png",
+      "source": ".tmp/uat181-native-20260917/bounded-replacement-notes-error.png",
+      "original_sha256": "1b84bb44dc0067aed510221be590fb026a83ff3250e9f92bf0489b8fc82e9ce4",
+      "retained_sha256": "1b84bb44dc0067aed510221be590fb026a83ff3250e9f92bf0489b8fc82e9ce4",
+      "normalization": "none"
+    },
+    {
+      "file": "bounded-old-api-interrupt-32260.json",
+      "source": ".tmp/uat181-native-20260917/bounded-old-api-interrupt-32260.json",
+      "original_sha256": "99c5b6694589583140831c0ac81bf1992001e27c791fb848aec7ea057aa55b08",
+      "retained_sha256": "99c5b6694589583140831c0ac81bf1992001e27c791fb848aec7ea057aa55b08",
+      "normalization": "none"
+    },
+    {
+      "file": "after-old-exit-retry.txt",
+      "source": ".tmp/uat181-native-20260917/after-old-exit-retry.txt",
+      "original_sha256": "32765e9823bdf129878b9e7e9c8f348d505beb6c617f24b8665d711d9d5be9ec",
+      "retained_sha256": "32765e9823bdf129878b9e7e9c8f348d505beb6c617f24b8665d711d9d5be9ec",
+      "normalization": "none"
+    },
+    {
+      "file": "after-old-exit-recovery.txt",
+      "source": ".tmp/uat181-native-20260917/after-old-exit-recovery.txt",
+      "original_sha256": "1d2b9ab7f57d9a82e990c27720e46d853f4eea3c91a7e76638cd7a8fb05f4776",
+      "retained_sha256": "b2b927eea4cc403b62c39e91f1484f0b0f7bfef07acc705b62db8160ce2fa8ea",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "residual-read-candidates.md",
+      "source": ".tmp/uat181-native-20260917/residual-read-candidates.md",
+      "original_sha256": "efeb5f2c93e23e60d68d35d6e4dfcd00e94d779111f08c86e6e8b31b1ba6d7d6",
+      "retained_sha256": "efeb5f2c93e23e60d68d35d6e4dfcd00e94d779111f08c86e6e8b31b1ba6d7d6",
+      "normalization": "none"
+    }
+  ]
+}

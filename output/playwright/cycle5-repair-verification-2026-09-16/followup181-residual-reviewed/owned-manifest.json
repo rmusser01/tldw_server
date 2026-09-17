@@ -1,0 +1,26 @@
+{
+  "task": "TASK13260.118",
+  "production_change": "six explicit pure SELECT read_only flags",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "f128573e83334bc3c0bfe694c36d2811167c7061f3fbf08519abd9750b623aaa",
+      "snapshot": "review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+      "sha256": "f781d085923842d3d07252931c957f5a38cadf621767c524e3c6f83cfdbfa932",
+      "snapshot": "review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/character_store.py"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "sha256": "752cc27e7bcd43bd6e1555c189f4c54ac4a89429394a7874c31c59c4f9fa3ef9",
+      "snapshot": "review-snapshot/tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py",
+      "sha256": "8ac0318f0761f8963a6f60e730130943eca5142ba9ffd723aa7b59aa279bb55b",
+      "snapshot": "review-snapshot/tldw_Server_API/tests/DB_Management/test_chacha_postgres_shell_read_lifecycle.py"
+    }
+  ]
+}

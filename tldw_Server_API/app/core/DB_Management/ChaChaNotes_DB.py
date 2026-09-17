@@ -20036,7 +20036,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._schema_lock = threading.RLock()
         with self._schema_lock:
             try:
-                self.execute_query("SELECT 1 FROM character_cards LIMIT 1")
+                self.execute_query("SELECT 1 FROM character_cards LIMIT 1", read_only=True)
                 return  # noqa: TRY300
             except CharactersRAGDBError as exc:
                 msg = str(exc).lower()
@@ -20062,7 +20062,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
             # Verify that the table now exists; if not, escalate as SchemaError.
             try:
-                self.execute_query("SELECT 1 FROM character_cards LIMIT 1")
+                self.execute_query("SELECT 1 FROM character_cards LIMIT 1", read_only=True)
             except CharactersRAGDBError as exc:
                 logger.error(
                     'Failed to verify character_cards table after schema re-initialization for {}: {}',
