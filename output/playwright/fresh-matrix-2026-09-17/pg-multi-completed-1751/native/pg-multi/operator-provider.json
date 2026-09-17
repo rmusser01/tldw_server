@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T16:53:42.678Z",
+  "cell": "pg-multi",
+  "adaptation": "Supported operator setup for multi-user guide, applied to isolated runtime config before first API start",
+  "changedKeys": [
+    "API.default_api",
+    "Local-API.llama_api_IP",
+    "Local-API.llama_model"
+  ],
+  "provider": "llama.cpp",
+  "baseUrl": "http://127.0.0.1:9099/v1",
+  "discoveredModel": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+  "discoveryStatus": 200,
+  "beforeConfigSha256": "f8be659d1f67bcdf1019158f1d55f4949b20c42519bea2f0bf1a8a3e4fb51a1e",
+  "afterConfigSha256": "7ffa4c760c0e0549bd89bf9423f24c1caf5f9267c3c6c366f7376b666434a807",
+  "frozenSourceUnchanged": true
+}

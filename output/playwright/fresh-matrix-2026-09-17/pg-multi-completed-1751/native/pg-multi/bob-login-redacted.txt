@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T17:35:30.934Z","url":"http://127.0.0.1:18683/","events":[{"event":"identity","at":"2026-09-17T17:33:58.505Z","status":200,"identity":{"id":2,"username":"alice"}},{"event":"identity","at":"2026-09-17T17:35:29.011Z","status":200,"identity":{"id":2,"username":"alice"}},{"event":"identity","at":"2026-09-17T17:35:29.193Z","status":200,"identity":{"id":2,"username":"alice"}},{"event":"auth-lifetime","at":"2026-09-17T17:35:30.858Z","status":200,"expiresIn":1800},{"event":"identity","at":"2026-09-17T17:35:30.883Z","status":200,"identity":{"id":3,"username":"bob"}},{"event":"identity","at":"2026-09-17T17:35:30.925Z","status":200,"identity":{"id":3,"username":"bob"}}]}
+### Ran Playwright code
+```js
+await (async page=>{await page.getByRole('textbox',{name:'Username',exact:true}).fill("bob");await page.getByRole('textbox',{name:'Password',exact:true}).fill("[REDACTED]");await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Sign in to tldw',exact:true}).waitFor({state:'hidden',timeout:20000});return {at:new Date().toISOString(),url:page.url(),events:(page.__matrixEvents||[]).filter(e=>e.event==='identity'||e.event==='auth-lifetime').slice(-6)};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18683/
+- Page Title: Home | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T16-54-25-410Z.log#L134-L135
+

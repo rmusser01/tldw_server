@@ -1,0 +1,8 @@
+### Result
+{"parked":{"at":"2026-09-17T16:58:56.793Z","openPages":0,"serviceWorkers":0},"issued":{"event":"auth-lifetime","at":"2026-09-17T16:58:30.444Z","url":"http://127.0.0.1:18683/api/v1/auth/login","status":200,"expiresIn":1800},"earliestReturnAt":"2026-09-17T17:28:40.444Z","events":[{"event":"auth-lifetime","at":"2026-09-17T16:58:30.444Z","url":"http://127.0.0.1:18683/api/v1/auth/login","status":200,"expiresIn":1800},{"event":"identity","at":"2026-09-17T16:58:30.462Z","status":200,"identity":{"id":2,"username":"alice"}},{"event":"identity","at":"2026-09-17T16:58:30.559Z","status":200,"identity":{"id":2,"username":"alice"}},{"event":"identity","at":"2026-09-17T16:58:30.725Z","status":200,"identity":{"id":2,"username":"alice"}}]}
+### Ran Playwright code
+```js
+await (async anchor=>{const issued=anchor.__expiryEvents.filter(e=>e.event==='auth-lifetime'&&e.status===200&&Number.isFinite(e.expiresIn)).at(-1);if(!issued)throw Error('No real token lifetime receipt');await anchor.__expiryPage.close();anchor.__expiryPage=null;anchor.__expiryParked={at:new Date().toISOString(),openPages:anchor.__expiryContext.pages().length,serviceWorkers:anchor.__expiryContext.serviceWorkers().length};return {parked:anchor.__expiryParked,issued,earliestReturnAt:new Date(Date.parse(issued.at)+(issued.expiresIn+10)*1000).toISOString(),events:anchor.__expiryEvents};}
+)(page);
+```
+

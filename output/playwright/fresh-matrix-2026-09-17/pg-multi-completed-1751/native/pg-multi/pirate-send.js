@@ -1,0 +1,1 @@
+async page=>{await page.getByTestId("prompt-insert-system").click();await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Tell me about the weather today.");await page.getByRole("button",{name:"Send message",exact:true}).click();return {at:new Date().toISOString(),body:await page.locator("body").ariaSnapshot()};}

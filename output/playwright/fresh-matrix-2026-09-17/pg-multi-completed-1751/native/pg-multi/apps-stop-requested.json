@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-17T17:50:30.295Z",
+  "action": "Final graceful app stop; official fixture holders and data retained",
+  "receipts": [
+    {
+      "action": "backend",
+      "pid": 59324,
+      "startedAt": "2026-09-17T17:49:11.336Z",
+      "port": 18603
+    },
+    {
+      "action": "frontend",
+      "pid": 98121,
+      "startedAt": "2026-09-17T16:54:06.756Z",
+      "port": 18683
+    }
+  ]
+}

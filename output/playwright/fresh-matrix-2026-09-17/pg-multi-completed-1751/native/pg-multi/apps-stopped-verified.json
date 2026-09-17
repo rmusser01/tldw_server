@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-17T17:51:04.681Z",
+  "ports": [
+    {
+      "port": 18603,
+      "error": "ECONNREFUSED"
+    },
+    {
+      "port": 18683,
+      "error": "ECONNREFUSED"
+    }
+  ],
+  "holders": "29823 /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python\n96865 /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python"
+}

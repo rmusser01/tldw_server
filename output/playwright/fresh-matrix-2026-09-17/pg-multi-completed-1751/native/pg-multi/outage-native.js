@@ -1,0 +1,1 @@
+async page=>{await page.reload();await page.getByText('Backend readiness check failed',{exact:false}).first().waitFor({timeout:20000});return {at:new Date().toISOString(),url:page.url(),snapshot:await page.locator('body').ariaSnapshot()};}

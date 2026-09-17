@@ -1,0 +1,18 @@
+### Result
+Total messages: 14 (Errors: 11, Warnings: 1)
+
+[INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18683/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
+[LOG] [HMR] connected @ http://127.0.0.1:18683/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/api/v1/auth/me:0
+[WARNING] [tldw:request] GET /api/v1/auth/me 500 Internal Server Error @ http://127.0.0.1:18683/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+[ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18683/health:0
+

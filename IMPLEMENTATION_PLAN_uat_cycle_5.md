@@ -1,3 +1,5 @@
+Current checkpoint 2026-09-17: all 48 frozen matrix outcomes are recorded across four configurations and independently reviewed. Sixteen new findings (231–246) remain unresolved. Apps and browsers are stopped; official PostgreSQL holders and data are retained. Stage 4 execution and retention are complete, with failures explicitly recorded. Repairs continue in IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no full acceptance or next-matrix release.
+
 # Cycle 5 repair and verification plan
 
 Current gate2026-09-17:230verified/0pending/0unresolved, independent230native acceptance complete. Stage3 Complete; Stage4 preparation released. No newmatrixrow has run. Freeze a fullcommit, createfour source archives and copied dependencies, pass relocation/source/runtime preflights, then execute12named journeys×4cells. Harness172 independently54Node+42Python0skip and copy-script full7pthguard reviewed. Older38tasks/127ACs reconciled;75fullPGmatrix remains pending. Ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json. Historical checkpoints below remain unchanged.
@@ -114,7 +116,7 @@ Stage3 remains active at23:45UTC: all180 identified defects have reviewed implem
 **Goal:** Recheck the authoritative journeys on new configuration/data/browser state after all confirmed repairs.
 **Success Criteria:** Both mode matrices account for every required row on one frozen source, with any newly observed issue tracked immediately. No blanket sign-off while confirmed product failures remain.
 **Tests:** The twelve-row named-journey protocol, real model generation, canonical persistence, user/permission isolation, connection recovery and natural expiry controls.
-**Status:** In Progress
+**Status:** Complete (execution and evidence; findings 231–246 remain open in the follow-up plan)
 
 - Check fetched dev ancestry before freezing; preserve the truthful original-baseline correction.
 - Explicitly record and exercise PostgreSQL as well as SQLite backend configurations in the fresh single-user and multi-user matrix. Reused dependencies and test infrastructure remain transparent.

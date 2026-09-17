@@ -1,0 +1,1 @@
+async page=>{await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Hello, who are you?");await page.getByRole("button",{name:"Send message",exact:true}).click();return {at:new Date().toISOString(),body:await page.locator("body").ariaSnapshot()};}

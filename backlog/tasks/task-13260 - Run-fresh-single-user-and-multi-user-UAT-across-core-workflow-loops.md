@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 17:02'
+updated_date: '2026-09-17 18:05'
 labels:
   - uat
   - testing
@@ -208,6 +208,12 @@ PG-single125-payload evidence checkpoint independently retained/reviewed, all48 
 2026-09-17 16:51UTC: frozen SQLite multi-user12-row pass concluded with recorded failures and limits. Natural30min expiry/refresh, ordinary Chat Retry, public source/cited QA/loaded handoff, Pirate/TestBot(operator-default), analysis persistence, reciprocal account Back/API ownership, admin own-source Trash/restore, actual API outage/Retry accepted within scope. New241–244 tracked as children183–186; total244=230prior verified+14new unresolved. Generation234 and Study235/240/242 remain failed; exact Wiki external denial, vision/hidden/mixed/early-End limitations explicit. SQLite apps/browser stopped; data retained. PostgreSQL multi-user official fixtures now held, restricted-role preparation in progress. No product edits during frozen matrix; evidence checkpoint and independent review pending.
 
 SQLite multi-user checkpoint retained/reviewed: output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650. All258payloads/2gziproundtrips/sourceparity,85distinctrowreferences,15frozenharnesses pass. Manifest bd5462641d65f8c58c7836e553f6073bb12072c9d1a3952b0c6051eae80dcbb4, review f840a3ccb482786c7fb1d737f09c4df97c2f0a38158f350a34dffdc7bce3ead2. Evidence-only checkpoint; Node syntax checks and git diff --check pass; Bandit not applicable to this docs/JS evidence change, no Python production modified. PostgreSQL multi-user is now initialized with official fixtures/restrictedrole and native setup/ordinary Chat in progress. No full acceptance claim.
+
+2026-09-17 17:35UTC PostgreSQL multi native matrix: real natural expiry1829.414s after1800s login passes401→refresh200→Alice2/ownNotes200. Pirate Note/card/provenance/backlink pass; Study235/240/242 reproduced; exactWikipedia access denied/no storedsource. TestBot actualcomplete-v2 headers200 but no visibleanswer then45s timeout; read-onlydiagnosis pending, nocompletionpass. Reciprocalisolationandoutagerecovery underway. Frozen8f8774e6 unchanged;15new231–245 remainunresolved.
+
+Completed all48frozenmatrixoutcomes; finalPGmulti packet186payloads pending independentretentionreview.16new231–246 remainopen. Added Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md for boundedrepairs, combinedchecks/nativeacceptance, thenonly a newfullmatrix. Existinguserfix-allauthorization persists. Allapps/browsersstopped, officialPGholders/dataretained.
+
+Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads / 1,524,044 bytes, all 83 distinct row references and 15 frozen harness hashes verified. Manifest 1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593; review 4cab6a7cc70de0a2c63e0f2192bbed62f3e72b057c952f14fbbcad5ef73e9254; 191-file auxiliary index d36de0b89bb1c60c79ad501d9f37f9bab2e683c31de7c183def0bc1db4d437f6. All 48 outcomes accounted for with failures; 16 new findings 231-246 remain open. Owned apps/browser stopped; official PostgreSQL holders/data retained. Evidence-only commit: no product source changes, Bandit not applicable. Repairs follow Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no new full UAT before reviewed repairs/dispositions and original native acceptance.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

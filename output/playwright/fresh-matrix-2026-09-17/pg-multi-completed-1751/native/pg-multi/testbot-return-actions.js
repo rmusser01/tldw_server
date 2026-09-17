@@ -1,0 +1,1 @@
+async page=>{const a=page.getByRole('article',{name:'User message 1 of 1',exact:true});await a.hover();await a.getByRole('button',{name:'More actions',exact:true}).click();return {at:new Date().toISOString(),body:await page.locator('body').ariaSnapshot(),events:page.__matrixEvents.filter(e=>e.at>'2026-09-17T17:43:00Z'&&/\/chat/.test(e.url||''))};}

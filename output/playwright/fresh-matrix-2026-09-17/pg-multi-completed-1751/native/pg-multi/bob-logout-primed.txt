@@ -1,0 +1,13 @@
+### Result
+{"url":"http://127.0.0.1:18683/login","at":"2026-09-17T17:42:21.974Z","snapshot":"- heading \"Sign in to tldw\" [level=1]\n- paragraph:\n  - text: http://127.0.0.1:18683\n  - link \"Change server\":\n    - /url: /settings/tldw\n- text: Username\n- textbox \"Username\"\n- text: Password\n- textbox \"Password\"\n- button \"Sign in\"\n- paragraph:\n  - text: Trouble signing in? Server URL and auth mode are configured in\n  - link \"tldw settings\":\n    - /url: /settings/tldw\n  - text: .\n- alert"}
+### Ran Playwright code
+```js
+await (async page=>{await page.goto('http://127.0.0.1:18683/settings/tldw');await page.getByRole('button',{name:'Logout',exact:true}).click();await page.getByRole('button',{name:'Logout',exact:true}).waitFor({state:'hidden',timeout:10000});await page.goto('http://127.0.0.1:18683/login');await page.getByRole('heading',{name:'Sign in to tldw',exact:true}).waitFor({timeout:10000});return {url:page.url(),at:new Date().toISOString(),snapshot:await page.locator('body').ariaSnapshot()};}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18683/login
+- Page Title: Sign in | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T16-54-25-410Z.log#L151-L156
+

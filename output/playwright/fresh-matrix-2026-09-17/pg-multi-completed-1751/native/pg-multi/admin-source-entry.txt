@@ -1,0 +1,10 @@
+### Ran Playwright code
+```js
+await (async page=>{await page.getByRole('button',{name:'Media',exact:true}).click();await page.getByRole('button',{name:'Quick Ingest',exact:true}).first().click();const more=page.getByRole('button',{name:'Start a new ingest',exact:true});if(await more.isVisible())await more.click();page.__adminIngestAt=new Date().toISOString();await page.getByRole('button',{name:'Browse files',exact:true}).click();}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18683/
+### Modal state
+- [File chooser]: can be handled by upload
+

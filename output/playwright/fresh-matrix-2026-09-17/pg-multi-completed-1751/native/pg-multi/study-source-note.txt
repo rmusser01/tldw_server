@@ -1,0 +1,38 @@
+### Error
+TimeoutError: locator.check: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('radio', { name: 'Cram', exact: true })
+    - locator resolved to <input name=":r7j:" type="radio" class="ant-segmented-item-input"/>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div title="Cram" class="ant-segmented-item-label">Cram</div> intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div title="Cram" class="ant-segmented-item-label">Cram</div> intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    45 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div title="Cram" class="ant-segmented-item-label">Cram</div> intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+    5 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div class="absolute inset-0 rounded-2xl bg-bg/70 backdrop-blur-[1px]">…</div> from <div class="pointer-events-none absolute inset-0 z-30 flex justify-center px-4 sm:px-6 lg:px-8">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+  - element was detached from the DOM, retrying
+
+

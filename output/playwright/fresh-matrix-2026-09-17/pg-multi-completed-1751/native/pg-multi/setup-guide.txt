@@ -1,0 +1,32 @@
+### Page
+- Page URL: http://127.0.0.1:18683/
+- Page Title: Home | tldw
+- Console: 0 errors, 4 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e16]:
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - paragraph [ref=e21]: Multi-user connection
+          - generic [ref=e23]:
+            - heading "First-time setup" [level=1] [ref=e24]
+            - paragraph [ref=e25]: Sign in to your server with an account created by its administrator.
+        - region [ref=e27]:
+          - generic [ref=e35]:
+            - heading "Multi-user setup guide" [level=2] [ref=e36]
+            - paragraph [ref=e37]: Your server is configured for multi-user access.
+          - generic [ref=e38]:
+            - paragraph [ref=e39]: Sign in with your server account. If you need an account, ask your administrator. Operators can use the guide to finish deployment configuration.
+            - generic [ref=e40]:
+              - link "Open guide" [ref=e41] [cursor=pointer]:
+                - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md
+              - link "Open deployment checklist" [ref=e46] [cursor=pointer]:
+                - /url: https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Server/Multi-User_Deployment_Guide.md
+          - button "Sign in" [ref=e51] [cursor=pointer]
+  - alert [ref=e10]
+```
+

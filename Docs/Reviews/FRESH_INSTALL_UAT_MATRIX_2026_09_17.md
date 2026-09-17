@@ -1,6 +1,6 @@
 # Fresh UAT matrix — 2026-09-17
 
-**SQLite single-user native pass concluded with recorded failures; PostgreSQL single-user native pass also concluded with recorded failures; SQLite multi-user also concluded with recorded failures; PostgreSQL multi-user remains pending.** All230 prior findings have verified bounded outcomes. Frozen source: `8f8774e6c868b304a96d95ab82e28389c129a78b`; branch `codex/fresh-install-uat-fixes`. Fresh origin/dev remains `59049e094e0845a4611ea725ae19b7c1754ea709` and is included; original branch creation used an older base and dev was merged later.
+**All four configurations have completed the frozen48-row execution with recorded failures. No full UAT acceptance:16new findings231–246 remain unresolved.** All230 prior findings have verified bounded outcomes. Frozen source: `8f8774e6c868b304a96d95ab82e28389c129a78b`; branch `codex/fresh-install-uat-fixes`. Fresh origin/dev remains `59049e094e0845a4611ea725ae19b7c1754ea709` and is included; original branch creation used an older base and dev was merged later.
 
 Each cell gets a separate source archive, app data/configuration and browser session. Cells run serially. Installed Python/Bun dependencies, system interpreter/browser and existing local model services are reused; this is not a clean-machine dependency installation. PostgreSQL uses official fixture databases with a direct non-superuser, non-BYPASSRLS runtime login; final ordinary-user isolation remains an actual workflow check.
 
@@ -8,22 +8,22 @@ The12 named journeys follow the recovered frontend UAT/E2E protocol. No authorit
 
 | Row | Journey | SQLite single | SQLite multi | PostgreSQL single | PostgreSQL multi |
 |---|---|---|---|---|---|
-| 1 | Fresh setup, provider discovery and first real Chat | Functional pass; UX231 | Functional pass; operator setup | Functional pass; UX231 | Not started |
-| 2 | Authentication reload, disconnect/logout, outage recovery and natural expiry | Functional pass; UX237; JWT expiry N/A | Expiry/logout/reload/outage/Retry pass | Functional pass; UX237; JWT expiry N/A | Not started |
-| 3 | Two-turn Chat persistence and real provider failure/Retry | Core pass; UX232; image/visibility limits | Core pass; UX232; image guard only | Core pass; UX232; image/visibility limits | Not started |
-| 4 | Synthetic file ingestion, search, cited QA and Media-to-Chat | Core pass; analysis warning; API233 | Core pass after loaded handoff; faults233/241 | Fail238 RLS insert; source-dependent steps blocked | Not started |
-| 5 | Exact Playwright Wikipedia URL ingestion and grounded QA | Blocked: external source access denied | Blocked: exact source access denied | Blocked: external source access denied | Not started |
-| 6 | Biology Note to five generated cards and five-card Study | Fail234 twice; five-card Study blocked | Fail234; five-card Study blocked | Fail234; five-card Study blocked | Not started |
-| 7 | Pirate Prompt application, real response and reload | Pass | Pass | Pass | Not started |
-| 8 | TestBot Character selection, real response and reload | Fail236; completion/reload blocked | Pass with operator default; not236 repair | Fail236; catalogue239 | Not started |
-| 9 | Chat to Note/backlink and reviewed card/Study controls | Partial; re-rate preview Fail235; mixed/early-End blocked234 | Partial;235/240/242; generated-five blocked234 | Partial; re-rate235/analytics240; source/five-card limits | Not started |
-| 10 | Source analysis, Multi-Item Review and changed reanalysis | Pass; controlled availability failure | Pass; changed reanalysis/failure preservation | Blocked238: no saved source | Not started |
-| 11 | Permission-aware soft delete, Trash and exact restore | Pass | Permission-aware delete/Trash/restore pass; UX244 | Blocked238: no saved source | Not started |
-| 12 | Reciprocal multi-user metadata/content/draft/job isolation | Not applicable: single user | Bounded native/API controls pass; UX243 | Not applicable: single user | Not started |
+| 1 | Fresh setup, provider discovery and first real Chat | Functional pass; UX231 | Functional pass; operator setup | Functional pass; UX231 | Functional pass; operator setup |
+| 2 | Authentication reload, disconnect/logout, outage recovery and natural expiry | Functional pass; UX237; JWT expiry N/A | Expiry/logout/reload/outage/Retry pass | Functional pass; UX237; JWT expiry N/A | Expiry/logout/reload/outage/Retry pass |
+| 3 | Two-turn Chat persistence and real provider failure/Retry | Core pass; UX232; image/visibility limits | Core pass; UX232; image guard only | Core pass; UX232; image/visibility limits | Core pass;232; image guard/persistence only |
+| 4 | Synthetic file ingestion, search, cited QA and Media-to-Chat | Core pass; analysis warning; API233 | Core pass after loaded handoff; faults233/241 | Fail238 RLS insert; source-dependent steps blocked | Fail245: quota schema; no source/job |
+| 5 | Exact Playwright Wikipedia URL ingestion and grounded QA | Blocked: external source access denied | Blocked: exact source access denied | Blocked: external source access denied | Blocked: exact source access denied |
+| 6 | Biology Note to five generated cards and five-card Study | Fail234 twice; five-card Study blocked | Fail234; five-card Study blocked | Fail234; five-card Study blocked | Fail234; five-card Study blocked |
+| 7 | Pirate Prompt application, real response and reload | Pass | Pass | Pass | Instruction/reload pass; unverified weather claims |
+| 8 | TestBot Character selection, real response and reload | Fail236; completion/reload blocked | Pass with operator default; not236 repair | Fail236; catalogue239 | Fail246 stream timeout; catalogue239 |
+| 9 | Chat to Note/backlink and reviewed card/Study controls | Partial; re-rate preview Fail235; mixed/early-End blocked234 | Partial;235/240/242; generated-five blocked234 | Partial; re-rate235/analytics240; source/five-card limits | Partial;235/240/242; source/five-card limits |
+| 10 | Source analysis, Multi-Item Review and changed reanalysis | Pass; controlled availability failure | Pass; changed reanalysis/failure preservation | Blocked238: no saved source | Blocked245: ordinary/admin source upload |
+| 11 | Permission-aware soft delete, Trash and exact restore | Pass | Permission-aware delete/Trash/restore pass; UX244 | Blocked238: no saved source | Blocked245: ordinary/admin source upload |
+| 12 | Reciprocal multi-user metadata/content/draft/job isolation | Not applicable: single user | Bounded native/API controls pass; UX243 | Not applicable: single user | Bounded native/API pass; UX243; Media/job blocked245 |
 
 ## Preparation and evidence
 
-- Released at 2026-09-17T12:18:45.051Z. All four source archives/dependency copies and origin preflights are complete and independently audited. SQLite single-user initialization, API, frontend and fresh browser are running; the other three cells have not been initialized or launched.
+- Released at 2026-09-17T12:18:45.051Z. All four source archives/dependency copies and origin preflights are complete and independently audited. All four cells have now initialized and run through normal native workflows. The first three apps/browsers are stopped with preserved data; All four app/browser pairs are stopped with data preserved; both official PostgreSQL fixture holders remain alive.
 - API/UI ports: SQLite single18600/18680; SQLite multi18601/18681; PostgreSQL single18602/18682; PostgreSQL multi18603/18683.
 - Multi-user administration uses the existing supported bootstrap function, normal admin login and actual admin-UI user creation.
 - Record every Pass/Fail/Blocked/Partial/Not applicable with evidence. Preserve exact Wikipedia denial if encountered; no substitute counts as that row. Synthetic automated provider responses do not count as real native inference.
@@ -175,3 +175,37 @@ Late independent audit: `.tmp/uat-next-matrix-20260916/audits/sqlite-multi-late-
 ### Retained SQLite multi-user checkpoint
 
 [Evidence packet](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/README.md) and [independent review](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/RETENTION_REVIEW.md):258payloads, two verified gzip roundtrips, all85distinct SQLite-multi row references,15unchanged frozen harness files; known-credential/JWT scan0matches. Manifest SHA bd5462641d65f8c58c7836e553f6073bb12072c9d1a3952b0c6051eae80dcbb4; review f840a3ccb482786c7fb1d737f09c4df97c2f0a38158f350a34dffdc7bce3ead2; checksum index b215af9e43a378f0de1fb86ce22ac4e4485c2e2cc20ec8d718d8ef7e44224254. Two older controller hashes remain historical references, not retained exact controller snapshots. Admin post-restore rootUUID is not independently re-emitted; ID1/title/originalcontent/version1 are confirmed and the ingest receipt establishes the original UUID. No full-matrix signoff.
+
+### PostgreSQL multi-user startup and Chat
+
+Official fixtures hold separate fresh AuthNZ/content databases with runtime role `tldw_matrix_f646b1f478dc4c8d`: LOGINtrue; superuser/BYPASSRLS/INHERIT/CREATEDB/CREATEROLE/replicationfalse; zero memberships. Standard initialize and admin bootstrap exit0; native admin UI creates ordinary Alice2 and Bob3. Supported operator provider configuration is applied to the isolated runtime before first API start. Backend18603/WebUI18683 use frozen8f8774e6.
+
+Alice actual Chat conversation1000f786-333a-4fe1-b48c-6097bc36c71d completes two ORBIT-742 turns200, then a one-request unavailable-model override yields real400. NativeRetry originalmodel200 persists one additional user/assistant pair. Settled readback has7unique canonical IDs; earlier immediate reload capture had5 and is not used as final proof. Actual128pxPNG attachment, capability guard and Retry preserve one loaded image after reload; completion count4before/4after. No successful vision or true-hidden acceptance.
+
+An independent normal Alice browser context receives a real1800-second lifetime at16:58:30.444UTC; all its pages close at16:58:56.793, with0serviceworkers. Earliest natural return17:28:40.444UTC. Other workflows continue while it remains idle; expiry acceptance is pending. Native source ingestion is starting.
+
+### PostgreSQL multi-user checkpoint 17:34UTC
+
+Natural expiry passed after1829.414seconds with a real1800second token: auth/me401, refresh200, Alice2 and ownNotes200. Child context closed after capture. Exact Wikipedia is source_access_denied with no stored article. Pirate answer Note/card saves201, original Note backlink and linked card-source Note pass. Easy4days/practiceOFF noPOST/Good10days/Hard14days persist; preview235, analytics240 and singular242 reproduce. An initial wrong Notes query and Cram radio input locator were harness errors; corrected native actions retained. Study source link opens the actual277-character answer. Generated-five/mixed/early-End are not accepted.
+
+TestBot Character4 is created and enters Chat under the configured raw model. World-book catalogue500 reproduces239. Its actual complete-v2 request at17:28:00.726 gets200headers but native stream times out at~45seconds without visible BEEP BOOP; root cause remains under read-only investigation. No successful Character completion/reload claimed. Evidence: native/pg-multi/expiry-close-testbot-observe.txt and testbot-timeout-log.json. Account-isolation checks continue; no full acceptance.
+
+### PostgreSQL multi-user ownership and upload boundaries
+
+Native settled Alice→Bob and Bob→Alice Back chains show current identity, cleared foreign source/generator draft and only own populated deck. QA/Chat draft fields are empty after each switch. Bob owns Note d5e4cbfb-96e9-4fca-9b2d-c25ead5ade8c, Chat7d28639e-cf24-4da9-b343-75bab49d12d4 and deck2/card7a4417bb-11a2-434d-974f-8a646830de8a. Alice private deck1/card943a2602-e64c-4736-a551-45405885fd95 remain isolated. Native direct foreign Note links404 both ways. Bob ordinary completion again shows Character setup243; canonical reloadcorrects.
+
+Independent normal API logins pass30asserted observations: Notes ownread/write200 and foreignread/validPUT404, Chat detail/history own200/foreign403, cards own200/foreign404, only own populated deck. Initial helper wrongly required404forChat; the legitimate403denial was retained and the assertion corrected. Exact original Notes restoredAlicev5/Bobv3; finalnativeAlice227chars/Bobgeneratororiginalprove content. No browser token/storage read.
+
+Administrator native source upload also413Quota check unavailable at17:46:13, analysisoff. No job/Media iscreated;245blocksanalysis/reanalysis/Trash/restore and positiveMedia/jobownershipcontrols. No source or schema insertedaround thefailure. TestBot246 originaltimeout remains open; afterlogout/reopen canonicalhistorycontains onlyuserturn and itsMoreactions offersDelete/Pin, noRetry. No newturnsent as a substitute. Final controlledoutagecheck is pending.
+
+### Final PostgreSQL multi-user closeout
+
+Owned API98070 stopped17:48:31; actual18603ECONNREFUSED17:48:48. Native reload shows Backend readiness check failed. Same-profile API59324 starts17:49:11 without initializer/reset. NativeRetry17:49:46 restores Alice2 and original227character Note7b4f7117-4139-4f35-9107-a696145f7810/version5 without password re-entry. Finalconsole500s occurred during the intentional outage; originalhistory also confirms231extensionwording.
+
+Browser closes and ownedAPI59324/frontend98121stop17:50:30. Ports18603/18683bothrefuse17:51:04; officialfixtureholders29823/96865remain. All48cells have boundedoutcomes, with blockeddependencies explicit. No full acceptance;231–246 must be reconciled with fixes/verification before anotherfullmatrix.
+
+### Final retained PostgreSQL multi-user checkpoint
+
+[Evidence packet](../../output/playwright/fresh-matrix-2026-09-17/pg-multi-completed-1751/README.md) and [independent review](../../output/playwright/fresh-matrix-2026-09-17/pg-multi-completed-1751/RETENTION_REVIEW.md): all 186 payloads (1,524,044 bytes), 89 row-reference usages / 83 distinct paths, and 15 frozen harness hashes verified. No payload needed gzip. The author-run known-value credential scan and independent JWT-shape scan found no matches; their different coverage is explicit in the review. A row 7 filename reference was corrected without changing any result.
+
+Manifest SHA `1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593`; review SHA `4cab6a7cc70de0a2c63e0f2192bbed62f3e72b057c952f14fbbcad5ef73e9254`; auxiliary checksum index SHA `d36de0b89bb1c60c79ad501d9f37f9bab2e683c31de7c183def0bc1db4d437f6` binds 191 files, excluding itself. All 48 outcomes are recorded with failures; sixteen findings remain open. This evidence-only checkpoint changes no product source, so Bandit is not applicable. Repairs continue under [the next plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md) before another full matrix.

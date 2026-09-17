@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-17T16:54:06.908Z",
+  "cell": "pg-multi",
+  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "initialized": {
+    "status": "completed",
+    "code": 0
+  },
+  "bootstrapCompleted": true,
+  "runtimeRole": {
+    "name": "tldw_matrix_f646b1f478dc4c8d",
+    "login": true,
+    "superuser": false,
+    "bypassrls": false,
+    "inherit": false,
+    "createdb": false,
+    "createrole": false,
+    "replication": false,
+    "memberships": 0
+  },
+  "officialFixtures": {
+    "auth": "pg_temp_db",
+    "content": "pg_temp_db_session"
+  },
+  "fixtureStatus": "held",
+  "ports": {
+    "api": 18603,
+    "frontend": 18683
+  },
+  "dependenciesReused": true,
+  "providerSetup": "explicit operator config before first API start"
+}

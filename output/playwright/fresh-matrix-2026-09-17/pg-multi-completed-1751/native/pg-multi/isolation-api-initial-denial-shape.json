@@ -1,0 +1,257 @@
+{
+  "startedAt": "2026-09-17T17:40:53.506Z",
+  "fixtures": {
+    "alice": {
+      "note": "7b4f7117-4139-4f35-9107-a696145f7810",
+      "chat": "71f6314c-f5df-448e-ab85-7b03edb3a440",
+      "card": "943a2602-e64c-4736-a551-45405885fd95",
+      "deck": "Alice Private Deck ORBIT742"
+    },
+    "bob": {
+      "note": "d5e4cbfb-96e9-4fca-9b2d-c25ead5ade8c",
+      "chat": "7d28639e-cf24-4da9-b343-75bab49d12d4",
+      "card": "7a4417bb-11a2-434d-974f-8a646830de8a",
+      "deck": "Bob Private Deck BIRCH913"
+    }
+  },
+  "kind": "Independent normal password logins; native-created records; no browser token/storage access",
+  "checks": [
+    {
+      "at": "2026-09-17T17:40:53.586Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/auth/me",
+      "status": 200,
+      "body": {
+        "id": 2,
+        "uuid": null,
+        "username": "alice",
+        "email": "alice-pg-multi@example.com",
+        "role": "user",
+        "is_active": true,
+        "is_verified": true,
+        "created_at": "2026-09-17T17:40:53.584219",
+        "last_login": null,
+        "storage_quota_mb": 1000,
+        "storage_used_mb": 0,
+        "warning": "deprecated_endpoint",
+        "successor": "/api/v1/users/me/profile"
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.644Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/auth/me",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "uuid": null,
+        "username": "bob",
+        "email": "bob-pg-multi@example.com",
+        "role": "user",
+        "is_active": true,
+        "is_verified": true,
+        "created_at": "2026-09-17T17:40:53.642830",
+        "last_login": null,
+        "storage_quota_mb": 1000,
+        "storage_used_mb": 0,
+        "warning": "deprecated_endpoint",
+        "successor": "/api/v1/users/me/profile"
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.690Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice PostgreSQL 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "7b4f7117-4139-4f35-9107-a696145f7810",
+        "created_at": "2026-09-17T17:11:59.957000Z",
+        "last_modified": "2026-09-17T17:11:59.957000Z",
+        "version": 1,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.731Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 404,
+      "body": {
+        "detail": "Note not found"
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.794Z",
+      "who": "alice",
+      "method": "PUT",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice PostgreSQL 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n\nALICE OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "7b4f7117-4139-4f35-9107-a696145f7810",
+        "created_at": "2026-09-17T17:11:59.957000Z",
+        "last_modified": "2026-09-17T17:40:53.772000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.836Z",
+      "who": "bob",
+      "method": "PUT",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 404,
+      "body": {
+        "detail": "Note not found."
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.880Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice PostgreSQL 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n\nALICE OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "7b4f7117-4139-4f35-9107-a696145f7810",
+        "created_at": "2026-09-17T17:11:59.957000Z",
+        "last_modified": "2026-09-17T17:40:53.772000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.925Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice PostgreSQL 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n\nALICE OWN API WRITE CONTROL",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "7b4f7117-4139-4f35-9107-a696145f7810",
+        "created_at": "2026-09-17T17:11:59.957000Z",
+        "last_modified": "2026-09-17T17:40:53.772000Z",
+        "version": 2,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:53.982Z",
+      "who": "alice",
+      "method": "PUT",
+      "route": "/notes/7b4f7117-4139-4f35-9107-a696145f7810",
+      "status": 200,
+      "body": {
+        "title": "Biology Basics — Alice PostgreSQL 20260917",
+        "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+        "conversation_id": null,
+        "message_id": null,
+        "id": "7b4f7117-4139-4f35-9107-a696145f7810",
+        "created_at": "2026-09-17T17:11:59.957000Z",
+        "last_modified": "2026-09-17T17:40:53.963000Z",
+        "version": 3,
+        "client_id": "2",
+        "deleted": false,
+        "studio": null,
+        "keywords": [],
+        "folders": [],
+        "keyword_sync": null
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:54.009Z",
+      "who": "alice",
+      "method": "GET",
+      "route": "/chats/71f6314c-f5df-448e-ab85-7b03edb3a440",
+      "status": 200,
+      "body": {
+        "id": "71f6314c-f5df-448e-ab85-7b03edb3a440",
+        "scope_type": "global",
+        "workspace_id": null,
+        "character_id": null,
+        "character_name": null,
+        "assistant_kind": null,
+        "assistant_id": null,
+        "assistant_name": null,
+        "persona_memory_mode": null,
+        "title": "Tell me about the weather today.",
+        "rating": null,
+        "state": "in-progress",
+        "topic_label": null,
+        "cluster_id": null,
+        "source": "webui-chat",
+        "external_ref": null,
+        "created_at": "2026-09-17T17:17:15.276000Z",
+        "last_modified": "2026-09-17T17:17:21.261000Z",
+        "message_count": 3,
+        "version": 1,
+        "parent_conversation_id": null,
+        "root_id": "71f6314c-f5df-448e-ab85-7b03edb3a440",
+        "forked_from_message_id": null,
+        "settings": null,
+        "behavior_snapshot": {
+          "status": "missing",
+          "schema_version": null,
+          "digest": null
+        },
+        "resume_eligible": false,
+        "resume_ineligible_reason": "behavior_snapshot_missing",
+        "settings_version": null,
+        "history_version": 7,
+        "tail": {
+          "message_id": "3304b717-de31-4641-9d6d-83e86e7cd8e7",
+          "message_version": 1
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T17:40:54.033Z",
+      "who": "bob",
+      "method": "GET",
+      "route": "/chats/71f6314c-f5df-448e-ab85-7b03edb3a440",
+      "status": 403,
+      "body": {
+        "detail": "You don't have access to this chat session"
+      }
+    }
+  ],
+  "completed": false,
+  "failure": "reciprocal Chat boundary failed"
+}

@@ -1,8 +1,10 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Fresh-run findings:244 total —230 previously verified,14 new unresolved (231–244).** The frozen48-row matrix continues with product source unchanged. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
+- **Current repair gate:** all 48 frozen outcomes are retained and independently reviewed, with 16 unresolved findings (231–246). The final [PostgreSQL multi-user review](../../output/playwright/fresh-matrix-2026-09-17/pg-multi-completed-1751/RETENTION_REVIEW.md) confirms evidence fidelity, not application acceptance. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md). No new full UAT starts until these findings have reviewed fixes or evidence-backed dispositions and original-scenario acceptance.
 
-- **Fresh matrix running:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations; SQLite single-user setup and Chat are underway. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
+- **Fresh-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
+
+- **Fresh matrix execution concluded with failures:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations, all48row outcomes recorded and apps stopped. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
 
 - **Repair-gate checkpoint: all 230 prior findings verified; 0 unresolved or awaiting acceptance at release.** UAT230 passes independent native Settings entry/reload/logout-login on db2b0602. The repair gate is released for fresh matrix preparation; this was the pre-execution gate; current execution is in the linked live matrix. The matrix uses SQLite/PostgreSQL × single/multi-user, with12 named journeys per configuration. [Final repair ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json). [Settings acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native230-settings-probe-accepted/README.md).
 
@@ -2567,3 +2569,38 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 ### Retained SQLite multi-user checkpoint
 
 [Evidence packet](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/README.md) and [independent review](../../output/playwright/fresh-matrix-2026-09-17/sqlite-multi-completed-1650/RETENTION_REVIEW.md):258payloads, two verified gzip roundtrips, all85distinct SQLite-multi row references,15unchanged frozen harness files; known-credential/JWT scan0matches. Manifest SHA bd5462641d65f8c58c7836e553f6073bb12072c9d1a3952b0c6051eae80dcbb4; review f840a3ccb482786c7fb1d737f09c4df97c2f0a38158f350a34dffdc7bce3ead2; checksum index b215af9e43a378f0de1fb86ce22ac4e4485c2e2cc20ec8d718d8ef7e44224254. Two older controller hashes remain historical references, not retained exact controller snapshots. Admin post-restore rootUUID is not independently re-emitted; ID1/title/originalcontent/version1 are confirmed and the ingest receipt establishes the original UUID. No full-matrix signoff.
+
+## UAT-245 — P1: Fresh PostgreSQL multi-user upload cannot check storage quotas
+
+- Open, TASK13260.187. Ordinary Alice2 submits the public1914-character source through Quick Ingest at17:07:59.477UTC. POST `/media/ingest/jobs` returns413 with `storage_quota_exceeded`, `Quota check unavailable`, used_mb0 and null quota/remaining. No job or source is created. Native results show0succeeded1failed.
+- Safe backend log directly identifies `AuthnzStorageQuotasRepo.get_org_quota`: relation `storage_quotas` does not exist / UndefinedTableError. Standard fresh initializer and admin bootstrap exited0; runtime uses the fixture-issued non-superuser/non-BYPASSRLS login. This is distinct from238’s later media RLS insert; single-user bypasses the quota guard. No fail-open or privilege bypass applied.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/pg-multi/ingest-failed-observation.txt`, `quota-error-excerpt.json`, `startup-summary.json`. Initial driver omitted the visibly required analysis-provider field; after normal correction the actual POST413 establishes the defect. Subsequent first-use Notes tour intercepted the retained ingest Done button; that separate driver ordering error is retained, with no Note save issued before correction.
+
+- UAT245 independent audit489db100fdefc37ce5b1fc4671bf3479b2bd64cc24f29dbc46c9ceddcff78b2b confirms only SQLite migration051 declares storage_quotas; canonical PG core schema omits it. Existing fail-closed12009 behavior is correct. Eighteen frozen source/test hashes and four native inputs; no runtime/DB changes.
+- UAT234 now reproduces in all four cells: PostgreSQL multi browser500 at30.009s, backend200 at36.045s. No5-card draft received; generation semantics beyond the lost body are not certified.
+
+### PostgreSQL multi-user provider output-quality observation
+
+- Exact Pirate Prompt is applied and response contains ARRR/persists. This instance asserts clear skies and an easterly breeze despite no location or live weather source. These are unverified model claims, not a weather-accuracy pass. Native reuse card question explicitly asks what the assistant described, without treating the claimed weather as established fact. Record alongside row7; no application-caused factual error is established from this one local-model output. Evidence `native/pg-multi/pirate-reloaded.txt` and `answer-note-saved.txt`.
+
+### PostgreSQL multi-user checkpoint 17:34UTC
+
+Natural expiry passed after1829.414seconds with a real1800second token: auth/me401, refresh200, Alice2 and ownNotes200. Child context closed after capture. Exact Wikipedia is source_access_denied with no stored article. Pirate answer Note/card saves201, original Note backlink and linked card-source Note pass. Easy4days/practiceOFF noPOST/Good10days/Hard14days persist; preview235, analytics240 and singular242 reproduce. An initial wrong Notes query and Cram radio input locator were harness errors; corrected native actions retained. Study source link opens the actual277-character answer. Generated-five/mixed/early-End are not accepted.
+
+TestBot Character4 is created and enters Chat under the configured raw model. World-book catalogue500 reproduces239. Its actual complete-v2 request at17:28:00.726 gets200headers but native stream times out at~45seconds without visible BEEP BOOP; root cause remains under read-only investigation. No successful Character completion/reload claimed. Evidence: native/pg-multi/expiry-close-testbot-observe.txt and testbot-timeout-log.json. Account-isolation checks continue; no full acceptance.
+
+## UAT-246 — P2: Native TestBot stream times out before an answer
+
+- Open investigation, TASK13260.188. Fresh PostgreSQL multi-user Character4 sends Hello, who are you? in conversation3165d63b-f3b1-4629-9d25-b5fd36f5acd6. Actual complete-v2 request17:28:00.726 receives200headers17:28:01.096 and body read terminates17:28:46.133; UI shows Your chat timed out with recovery actions and no visible BEEP BOOP. Headers200 are not successful completion.
+- Backend reached real upstream localhost9099 and receivedHTTP200 at17:28:00.831. Source transport default idle45s matches timing. Exact lost/absent chunk boundary and cause are unproven; no PostgreSQL-specific cause or fix is asserted. World-book500 is separately239. SQLite-multi same configured model had completed its earlier TestBot. Current provider throughput log is unavailable; stale Sep16log is excluded.
+- Evidence: native/pg-multi/expiry-close-testbot-observe.txt, testbot-inflight.txt, testbot-timeout-log.json. Original native completion/reload remains unaccepted; independent read-only diagnosis under parent task.
+
+### PostgreSQL multi-user ownership and upload boundaries
+
+Native settled Alice→Bob and Bob→Alice Back chains show current identity, cleared foreign source/generator draft and only own populated deck. QA/Chat draft fields are empty after each switch. Bob owns Note d5e4cbfb-96e9-4fca-9b2d-c25ead5ade8c, Chat7d28639e-cf24-4da9-b343-75bab49d12d4 and deck2/card7a4417bb-11a2-434d-974f-8a646830de8a. Alice private deck1/card943a2602-e64c-4736-a551-45405885fd95 remain isolated. Native direct foreign Note links404 both ways. Bob ordinary completion again shows Character setup243; canonical reloadcorrects.
+
+Independent normal API logins pass30asserted observations: Notes ownread/write200 and foreignread/validPUT404, Chat detail/history own200/foreign403, cards own200/foreign404, only own populated deck. Initial helper wrongly required404forChat; the legitimate403denial was retained and the assertion corrected. Exact original Notes restoredAlicev5/Bobv3; finalnativeAlice227chars/Bobgeneratororiginalprove content. No browser token/storage read.
+
+Administrator native source upload also413Quota check unavailable at17:46:13, analysisoff. No job/Media iscreated;245blocksanalysis/reanalysis/Trash/restore and positiveMedia/jobownershipcontrols. No source or schema insertedaround thefailure. TestBot246 originaltimeout remains open; afterlogout/reopen canonicalhistorycontains onlyuserturn and itsMoreactions offersDelete/Pin, noRetry. No newturnsent as a substitute. Final controlledoutagecheck is pending.
+
+FinalPGmultioutage/recovery passes with actualportrefusal, same-profile restart, nativeRetryAlice2/originalNotev5; no re-login. Bothfixtureholders/dataremain while completed appportsareclosed17:51UTC. All16new findings231–246 remainopen; no newfullUATbefore repair acceptance.

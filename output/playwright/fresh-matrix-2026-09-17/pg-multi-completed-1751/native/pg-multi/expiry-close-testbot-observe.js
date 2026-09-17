@@ -1,0 +1,1 @@
+async page=>{await page.__expiryContext.close();page.__expiryPage=null;page.__expiryContext=null;return {at:new Date().toISOString(),expiryClosed:true,body:await page.locator('body').ariaSnapshot(),events:page.__matrixEvents.filter(e=>e.at>'2026-09-17T17:27:00Z'&&/chat|world/.test(e.url||''))};}

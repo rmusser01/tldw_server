@@ -1,0 +1,1 @@
+async page=>{return {at:new Date().toISOString(),snapshot:await page.locator('body').ariaSnapshot(),events:(page.__matrixEvents||[]).filter(e=>e.at>page.__sourceIngestAt&&/\/media|\/ingestion|\/jobs/.test(e.url||''))};}
