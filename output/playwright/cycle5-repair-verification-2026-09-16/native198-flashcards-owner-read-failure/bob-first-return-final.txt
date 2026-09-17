@@ -1,0 +1,155 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+- Console: 26 errors, 26 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f12e11]:
+  - generic [ref=f12e2139]:
+    - banner [ref=f12e2140]:
+      - generic [ref=f12e2141]:
+        - generic [ref=f12e2143]:
+          - generic [ref=f12e2144]: Study workspace
+          - heading "Flashcards" [level=1] [ref=f12e2145]
+        - navigation "Flashcards modes" [ref=f12e2146]:
+          - generic [ref=f12e2147]: Study
+          - generic [ref=f12e2148]: Manage
+          - generic [ref=f12e2149]: Import / Export
+          - generic [ref=f12e2150]: Templates
+          - generic [ref=f12e2151]: Scheduler
+    - generic [ref=f12e2154]:
+      - tablist [ref=f12e2155]:
+        - generic [ref=f12e2157]:
+          - tab "Study" [ref=f12e2159] [cursor=pointer]
+          - tab "Manage" [ref=f12e2161] [cursor=pointer]
+          - tab "Import / Export" [selected] [ref=f12e2163] [cursor=pointer]
+          - tab "Templates" [ref=f12e2165] [cursor=pointer]
+          - tab "Scheduler" [ref=f12e2167] [cursor=pointer]
+        - generic [ref=f12e2169]:
+          - button "Test with Quiz" [disabled] [ref=f12e2171]
+          - button "Keyboard Shortcuts" [ref=f12e2172] [cursor=pointer]
+      - tabpanel "Import / Export" [ref=f12e2179]:
+        - generic [ref=f12e2180]:
+          - generic [ref=f12e2181]:
+            - generic [ref=f12e2182]: Task
+            - radiogroup "Create, import, or export task" [ref=f12e2186]:
+              - generic [ref=f12e2187]:
+                - generic [ref=f12e2188] [cursor=pointer]:
+                  - radio "Create cards" [checked]
+                  - generic "Create cards" [ref=f12e2189]
+                - generic [ref=f12e2190] [cursor=pointer]:
+                  - radio "Import file"
+                  - generic "Import file" [ref=f12e2191]
+                - generic [ref=f12e2192] [cursor=pointer]:
+                  - radio "Export backup"
+                  - generic "Export backup" [ref=f12e2193]
+          - region [ref=f12e2194]:
+            - generic [ref=f12e2195]:
+              - heading "Create and generate" [level=5] [ref=f12e2196]
+              - text: Start new study material from study packs, source text, or images.
+            - generic [ref=f12e2197]:
+              - generic [ref=f12e2198]:
+                - generic [ref=f12e2199]: Study packs
+                - generic [ref=f12e2203]:
+                  - generic [ref=f12e2204]:
+                    - strong [ref=f12e2206]: Turn media or notes into a review queue.
+                    - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                  - button "Create study pack" [ref=f12e2207] [cursor=pointer]
+              - generic [ref=f12e2209]:
+                - generic [ref=f12e2210]: Generate Flashcards
+                - generic [ref=f12e2214]:
+                  - generic [ref=f12e2215]: Generate cards from pasted text, review/edit them, then save to a deck.
+                  - textbox "Paste transcript, notes, or study material..." [ref=f12e2216]
+                  - generic [ref=f12e2217]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                  - generic [ref=f12e2218]:
+                    - generic [ref=f12e2219]:
+                      - switch "Advanced mix" [ref=f12e2220] [cursor=pointer]
+                      - generic [ref=f12e2223]: Advanced mix
+                    - generic [ref=f12e2225]:
+                      - generic "Number of cards" [ref=f12e2227]: "Number of cards :"
+                      - spinbutton [ref=f12e2231]: "10"
+                    - generic [ref=f12e2233]:
+                      - generic "Card type" [ref=f12e2235]: "Card type :"
+                      - generic [ref=f12e2239] [cursor=pointer]:
+                        - generic [ref=f12e2240]:
+                          - generic "Basic" [ref=f12e2241]
+                          - combobox [ref=f12e2242]
+                        - img "down" [ref=f12e2244]
+                    - generic [ref=f12e2248]:
+                      - generic "Difficulty" [ref=f12e2250]: "Difficulty :"
+                      - generic [ref=f12e2254] [cursor=pointer]:
+                        - generic [ref=f12e2255]:
+                          - generic "Mixed" [ref=f12e2256]
+                          - combobox [ref=f12e2257]
+                        - img "down" [ref=f12e2259]
+                    - generic [ref=f12e2263]:
+                      - generic "Deck" [ref=f12e2265]: "Deck :"
+                      - generic [ref=f12e2269] [cursor=pointer]:
+                        - combobox [ref=f12e2271]
+                        - img "down" [ref=f12e2273]
+                    - generic [ref=f12e2277]:
+                      - generic "Provider (optional)" [ref=f12e2279]: "Provider (optional) :"
+                      - textbox [ref=f12e2283]
+                    - generic [ref=f12e2285]:
+                      - generic "Model (optional)" [ref=f12e2287]: "Model (optional) :"
+                      - textbox [ref=f12e2291]
+                  - generic [ref=f12e2293]:
+                    - generic "Focus topics (comma-separated)" [ref=f12e2295]: "Focus topics (comma-separated) :"
+                    - textbox "exam 1, chapter 3, formulas" [ref=f12e2299]
+                  - button "Generate cards" [disabled] [ref=f12e2301]
+              - generic [ref=f12e2302]:
+                - generic [ref=f12e2303]: Image Occlusion
+                - generic [ref=f12e2307]:
+                  - generic [ref=f12e2308]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                  - generic [ref=f12e2309]:
+                    - generic [ref=f12e2311]:
+                      - generic "Deck" [ref=f12e2313]: "Deck :"
+                      - generic [ref=f12e2317] [cursor=pointer]:
+                        - combobox [ref=f12e2319]
+                        - img "down" [ref=f12e2321]
+                    - generic [ref=f12e2325]:
+                      - generic "Tags" [ref=f12e2327]: "Tags :"
+                      - textbox "tag-1, tag-2" [ref=f12e2331]
+                  - generic [ref=f12e2332]:
+                    - generic [ref=f12e2333]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                    - generic [ref=f12e2334]:
+                      - generic [ref=f12e2335]: Source image
+                      - button "Upload image occlusion source" [ref=f12e2336]
+                    - status [ref=f12e2337]:
+                      - paragraph [ref=f12e2342]: Choose an image to begin authoring occlusions.
+                  - button "Generate occlusion drafts" [ref=f12e2343] [cursor=pointer]
+          - region [ref=f12e2345]:
+            - generic [ref=f12e2346]:
+              - heading "Import and export" [level=5] [ref=f12e2347]
+              - text: Move cards in and out without changing the flashcards route.
+            - generic [ref=f12e2348]:
+              - generic [ref=f12e2349]: Import/export summary
+              - generic [ref=f12e2353]:
+                - generic [ref=f12e2354]:
+                  - strong [ref=f12e2356]: Supported formats
+                  - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                - generic [ref=f12e2357]:
+                  - strong [ref=f12e2359]: Current import limits
+                  - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                - generic [ref=f12e2360]:
+                  - strong [ref=f12e2362]: Last action
+                  - text: No import/export actions yet in this session.
+            - text: ": : : : : :"
+  - alert [ref=f12e10]: Flashcards | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-16T23-46-59-546Z.log#L705-L726

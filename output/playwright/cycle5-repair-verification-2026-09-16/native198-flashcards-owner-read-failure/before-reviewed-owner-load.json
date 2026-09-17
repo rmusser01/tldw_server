@@ -1,0 +1,322 @@
+{
+  "observedAt": "2026-09-17T04:28:30.583396+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 29445,
+      "state": "idle"
+    },
+    {
+      "pid": 38214,
+      "state": "idle"
+    },
+    {
+      "pid": 38243,
+      "state": "idle"
+    },
+    {
+      "pid": 39392,
+      "state": "idle"
+    },
+    {
+      "pid": 39393,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 39394,
+      "state": "idle"
+    },
+    {
+      "pid": 39395,
+      "state": "idle"
+    },
+    {
+      "pid": 39396,
+      "state": "idle"
+    },
+    {
+      "pid": 39397,
+      "state": "idle"
+    },
+    {
+      "pid": 39398,
+      "state": "idle"
+    },
+    {
+      "pid": 39406,
+      "state": "idle"
+    },
+    {
+      "pid": 39429,
+      "state": "idle"
+    },
+    {
+      "pid": 39530,
+      "state": "idle"
+    },
+    {
+      "pid": 40257,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 40276,
+      "state": "idle"
+    },
+    {
+      "pid": 40277,
+      "state": "idle"
+    },
+    {
+      "pid": 40278,
+      "state": "idle"
+    },
+    {
+      "pid": 40733,
+      "state": "idle"
+    },
+    {
+      "pid": 40734,
+      "state": "idle"
+    },
+    {
+      "pid": 41066,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 41188,
+      "state": "idle"
+    },
+    {
+      "pid": 51464,
+      "state": "idle"
+    },
+    {
+      "pid": 51490,
+      "state": "idle"
+    },
+    {
+      "pid": 51491,
+      "state": "idle"
+    },
+    {
+      "pid": 87828,
+      "state": "active"
+    }
+  ],
+  "locks": [
+    {
+      "pid": 39393,
+      "relation": "buddy_attachments",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "buddy_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "decks",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "flashcard_reviews",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "flashcards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 39393,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "buddy_attachments",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "buddy_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "decks",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "flashcard_reviews",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "flashcards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 40257,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 41066,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 41066,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "chacha_schema_migration_progress",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "db_schema_version",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "db_schema_version",
+      "mode": "RowShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "flashcards",
+      "mode": "AccessExclusiveLock",
+      "granted": false
+    },
+    {
+      "pid": 87828,
+      "relation": "moodboard_notes",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "moodboards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_attachments",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_studio_documents",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_task_reconciliation_state",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_task_scope_authority",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_tasks",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "note_tasks",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "notes",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "notes",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "task_event_read_state",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "task_events",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "task_events",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "task_note_projections",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 87828,
+      "relation": "task_projection_drifts",
+      "mode": "ShareLock",
+      "granted": true
+    }
+  ],
+  "transactionReadOnlyVerified": true,
+  "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+}

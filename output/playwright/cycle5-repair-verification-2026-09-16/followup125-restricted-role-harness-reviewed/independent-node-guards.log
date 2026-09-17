@@ -1,0 +1,46 @@
+(node:11898) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ zero exit without normal-return proof cannot mark initialization complete (4.70525ms)
+✔ forwarded cancellation cannot mark initialization complete even with exit zero (2.504583ms)
+✔ initialization rejects stale attempt proof (2.6495ms)
+✔ initialization rejects other preparation proof (2.417542ms)
+✔ initialization rejects incomplete proof (2.660583ms)
+✔ nonzero child exit rejects an otherwise matching completion proof (2.549875ms)
+✔ matching normal completion records identity and allows restart without resetting (3.559458ms)
+✔ failed initialization remains retryable and an old attempt cannot satisfy retry (2.976625ms)
+✔ backend rejects missing initialization before port or spawn (1.814917ms)
+✔ backend rejects wrong-preparation initialization before port or spawn (1.858834ms)
+✔ backend rejects legacy-exit-only initialization before port or spawn (1.764792ms)
+✔ frontend rejects missing initialization before port or spawn (1.547ms)
+✔ frontend rejects wrong-preparation initialization before port or spawn (2.160667ms)
+✔ frontend rejects legacy-exit-only initialization before port or spawn (1.812875ms)
+✔ incomplete preparation cannot initialize or start (1.659ms)
+✔ another run/cell cannot reuse a bound source root (sqlite-single) (1.745166ms)
+✔ another run/cell cannot reuse a bound source root (pg-single) (2.003084ms)
+✔ preparation reserves a new source before a helper can fail (2.1115ms)
+✔ successful new preparation writes a completed matching record (3.635ms)
+✔ existing profile mode ownership refusal remains before spawn (1.725208ms)
+✔ a failed child never creates a success marker (2.140083ms)
+✔ existing profile preparation is never overwritten (1.82575ms)
+✔ official PG receipt validates exact local ownership without connecting (2.802125ms)
+✔ matrix runtime role accepts separated checked provisioning and runtime identities (1.946875ms)
+✔ matrix runtime role rejects elevated superuser receipt (2.02925ms)
+✔ matrix runtime role rejects elevated bypassrls receipt (2.477667ms)
+✔ matrix runtime role rejects elevated inherit receipt (1.999917ms)
+✔ matrix runtime role rejects elevated createdb receipt (2.026ms)
+✔ matrix runtime role rejects elevated createrole receipt (1.951ms)
+✔ matrix runtime role rejects elevated replication receipt (2.028709ms)
+✔ matrix runtime role rejects legacy administrator receipt (2.551583ms)
+✔ matrix runtime role rejects administrator membership and reused provisioning identity (2.151792ms)
+✔ matrix runtime role checks live privileges before launching initializer (2.553917ms)
+✔ matrix runtime role live probe uses explicit copied python and no passwords in argv (2.36825ms)
+✔ matrix runtime live role failure blocks backend before port or process (2.1955ms)
+✔ matrix runtime live role failure blocks frontend before port or process (2.267375ms)
+ℹ tests 36
+ℹ suites 0
+ℹ pass 36
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 118.332542

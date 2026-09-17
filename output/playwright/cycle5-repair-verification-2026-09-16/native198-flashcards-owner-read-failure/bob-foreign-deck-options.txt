@@ -1,0 +1,217 @@
+### Ran Playwright code
+```js
+await page.getByTestId('flashcards-generate-deck').getByRole('combobox').click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T04-33-16-420Z.yml)
+
+- generic [ref=f13e11]:
+  - generic [ref=f13e12]:
+    - generic [ref=f13e14]:
+      - link "Skip to main content" [ref=f13e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f13e16]:
+        - button "Expand sidebar" [ref=f13e17] [cursor=pointer]
+        - button "New Chat" [ref=f13e21] [cursor=pointer]
+        - generic [ref=f13e24]:
+          - button "Quick Ingest" [ref=f13e25] [cursor=pointer]
+          - button "Chat" [ref=f13e29] [cursor=pointer]
+          - button "Prompts" [ref=f13e32] [cursor=pointer]
+          - button "Characters" [ref=f13e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f13e41] [cursor=pointer]
+          - button "World Books" [ref=f13e45] [cursor=pointer]
+          - button "Notes" [ref=f13e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f13e52] [cursor=pointer]
+          - button "Media" [ref=f13e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f13e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f13e69] [cursor=pointer]
+          - button "Kanban" [ref=f13e75] [cursor=pointer]
+          - button "Watchlists" [ref=f13e77] [cursor=pointer]
+        - generic [ref=f13e82]:
+          - button "Open Notes Dock" [ref=f13e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f13e88] [cursor=pointer]
+          - button "Settings" [ref=f13e91] [cursor=pointer]
+      - main [ref=f13e95]:
+        - generic [ref=f13e96]:
+          - generic [ref=f13e99]:
+            - generic [ref=f13e100]:
+              - button "Expand sidebar" [ref=f13e101] [cursor=pointer]
+              - generic [ref=f13e103]:
+                - img "tldw Assistant" [ref=f13e104]
+                - generic [ref=f13e105]: tldw Assistant
+                - button "Companion Home" [ref=f13e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f13e110] [cursor=pointer]
+            - generic [ref=f13e113]:
+              - button "Search - Open command palette" [ref=f13e114] [cursor=pointer]:
+                - generic [ref=f13e118]: Search
+                - generic [ref=f13e119]: ⌘K
+              - button "Open settings" [ref=f13e120] [cursor=pointer]
+              - generic [ref=f13e132]:
+                - button "Notifications, 0 unread" [ref=f13e133] [cursor=pointer]
+                - status [ref=f13e137]: Notifications are active
+              - button "Switch to light theme" [ref=f13e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f13e145] [cursor=pointer]:
+                - generic [ref=f13e146]: "?"
+          - generic [ref=f13e148]:
+            - generic [ref=f13e150]:
+              - generic [ref=f13e152]:
+                - generic [ref=f13e153]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f13e154]
+              - navigation "Flashcards modes" [ref=f13e155]:
+                - generic [ref=f13e156]: Study
+                - generic [ref=f13e157]: Manage
+                - generic [ref=f13e158]: Import / Export
+                - generic [ref=f13e159]: Templates
+                - generic [ref=f13e160]: Scheduler
+            - generic [ref=f13e163]:
+              - tablist [ref=f13e164]:
+                - generic [ref=f13e166]:
+                  - tab "Study" [ref=f13e168] [cursor=pointer]
+                  - tab "Manage" [ref=f13e170] [cursor=pointer]
+                  - tab "Import / Export" [selected] [ref=f13e172] [cursor=pointer]
+                  - tab "Templates" [ref=f13e174] [cursor=pointer]
+                  - tab "Scheduler" [ref=f13e176] [cursor=pointer]
+                - generic [ref=f13e178]:
+                  - button "Test with Quiz" [disabled] [ref=f13e180]
+                  - button "Keyboard Shortcuts" [ref=f13e181] [cursor=pointer]
+              - tabpanel "Import / Export" [ref=f13e188]:
+                - generic [ref=f13e189]:
+                  - generic [ref=f13e190]:
+                    - generic [ref=f13e191]: Task
+                    - radiogroup "Create, import, or export task" [ref=f13e195]:
+                      - generic [ref=f13e196]:
+                        - generic [ref=f13e197] [cursor=pointer]:
+                          - radio "Create cards" [checked]
+                          - generic "Create cards" [ref=f13e198]
+                        - generic [ref=f13e199] [cursor=pointer]:
+                          - radio "Import file"
+                          - generic "Import file" [ref=f13e200]
+                        - generic [ref=f13e201] [cursor=pointer]:
+                          - radio "Export backup"
+                          - generic "Export backup" [ref=f13e202]
+                  - region [ref=f13e203]:
+                    - generic [ref=f13e204]:
+                      - heading "Create and generate" [level=5] [ref=f13e205]
+                      - text: Start new study material from study packs, source text, or images.
+                    - generic [ref=f13e206]:
+                      - generic [ref=f13e207]:
+                        - generic [ref=f13e208]: Study packs
+                        - generic [ref=f13e212]:
+                          - generic [ref=f13e213]:
+                            - strong [ref=f13e215]: Turn media or notes into a review queue.
+                            - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                          - button "Create study pack" [ref=f13e216] [cursor=pointer]
+                      - generic [ref=f13e218]:
+                        - generic [ref=f13e219]: Generate Flashcards
+                        - generic [ref=f13e223]:
+                          - generic [ref=f13e224]: Generate cards from pasted text, review/edit them, then save to a deck.
+                          - textbox "Paste transcript, notes, or study material..." [ref=f13e225]
+                          - generic [ref=f13e226]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                          - generic [ref=f13e227]:
+                            - generic [ref=f13e228]:
+                              - switch "Advanced mix" [ref=f13e229] [cursor=pointer]
+                              - generic [ref=f13e232]: Advanced mix
+                            - generic [ref=f13e234]:
+                              - generic "Number of cards" [ref=f13e236]: "Number of cards :"
+                              - spinbutton [ref=f13e240]: "10"
+                            - generic [ref=f13e242]:
+                              - generic "Card type" [ref=f13e244]: "Card type :"
+                              - generic [ref=f13e248] [cursor=pointer]:
+                                - generic [ref=f13e249]:
+                                  - generic "Basic" [ref=f13e250]
+                                  - combobox [ref=f13e251]
+                                - img "down" [ref=f13e253]
+                            - generic [ref=f13e257]:
+                              - generic "Difficulty" [ref=f13e259]: "Difficulty :"
+                              - generic [ref=f13e263] [cursor=pointer]:
+                                - generic [ref=f13e264]:
+                                  - generic "Mixed" [ref=f13e265]
+                                  - combobox [ref=f13e266]
+                                - img "down" [ref=f13e268]
+                            - generic [ref=f13e272]:
+                              - generic "Deck" [ref=f13e274]: "Deck :"
+                              - generic [ref=f13e278] [cursor=pointer]:
+                                - generic [ref=f13e279]:
+                                  - generic "Alice UAT151 Citrine Deck" [ref=f13e280]
+                                  - combobox [expanded] [active] [ref=f13e281]:
+                                    - listbox:
+                                      - option "Alice UAT151 Citrine Deck" [selected]: "1"
+                                      - option "Alice UAT167 recovery 20260917": "4"
+                                - img "down" [ref=f13e283]
+                            - generic [ref=f13e286]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                            - generic [ref=f13e288]:
+                              - generic "Provider (optional)" [ref=f13e290]: "Provider (optional) :"
+                              - textbox [ref=f13e294]
+                            - generic [ref=f13e296]:
+                              - generic "Model (optional)" [ref=f13e298]: "Model (optional) :"
+                              - textbox [ref=f13e302]
+                          - generic [ref=f13e304]:
+                            - generic "Focus topics (comma-separated)" [ref=f13e306]: "Focus topics (comma-separated) :"
+                            - textbox "exam 1, chapter 3, formulas" [ref=f13e310]
+                          - button "Generate cards" [disabled] [ref=f13e312]
+                      - generic [ref=f13e313]:
+                        - generic [ref=f13e314]: Image Occlusion
+                        - generic [ref=f13e318]:
+                          - generic [ref=f13e319]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                          - generic [ref=f13e320]:
+                            - generic [ref=f13e322]:
+                              - generic "Deck" [ref=f13e324]: "Deck :"
+                              - generic [ref=f13e328] [cursor=pointer]:
+                                - generic [ref=f13e329]:
+                                  - generic "Alice UAT151 Citrine Deck" [ref=f13e330]
+                                  - combobox [ref=f13e331]
+                                - img "down" [ref=f13e333]
+                                - img "close-circle" [ref=f13e337]
+                            - generic [ref=f13e340]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                            - generic [ref=f13e342]:
+                              - generic "Tags" [ref=f13e344]: "Tags :"
+                              - textbox "tag-1, tag-2" [ref=f13e348]
+                          - generic [ref=f13e349]:
+                            - generic [ref=f13e350]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                            - generic [ref=f13e351]:
+                              - generic [ref=f13e352]: Source image
+                              - button "Upload image occlusion source" [ref=f13e353]
+                            - status [ref=f13e354]:
+                              - paragraph [ref=f13e359]: Choose an image to begin authoring occlusions.
+                          - button "Generate occlusion drafts" [ref=f13e360] [cursor=pointer]
+                  - region [ref=f13e362]:
+                    - generic [ref=f13e363]:
+                      - heading "Import and export" [level=5] [ref=f13e364]
+                      - text: Move cards in and out without changing the flashcards route.
+                    - generic [ref=f13e365]:
+                      - generic [ref=f13e366]: Import/export summary
+                      - generic [ref=f13e370]:
+                        - generic [ref=f13e371]:
+                          - strong [ref=f13e373]: Supported formats
+                          - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                        - generic [ref=f13e374]:
+                          - strong [ref=f13e376]: Current import limits
+                          - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                        - generic [ref=f13e377]:
+                          - strong [ref=f13e379]: Last action
+                          - text: No import/export actions yet in this session.
+                    - text: ": : : : : :"
+    - generic [ref=f13e385]:
+      - generic "Alice UAT151 Citrine Deck" [ref=f13e386] [cursor=pointer]
+      - generic "Alice UAT167 recovery 20260917" [ref=f13e388] [cursor=pointer]
+      - generic "Alice UAT196 concise recovery 20260917" [ref=f13e390] [cursor=pointer]
+      - generic "Create new deck" [ref=f13e392] [cursor=pointer]
+  - alert [ref=f13e10]

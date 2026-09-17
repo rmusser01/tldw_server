@@ -1,0 +1,75 @@
+{
+  "at": "2026-09-17T04:34:37.305Z",
+  "files": [
+    {
+      "file": "monitor.js",
+      "source": ".tmp/uat151-scope-native-20260917/monitor.js",
+      "original_sha256": "5e1c7b215cacf96f3425ee2b5e65b0782925fe90ead84f9fdd6cc7ecac43f58e",
+      "retained_sha256": "5e1c7b215cacf96f3425ee2b5e65b0782925fe90ead84f9fdd6cc7ecac43f58e",
+      "normalization": "none"
+    },
+    {
+      "file": "events.js",
+      "source": ".tmp/uat151-scope-native-20260917/events.js",
+      "original_sha256": "d1f4b56acb9fd8002e32cc1d04fb6c6bf7cbb425e60c400e844becc942071058",
+      "retained_sha256": "d1f4b56acb9fd8002e32cc1d04fb6c6bf7cbb425e60c400e844becc942071058",
+      "normalization": "none"
+    },
+    {
+      "file": "bob-first-return-final.txt",
+      "source": ".tmp/uat151-scope-native-20260917/bob-first-return-final.txt",
+      "original_sha256": "c132eae4d7661031b872c959540b9df7ee8dd956ad8974c43e40b3d1a3a598d7",
+      "retained_sha256": "93702d8697f5abe06cc0ebf69c9aeb222dccd8ed9d6325d4e9b337172732dddc",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bob-events-final.txt",
+      "source": ".tmp/uat151-scope-native-20260917/bob-events-final.txt",
+      "original_sha256": "87cd60790d6ba899eb695956daa47cbb355d9165d34d20de15408dca8b112163",
+      "retained_sha256": "abee0c42468ffb2f6d6eafd5bfdb46d839360a754862e9f6f9479d3a4aa20443",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "before-reviewed-owner-load.json",
+      "source": ".tmp/uat151-scope-native-20260917/before-reviewed-owner-load.json",
+      "original_sha256": "176e2c362e0d67e9ccb9839d5024793c057ab1f533837296f03b582844ee2b83",
+      "retained_sha256": "176e2c362e0d67e9ccb9839d5024793c057ab1f533837296f03b582844ee2b83",
+      "normalization": "none"
+    },
+    {
+      "file": "bob-repaired-ready.txt",
+      "source": ".tmp/uat151-scope-native-20260917/bob-repaired-ready.txt",
+      "original_sha256": "060c04d4224258708e54be24eba17df2bc14b174b8afb8ec581b6bf65c9c648b",
+      "retained_sha256": "63c3c17668b8d4e8f57174e8fe5ed5faf133b3b602b609413d3267b165e74a3c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bob-repaired-events.txt",
+      "source": ".tmp/uat151-scope-native-20260917/bob-repaired-events.txt",
+      "original_sha256": "99fbbcf180da6ff1b5f8a63515840434aca980341b9bd78912262d6ee16ca618",
+      "retained_sha256": "3e0f797c963aa62047ac191304bb8623f3688e2ca941b28709221bf962ed5717",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "uat198-native-read-failure.json",
+      "source": ".tmp/uat151-scope-native-20260917/uat198-native-read-failure.json",
+      "original_sha256": "49fa35a5fd69ec6041d29d3a3936dd8bce7ca583f6489cb623d23dfd2fe32d80",
+      "retained_sha256": "49fa35a5fd69ec6041d29d3a3936dd8bce7ca583f6489cb623d23dfd2fe32d80",
+      "normalization": "none"
+    },
+    {
+      "file": "bob-foreign-deck-options.txt",
+      "source": ".tmp/uat151-scope-native-20260917/bob-foreign-deck-options.txt",
+      "original_sha256": "f7e3e2f6617eb7fc8deda764f4733c62abddf0084acf8a6f3ff5a66b7051dabc",
+      "retained_sha256": "f7e3e2f6617eb7fc8deda764f4733c62abddf0084acf8a6f3ff5a66b7051dabc",
+      "normalization": "none"
+    },
+    {
+      "file": "bob-foreign-deck-options.png",
+      "source": ".tmp/uat151-scope-native-20260917/bob-foreign-deck-options.png",
+      "original_sha256": "a726b3fcbdbcca202fa81087201743651f369c11cb76a6115be69ca52be2d3fe",
+      "retained_sha256": "a726b3fcbdbcca202fa81087201743651f369c11cb76a6115be69ca52be2d3fe",
+      "normalization": "none"
+    }
+  ]
+}

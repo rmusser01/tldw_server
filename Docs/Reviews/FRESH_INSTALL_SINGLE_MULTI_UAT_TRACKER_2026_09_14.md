@@ -1,5 +1,11 @@
 # Fresh-install UAT: single-user and multi-user
 
+- **Latest checkpoint:203 unique findings —182 verified,15 awaiting targeted acceptance,6 unresolved (181/198/200–203).**199 fix is committed; background tagging still needs181 lifetime ownership, and Flashcards/Persona Memory repairs are underway. Full fresh matrix has not started.
+
+- **Latest checkpoint:200 unique findings —182 verified,15 awaiting targeted acceptance,3 unresolved (198–200).** Native PostgreSQL identified Flashcards owner leakage, conversation update rowid and Persona Memory boolean filtering. All are tracked before fixes. Full fresh matrix has not started.
+
+- **Latest checkpoint:198 unique findings —182 verified,15 awaiting targeted acceptance,1 unresolved (198).** New authenticated cross-owner Flashcards read requires repair. Full fresh matrix has not started.
+
 - **Latest checkpoint:197 unique findings —182 verified,15 awaiting targeted acceptance,0 unresolved implementations.** Character ownership, per-owner PostgreSQL names and typed exemplar search are reviewed/committeddf0fbbd73a; the additional183 fixtures are verified48f89447fc. Independent247pass/0skip. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-character-reviewed.json). Restricted-role harness cold controls pass and are under independent review. Full fresh matrix has not started.
 
 - **Latest checkpoint:197 unique findings —181 verified,12 awaiting native acceptance,4 unresolved (183/193/194/195).**196 native concise recovery passes.181 HTTP/worker and197 count repairs are committed and independently reviewed.183 reopened for an additional stale historical migration fixture. Character/schema/search unit is frozen for independent review. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-worker-reviewed.json). Restricted-role harness cold-init proof remains in progress; full fresh matrix has not started.
@@ -2092,3 +2098,37 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 ## Account-switch retest before backend reload —2026-09-17 04:27 UTC
 
 Alice source and both deck labels clear on Bob’s first return to Import/Export. Normal auth/me confirms Bob3, but deck/card reads fail500 ChaChaNotes DB unavailable on old backendPID63046, started02:00UTC before the reviewed ownership changes. Read-only metadata retains idle transactions and35public-table locks. UAT151 is not accepted; this is preserved old-runtime failure evidence under181, not a regression claim against the newly committed backend. Load reviewed source, warm both owners, then repeat original151 before full UAT.
+
+## UAT-198 — P1, open — Bob receives Alice’s private Flashcards data
+
+- On the reviewed backend48f89447fc, normal browser auth/me confirms Bob3 three times. Actual04:30:02UTC deck-list200 responses return Alice2 private decks1/4/6, and card-list200 reports all5Alice cards. The first visible selector also displays Alice’s deck because this current catalogue contains it. No native foreign writes were attempted.
+- Native service role is the previously qualified superuser/BYPASSRLS configuration. Ordinary-role behavior is being tested; no inference of ordinary-role enforcement or leakage yet. Source inspection finds missing owner predicates in the deck list and Flashcards visibility helper.
+- Distinct from151: that original frontend bug retained Alice labels despite an empty Bob catalogue.151 remains pending; this backend response blocks its positive acceptance. TASK13260.136 tracks official-fixture reproduction, minimal contract-preserving repair and independent/native verification.
+- Private retained raw evidence: .tmp/uat151-scope-native-20260917/uat198-native-read-failure.json, bob-repaired-events.txt and bob-server-returned-alice.png. Root observed the screenshot; durable scanned retention follows.
+
+## UAT-199 — P1, open — PostgreSQL conversation updates query nonexistent rowid
+
+- Bob’s owned default3 creates conversationc0d85261-ecd0-4c78-af71-47c88dab9d1d and greeting/user messages201. Both message-triggered conversation updates then log PostgreSQL column rowid does not exist (04:35:17.993/18.085UTC). The function selects rowid but never uses it. TASK13260.137 owns causal real-backend tests and the minimal projection correction; preserve version/deleted/search behavior.
+
+## UAT-200 — P1, open — Persona Memory boolean filter aborts PostgreSQL Chat completion
+
+- Actual complete-v2 request71df096e-92b6-4ff9-afba-7aba1118647e returns500 on48f89447fc, before a successful model call. PostgreSQL04:35:18.277UTC rejects persona_memory_entries archived=0 as boolean=integer; the following WorldBook CREATE TABLE fails because the transaction is already aborted. This is distinct from176’s corrected unsupported context manager. TASK13260.138 owns the primary SQL and optional-error transaction diagnosis/repair. No artificial provider fault was installed for this Bob send.
+- Both failures retained in .tmp/uat193-031-native-20260917/bob-events.txt and selected redacted backend/PostgreSQL SQL receipts. Character193 passes Bob creation only so far; Alice acceptance and successful completion remain pending.
+
+## UAT-201 — P2, open — PostgreSQL private deck names collide across users
+
+- Official two-owner fixture proves Bob cannot create a private deck with Alice’s name because of the global decks.name uniqueness constraint; SQLite per-file control passes. TASK13260.139 tracks owner-scoped atomic migration with data/catalog/rollback controls. No native same-name attempt yet.
+
+## UAT-202 — P2, open — Reusing an owned deleted PostgreSQL deck name fails
+
+- Actual owned delete/add-same-name fixture raises KeyError(0) at deleted_row[0]; SQLite control passes. TASK13260.140 tracks named PostgreSQL row access preserving restoration/version semantics and198 ownership.
+
+## UAT-203 — P2, open — PostgreSQL Persona Memory count reads a mapping row positionally
+
+- Independent of200 archived predicate: count_persona_memory_entries(include_archived=True,include_deleted=True) reaches row[0] and raises KeyError0, while SQLite passes. TASK13260.141 tracks minimal named count read with owner/empty/populated/filter controls. This is fixture-derived, not a native count observation.
+
+## UAT181 HTTP-owner follow-up and198 ordinary-role qualification —04:47UTC
+
+- After two real Bob message201 responses on12336, two idle COUNT(messages JOIN conversations) transactions remain on PostgreSQL sessions90388/90756; their timestamps match the two messages. Source trace points to daemon background tagging that does not inherit the HTTP operation context. Causal actual-scheduler fixture verification is underway.181 is reopened for this adopter gap; HTTP and StudyPack implementations remain retained, no replacement acceptance claimed.
+-198 official fixture32 cases produced14PGfailures/18controls, and separate14edges produced7PGfailures/7SQLite controls, all0skip. Ordinary NOSUPERUSER/NOBYPASSRLS rawSQL can also read foreign Flashcards: no RLS policy exists. Approved repair scope is application persistence ownership, preserving explicit authorized owner-DB sharing; it does not claim arbitrary SELECT-granted SQL clients are tenant-isolated. Actual restricted-role service checks are required.
+-199 repair is independently reviewed and committeddd5104799a (22tests0skip), pending native load. Role125 is Done after independent36Node/26Python/2realPGcold controls; finalmatrix remains unstarted.
