@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-17T04:58:11.618Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_persona_memory_filter_backends.py",
+    "tldw_Server_API/tests/DB_Management/test_persona_memory_count_backends.py",
+    "tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_persona_state_store.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py",
+    "tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

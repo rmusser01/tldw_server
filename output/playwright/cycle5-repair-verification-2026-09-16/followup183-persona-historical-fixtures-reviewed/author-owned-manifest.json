@@ -1,0 +1,12 @@
+{
+  "task": "TASK13260.120",
+  "unit": "Additional v25/v36 historical persona fixtures only",
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py",
+      "sha256": "4e0b8f236bdfefc34608410d8af4ccc04eecd2f1692349324de701ff3191ce73",
+      "bytes": 23077
+    }
+  ],
+  "baselineSha256": "e554d8f2c63ed662f74427968e4d0d3b5fc361335444d48b06b1d907fd5b7732"
+}

@@ -1,0 +1,34 @@
+{
+  "sourceAfter": [
+    {
+      "path": "tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py",
+      "sha256": "4e0b8f236bdfefc34608410d8af4ccc04eecd2f1692349324de701ff3191ce73",
+      "matchesBefore": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "97f1a6ef791ca8f5fa4ebb5bbeba2c5c82a229d0d05ed70345fdc6064699dc5a",
+      "matchesBefore": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "sha256": "52652fa347b2d945abcdf01674a16f2f76d997875bc6a56995457656dee9cfea",
+      "matchesBefore": true
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py",
+      "sha256": "0b37e00942c60e47e9020ce6ff256606d9ef1560b6cc0cff29fe7f144f981efa",
+      "matchesBefore": true
+    }
+  ],
+  "ruffFindings": 0,
+  "banditFindings": 0,
+  "banditErrors": 0,
+  "banditExcludedRules": [
+    "B101"
+  ],
+  "tests": "12 passed, 0 skipped, 4 warnings in 10.38s",
+  "diffCheckExit": 0,
+  "formatCheckExit": 1,
+  "formatAttribution": "Three unchanged ordinary-test baseline hunks only; no changed fixture/helper differences."
+}

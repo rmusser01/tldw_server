@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-17T05:05:52.627Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py",
+    "tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
