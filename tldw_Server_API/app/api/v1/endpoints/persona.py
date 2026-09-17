@@ -248,6 +248,7 @@ from tldw_Server_API.app.core.Persona.runtime_explorer import (
 )
 from tldw_Server_API.app.core.Persona.session_manager import PlanConfirmationError, get_session_manager
 from tldw_Server_API.app.core.Persona.session_materialization import (
+    ensure_default_persona_profile,
     materialize_persona_session,
     scope_snapshot_id_from_snapshot,
 )
@@ -3159,45 +3160,7 @@ def _load_persona_buddy_rows_for_projection(
 
 
 def _ensure_default_persona_profile(db: CharactersRAGDB, *, user_id: str) -> dict[str, Any]:
-    profile = db.get_persona_profile(_DEFAULT_PERSONA_ID, user_id=user_id, include_deleted=False)
-    if profile is None:
-        try:
-            _ = db.create_persona_profile(
-                {
-                    "id": _DEFAULT_PERSONA_ID,
-                    "user_id": user_id,
-                    "name": _DEFAULT_PERSONA_NAME,
-                    "mode": "session_scoped",
-                    "system_prompt": _DEFAULT_PERSONA_DESCRIPTION,
-                    "is_active": True,
-                }
-            )
-        except ConflictError:
-            # A raced creator likely inserted it first; re-fetch below.
-            pass
-        profile = db.get_persona_profile(_DEFAULT_PERSONA_ID, user_id=user_id, include_deleted=False)
-    if profile is None:
-        profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=1)
-        if not profiles:
-            raise ConflictError(
-                "Unable to resolve a default persona profile for user.",
-                entity="persona_profiles",
-                entity_id=_DEFAULT_PERSONA_ID,
-            )
-        profile = profiles[0]
-
-    if str(profile.get("id") or "") == _DEFAULT_PERSONA_ID:
-        try:
-            existing = db.list_persona_policy_rules(persona_id=_DEFAULT_PERSONA_ID, user_id=user_id)
-            if not existing:
-                _ = db.replace_persona_policy_rules(
-                    persona_id=_DEFAULT_PERSONA_ID,
-                    user_id=user_id,
-                    rules=_DEFAULT_PERSONA_POLICY_RULES,
-                )
-        except CharactersRAGDBError as exc:
-            logger.warning("Failed to ensure default persona policy rules: {}", exc)
-    return profile
+    return ensure_default_persona_profile(db, user_id=user_id)
 
 
 def _persona_catalog_items() -> list[PersonaInfo]:

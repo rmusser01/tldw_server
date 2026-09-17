@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -1743,7 +1744,23 @@ class PersonaStateStore:
         )
 
         try:
-            self.execute_query(query, params, commit=True)
+            if self.backend_type == BackendType.POSTGRESQL:
+                conn = self.get_connection()
+                operation_state = conn._operation_state
+                with operation_state.use() if operation_state is not None else nullcontext():
+                    raw_conn = conn._connection
+                    if raw_conn.info.transaction_status.name == "IDLE" and (
+                        getattr(self._connection_state(), "tx_depth", 0)
+                        or conn._backend._tx_depth(raw_conn)
+                    ):
+                        # An empty caller-owned transaction still owns the commit.
+                        conn.execute("BEGIN")
+                    # Psycopg rolls back only this insert's savepoint when the
+                    # caller already has a transaction, including pending writes.
+                    with raw_conn.transaction():
+                        conn.execute(query, params)
+            else:
+                self.execute_query(query, params, commit=True)
             return persona_id  # noqa: TRY300
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
