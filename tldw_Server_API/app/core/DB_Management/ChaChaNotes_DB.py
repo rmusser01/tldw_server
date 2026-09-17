@@ -25971,7 +25971,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return [lst[i:i + size] for i in range(0, len(lst), size)]
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
-                                pk_value: Any) -> int:
+                                pk_value: Any, *, owner_client_id: str | None = None) -> int:
         """
         Fetches the current version of an active (not soft-deleted) record.
 
@@ -25994,7 +25994,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(  # noqa: TRY003
                 f"Unsafe identifier in version lookup: table={table_name!r}, column={pk_col_name!r}"
             )
-        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (pk_value,))  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (pk_value,) + owner_params)  # nosec B608
         row = cursor.fetchone()
 
         if not row:
@@ -32505,8 +32506,74 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # - soft_delete: UPDATE SET deleted = 1, last_modified, version, client_id WHERE id/name = ? AND version = ? AND deleted = 0.
     # - search: Use respective FTS table.
 
+    def _selected_owner_filter(self, owner_client_id: str | None, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Apply an explicitly requested PostgreSQL owner; SQLite IDs label devices."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        if alias and not _SAFE_IDENTIFIER_RE.fullmatch(alias):
+            raise InputError("Invalid owner filter alias")  # noqa: TRY003
+        column = f"{alias}.client_id" if alias else "client_id"
+        return f" AND {column} = ?", (owner_client_id,)
+
+    def _selected_keyword_link_filter(
+        self, link_table: str, alias: str, *, owner_client_id: str | None,
+    ) -> tuple[str, tuple[str, ...]]:
+        """Scope both ends of the explicitly requested keyword relationship."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        parents = {
+            "note_keywords": ("notes", "note_id"),
+            "conversation_keywords": ("conversations", "conversation_id"),
+            "collection_keywords": ("keyword_collections", "collection_id"),
+            "flashcard_keywords": ("flashcards", "card_id"),
+        }
+        parent_table, parent_column = parents[link_table]
+        if not _SAFE_IDENTIFIER_RE.fullmatch(alias):
+            raise InputError("Invalid keyword link alias")  # noqa: TRY003
+        keyword_table = self._map_table_for_backend("keywords")
+        return (
+            f" AND EXISTS (SELECT 1 FROM {parent_table} owner_parent "  # nosec B608
+            f"WHERE owner_parent.id = {alias}.{parent_column} AND owner_parent.client_id = ?)"
+            f" AND EXISTS (SELECT 1 FROM {keyword_table} owner_keyword "
+            f"WHERE owner_keyword.id = {alias}.keyword_id AND owner_keyword.client_id = ?)",
+            (owner_client_id, owner_client_id),
+        )
+
+    def _require_selected_owner_row(
+        self, conn: Any, table_name: str, item_id: Any, owner_client_id: str | None,
+        *, include_deleted: bool = False,
+    ) -> None:
+        """Lock an explicitly scoped parent until its existing transaction completes."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL or item_id is None:
+            return
+        if table_name == "messages":
+            # Message client IDs may name sync devices. Its conversation owns it.
+            # Match the existing message-edit lock order: message, then conversation.
+            row = conn.execute(
+                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE FOR UPDATE",
+                (item_id,),
+            ).fetchone()
+            if row is not None:
+                try:
+                    self._require_selected_owner_row(conn, "conversations", row["conversation_id"], owner_client_id)
+                except ConflictError:
+                    row = None
+            if row is None:
+                raise ConflictError("Referenced message not found", entity="messages", entity_id=item_id)  # noqa: TRY003
+            return
+        if table_name not in {"notes", "conversations", "keywords", "keyword_collections", "note_folders"}:
+            raise InputError("Unsupported Notes parent table")  # noqa: TRY003
+        table_name = self._map_table_for_backend(table_name)
+        deleted_clause = "" if include_deleted else " AND deleted = FALSE"
+        row = conn.execute(
+            f"SELECT id FROM {table_name} WHERE id = ? AND client_id = ?{deleted_clause} FOR UPDATE",  # nosec B608
+            (item_id, owner_client_id),
+        ).fetchone()
+        if row is None:
+            raise ConflictError("Referenced record not found", entity=table_name, entity_id=item_id)  # noqa: TRY003
+
     def _add_generic_item(self, table_name: str, unique_col_name: str, item_data: dict[str, Any], main_col_value: str,
-                          other_fields_map: dict[str, str]) -> int | None:
+                          other_fields_map: dict[str, str], *, owner_client_id: str | None = None) -> int | None:
         """
         Internal helper to add items to tables with an auto-increment ID and a unique text column.
 
@@ -32537,7 +32604,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For other database errors.
         """
         now = self._get_current_utc_timestamp_iso()
-        client_id_to_use = item_data.get('client_id', self.client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        client_id_to_use = owner_client_id if owner_params else item_data.get('client_id', self.client_id)
 
         other_cols = list(other_fields_map.keys())
         other_placeholders_list = ['?'] * len(other_cols)
@@ -32579,8 +32647,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
                 undelete_cursor = conn.execute(
-                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1",  # nosec B608
-                    (main_col_value,))
+                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1{owner_clause}",  # nosec B608
+                    (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
                     item_id, current_version = existing_deleted['id'], existing_deleted['version']
@@ -32595,10 +32663,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         update_params_list.append(other_values[i])
                     update_set_parts.extend(["deleted = 0", "last_modified = ?", "version = ?", "client_id = ?"])
                     # WHERE clause params for undelete
-                    undelete_where_params = [item_id, current_version]
+                    undelete_where_params = [item_id, current_version] + list(owner_params)
                     full_undelete_params = tuple(update_params_list + [now, next_version, client_id_to_use] + undelete_where_params)
 
-                    undelete_query = f"UPDATE {table_name} SET {', '.join(update_set_parts)} WHERE id = ? AND version = ?"  # nosec B608
+                    undelete_query = f"UPDATE {table_name} SET {', '.join(update_set_parts)} WHERE id = ? AND version = ?{owner_clause}"  # nosec B608
 
                     row_count_undelete = conn.execute(undelete_query, full_undelete_params).rowcount
                     if row_count_undelete == 0:
@@ -32614,8 +32682,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 item_id_insert = cursor_insert.lastrowid if hasattr(cursor_insert, 'lastrowid') else None
                 if item_id_insert is None and self.backend_type == BackendType.POSTGRESQL:
                     sel = conn.execute(
-                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?",  # nosec B608
-                        (main_col_value,)
+                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?{owner_clause}",  # nosec B608
+                        (main_col_value,) + owner_params
                     )
                     row = sel.fetchone()
                     if row is not None:
@@ -32635,7 +32703,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         return None  # Should not be reached if exceptions are raised properly
 
-    def _get_generic_item_by_id(self, table_name: str, item_id: int) -> dict[str, Any] | None:
+    def _get_generic_item_by_id(self, table_name: str, item_id: int, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by its auto-increment integer ID.
 
@@ -32650,16 +32718,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0{owner_clause}"  # nosec B608
         try:
-            cursor = self.execute_query(query, (item_id,))
+            cursor = self.execute_query(query, (item_id,) + owner_params)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching {table_name} ID {item_id}: {e}")
             raise
 
-    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str) -> dict[str, Any] | None:
+    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by a unique text column value.
         Assumes the column has `COLLATE NOCASE` if case-insensitive search is desired.
@@ -32676,9 +32745,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0{owner_clause}"  # nosec B608
         try:
-            cursor = self.execute_query(query, (value,))
+            cursor = self.execute_query(query, (value,) + owner_params)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as e:
@@ -32698,7 +32768,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _case_insensitive_order_clause(self, column: str, direction: str | None = None) -> str:
         return f"ORDER BY {self._case_insensitive_order_expression(column, direction)}"
 
-    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Lists non-deleted items from a table, with specified ordering.
 
@@ -32725,9 +32795,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             order_expression = self._case_insensitive_order_expression(base.strip(), direction.strip() or None)
 
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE deleted = 0 ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE deleted = 0{owner_clause} ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
         try:
-            cursor = self.execute_query(query, (limit, offset), read_only=True)
+            cursor = self.execute_query(query, owner_params + (limit, offset), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
             logger.error(f"Database error listing {table_name}: {e}")
@@ -32736,7 +32807,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _update_generic_item(self, table_name: str, item_id: int | str,
                              update_data: dict[str, Any], expected_version: int,
                              allowed_fields: list[str], pk_col_name: str = "id",
-                             unique_col_name_in_data: str | None = None) -> bool | None:
+                             unique_col_name_in_data: str | None = None, *, owner_client_id: str | None = None) -> bool | None:
         """
         Internal helper: Updates an item in a table using optimistic locking.
 
@@ -32763,6 +32834,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not update_data:
             raise InputError(f"No data provided for update of {table_name} ID {item_id}.")  # noqa: TRY003
 
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
         now = self._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
@@ -32800,14 +32872,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Values for the WHERE clause
         where_clause_values = [item_id, expected_version]
-        final_query_params = tuple(current_params_for_set_clause + where_clause_values)
+        final_query_params = tuple(current_params_for_set_clause + where_clause_values) + owner_params
 
-        query = f"UPDATE {table_name} SET {', '.join(current_fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"  # nosec B608
+        query = f"UPDATE {table_name} SET {', '.join(current_fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
 
         try:
             with self.transaction() as conn:
                 # Explicit pre-check. _get_current_db_version raises ConflictError if not found or soft-deleted.
-                current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
+                current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id, owner_client_id=owner_client_id)
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -32822,7 +32894,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # This state implies the record was active with expected_version during the _get_current_db_version check,
                     # but was either deleted or its version changed *just before* the UPDATE SQL executed.
                     check_again_cursor = conn.execute(
-                        f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows."
                     if not final_state:
@@ -32863,7 +32935,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None, function should return True or raise.
 
     def _soft_delete_generic_item(self, table_name: str, item_id: int | str,
-                                  expected_version: int, pk_col_name: str = "id") -> bool | None:
+                                  expected_version: int, pk_col_name: str = "id", *, owner_client_id: str | None = None) -> bool | None:
         """
         Internal helper: Soft-deletes an item in a table using optimistic locking.
 
@@ -32885,22 +32957,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         logical_table_name = table_name
         table_name = self._map_table_for_backend(table_name)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
-        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"  # nosec B608
-        params = (now, next_version_val, self.client_id, item_id, expected_version)
+        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE {pk_col_name} = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
+        params = (now, next_version_val, self.client_id, item_id, expected_version) + owner_params
 
         try:
             with self.transaction() as conn:
                 try:
-                    current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
+                    current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id, owner_client_id=owner_client_id)
                     # If we are here, record is active and current_db_version is its version.
                 except ConflictError:
                     # Check if the ConflictError is because it's already soft-deleted.
                     # Query again to be absolutely sure of the 'deleted' status.
                     check_deleted_cursor = conn.execute(
-                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     record_status = check_deleted_cursor.fetchone()
 
                     if record_status and record_status['deleted']:
@@ -32921,7 +32994,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # This means the record (which was active with expected_version) changed state
                     # between the _get_current_db_version check and the UPDATE execution.
                     check_again_cursor = conn.execute(
-                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     changed_record = check_again_cursor.fetchone()
                     if not changed_record:
                         raise ConflictError(  # noqa: TRY003, TRY301
@@ -32961,7 +33034,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None.
 
     def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
-                                  search_term: str, limit: int = 10) -> list[dict[str, Any]]:
+                                  search_term: str, limit: int = 10, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Performs FTS search on tables like keywords, notes, collections.
 
@@ -33002,17 +33075,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 return []
 
+            owner_clause, owner_params = self._selected_owner_filter(owner_client_id, "main")
             fts_column = f"{fts_table_name}_tsv"
             query = """
                 SELECT main.*, ts_rank(main.{fts_column}, to_tsquery('english', ?)) AS rank
                 FROM {main_table_name} main
-                WHERE main.deleted = FALSE
+                WHERE main.deleted = FALSE{owner_clause}
                   AND main.{fts_column} @@ to_tsquery('english', ?)
                 ORDER BY rank DESC, main.last_modified DESC
                 LIMIT ?
             """.format_map(locals())  # nosec B608
             try:
-                cursor = self.execute_query(query, (tsquery, tsquery, limit))
+                cursor = self.execute_query(query, (tsquery,) + owner_params + (tsquery, limit))
                 return [dict(row) for row in cursor.fetchall()]
             except CharactersRAGDBError as exc:
                 logger.error("PostgreSQL FTS search failed for table '{}': {}", main_table_name, exc)
@@ -33050,11 +33124,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             query = """
                 SELECT COUNT(*) AS cnt
                 FROM notes n
-                WHERE n.deleted = FALSE
+                WHERE n.deleted = FALSE AND n.client_id = ?
                   AND n.notes_fts_tsv @@ to_tsquery('english', ?)
             """
             try:
-                cursor = self.execute_query(query, (tsquery,))
+                cursor = self.execute_query(query, (self.client_id, tsquery))
                 row = cursor.fetchone()
                 return int(row["cnt"]) if row else 0
             except CharactersRAGDBError as exc:
@@ -34285,7 +34359,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Linking Table Methods (with manual sync_log entries) ---
     def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
-                     operation: str) -> bool:
+                     operation: str, *, owner_client_id: str | None = None) -> bool:
         """Helper to add ('link') or remove ('unlink') entries from a linking table."""
         now_iso = self._get_current_utc_timestamp_iso()
         sync_payload_dict: dict[str, Any] = {}
@@ -34294,6 +34368,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
+                if owner_client_id is not None and self.backend_type == BackendType.POSTGRESQL:
+                    parents = {
+                        "note_keywords": "notes",
+                        "conversation_keywords": "conversations",
+                        "collection_keywords": "keyword_collections",
+                    }
+                    parent = parents.get(link_table)
+                    if parent is None or col2_name != "keyword_id":
+                        raise InputError("Unsupported scoped keyword link")  # noqa: TRY003
+                    self._require_selected_owner_row(conn, parent, col1_val, owner_client_id)
+                    self._require_selected_owner_row(conn, "keywords", col2_val, owner_client_id)
                 if operation == "link":
                     if self.backend_type == BackendType.POSTGRESQL:
                         query = (
@@ -34439,6 +34524,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return expanded
 
     def _ensure_note_exists_for_folder_sync(self, conn: Any, note_id: str) -> None:
+        self._require_selected_owner_row(conn, "notes", note_id, self.client_id, include_deleted=True)
         row = conn.execute("SELECT id FROM notes WHERE id = ?", (note_id,)).fetchone()
         if row is None:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
@@ -34447,16 +34533,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_path = self._normalize_note_folder_path(folder_path)
         if not normalized_path:
             return None
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
+        lock_clause = " FOR UPDATE" if owner_params else ""
         return self._coerce_mapping_row(
             conn.execute(
-                """
+                f"""
                 SELECT id, path, deleted, version
                   FROM note_folders
-                 WHERE LOWER(path) = LOWER(?)
+                 WHERE LOWER(path) = LOWER(?){owner_clause}
                  ORDER BY deleted ASC, id ASC
-                 LIMIT 1
-                """,
-                (normalized_path,),
+                 LIMIT 1{lock_clause}
+                """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                (normalized_path,) + owner_params,
             ).fetchone()
         )
 
@@ -34465,6 +34553,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not normalized_path:
             raise InputError("Folder path cannot be empty.")  # noqa: TRY003
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         existing_row = self._lookup_note_folder_row_locked(conn, normalized_path)
         if existing_row:
             folder_id = int(existing_row["id"])
@@ -34472,14 +34561,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 now = self._get_current_utc_timestamp_iso()
                 deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
                 conn.execute(
-                    "UPDATE note_folders SET deleted = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ?",
+                    f"UPDATE note_folders SET deleted = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ?{owner_clause}",  # nosec B608
                     (
                         deleted_value,
                         now,
                         int(existing_row.get("version") or 1) + 1,
                         self.client_id,
                         folder_id,
-                    ),
+                    ) + owner_params,
                 )
             return folder_id
 
@@ -34489,8 +34578,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if parent_id is not None:
             parent_row = self._coerce_mapping_row(
                 conn.execute(
-                    "SELECT path FROM note_folders WHERE id = ?",
-                    (parent_id,),
+                    f"SELECT path FROM note_folders WHERE id = ?{owner_clause}",  # nosec B608
+                    (parent_id,) + owner_params,
                 ).fetchone()
             ) or {}
             parent_display_path = self._normalize_note_folder_path(parent_row.get("path")) or parent_path
@@ -34526,17 +34615,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def create_note_folder_path(self, folder_path: str) -> dict[str, Any]:
         """Create or reuse a note folder path and return the active folder row."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
                 folder_id = self._ensure_note_folder_path_locked(conn, folder_path)
                 folder_row = self._coerce_mapping_row(
                     conn.execute(
-                        """
+                        f"""
                         SELECT id, sync_id, name, path, parent_id
                           FROM note_folders
-                         WHERE id = ? AND deleted = ?
-                        """,
-                        (folder_id, self._active_note_folder_deleted_value()),
+                         WHERE id = ? AND deleted = ?{owner_clause}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (folder_id, self._active_note_folder_deleted_value()) + owner_params,
                     ).fetchone()
                 )
                 if folder_row is None:
@@ -34552,13 +34642,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_path = self._normalize_note_folder_path(folder_path)
         if not normalized_path:
             return None
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         cursor = self.execute_query(
-            """
+            f"""
             SELECT id, sync_id, name, path, parent_id
               FROM note_folders
-             WHERE LOWER(path) = LOWER(?) AND deleted = ?
-            """,
-            (normalized_path, self._active_note_folder_deleted_value()),
+             WHERE LOWER(path) = LOWER(?) AND deleted = ?{owner_clause}
+            """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+            (normalized_path, self._active_note_folder_deleted_value()) + owner_params,
             read_only=True,
         )
         row = cursor.fetchone()
@@ -34569,22 +34660,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if limit <= 0:
             return []
         path_order_expr = self._case_insensitive_order_expression("path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = (
             "SELECT id, sync_id, name, path, parent_id "
             "FROM note_folders "
-            "WHERE deleted = ? "
+            f"WHERE deleted = ?{owner_clause} "
             f"ORDER BY {path_order_expr} "  # nosec B608
             "LIMIT ? OFFSET ?"
         )
         cursor = self.execute_query(
             query,
-            (self._active_note_folder_deleted_value(), limit, max(0, offset)),
+            (self._active_note_folder_deleted_value(),) + owner_params + (limit, max(0, offset)),
             read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
     def sync_note_folders(self, note_id: str, folder_paths: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))
+        folder_scope = ""
+        folder_params: tuple[str, ...] = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            folder_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_memberships.folder_id AND owner_folder.client_id = ?)"
+            folder_params = (self.client_id,)
         try:
             with self.transaction() as conn:
                 self._ensure_note_exists_for_folder_sync(conn, note_id)
@@ -34593,8 +34690,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     for folder_path in desired_paths
                 }
                 existing_rows = conn.execute(
-                    "SELECT folder_id FROM note_folder_memberships WHERE note_id = ?",
-                    (note_id,),
+                    f"SELECT folder_id FROM note_folder_memberships WHERE note_id = ?{folder_scope}",  # nosec B608
+                    (note_id,) + folder_params,
                 ).fetchall()
                 existing_ids: set[int] = set()
                 for row in existing_rows:
@@ -34635,6 +34732,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise InputError("source_id must be a positive integer.")  # noqa: TRY003
 
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))
+        folder_scope = ""
+        folder_params: tuple[str, ...] = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            folder_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_source_memberships.folder_id AND owner_folder.client_id = ?)"
+            folder_params = (self.client_id,)
+        key_scope = ""
+        if folder_params:
+            key_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_source_keys.folder_id AND owner_folder.client_id = ?)"
         try:
             with self.transaction() as conn:
                 self._ensure_note_exists_for_folder_sync(conn, note_id)
@@ -34644,12 +34749,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     desired_pairs.append((folder_path, folder_id))
 
                 existing_rows = conn.execute(
-                    """
+                    f"""
                     SELECT folder_id
                       FROM note_folder_source_memberships
-                     WHERE note_id = ? AND source_id = ?
-                    """,
-                    (note_id, int(source_id)),
+                     WHERE note_id = ? AND source_id = ?{folder_scope}
+                    """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    (note_id, int(source_id)) + folder_params,
                 ).fetchall()
                 existing_ids: set[int] = set()
                 for row in existing_rows:
@@ -34676,12 +34781,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
 
                 existing_key_rows = conn.execute(
-                    """
+                    f"""
                     SELECT folder_key
                       FROM note_folder_source_keys
-                     WHERE source_id = ?
-                    """,
-                    (int(source_id),),
+                     WHERE source_id = ?{key_scope}
+                    """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    (int(source_id),) + folder_params,
                 ).fetchall()
                 existing_keys: set[str] = set()
                 for row in existing_key_rows:
@@ -34692,11 +34797,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     existing_keys.add(str(folder_key))
                 for folder_key in existing_keys - desired_keys:
                     conn.execute(
-                        """
+                        f"""
                         DELETE FROM note_folder_source_keys
-                         WHERE source_id = ? AND folder_key = ?
-                        """,
-                        (int(source_id), folder_key),
+                         WHERE source_id = ? AND folder_key = ?{key_scope}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (int(source_id), folder_key) + folder_params,
                     )
 
                 now = self._get_current_utc_timestamp_iso()
@@ -34705,11 +34810,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if not folder_key:
                         continue
                     conn.execute(
-                        """
+                        f"""
                         DELETE FROM note_folder_source_keys
-                         WHERE source_id = ? AND folder_key = ?
-                        """,
-                        (int(source_id), folder_key),
+                         WHERE source_id = ? AND folder_key = ?{key_scope}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (int(source_id), folder_key) + folder_params,
                     )
                     conn.execute(
                         """
@@ -34735,6 +34840,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_note_folders_for_note(self, note_id: str) -> list[dict[str, Any]]:
         order_clause = self._case_insensitive_order_clause("f.path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "f")
+        if owner_params:
+            owner_clause += " AND EXISTS (SELECT 1 FROM notes owner_note WHERE owner_note.id = ? AND owner_note.client_id = ?)"
+            owner_params += (note_id, self.client_id)
         query = """
                 SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
                   FROM note_folders f
@@ -34755,9 +34864,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                           WHERE suppression.note_id = ?
                             AND suppression.folder_id = memberships.folder_id
                    )
+                {owner_clause}
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (note_id, note_id, note_id), read_only=True)
+        cursor = self.execute_query(query, (note_id, note_id, note_id) + owner_params, read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def get_note_folders_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -34766,6 +34876,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         out: dict[str, list[dict[str, Any]]] = {note_id: [] for note_id in note_ids}
         max_vars = 450
         path_order_expr = self._case_insensitive_order_expression("f.path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "f")
+        if owner_params:
+            owner_clause += " AND EXISTS (SELECT 1 FROM notes owner_note WHERE owner_note.id = memberships.note_id AND owner_note.client_id = ?)"
+            owner_params += (self.client_id,)
         for start in range(0, len(note_ids), max_vars):
             batch = note_ids[start:start + max_vars]
             placeholders = ",".join(["?"] * len(batch))
@@ -34789,9 +34903,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                               WHERE suppression.note_id = memberships.note_id
                                 AND suppression.folder_id = memberships.folder_id
                        )
+                     {owner_clause}
                      ORDER BY memberships.note_id, {path_order_expr}
                     """.format_map(locals())  # nosec B608
-            cursor = self.execute_query(query, tuple(batch + batch), read_only=True)
+            cursor = self.execute_query(query, tuple(batch + batch) + owner_params, read_only=True)
             for row in cursor.fetchall():
                 record = dict(row)
                 current_note_id = str(record.pop("note_id"))
