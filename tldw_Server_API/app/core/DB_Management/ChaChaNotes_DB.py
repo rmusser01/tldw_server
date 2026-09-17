@@ -753,7 +753,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
-    _POSTGRES_SCHEMA_VERSION = 67
+    _POSTGRES_SCHEMA_VERSION = 68
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -17696,6 +17696,54 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
         self._sync_postgres_sequences(conn)
 
+    def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
+        """Reserve character names per owner without changing existing rows or IDs."""
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("Character name migration requires PostgreSQL schema V67.")  # noqa: TRY003
+        catalog_query = (
+            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
+            "FROM pg_constraint c "
+            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
+            "GROUP BY c.oid, c.conname"
+        )
+        constraints = self.backend.execute(catalog_query, connection=conn).rows
+        old_keys = [row for row in constraints if row["columns"] == ["name"]]
+        new_key = "character_cards_client_id_name_key"
+        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
+            raise SchemaError("Unexpected character name constraint catalog at PostgreSQL V67.")  # noqa: TRY003
+        self.backend.execute(
+            "ALTER TABLE character_cards ADD CONSTRAINT character_cards_client_id_name_key "
+            "UNIQUE (client_id, name)",
+            connection=conn,
+        )
+        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
+        self.backend.execute(
+            f"ALTER TABLE character_cards DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
+            connection=conn,
+        )
+        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
+        remaining_global_name_key = self.backend.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
+            "WHERE i.indrelid = 'character_cards'::regclass AND i.indisunique "
+            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
+            connection=conn,
+        ).scalar
+        if remaining_global_name_key or not any(
+            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
+            for row in final_constraints
+        ):
+            raise SchemaError("Character owner/name constraint verification failed.")  # noqa: TRY003
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
+            (68, self._SCHEMA_NAME, 67),
+            connection=conn,
+        )
+        if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 68:
+            raise SchemaError("Character name PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
         """Migrate schema from V64 to V65 (character resume snapshot state)."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
@@ -24988,6 +25036,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if target_version >= 67 and current_version < 67:
                 self._migrate_from_v66_to_v67_postgres(conn)
                 current_version = 67
+            if target_version >= 68 and current_version < 68:
+                self._migrate_from_v67_to_v68_postgres(conn)
+                current_version = 68
             self._runtime_schema_version = current_version
 
             if current_version > target_version:
