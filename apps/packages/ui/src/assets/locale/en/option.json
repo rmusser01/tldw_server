@@ -1374,6 +1374,7 @@
     "graphFocusCurrent": "Focus current note",
     "graphExpand": "Expand graph",
     "graphRefresh": "Refresh graph",
+    "graphPermissionUnavailable": "Notes graph is unavailable for this account. Ask an administrator for access.",
     "graphZoomIn": "Zoom in",
     "graphZoomOut": "Zoom out",
     "graphFit": "Fit graph to view",
