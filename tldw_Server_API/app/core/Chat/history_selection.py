@@ -168,7 +168,7 @@ def bind_selected_history_content(
     ):
         raise HistorySelectionError("selected_content_mismatch")
     return tuple(
-        _freeze_json({"id": item["id"], "revision": item["revision"], "message": item["message"], "images": item["images"]})
+        _freeze_json({key: item[key] for key in ("id", "revision", "message", "images", "tool_calls", "extra_metadata") if key in item})
         for item in content
     )
 

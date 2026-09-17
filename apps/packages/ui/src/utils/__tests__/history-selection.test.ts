@@ -121,3 +121,13 @@ it("binds new legacy descendants to only their protected base, including null br
   expect(path(["a", "shared"], "shared", "first")).toEqual(["a", "shared"])
   expect(() => path(["a", "shared"], "y", "first")).toThrow(expect.objectContaining({code: "interpretation_mismatch"}))
 })
+
+it("retains detached historical tool fields in the revision-bound capture", () => {
+  const content = { id: "u1", revision: "1", message: "result", images: [],
+    tool_calls: [{ id: "call", function: { name: "lookup" } }],
+    extra_metadata: { sender_role: "tool", tool_call_id: "call" } }
+  const bound = bindSelectedHistoryContent([rows[0]], [content])
+  content.tool_calls[0].function.name = "changed"
+  expect(bound[0].tool_calls).toEqual([{ id: "call", function: { name: "lookup" } }])
+  expect(bound[0].extra_metadata).toEqual({ sender_role: "tool", tool_call_id: "call" })
+})

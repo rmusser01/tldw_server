@@ -25895,6 +25895,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Skill registry
     # ----------------------
+    def history_skills_may_be_visible(self) -> bool:
+        """Read potential model-visible registry state without creating/syncing tables."""
+        with self.transaction() as conn:
+            if not self.backend.table_exists("skill_registry", connection=conn):
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM skill_registry WHERE deleted = FALSE "
+                "AND user_invocable = TRUE AND disable_model_invocation = FALSE LIMIT 1"
+            ).fetchone()
+            return row is not None
+
     def _ensure_skill_registry_table(self) -> None:
         """Ensure the skill_registry table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
@@ -44392,6 +44403,10 @@ for _message_store_method in (
     "get_conversation_history_snapshot",
     "get_conversation_history_selected_content",
     "confirm_legacy_history_projection",
+    "validate_history_selection",
+    "append_selected_history_input",
+    "append_selected_history_inputs",
+    "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

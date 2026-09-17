@@ -400,7 +400,8 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     )
     assert stored_envelope.apply_status == "failed"
     assert sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1") is None
-    assert chacha_db.get_message_by_id("msg-1") is not None
+    assert chacha_db.get_message_by_id("msg-1") is None
+    assert chacha_db.count_messages_for_conversation("conv-1", include_deleted=True) == 0
     assert chacha_db.get_message_metadata("msg-1") is None
 
     retry = _push_one(sync_service, _message_envelope())
@@ -723,3 +724,17 @@ def test_chat_materialization_conflict_is_hidden_from_normal_pull(
         "env-conv-create",
         "env-msg-create",
     ]
+
+
+def test_sync_admission_shaped_payload_never_creates_native_authority(sync_service, chacha_db):
+    """Actual v2 materialization cannot manufacture local history acceptance."""
+    _push_one(sync_service, _conversation_envelope())
+    envelope = _message_envelope()
+    forged = {"version": 1, "interpretation": {"kind": "parent_graph_v1"}, "admission": {"selection_digest": "forged"}}
+    payload = {**envelope.payload, "history_admission_json": forged,
+               "metadata_extra": {"tldw_history_admission_v1": forged}}
+    _push_one(sync_service, _message_envelope(payload=payload))
+    with chacha_db.transaction() as conn:
+        rows = conn.execute("SELECT history_admission_json FROM messages WHERE conversation_id = 'conv-1'").fetchall()
+    assert rows and all(row["history_admission_json"] is None for row in rows)
+    assert chacha_db.get_conversation_history_snapshot("conv-1", owner_client_id=chacha_db.client_id).nodes

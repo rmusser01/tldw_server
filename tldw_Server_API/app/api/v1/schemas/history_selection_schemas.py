@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
@@ -94,6 +94,7 @@ class HistoryComparisonMetadataV1(HistoryWireModel):
 
 
 class HistoryNodeV1(HistoryMessageRevisionV1):
+    preview: str | None = Field(None, max_length=200)
     legacy_projection_id: str | None = None
     parent_id: str | None
     role: str
@@ -111,13 +112,15 @@ class HistorySelectedContentV1(HistoryMessageRevisionV1):
 
     message: str
     images: tuple[str, ...]
+    tool_calls: list[dict[str, Any]] | None = None
+    extra_metadata: dict[str, Any] | None = None
 
     _freeze_images = field_validator("images", mode="before")(_wire_array)
 
 
 class HistorySelectionSnapshotV1(HistoryWireModel):
     version: Literal[1]
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     fences: HistoryFencesV1
     nodes: tuple[HistoryNodeV1, ...]
@@ -130,7 +133,7 @@ class HistorySelectionSnapshotV1(HistoryWireModel):
 
 class HistoryViewSelectionV1(HistoryWireModel):
     view_session_id: str
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     interpretation: HistoryInterpretationV1
     cursor: HistoryCursorV1
@@ -139,7 +142,7 @@ class HistoryViewSelectionV1(HistoryWireModel):
 
 class HistorySelectionV1(HistoryWireModel):
     version: Literal[1]
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     interpretation: HistoryInterpretationV1
     cursor: HistoryCursorV1
@@ -164,7 +167,7 @@ class CompareHistorySelectionV1(HistoryWireModel):
     """One model's semantic comparison projection and tagged digest."""
 
     version: Literal[1]
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     model_id: str = Field(min_length=1)
     cluster_id: str | None
@@ -193,14 +196,20 @@ ForkInputV1 = Annotated[NormalForkInputV1 | ComparisonForkInputV1, Field(discrim
 
 class ForkRequestV1(HistoryWireModel):
     operation_id: str = Field(min_length=1)
-    owner_key: str
-    destination_owner_key: str
+    owner_key: str = Field(min_length=1)
+    destination_owner_key: str = Field(min_length=1)
     request_digest: str
     input: ForkInputV1
 
 
+class HistoryCaptureViewV1(HistoryViewSelectionV1):
+    """Only a fresh read-only bootstrap may omit its owner namespace."""
+
+    owner_key: str | None = Field(None, min_length=1)
+
+
 class HistoryCaptureRequestV1(HistoryWireModel):
-    view: HistoryViewSelectionV1
+    view: HistoryCaptureViewV1
     purpose: Literal["send", "fork"]
 
 
@@ -237,13 +246,20 @@ class HistoryFailureV1(HistoryWireModel):
     code: str
 
 
-HistoryCaptureResultV1 = Annotated[CapturedHistoryV1 | HistoryFailureV1, Field(discriminator="status")]
+class HistoryCaptureFailureV1(HistoryFailureV1):
+    """Read failures retain the authenticated complete source for explicit review."""
+
+    snapshot: HistorySelectionSnapshotV1
+    view: HistoryViewSelectionV1
+
+
+HistoryCaptureResultV1 = Annotated[CapturedHistoryV1 | HistoryCaptureFailureV1, Field(discriminator="status")]
 
 
 class LegacyHistoryProjectionConfirmV1(HistoryWireModel):
     version: Literal[1]
     projection_id: str = Field(min_length=1)
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     source_digest: str
     fences: HistoryFencesV1
@@ -266,7 +282,7 @@ class LegacyHistoryProjectionV1(LegacyHistoryProjectionConfirmV1):
 
 class HistoryAdmissionReferenceV1(HistoryWireModel):
     version: Literal[1]
-    owner_key: str
+    owner_key: str = Field(min_length=1)
     conversation_id: str
     input_message_id: str
     input_message_revision: str

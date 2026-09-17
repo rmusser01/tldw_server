@@ -107,6 +107,14 @@ export const resolveLegacyProjection = (
 }
 
 /** Bind a separately loaded content payload to the exact captured path. */
+const freezeHistoryMetadata = <T>(value: T): T => {
+  if (value && typeof value === "object") {
+    Object.values(value).forEach(freezeHistoryMetadata)
+    Object.freeze(value)
+  }
+  return value
+}
+
 export const bindSelectedHistoryContent = (
   rows: readonly HistoryNodeV1[], content: readonly HistorySelectedContentV1[]
 ): readonly HistorySelectedContentV1[] => {
@@ -118,7 +126,9 @@ export const bindSelectedHistoryContent = (
     id: item.id,
     revision: item.revision,
     message: item.message,
-    images: Object.freeze([...item.images])
+    images: Object.freeze([...item.images]),
+    ...(item.tool_calls !== undefined ? { tool_calls: freezeHistoryMetadata(structuredClone(item.tool_calls)) } : {}),
+    ...(item.extra_metadata !== undefined ? { extra_metadata: freezeHistoryMetadata(structuredClone(item.extra_metadata)) } : {})
   })))
 }
 

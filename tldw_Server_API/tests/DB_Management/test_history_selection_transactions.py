@@ -442,3 +442,257 @@ def test_storage_context_binds_behavior_without_requiring_character_readiness(hi
         db.get_conversation_history_selected_content(
             cid, [mid], snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY
         )
+
+
+def selected(db, cid, cursor=None):
+    from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+
+    snap = snapshot_to_wire(snapshot(db, cid))
+    result = resolve_history_selection(snap, {
+        "owner_key": OWNER_KEY, "conversation_id": cid,
+        "interpretation": {"kind": "parent_graph_v1"},
+        "cursor": cursor or {"kind": "empty"}, "selection_revision": 3,
+    }, "send", "client-provenance")
+    assert result["status"] == "ready"
+    return result["selection"]
+
+
+def admit(db, cid, selection, mid="accepted-user", **kwargs):
+    return db.append_selected_history_input(
+        cid, selection, {"id": mid, "sender": "user", "content": "new input", **kwargs},
+        owner_client_id="alice", owner_key=OWNER_KEY,
+    )
+
+
+def settle(db, cid, admission, mid="accepted-assistant", **kwargs):
+    reference = {key: admission[key] for key in (
+        "version", "owner_key", "conversation_id", "input_message_id",
+        "input_message_revision", "selection_digest",
+    )}
+    return db.settle_history_admission(
+        cid, reference, {"id": mid, "sender": "assistant", "content": "response", **kwargs},
+        owner_client_id="alice", owner_key=OWNER_KEY,
+    )
+
+
+def test_selected_admission_empty_parent_replay_and_late_settlement(history_db):
+    db, cid = history_db
+    selection = selected(db, cid)
+    accepted = admit(db, cid, selection)
+    assert db.get_message_by_id("accepted-user")["parent_message_id"] is None
+    assert admit(db, cid, selection) == accepted
+    another = admit(db, cid, selected(db, cid), "other-user")
+    assert another["input_message_id"] != accepted["input_message_id"]
+    settle(db, cid, accepted)
+    assert db.get_message_by_id("accepted-assistant")["parent_message_id"] == "accepted-user"
+    assert settle(db, cid, accepted) == "accepted-assistant"
+    with pytest.raises(HistorySelectionError, match="message_id_conflict"):
+        settle(db, cid, another)
+
+
+def test_selected_admission_conflicting_parent_and_stale_source_write_nothing(history_db):
+    db, cid = history_db
+    initial = selected(db, cid)
+    with pytest.raises(HistorySelectionError, match="parent_mismatch"):
+        admit(db, cid, initial, parent_message_id="missing")
+    assert not snapshot(db, cid).nodes
+    root = add(db, cid)
+    selection = selected(db, cid, {"kind": "after_message", "message_id": root})
+    db.update_message(root, {"content": "edited"}, expected_version=1)
+    with pytest.raises(HistorySelectionError, match="stale_selection"):
+        admit(db, cid, selection)
+    assert len(snapshot(db, cid).nodes) == 1
+
+
+def test_selected_admission_rollback_protected_write_and_settlement_parent_edit(history_db, monkeypatch):
+    db, cid = history_db
+    selection = selected(db, cid)
+    store = db.message_store
+    original = store._write_history_authority
+    def fail(*args, **kwargs):
+        raise RuntimeError("protected write failed")
+    monkeypatch.setattr(store, "_write_history_authority", fail)
+    with pytest.raises(RuntimeError, match="protected write failed"):
+        admit(db, cid, selection)
+    assert not snapshot(db, cid).nodes
+    monkeypatch.setattr(store, "_write_history_authority", original)
+    accepted = admit(db, cid, selection)
+    db.update_message("accepted-user", {"content": "edited"}, expected_version=1)
+    with pytest.raises(HistorySelectionError, match="stale_parent"):
+        settle(db, cid, accepted)
+    assert len(snapshot(db, cid).nodes) == 1
+
+
+def test_settlement_survives_settings_but_rejects_workspace_scope_change(history_db):
+    db, cid = history_db
+    accepted = admit(db, cid, selected(db, cid))
+    db.upsert_conversation_settings(cid, {"model": "changed"})
+    settle(db, cid, accepted)
+    db.upsert_workspace("other", "Other")
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET scope_type = 'workspace', workspace_id = 'other' WHERE id = ?", (cid,))
+    with pytest.raises(HistorySelectionError, match="stale_scope"):
+        settle(db, cid, accepted, "late")
+
+
+def test_admitted_tool_metadata_and_assistant_retry_drift(history_db):
+    db, cid = history_db
+    accepted = admit(db, cid, selected(db, cid), extra_metadata={"sender_role": "user", "name": "Alice"})
+    assert db.get_message_metadata("accepted-user")["extra"]["name"] == "Alice"
+    settle(db, cid, accepted)
+    db.update_message("accepted-assistant", {"content": "changed"}, expected_version=1)
+    with pytest.raises(HistorySelectionError, match="message_id_conflict"):
+        settle(db, cid, accepted)
+
+
+def test_history_preview_unicode_and_image_only(history_db):
+    db, cid = history_db
+    text = "😸界" * 150
+    mid = add(db, cid, text)
+    image = add(db, cid, "", images=[{"data": b"one", "mime": "image/png"}])
+    snap = snapshot_to_wire(snapshot(db, cid))
+    assert snap["nodes"][0]["preview"] == text[:200]
+    assert snap["nodes"][1]["preview"] == ""
+    content = db.get_conversation_history_selected_content(cid, [mid, image], snapshot=snapshot(db, cid),
+        owner_client_id="alice", owner_key=OWNER_KEY)
+    assert content[0]["message"] == text
+
+
+def test_history_sqlite_function_follows_real_connection_lifetime(history_db, tmp_path):
+    db, cid = history_db
+    if db.backend_type != BackendType.SQLITE:
+        pytest.skip("SQLite connection lifetime")
+    for _ in range(3):
+        add(db, cid)
+    other = CharactersRAGDB(db_path=str(tmp_path / "second.sqlite"), client_id="alice")
+    other_cid = other.add_conversation({"character_id": 1, "title": "Second"})
+    first_conn, second_conn = db.get_connection(), other.get_connection()
+    snapshot(db, cid, conn=first_conn)
+    cursor = first_conn.execute("SELECT h1_sha256(content) FROM messages")
+    cursor.fetchone()
+    try:
+        snapshot(other, other_cid, conn=second_conn)
+        assert len(snapshot(db, cid, conn=first_conn).nodes) == 3
+        from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageStore
+        assert len(MessageStore(db).get_conversation_history_snapshot(
+            cid, owner_client_id="alice", owner_key=OWNER_KEY, conn=first_conn).nodes) == 3
+    finally:
+        cursor.close()
+        other.close_all_connections()
+
+
+def test_server_input_chain_atomic_acceptance_and_replay(history_db):
+    db, cid = history_db
+    selection = selected(db, cid)
+    accepted = db.append_selected_history_inputs(cid, selection,
+        [{"sender": "user", "content": "question"}, {"sender": "tool", "content": "evidence"}],
+        owner_client_id="alice", owner_key=OWNER_KEY)
+    final = db.get_message_by_id(accepted["input_message_id"])
+    assert final["sender"] == "tool"
+    assert final["parent_message_id"] is not None
+    assert accepted["selection_digest"] == selection["selection_digest"]
+    with pytest.raises(HistorySelectionError, match="selection_already_consumed"):
+        db.append_selected_history_inputs(cid, selection, [{"sender": "tool", "content": "again"}],
+            owner_client_id="alice", owner_key=OWNER_KEY)
+    db.update_message(final["parent_message_id"], {"content": "earlier changed"}, expected_version=1)
+    with pytest.raises(HistorySelectionError, match="stale_parent"):
+        settle(db, cid, accepted)
+    assert db.count_messages_for_conversation(cid) == 2
+
+
+def test_server_input_chain_rolls_back_middle_failure(history_db, monkeypatch):
+    db, cid = history_db
+    selection = selected(db, cid)
+    original = db.message_store.add_message
+    calls = 0
+    def fail_second(data, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("middle input")
+        return original(data, **kwargs)
+    monkeypatch.setattr(db.message_store, "add_message", fail_second)
+    with pytest.raises(RuntimeError, match="middle input"):
+        db.append_selected_history_inputs(cid, selection,
+            [{"sender": "user", "content": "first"}, {"sender": "tool", "content": "second"}],
+            owner_client_id="alice", owner_key=OWNER_KEY)
+    assert not snapshot(db, cid).nodes
+
+
+def test_simultaneous_server_completion_selection_consumed_once(history_db):
+    db, cid = history_db
+    selection = selected(db, cid)
+    barrier = threading.Barrier(2)
+    def run():
+        barrier.wait(timeout=10)
+        try:
+            return db.append_selected_history_inputs(cid, selection, [{"sender": "tool", "content": "same turn"}],
+                owner_client_id="alice", owner_key=OWNER_KEY)
+        except HistorySelectionError as exc:
+            return exc.code
+        finally:
+            db.close_connection()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: run(), range(2)))
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert "selection_already_consumed" in results
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+def test_admission_waits_for_actual_edit_then_rejects_retained_drift(history_db):
+    db, cid = history_db
+    mid = add(db, cid)
+    selection = selected(db, cid, {"kind": "after_message", "message_id": mid})
+    editing, release = threading.Event(), threading.Event()
+    def edit():
+        try:
+            with db.transaction() as conn:
+                db.update_message(mid, {"content": "racing edit"}, expected_version=1, conn=conn)
+                editing.set()
+                assert release.wait(timeout=10)
+        finally:
+            db.close_connection()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        edit_future = pool.submit(edit)
+        assert editing.wait(timeout=10)
+        admission_future = pool.submit(admit, db, cid, selection)
+        release.set()
+        edit_future.result(timeout=10)
+        with pytest.raises(HistorySelectionError, match="stale_selection"):
+            admission_future.result(timeout=10)
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+def test_settlement_retry_rejects_metadata_drift_without_row_version(history_db):
+    db, cid = history_db
+    accepted = admit(db, cid, selected(db, cid))
+    settle(db, cid, accepted, extra_metadata={"sender_role": "assistant"})
+    db.add_message_metadata("accepted-assistant", extra={"sender_role": "assistant", "changed": True})
+    with pytest.raises(HistorySelectionError, match="message_id_conflict"):
+        settle(db, cid, accepted, extra_metadata={"sender_role": "assistant"})
+
+
+def test_settlement_rejects_input_metadata_drift_without_row_version(history_db):
+    db, cid = history_db
+    accepted = admit(db, cid, selected(db, cid), extra_metadata={"sender_role": "user"})
+    db.add_message_metadata("accepted-user", extra={"sender_role": "user", "changed": True})
+    with pytest.raises(HistorySelectionError, match="stale_parent"):
+        settle(db, cid, accepted)
+    assert db.count_messages_for_conversation(cid) == 1
+
+
+def test_skill_visibility_read_does_not_create_registry_and_detects_stale_eligible_rows(history_db):
+    db, _ = history_db
+    with db.transaction() as conn:
+        existed = db.backend.table_exists("skill_registry", connection=conn)
+    assert db.history_skills_may_be_visible() is False
+    with db.transaction() as conn:
+        assert db.backend.table_exists("skill_registry", connection=conn) is existed
+    db._ensure_skill_registry_table()
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO skill_registry (name, directory_path, uuid, user_invocable, disable_model_invocation) "
+                     "VALUES (?, ?, ?, TRUE, TRUE)", ("disabled", "/missing", "disabled-id"))
+    assert db.history_skills_may_be_visible() is False
+    with db.transaction() as conn:
+        conn.execute("UPDATE skill_registry SET disable_model_invocation = FALSE WHERE name = ?", ("disabled",))
+    assert db.history_skills_may_be_visible() is True

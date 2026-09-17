@@ -279,3 +279,41 @@ def test_legacy_descendants_keep_their_protected_base_and_null_branch():
     assert path(["a", "shared"], "shared", "first") == ["a", "shared"]
     with pytest.raises(HistorySelectionError, match="interpretation_mismatch"):
         path(["a", "shared"], "y", "first")
+
+
+def test_selected_content_retains_detached_tool_metadata():
+    from tldw_Server_API.app.core.Chat.history_selection import bind_selected_history_content
+    content = {"id": "tool", "revision": "r", "message": "result", "images": [],
+               "tool_calls": [{"id": "call", "function": {"name": "lookup"}}],
+               "extra_metadata": {"sender_role": "tool", "tool_call_id": "call"}}
+    result = bind_selected_history_content([{"id": "tool", "revision": "r"}], [content])
+    content["tool_calls"][0]["function"]["name"] = "mutated"
+    assert result[0]["tool_calls"][0]["function"]["name"] == "lookup"
+    assert result[0]["extra_metadata"]["tool_call_id"] == "call"
+
+
+def test_bootstrap_owner_is_nullable_but_never_empty_or_optional_on_durable_view():
+    from pydantic import ValidationError
+
+    from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+        HistoryCaptureViewV1,
+        HistoryViewSelectionV1,
+    )
+    view = {"view_session_id": "v", "conversation_id": "c", "interpretation": {"kind": "parent_graph_v1"},
+            "cursor": {"kind": "empty"}, "selection_revision": 0}
+    assert HistoryCaptureViewV1.model_validate(view).owner_key is None
+    with pytest.raises(ValidationError):
+        HistoryCaptureViewV1.model_validate({**view, "owner_key": ""})
+    with pytest.raises(ValidationError):
+        HistoryViewSelectionV1.model_validate(view)
+
+
+def test_versioned_completion_rejects_competing_legacy_continuation_authority():
+    from pydantic import ValidationError
+
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+    selection = json.loads(FIXTURE.read_text())["selection_vectors"][0]["selection"]
+    with pytest.raises(ValidationError, match="continuation"):
+        ChatCompletionRequest(model="test", conversation_id=selection["conversation_id"], save_to_db=True,
+            messages=[{"role": "user", "content": "current"}], tldw_history_selection_v1=selection,
+            tldw_continuation={"from_message_id": "different-anchor", "mode": "branch"})

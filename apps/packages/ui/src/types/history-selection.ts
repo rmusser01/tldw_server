@@ -18,14 +18,15 @@ export type HistoryFencesV1 = { readonly conversation: string; readonly history:
 export type HistoryRequiredReferenceV1 = { readonly id: string; readonly revision: string; readonly kind: string }
 
 export type HistoryNodeV1 = HistoryMessageRevisionV1 & {
-  readonly legacy_projection_id?: string
+  readonly preview?: string | null
+  readonly legacy_projection_id?: string | null
   readonly parent_id: string | null
   readonly role: string
   readonly settled: boolean
-  readonly conversation_id?: string
+  readonly conversation_id?: string | null
   readonly metadata?: readonly HistoryRequiredReferenceV1[]
   readonly assets?: readonly HistoryRequiredReferenceV1[]
-  readonly comparison?: { readonly cluster_id: string; readonly model_id: string | null; readonly common: boolean }
+  readonly comparison?: { readonly cluster_id: string; readonly model_id: string | null; readonly common: boolean } | null
 }
 
 /** Coherently loaded content for one selected manifest member.
@@ -34,6 +35,8 @@ export type HistoryNodeV1 = HistoryMessageRevisionV1 & {
 export type HistorySelectedContentV1 = HistoryMessageRevisionV1 & {
   readonly message: string
   readonly images: readonly string[]
+  readonly tool_calls?: readonly Record<string, unknown>[] | null
+  readonly extra_metadata?: Readonly<Record<string, unknown>> | null
 }
 
 export type HistorySelectionSnapshotV1 = {
@@ -88,7 +91,16 @@ export type HistorySelectionCaptureV1 = {
   readonly purpose: "send" | "fork"
   readonly storage_context_digest: string
 }
-export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | HistoryResolutionFailureV1
+export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | (HistoryResolutionFailureV1 & {
+  readonly snapshot: HistorySelectionSnapshotV1
+  readonly view: HistoryViewSelectionV1
+})
+
+/** Null owner is allowed only for a fresh read-only bootstrap under a verified client lease. */
+export type HistoryCaptureRequestV1 = {
+  readonly view: Omit<HistoryViewSelectionV1, "owner_key"> & { readonly owner_key?: string | null }
+  readonly purpose: "send" | "fork"
+}
 
 export type PreparedHistoryContextV1 = {
   readonly payload: unknown
