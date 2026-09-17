@@ -1,5 +1,7 @@
 # Fresh-install UAT: single-user and multi-user
 
+- **Latest checkpoint:197 unique findings —181 verified,12 awaiting native acceptance,4 unresolved (183/193/194/195).**196 native concise recovery passes.181 HTTP/worker and197 count repairs are committed and independently reviewed.183 reopened for an additional stale historical migration fixture. Character/schema/search unit is frozen for independent review. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-worker-reviewed.json). Restricted-role harness cold-init proof remains in progress; full fresh matrix has not started.
+
 - **Latest reconciliation:197 unique findings —181 verified,10 awaiting native acceptance,6 unresolved (181/193–197).**167/174/175 native acceptance is retained.181 HTTP ownership is committed07e0abf1c4; worker adoption and native replacement remain pending.193/194 ownership/name migration,195 exemplar parameter typing,196 duplicate copy and197 StudyPack counts are being repaired. Final-matrix harness is reopened to enforce a direct non-bypass PostgreSQL runtime role. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-deck-accepted.json).
 
 - **New diagnostic findings:196 unique findings.**195 tracks omitted-filter PostgreSQL exemplar search failure;196 tracks transport detail in otherwise successful duplicate-deck recovery.167/174/175 passed targeted requests and reload; evidence retention/accounting follows. Full fresh UAT remains gated.
@@ -1929,6 +1931,8 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 ## UAT-181 — P1, reopened — PostgreSQL reads block replacement database initialization
 
+- Current status: HTTP ownership07e0abf1c4 and bounded StudyPack job ownership11c9b0a933 are independently reviewed/committed. Author29focused+48adjacent and independent29 pass0skip for the worker/count units. Native replacement and StudyPack acceptance remain pending. [Worker repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-study-worker-reviewed/README.md). Earlier status statements below are historical.
+
 - Current HTTP ownership unit is independently reviewed: author164 tests and independent77 plus4 counterexamples pass with zero skips on exact7-file hashes. Four product paths scope full HTTP and maintenance checkout lifetime, preserving transaction decisions; reviewer cursor/lock/acquisition findings are fixed. Native overlap/replacement and the separately demonstrated StudyPack IDLE executor checkout remain pending, so181 stays unresolved. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-http-ownership-reviewed/README.md).
 
 - Third bounded repair committed3ce1b63d57: four keyword/collection reads, actual whole-Notes chain RED14/30, author92 and independent44 PASS/0skips. Native full Notes bootstrap200 at01:58:57UTC releases all its keyword/collection/Notes locks. All-public-table metadata still shows idle transactions retaining Buddy/source-review locks. Replacement63046 reaches health200 while old61182 drains; new initializer waits on source_review_occurrences and actual Notes/collections/keywords return500 at02:01:34UTC. Notes automatic retry500 at02:01:39UTC. **Stop further per-query patches and reassess transaction/schema lifecycle architecture before another repair.** Evidence `.tmp/uat181-full-native-20260917/` includes exact backend3667-file source manifest, metadata, wire responses and screenshot. [Four-read repair/review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-notes-bootstrap-reviewed/README.md).
@@ -1954,7 +1958,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - The one-line named-column repair passes12 independent required-PG/SQLite controls and28 broader asset tests, separate runs with zero skips. Real router upload/content tests preserve exact valid PNG bytes; native authenticated upload/render/reload remains pending.
 - [Repair and evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup182/README.md).
 
-## UAT-183 — P2, verified — stale Buddy migration test fixtures fail current-schema regression checks
+## UAT-183 — P2, reopened — stale Buddy migration test fixtures fail current-schema regression checks
+
+- Current status: Reopened for one additional stale historical fixture: exemplar21-to22 test relabels a current database as21 and triggers the realv59 Notes registry guard. Nonmutating baseline reproduces it. Actual historical21 construction is under independent review; prior183162+4 evidence remains valid for its original cases. TASK13260.120 tracks the extension. Earlier status statements below are historical.
 
 - Adjacent verification finds158 passes and4 failures, zero skips. All four failures reproduce against unchanged pre181 method bodies. Three tests assert schema66 after current schema advanced to67. The fourth creates a current database, rewrites only its version to39 and drops one table, retaining newer Notes attachment tables; the intentional v59 collision guard then rejects this invalid historical fixture.
 - TASK13260.120 precedes edits. Construct the historical schema accurately, retain seeded-data and explicit v66 storage/RLS checks, and verify current-head upgrade completion. Do not weaken production migration guards or skip these failures. Repeat the complete adjacent suite and independent review before acceptance.
@@ -2058,13 +2064,17 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Actual required-PostgreSQL ownership regressions encounter a separate CharacterStore.search_character_exemplars query error when emotion/scenario are omitted. Driver replay confirms IndeterminateDatatype42P18 at parameter4 for both omitted and supplied filters; each IS NULL placeholder lacks type context. Actual owned-list control succeeds. The earlier explicit-filter positive-control hypothesis was rejected. ExistingTASK16 covered deleted filtering only. No native failure is claimed.
 - TASK13260.133 precedes repair. Preserve filtering, result/count/deleted semantics and SQLite; retain exact driver classification, causal RED and mandatory-PG GREEN, then independent review.
 
-## UAT-196 — P3, open — duplicate deck guidance exposes transport diagnostics
+## UAT-196 — P3, verified — duplicate deck guidance exposes transport diagnostics
+
+- Current status: Verified on479ea9427a: native actual409 concise guidance, same-draft edited-nameRetry deck6/card200 and canonical reload accepted. [Native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native196-duplicate-guidance-accepted/README.md). Earlier status statements below are historical.
 
 - Actual duplicate generated-card save correctly returns409 and offers usable Retry, but the inline error, toast and last-action summary include Entity: decks, ID and POST /api/v1/flashcards/decks. The preserved draft saves successfully after editing the deck name, establishing174/175 behavior while this separate copy issue remains. Native screenshot .tmp/uat167-174-175-native-20260917/duplicate-inline.png.
 - TASK13260.134 owns concise localized duplicate-name guidance at the actual deck-create conflict boundary. Preserve full diagnostic reporting, draft/source/account-scope guards, unrelated errors and edited-name Retry. No generic message stripping or UI-wide error taxonomy rewrite.
 
 
-## UAT-197 — P1, open — PostgreSQL Study Pack card append reads named counts as tuples
+## UAT-197 — P1, implemented; native acceptance pending — PostgreSQL Study Pack card append reads named counts as tuples
+
+- Current status: Implemented and independently reviewed, commit053ff74116. Exactly two named-count accesses, unchangedSQL; actual8PG/SQLite controls and worker persistence pass in independent29/0skip. NativeStudyPack pending. [Repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup197-study-pack-counts-reviewed/README.md). Earlier status statements below are historical.
 
 - Actual StudyPack worker success reaches real add_study_pack_cards and raises KeyError0 at before_row[0]; after_row has the same unaliased COUNT(*) row contract. PostgreSQL returns named count, SQLite retains tuple-compatible COUNT(*). Four persistence controls fail; SQLite success/repeats pass. Separate from181 worker checkout lifetime. No native failure is claimed.
 - TASK13260.135 owns exactly these count reads and actual append/duplicate/rollback controls, preserving SQL/transaction semantics. Shared source regions are coordinated with193/194 schema changes. Evidence .tmp/fresh-uat-recovery-20260916/uat181-study-pack-first-red.redacted.log; corrected lease-specific cancellation accounting is a separate181 harness correction.
