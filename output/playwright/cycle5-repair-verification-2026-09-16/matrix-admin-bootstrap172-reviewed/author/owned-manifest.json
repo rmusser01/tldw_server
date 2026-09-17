@@ -1,0 +1,36 @@
+{
+  "task": "TASK13260.172",
+  "scope": "harness-only explicit supported admin bootstrap",
+  "files": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sha256": "a26b3dc6c6c28b78183c92d101635495eb7fbfb4dea47d56f8e1ab9ff93e578d",
+      "snapshot": ".tmp/uat-next-matrix-20260916/admin172/review-snapshot/matrix-launcher.mjs",
+      "baseline_sha256": "584157e69b2d7be7ed0ab1db15e509f75458c099c5404ac4fa064dbd6e50e1c9"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.test.mjs",
+      "sha256": "5b44d40fab0e26531159838150bbe63bb0fb752325466cc554deae88e7e16f42",
+      "snapshot": ".tmp/uat-next-matrix-20260916/admin172/review-snapshot/matrix-launcher.test.mjs",
+      "baseline_sha256": "91d9c96bd7aa1e11a3f277edc0a7a7dab21bf77779ebf7041e1ae5b0f004016e"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/bootstrap-admin-cell.py",
+      "sha256": "39760bd3df7d7e05913ca24df22adf27afba731778c18cea8fb57cb6bf04894c",
+      "snapshot": ".tmp/uat-next-matrix-20260916/admin172/review-snapshot/bootstrap-admin-cell.py",
+      "baseline_sha256": null
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/test_bootstrap_admin_cell.py",
+      "sha256": "a21b69a7ebd5e27becce71fe467a6dc0a54163c22c409c5bdb5eaaca9da4451f",
+      "snapshot": ".tmp/uat-next-matrix-20260916/admin172/review-snapshot/test_bootstrap_admin_cell.py",
+      "baseline_sha256": null
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/LAUNCHER.md",
+      "sha256": "691a809d6d9fca4f1d244e2f2e34e9699a49776212bbe62bd96ae28ec7e4f88c",
+      "snapshot": ".tmp/uat-next-matrix-20260916/admin172/review-snapshot/LAUNCHER.md",
+      "baseline_sha256": "6acecc2802eea44db2424a32e14c451cb28966504e92b09b4d21cf5af22a2e6a"
+    }
+  ]
+}

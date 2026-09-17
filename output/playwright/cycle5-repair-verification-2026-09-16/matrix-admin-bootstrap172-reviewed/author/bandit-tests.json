@@ -1,0 +1,105 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T11:58:24Z",
+  "metrics": {
+    "./.tmp/uat-next-matrix-20260916/test_bootstrap_admin_cell.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 3,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 108,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 3,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 108,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "15     credentials = tmp_path / \"credentials.private.json\"\n16     account = {\"username\": \"synthetic_admin\", \"password\": \"synthetic-password-only\", \"email\": \"admin@example.invalid\"}\n17     credentials.write_text(json.dumps({\"accountStatus\": \"planned-not-created\", \"accounts\": {\"admin\": account}}))\n",
+      "col_offset": 46,
+      "end_col_offset": 56,
+      "filename": "./.tmp/uat-next-matrix-20260916/test_bootstrap_admin_cell.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'synthetic-password-only'",
+      "line_number": 16,
+      "line_range": [
+        16
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "23         \"receiptPath\": str(receipt),\n24         \"token\": \"this-attempt\",\n25         \"preparationHash\": \"this-preparation\",\n26     }\n27     monkeypatch.setenv(\"AUTH_MODE\", \"multi_user\")\n28     monkeypatch.setenv(\"MATRIX_ADMIN_REQUEST\", json.dumps(request))\n29     calls = []\n30     state = SimpleNamespace(result=True, error=None, origin=source / \"create_admin.py\")\n31 \n",
+      "col_offset": 8,
+      "end_col_offset": 15,
+      "filename": "./.tmp/uat-next-matrix-20260916/test_bootstrap_admin_cell.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'this-attempt'",
+      "line_number": 24,
+      "line_range": [
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "65         \"action\": \"bootstrap-admin\",\n66         \"token\": \"this-attempt\",\n67         \"preparationHash\": \"this-preparation\",\n68     }\n69     assert attempt.receipt.stat().st_mode & 0o777 == 0o600\n70     captured = capsys.readouterr()\n71     assert attempt.account[\"password\"] not in captured.out + captured.err + attempt.receipt.read_text()\n72     assert \"accounts\" not in attempt.receipt.read_text()\n",
+      "col_offset": 8,
+      "end_col_offset": 15,
+      "filename": "./.tmp/uat-next-matrix-20260916/test_bootstrap_admin_cell.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'this-attempt'",
+      "line_number": 66,
+      "line_range": [
+        63,
+        64,
+        65,
+        66,
+        67,
+        68
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    }
+  ]
+}
