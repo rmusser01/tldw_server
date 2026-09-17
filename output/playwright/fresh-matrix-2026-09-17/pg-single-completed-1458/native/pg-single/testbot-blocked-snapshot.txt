@@ -1,0 +1,176 @@
+### Page
+- Page URL: http://127.0.0.1:18682/characters
+- Page Title: Characters | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - generic [ref=f6e4]:
+      - link "Skip to main content" [ref=f6e5] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f6e6]:
+        - button "Expand sidebar" [ref=f6e7] [cursor=pointer]
+        - button "New Chat" [ref=f6e11] [cursor=pointer]
+        - generic [ref=f6e14]:
+          - button "Quick Ingest" [ref=f6e15] [cursor=pointer]
+          - button "Chat" [ref=f6e19] [cursor=pointer]
+          - button "Prompts" [ref=f6e22] [cursor=pointer]
+          - button "Characters" [ref=f6e26] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f6e31] [cursor=pointer]
+          - button "World Books" [ref=f6e35] [cursor=pointer]
+          - button "Notes" [ref=f6e38] [cursor=pointer]
+          - button "Knowledge QA" [ref=f6e42] [cursor=pointer]
+          - button "Media" [ref=f6e50] [cursor=pointer]
+          - button "Document Workspace" [ref=f6e53] [cursor=pointer]
+          - button "Research Workspace" [ref=f6e59] [cursor=pointer]
+          - button "Kanban" [ref=f6e65] [cursor=pointer]
+          - button "Watchlists" [ref=f6e67] [cursor=pointer]
+        - generic [ref=f6e72]:
+          - button "Open Notes Dock" [ref=f6e73] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f6e78] [cursor=pointer]
+          - button "Settings" [ref=f6e81] [cursor=pointer]
+      - main [ref=f6e85]:
+        - generic [ref=f6e86]:
+          - generic [ref=f6e89]:
+            - generic [ref=f6e90]:
+              - button "Expand sidebar" [ref=f6e91] [cursor=pointer]
+              - generic [ref=f6e93]:
+                - img "tldw Assistant" [ref=f6e94]
+                - generic [ref=f6e95]: tldw Assistant
+                - button "Companion Home" [ref=f6e96] [cursor=pointer]
+                - button "Show shortcuts" [ref=f6e100] [cursor=pointer]
+            - generic [ref=f6e103]:
+              - button "Search - Open command palette" [ref=f6e104] [cursor=pointer]:
+                - generic [ref=f6e108]: Search
+                - generic [ref=f6e109]: ⌘K
+              - button "Open settings" [ref=f6e110] [cursor=pointer]
+              - generic [ref=f6e122]:
+                - button "Notifications, 0 unread" [ref=f6e123] [cursor=pointer]
+                - status [ref=f6e127]: Notifications are active
+              - button "Switch to light theme" [ref=f6e128] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f6e135] [cursor=pointer]:
+                - generic [ref=f6e136]: "?"
+          - generic [ref=f6e138]:
+            - generic [ref=f6e139]:
+              - heading "Characters" [level=1] [ref=f6e140]
+              - paragraph [ref=f6e141]: Create reusable characters you can pick from the chat header and reuse across conversations.
+            - generic [ref=f6e142]:
+              - link "Skip to characters content" [ref=f6e143] [cursor=pointer]:
+                - /url: "#characters-main-content"
+              - main [ref=f6e144]:
+                - button [aria-hidden] [ref=f6e149] [cursor=pointer]: Upload character
+                - generic [ref=f6e150]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+                - generic [ref=f6e152]:
+                  - button "New character" [ref=f6e153] [cursor=pointer]
+                  - button "Import character" [ref=f6e155] [cursor=pointer]
+                  - generic [ref=f6e160]:
+                    - textbox "Search characters" [ref=f6e161]
+                    - generic [ref=f6e162]: /
+                  - radiogroup "View mode" [ref=f6e164]:
+                    - generic [ref=f6e165]:
+                      - generic [ref=f6e166] [cursor=pointer]:
+                        - radio [checked]
+                        - generic "Table view" [ref=f6e167]
+                      - generic [ref=f6e170] [cursor=pointer]:
+                        - radio
+                        - generic "Gallery view" [ref=f6e171]
+                  - radiogroup "Character list view" [ref=f6e178]:
+                    - generic [ref=f6e179]:
+                      - generic [ref=f6e180] [cursor=pointer]:
+                        - radio "Active" [checked]
+                        - generic "Active characters" [ref=f6e181]: Active
+                      - generic [ref=f6e182] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic "Recently deleted characters" [ref=f6e183]: Trash
+                  - button "Filters" [ref=f6e184] [cursor=pointer]
+                  - button "Display options" [ref=f6e189] [cursor=pointer]:
+                    - generic [ref=f6e190]: Display
+                - status [ref=f6e193]: 2 characters found
+                - generic [ref=f6e198]:
+                  - table [ref=f6e202]:
+                    - rowgroup [ref=f6e210]:
+                      - row [ref=f6e211]:
+                        - columnheader "Select all on page" [ref=f6e212]:
+                          - checkbox "Select all on page" [ref=f6e215] [cursor=pointer]
+                        - columnheader "Name" [ref=f6e217] [cursor=pointer]
+                        - columnheader "Tags" [ref=f6e228]
+                        - columnheader "Creator" [ref=f6e229] [cursor=pointer]
+                        - columnheader "Activity" [ref=f6e240] [cursor=pointer]
+                        - columnheader "Actions" [ref=f6e251]
+                    - rowgroup [ref=f6e252]:
+                      - row [ref=f6e563]:
+                        - cell "Select E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e564]:
+                          - checkbox "Select E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e567] [cursor=pointer]
+                        - cell [ref=f6e569]:
+                          - button "Edit name inline for E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e579]: E2E-TestBot — PostgreSQL Fresh 20260917
+                        - cell [ref=f6e582]
+                        - cell [ref=f6e583]
+                        - cell "Just now Updated Just now" [ref=f6e584]:
+                          - generic [ref=f6e585]:
+                            - generic [ref=f6e586]: Just now
+                            - generic [ref=f6e587]: Updated Just now
+                        - cell [ref=f6e588]:
+                          - generic [ref=f6e589]:
+                            - button "Chat as E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e590] [cursor=pointer]
+                            - button "Edit character E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e593] [cursor=pointer]
+                            - button "Delete character E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e596] [cursor=pointer]
+                            - button "Add E2E-TestBot — PostgreSQL Fresh 20260917 to favorites" [ref=f6e600] [cursor=pointer]
+                            - button "More actions for E2E-TestBot — PostgreSQL Fresh 20260917" [ref=f6e603] [cursor=pointer]
+                      - row [ref=f6e608]:
+                        - cell "Select Helpful AI Assistant" [ref=f6e254]:
+                          - checkbox "Select Helpful AI Assistant" [ref=f6e257] [cursor=pointer]
+                        - cell [ref=f6e259]:
+                          - generic [ref=f6e266]:
+                            - button "Edit name inline for Helpful AI Assistant" [ref=f6e269]: Helpful AI Assistant
+                            - button "Edit description inline for Helpful AI Assistant" [ref=f6e273]: A default, friendly assistant created automatically by the system.
+                        - cell [ref=f6e276]:
+                          - generic [ref=f6e277]:
+                            - button "default" [ref=f6e278] [cursor=pointer]
+                            - button "neutral" [ref=f6e280] [cursor=pointer]
+                            - button "Show and filter +1 hidden tags" [ref=f6e282]: "+1"
+                        - cell "System" [ref=f6e283]
+                        - cell "28m ago Updated 28m ago" [ref=f6e609]:
+                          - generic [ref=f6e286]:
+                            - generic [ref=f6e287]: 28m ago
+                            - generic [ref=f6e288]: Updated 28m ago
+                        - cell [ref=f6e289]:
+                          - generic [ref=f6e290]:
+                            - button "Chat as Helpful AI Assistant" [ref=f6e291] [cursor=pointer]
+                            - button "Edit character Helpful AI Assistant" [ref=f6e294] [cursor=pointer]
+                            - button "Delete character Helpful AI Assistant" [ref=f6e297] [cursor=pointer]
+                            - button "Add Helpful AI Assistant to favorites" [ref=f6e301] [cursor=pointer]
+                            - button "More actions for Helpful AI Assistant" [ref=f6e304] [cursor=pointer]
+                  - list [ref=f6e309]:
+                    - listitem "Previous Page" [ref=f6e310]:
+                      - button [disabled] [ref=f6e311]:
+                        - img "left" [ref=f6e312]
+                    - listitem "1" [ref=f6e315] [cursor=pointer]
+                    - listitem "Next Page" [ref=f6e317]:
+                      - button [disabled] [ref=f6e318]:
+                        - img "right" [ref=f6e319]
+                    - listitem [ref=f6e322]:
+                      - generic [ref=f6e323]:
+                        - generic [ref=f6e324]:
+                          - generic "10 / page" [ref=f6e325]
+                          - combobox "Page Size" [ref=f6e326]
+                        - img "down" [ref=f6e328]
+    - generic [ref=f6e610]:
+      - dialog "Character chat setup":
+        - generic [ref=f6e611]:
+          - button "Close" [active] [ref=f6e612] [cursor=pointer]:
+            - generic "Close" [ref=f6e613]:
+              - img "close" [ref=f6e614]
+          - generic [ref=f6e617]: Character chat setup
+          - alert [ref=f6e620]:
+            - generic [ref=f6e624]:
+              - paragraph [ref=f6e625]: Choose an available chat model before chatting as E2E-TestBot — PostgreSQL Fresh 20260917
+              - generic [ref=f6e626]: Your character selection and draft are kept. Choose a model from the available chat catalog, then return here to continue with E2E-TestBot — PostgreSQL Fresh 20260917.
+          - generic [ref=f6e627]:
+            - button "Return to character" [ref=f6e628] [cursor=pointer]
+            - button "Retry character chat" [ref=f6e630] [cursor=pointer]
+            - link "Open model settings" [ref=f6e632] [cursor=pointer]:
+              - /url: /settings/model
+  - alert [ref=f6e333]: Characters | tldw
+```
+

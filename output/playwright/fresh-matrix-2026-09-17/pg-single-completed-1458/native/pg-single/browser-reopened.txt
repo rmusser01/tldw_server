@@ -1,0 +1,20 @@
+### Browser `fresh-final-20260917-pg-single` opened with pid 38579.
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18682/flashcards');
+```
+### Page
+- Page URL: http://127.0.0.1:18682/flashcards
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-pg-single/browser-evidence/1789656463758-af9f9327-edfe-4ca8-8c11-223ec5823df2-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-47-44-432Z.log#L1-L2
+
+- generic [active]:
+  - dialog [ref=e1]:
+    - generic [ref=e2]:
+      - progressbar [ref=e3]
+      - status [ref=e7]: Loading...
+      - paragraph [ref=e8]: Please wait while we get things ready.
+      - generic [ref=e9]: Loading...
+  - alert [ref=e10]

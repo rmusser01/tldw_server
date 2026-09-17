@@ -1,0 +1,20 @@
+### Page
+- Page URL: http://127.0.0.1:18682/media
+- Page Title: Media | tldw
+- Console: 0 errors, 68 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f7e1]:
+  - generic [ref=f7e4]:
+    - link "Skip to main content" [ref=f7e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=f7e6]:
+      - generic [ref=f7e11]:
+        - heading "Add your credentials to use Media" [level=2] [ref=f7e12]
+        - paragraph [ref=f7e13]: Your server is reachable, but Media needs valid credentials before it can load.
+        - button "Open Settings" [ref=f7e15] [cursor=pointer]
+  - alert [ref=f7e16]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-48-24-901Z.log#L14-L86
+

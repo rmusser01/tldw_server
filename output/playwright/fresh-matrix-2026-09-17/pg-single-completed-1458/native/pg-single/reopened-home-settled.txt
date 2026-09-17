@@ -1,0 +1,27 @@
+### Page
+- Page URL: http://127.0.0.1:18682/
+- Page Title: Home | tldw
+- Console: 0 errors, 1 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f1e2]:
+  - generic [ref=f1e5]:
+    - link "Skip to main content" [ref=f1e6] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=f1e7]:
+      - region [ref=f1e10]:
+        - generic [ref=f1e16]:
+          - heading "Restore media access" [level=2] [ref=f1e17]
+          - paragraph [ref=f1e18]: First chat is complete, but the WebUI needs a working server key before it can add sources.
+          - paragraph [ref=f1e19]: If automatic WebUI access is disabled or unavailable, enter the SINGLE_USER_API_KEY configured for this server. Find it in the server's environment configuration or ask its operator.
+        - generic [ref=f1e20]:
+          - generic [ref=f1e21]: Single-user API key
+          - generic [ref=f1e22]:
+            - textbox "Single-user API key" [ref=f1e23]
+            - button "Save API key" [ref=f1e24] [cursor=pointer]
+            - button "Retry" [ref=f1e25] [cursor=pointer]
+  - alert [ref=f1e1]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-48-24-901Z.log#L3
+

@@ -1,0 +1,13 @@
+### Result
+{"at":"2026-09-17T14:10:55.018Z","body":"Skip to main content\n\nSOLO ONBOARDING\n\nFirst-time setup\n\nConfigure the minimum needed to reach a successful first chat.\n\nSkip for now\nSetup readiness\n\nChat must be ready. RAG and speech can be configured later.\n\nRetry\n\nChat\n\nFirst-chat lane\n\nready with warnings\nChat details\n\nEmbeddings/RAG\n\nOptional lane\n\nready with warnings\nEmbeddings/RAG details\n\nSpeech\n\nOptional lane\n\nready with warnings\nSpeech details\nFirst chat\n\nCompletion requires an actual successful response from llamacpp.\n\nDefault chat target\nllamacpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nFirst prompt\nBack to MCP tools\nSending..."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Skip MCP tools",exact:true}).click(); await page.getByRole("textbox",{name:"First prompt",exact:true}).fill("Say exactly: fresh PostgreSQL single-user ready."); await page.getByRole("button",{name:"Send test chat",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/
+- Page Title: Home | tldw
+- Console: 0 errors, 5 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-06-41-484Z.log#L11-L12
+

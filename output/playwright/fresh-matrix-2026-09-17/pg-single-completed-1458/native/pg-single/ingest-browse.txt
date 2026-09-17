@@ -1,0 +1,9 @@
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Quick Ingest",exact:true}).first().click(); await page.getByRole("button",{name:"Browse files",exact:true}).click(); })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/chat
+### Modal state
+- [File chooser]: can be handled by upload
+

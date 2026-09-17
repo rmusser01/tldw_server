@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T14:10:17.034Z","body":"Skip to main content\n\nSOLO ONBOARDING\n\nFirst-time setup\n\nConfigure the minimum needed to reach a successful first chat.\n\nSkip for now\nSetup readiness\n\nChat must be ready. RAG and speech can be configured later.\n\nRetry\n\nChat\n\nFirst-chat lane\n\nready with warnings\nChat details\n\nEmbeddings/RAG\n\nOptional lane\n\nready with warnings\nEmbeddings/RAG details\n\nSpeech\n\nOptional lane\n\nready with warnings\nSpeech details\nOptional advanced setup\n\nRAG and storage paths are optional for the first chat.\n\nRAG and embeddings\nConfigure after setup\nDefer\nSkip\nStorage paths\nConfigure after setup\nDefer\nSkip\nBack\nSaving..."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Continue",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+

@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T14:55:52.734Z","body":"- main:\n  - alert:\n    - text: Unavailable\n    - heading \"Backend readiness check failed\" [level=2]\n    - text: The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing.\n    - group: Diagnostics\n    - button \"Retry\"\n    - button \"Health & diagnostics\"\n    - button \"Server settings\"\n- alert"}
+### Ran Playwright code
+```js
+await (async page=>{await page.reload();await page.getByText("Backend readiness check failed",{exact:false}).first().waitFor({timeout:20000});return {at:new Date().toISOString(),body:await page.locator("body").ariaSnapshot()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/flashcards
+- Console: 9 errors, 0 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-48-24-901Z.log#L148-L182
+

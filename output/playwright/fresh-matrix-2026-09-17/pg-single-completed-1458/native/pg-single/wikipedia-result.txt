@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T14:23:55.328Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nMedia Inspector\nTrash\nRESULTS\n0 / 0\nGet started — ingest your first content\n\nPaste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.\n\nIngest\nSkip for now\nQuick Ingest\nAdd\n1 items\nConfigure\nCustom\nReview\nReviewed\nProcessing\nResults\nReview failed items\nExport failed list\nFAILED DURING PROCESSING (1)\nhttps://en.wikipedia.org/wiki/Playwright_(software)\n\nThe website or the server's outbound access policy blocked this source. Use an accessible source or upload a copy you are permitted to use.\n\nAccess blocked\n\nTotal: 0 succeeded, 1 failed\n\nIngest More\nDone","events":[{"event":"request","at":"2026-09-17T14:23:36.021Z","url":"http://127.0.0.1:18682/api/v1/media/process-web-scraping","method":"POST","body":{"scrape_method":"Individual URLs","url_input":"https://en.wikipedia.org/wiki/Playwright_(software)","mode":"persist","summarize_checkbox":false,"perform_chunking":true,"chunking_mode":"auto","auto_chunking_goal":"balanced"}},{"event":"response","at":"2026-09-17T14:23:36.935Z","bodyReadAt":"2026-09-17T14:23:36.940Z","url":"http://127.0.0.1:18682/api/v1/media/process-web-scraping","status":200,"body":{"status":"persist-ok","media_ids":[],"total_articles":1,"stored_articles":0,"skipped_articles":0,"duplicate_articles":0,"method":"Individual URLs","errors":["Source access was blocked by the website or outbound access policy."],"extraction_failures":[{"code":"source_access_denied"}],"task_id":"scrape_00113cd7"}}]}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Close the ingest wizard",exact:true}).waitFor({timeout:20000}); const result={at:new Date().toISOString(),body:await page.locator("body").innerText(),events:page.__matrixEvents.filter(e=>e.at>"2026-09-17T14:22:00")}; await page.getByRole("button",{name:"Close the ingest wizard",exact:true}).click(); await page.getByRole("button",{name:"Notes",exact:true}).click(); return result; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/notes
+- Page Title: Notes | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-06-41-484Z.log#L43-L46
+

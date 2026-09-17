@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 14:03'
+updated_date: '2026-09-17 15:11'
 labels:
   - uat
   - testing
@@ -196,6 +196,14 @@ Fresh matrix released at frozen8f8774e6c868b304a96d95ab82e28389c129a78b after al
 2026-09-17 13:31UTC: Frozen fresh matrix8f877 continues. New231–235 unresolved; no product changes. SQLite single setup/Chat/source workflows recorded, row7 exact pirate Prompt save/sync/application/realARRR/reload passes. Biology generation blocked234 at30s proxy; one ordinary retry also fails. Row9 clean Note/backlink/card/practice/scheduled/reload supported; re-rate intentionally adds event but displays stale interval235. Three other cells including bothPG still pending. Partial native/preparation/audit evidence retained under output/playwright/fresh-matrix-2026-09-17/sqlite-single-checkpoint-1331;201files, known-credential scan0. Independent packet verification underway.
 
 Fresh frozen8f877 SQLite-single rows10/11 now complete with independent24-input audit SHA6dedca29d37349c38f96684504e0f3b8f38490058d1fd69b3f62fc0c00aedcb9. Analysis saves ONE/TWO, stream failure recovers THREE, both-failed controls preserve THREE/version4 with visible error and canonical reload. Sole-item Delete204, active0/0, datedTrash, Restore200 preserve source and four version records. Original mediaUUID is not re-emitted, ID1/versionUUID evidence retained. New UAT237/TASK13260.179 logs duplicate search notifications on intentionally disconnected Media.237total/230priorverified/7newunresolved. Row2 reconnect succeeds; same-profile owned API outage/restart ongoing. Other cells pending; no full signoff.
+
+SQLite completed evidence committed8902cdb418; all69 delta payloads and merged51 matrix refs independently verified. PostgreSQL-single now initialized through officialfixtures with non-superuser/non-BYPASSRLS direct runtime, real first-chat and ordinary2turn+Retry+canonical5to7 pass (audit e143ed33c22cf11b9dd25d0ac874f45f62a4fcaa04f27b99c5252dc246b1e11e). Fresh media ingestion exposes UAT238/TASK13260.180: actual INSERT RLS violation, no sourceID, source-dependent rows4/10/11 blocked. ExactWiki alsoaccessdenied. Independent Notes save201 succeeds; five-card generation in progress.238total/230previousverified/8newopen. Frozen8f877 unchanged.
+
+Fresh PG-single row9 partially complete: clean Pirate answer note/card provenance, source Note link, practice OFF no review request, scheduled Good then re-rate Hard reproduces235 (6-day preview vs14-day save); reload3 reviews. Browser unexpectedly absent after14:41 practice; reopened fresh, normal key entry recovered data. Not uninterrupted session proof. Independent239 audit5ac41254 confirms catalogue context-manager defect, distinct prior214. Product source frozen8f877. Connection recovery now in progress.
+
+Fresh PG-single12 rows now accounted: normal Disconnect/reload/key re-entry/connection test pass; owned API outage14:55:14, port refusal14:55:33, readiness failure UI, same-profile API40346 and Retry14:56:46 restore3 reviews/October1 due with no re-entry. Ingest238 blocks source-dependent4/10/11; Wiki externally denied;234 exact-five-card blocked;236/239 Character fails;235 re-rate preview. Evidence retention next; both fresh multi cells not started. No full acceptance.
+
+PG-single125-payload evidence checkpoint independently retained/reviewed, all48 row paths resolved; manifest5d0f60e143811af5d45cfc575ef6b5753aa6e51d391e6a23d5daaecaa9e09652. New240/.182 Hard analytics identified; total240/230 prior verified/10open. SQLite-multi normal initializer/bootstrap0; native admin1 login, Alice2/Bob3 created roleuser. Alice separate context parked15:07:52 with actual login15:07:07.498/lifetime1800, return after15:37:17.498. Native Model settings requires operator provider; isolated config updated actual9099 model and same API restarted45087. No app-source edits. Bandit N/A evidence-only checkpoint.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

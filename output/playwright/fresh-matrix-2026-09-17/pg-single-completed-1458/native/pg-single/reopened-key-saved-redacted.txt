@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T14:48:49.854Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications require sign in\n?\nCompanion\n\nLoading your companion home dashboard.\n\nQuick actions\n\nJump to the main features.\n\nOpen Chat\n\nContinue active work in the main chat workspace.\n\nOpen Knowledge\n\nReview sources, notes, and captured knowledge from the main workspace.\n\nOpen Analysis\n\nReview and compare media from the main workspace."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole('textbox',{name:'Single-user API key',exact:true}).fill("[REDACTED]"); await page.getByRole('button',{name:'Save API key',exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator('body').innerText()}; })(page);
+```
+

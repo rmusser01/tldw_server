@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T14:54:26.957Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nStudy workspace\nFlashcards\nStudy\nManage\nImport / Export\nTemplates\nScheduler\nStudy\nManage\nImport / Export\nTemplates\nScheduler\nTest with Quiz\nSelect deck\nDue only\nCram\nFront first\nBack first\nSource reviews\nNo source reviews due\nSchedule\nReviewed today\n3\nRetention rate\n66.7%\nLapse rate\n33.3%\nAvg answer time\n26.9s\nStudy streak\n1 day\nYou're all caught up!\nNo cards are due for review. Great job!\nNext review: in 14 days\nThursday, October 1 at 7:51 AM · 1 card due within the following hour\nPractice again\nCreate more cards\nRecent study sessions\nAll decks\nView completed session\nCompleted\nCram review\n1 card reviewed\nCompleted 2026-09-17 07:51\nAll decks\nView completed session\nCompleted\nCram review\n1 card reviewed\nCompleted 2026-09-17 07:49\nAll decks\nView completed session\nCompleted\nDue review\n1 card reviewed\nCompleted 2026-09-17 07:40"}
+### Ran Playwright code
+```js
+await (async page=>{await page.goto("http://127.0.0.1:18682/flashcards");await page.getByText("Reviewed today",{exact:true}).waitFor({timeout:15000});return {at:new Date().toISOString(),body:await page.locator("body").innerText()};})(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/flashcards
+- Page Title: Flashcards | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-48-24-901Z.log#L146-L147
+

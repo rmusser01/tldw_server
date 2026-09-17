@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Fresh-run findings:237 total —230 previously verified,7 new unresolved (231–237).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
+- **Fresh-run findings:240 total —230 previously verified,10 new unresolved (231–240).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
 
 - **Fresh matrix running:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations; SQLite single-user setup and Chat are underway. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
 
@@ -2485,6 +2485,8 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 ## UAT-235 — P2: Re-rate shows stale scheduling intervals
 
+- PostgreSQL fresh-single reproduction: Good200 saved10days/version3 with next Hard14days; native re-rate showed Hard6days; actual Hard200 saved14days/version4. Reload retained3 reviews/sessions. Evidence native/pg-single/study-rerate-observed.txt and study-rerate-reloaded.txt in current packet.
+
 - Status: open, TASK13260.177; frozen product source unchanged.
 - Scheduled Cram Good returns200/version3/10-day interval at13:16:55UTC, including authoritative next Hard14days. Native Re-rate immediately restores a view showing Hard6days/Good10days/Easy13days from the earlier version. Clicking Hard returns200/version4/14days at13:21:59; normal reload confirms October1 due date and three scheduled review events.
 - Re-rate intentionally adds a scheduling event rather than undoing the prior one; the third review/session is expected. The defect is the displayed six-day prediction for the actual fourteen-day result. One practice-only rating generated no review POST and left scheduling unchanged.
@@ -2504,3 +2506,27 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Reconnect through the visible Open Settings → API Key → Save → Test Connection succeeds with Core reachable/RAG healthy. Wrong recovery-form helper timed out before mutation; retained as a harness error, not a product failure. No frozen code changes; unresolved.
 
 - UAT237 independent diagnosis SHA bf5a555ace2e0dfe22fe9213284b4503962f5fd0bdaedb266f3e074191dbd3c8: initial SEARCHING→testing bypass mounts Media search before credential readiness; manual search and uncancelled type-loader refetch callbacks can notify after the credential gate. Three UI notifications are proven, not three HTTP requests.15 frozen source/history hashes and6 native inputs. Bounded readiness/lifetime repair remains pending.
+
+## UAT-238 — P1: Fresh PostgreSQL ingest violates media row-level security
+
+- TASK13260.180. Native PostgreSQL single-user Quick Ingest uploads the same public1914-character Rowan source with real analysis/chunking. Job1 UUIDfca92acb-398f-41c8-8379-7376cc655615 preserves progress through minimize/reopen, then reports Warning/no media ID; UI correctly shows0succeeded1failed after50seconds.
+- Actual database server log14:19:51.337UTC: new row violates row-level security policy for table media on INSERT INTO Media, including owner_user_id. Runtime role is directly authenticated, non-superuser/non-BYPASSRLS. No source bypass, direct DB insert or elevated app role is used.
+- Expected: ordinary supported ingest supplies the required owner context and persists source/chunks. Source-dependent QA/reanalysis/Trash acceptance is blocked pending repair. Duplicate provider-analysis warning also reproduces233; its analysis failure does not excuse the separate persistence failure.
+- Evidence: .tmp/uat-next-matrix-20260916/native/pg-single/ingest-observation.txt, ingest-postgres-error-log.txt, ingest-database-error-log-excerpt.txt and ingest-failed-media-catalogue.txt. Source diagnosis ongoing; frozen source unchanged.
+
+- UAT234 PostgreSQL reproduction: exact5 request14:27:02.421→browser50014:27:32.434 (30.013s), while real backend200 completes39.103s. Biology Noteff7eb702-0e0f-4d38-8ced-dea50f180655 saved201; no generateddraft/deck/5cardStudy. Same proxy-budget defect, not a new issue.
+- UAT238 independent diagnosis0757595c34de959537effe3ad5ea772d4165d20c1a84304ba068acb1000ecc76: correct job/client/derived row owner1, absent content scope across worker/executor; backend defaults empty app.current_user_id. This last value is source-inferred, not a captured native GUC.21 matching frozen source/history hashes and5 nativeinputs; no RLS weakening or role bypass.
+
+## UAT-239 — P2: PostgreSQL world-book catalogue still uses an unsupported context manager
+
+- TASK13260.181. Fresh Character editor GET /characters/world-books?include_disabled=true returns500 twice14:33:37/38UTC. Safe logs identify WorldBookManager.list_world_books using with self.db.get_connection() on BackendConnectionWrapper, which does not implement that context manager.
+- Prior214/TASK13260.153 explicitly repaired get_character_world_books and entry-count reads; other legacy CRUD was left unverified. This new catalogue path is a separate observed residual, not a regression of the original214 accepted scenario.
+- TestBot itself creates201 as Character3; its library Chat is separately blocked by236. World-book selection in the editor is not certified. Native testbot-entry-result.txt and worldbook-error-excerpt.json retained. No frozen source edits.
+
+## UAT-240 — P2: Hard recall is incorrectly counted as a lapse in Study analytics
+
+- Open, TASK13260.182. Fresh PostgreSQL card has three reviews: Easy, Good (API rating3), Hard (rating2). Hard returns200 with successful schedule advancement to14days, repetitions3 and lapses0, but analytics reports retention66.7% and lapse33.3%. Before Hard, retention was100%.
+- The source analytics uses rating<3 rather than the scheduler outcome was_lapse already saved with each review. Current SM-2+/FSRS semantics and Study Guide define Hard as recalled with effort, not forgetting. Numeric shortcut positions are not API rating values; Again0/Hard2/Good3/Easy5 are documented API values.
+- Evidence native/pg-single/study-rerate-reloaded.txt and auth-outage-recovered.txt. This is a distinct analytics bug from235 stale preview. Repair must verify actual lapse and successful recall metrics on SQLite and PostgreSQL and define legacy-row handling; frozen source remains unchanged.
+
+- UAT237 also reproduced in fresh PG-single: auth-reconnect-form.txt captures the three redundant notices after normal disconnected Media→Open Settings; timing and request count are not inferred. Independent late-native audit a3db52f87d6524149050801a7a721866e0d4e7234d01a8600a6003c04c020301 binds49 inputs. UAT240 independent source diagnosis e7b3c05f7f6bab83c011955b0a05bc6948a525239e814326654d16fbf5092e7b binds12 frozen files and two native captures.

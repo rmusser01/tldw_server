@@ -1,0 +1,15 @@
+/Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/session.js:60
+      throw new Error(`Browser '${this.name}' is not open. Run
+            ^
+
+Error: Browser 'fresh-final-20260917-pg-single' is not open. Run
+
+  playwright-cli -s=fresh-final-20260917-pg-single open
+
+to start the browser session.
+    at Session.run (/Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/session.js:60:13)
+    at async runInSession (/Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/program.js:270:18)
+    at async program (/Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/program.js:254:20)
+
+Node.js v24.6.0
+

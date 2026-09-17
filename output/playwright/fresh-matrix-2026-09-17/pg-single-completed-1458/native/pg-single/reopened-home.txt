@@ -1,0 +1,12 @@
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18682/');
+```
+### Page
+- Page URL: http://127.0.0.1:18682/
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-pg-single/browser-evidence/1789656504773-8c118995-bb5a-45ff-aca4-a17b4691c020-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-48-24-901Z.log#L1-L2
+
+- alert [ref=f1e1]

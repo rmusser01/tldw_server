@@ -1,0 +1,29 @@
+### Error
+TimeoutError: locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'New note', exact: true })
+    - locator resolved to <button type="button" aria-label="New note" class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-circle ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-icon-only flex items-center justify-center">…</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    58 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+
+

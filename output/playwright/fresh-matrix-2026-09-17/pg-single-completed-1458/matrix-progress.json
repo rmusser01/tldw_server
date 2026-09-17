@@ -1,0 +1,504 @@
+{
+  "at": "2026-09-17T15:00:50.020Z",
+  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "runId": "fresh-final-20260917",
+  "phase": "SQLite multi-user startup; PG single evidence retention",
+  "rows": [
+    {
+      "row": 1,
+      "journey": "Fresh setup, provider discovery and first real Chat",
+      "cells": {
+        "sqlite-single": {
+          "status": "Functional pass; UX issue UAT-231",
+          "evidence": [
+            "native/sqlite-single/setup-snapshot.txt",
+            "native/sqlite-single/provider-validate.txt",
+            "native/sqlite-single/provider-selected-validate.txt",
+            "native/sqlite-single/provider-save.txt",
+            "native/sqlite-single/first-chat-result.txt",
+            "native/sqlite-single/key-save-redacted.txt",
+            "native/sqlite-single/chat-turn1-result.txt"
+          ],
+          "issues": [
+            "UAT-231"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Functional pass; UX UAT-231",
+          "issues": [
+            "UAT-231"
+          ],
+          "evidence": [
+            "native/pg-single/startup-summary.json",
+            "native/pg-single/setup-snapshot.txt",
+            "native/pg-single/provider-discovered-snapshot.txt",
+            "native/pg-single/provider-selected-validation.txt",
+            "native/pg-single/first-chat-result.txt",
+            "native/pg-single/key-save-redacted.txt",
+            "native/pg-single/chat-turn1-result.txt"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 2,
+      "journey": "Authentication reload, disconnect/logout, outage recovery and natural expiry",
+      "cells": {
+        "sqlite-single": {
+          "status": "Functional pass; UX UAT-237",
+          "issues": [
+            "UAT-237"
+          ],
+          "evidence": [
+            "native/sqlite-single/auth-disconnect-snapshot.txt",
+            "native/sqlite-single/auth-disconnected-media-snapshot.txt",
+            "native/sqlite-single/auth-reconnected-settings-redacted.txt",
+            "native/sqlite-single/auth-reconnected-media.txt",
+            "native/sqlite-single/auth-outage-stop.json",
+            "native/sqlite-single/auth-outage-port.json",
+            "native/sqlite-single/auth-outage-snapshot.txt",
+            "native/sqlite-single/auth-outage-recovered.txt"
+          ],
+          "limits": [
+            "JWT natural expiry is not applicable to API-key single-user mode",
+            "Normal Disconnect is connection-only; local Chat erasure is not claimed"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Functional pass; UX UAT-237; JWT expiry N/A",
+          "evidence": [
+            "native/pg-single/auth-settings.txt",
+            "native/pg-single/auth-disconnect-current.txt",
+            "native/pg-single/auth-reconnected-redacted.txt",
+            "native/pg-single/auth-reconnected-study.txt",
+            "native/pg-single/auth-outage-stop.json",
+            "native/pg-single/auth-outage-port.json",
+            "native/pg-single/auth-outage-ui.txt",
+            "native/pg-single/auth-outage-recovered.txt",
+            "native/pg-single/auth-reconnect-form.txt"
+          ],
+          "limits": [
+            "JWT expiry not applicable to API-key mode",
+            "Earlier browser closure/reopening recorded separately",
+            "Three redundant notices captured at recovery form; precise duration/request count unproven"
+          ],
+          "issues": [
+            "UAT-237"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 3,
+      "journey": "Two-turn Chat persistence and real provider failure/Retry",
+      "cells": {
+        "sqlite-single": {
+          "status": "Core pass; UX issue; qualified image/visibility limits",
+          "issues": [
+            "UAT-232"
+          ],
+          "evidence": [
+            "native/sqlite-single/chat-retry-final-evidence.txt",
+            "native/sqlite-single/image-final-evidence.txt"
+          ],
+          "limits": [
+            "Controlled real backend model availability400, not upstream generation failure",
+            "Actual PNG guard/Retry/reload only; no successful vision inference",
+            "True-hidden visibility not yet certified"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Core pass; UX UAT-232; image guard check in progress",
+          "issues": [
+            "UAT-232"
+          ],
+          "evidence": [
+            "native/pg-single/chat-two-turn-settled.txt",
+            "native/pg-single/chat-controlled-failure.txt",
+            "native/pg-single/chat-retry.txt",
+            "native/pg-single/chat-retry-reloaded.txt"
+          ],
+          "limits": [
+            "Controlled real backend availability failure rather than upstream outage",
+            "Vision inference and true-hidden visibility not certified"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 4,
+      "journey": "Synthetic file ingestion, search, cited QA and Media-to-Chat",
+      "cells": {
+        "sqlite-single": {
+          "status": "Core pass; analysis warning; API issue233",
+          "issues": [
+            "UAT-233"
+          ],
+          "evidence": [
+            "native/sqlite-single/ingest-terminal-evidence.txt",
+            "native/sqlite-single/knowledge-query-evidence.txt",
+            "native/sqlite-single/knowledge-citation-excerpt.txt",
+            "native/sqlite-single/media-source-chat-result.txt",
+            "native/sqlite-single/source-chat-reloaded-snapshot.txt"
+          ],
+          "limits": [
+            "Initial ingest analysis truncated; source and chunks saved, separate row10 pending"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Fail: media RLS insertion rejected; dependent source workflow blocked",
+          "issues": [
+            "UAT-238",
+            "UAT-233"
+          ],
+          "evidence": [
+            "native/pg-single/ingest-start-minimize-resume.txt",
+            "native/pg-single/ingest-observation.txt",
+            "native/pg-single/ingest-postgres-error-log.txt",
+            "native/pg-single/ingest-failed-media-catalogue.txt"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 5,
+      "journey": "Exact Playwright Wikipedia URL ingestion and grounded QA",
+      "cells": {
+        "sqlite-single": {
+          "status": "Blocked: external source access denied",
+          "evidence": [
+            "native/sqlite-single/wikipedia-review.txt",
+            "native/sqlite-single/wikipedia-ingest-start.txt",
+            "native/sqlite-single/wikipedia-ingest-observation.txt"
+          ],
+          "limits": [
+            "Exact source access denied; stored0/media_ids empty; dependent search and QA blocked without substitute"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Blocked: external source access denied",
+          "evidence": [
+            "native/pg-single/wikipedia-start.txt",
+            "native/pg-single/wikipedia-result.txt"
+          ],
+          "limits": [
+            "Exact Wikipedia source denied; media_ids empty/stored0; dependent search/QA blocked without substitute"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 6,
+      "journey": "Biology Note to five generated cards and five-card Study",
+      "cells": {
+        "sqlite-single": {
+          "status": "Fail; repeated on one unchanged retry; dependent five-card Study blocked",
+          "issues": [
+            "UAT-234"
+          ],
+          "evidence": [
+            "native/sqlite-single/biology-generate-failure-evidence.txt",
+            "native/sqlite-single/flashcard-failure-log-excerpt.json",
+            "native/sqlite-single/biology-generation-retry-evidence.txt",
+            "audits/sqlite-single-five-card-diagnosis.md"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Fail UAT-234; exact five-card draft/save/study blocked",
+          "issues": [
+            "UAT-234"
+          ],
+          "evidence": [
+            "native/pg-single/biology-note-canonical.txt",
+            "native/pg-single/biology-generate-start.txt",
+            "native/pg-single/biology-generate-result.txt",
+            "native/pg-single/biology-generation-log-excerpt.txt"
+          ],
+          "limits": [
+            "Browser500at30.013s; real backend200after39.103s; no five-card draft/deck saved"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 7,
+      "journey": "Pirate Prompt application, real response and reload",
+      "cells": {
+        "sqlite-single": {
+          "status": "Pass",
+          "evidence": [
+            "native/sqlite-single/pirate-prompt-save.txt",
+            "native/sqlite-single/pirate-use-in-chat.txt",
+            "native/sqlite-single/pirate-apply-system.txt",
+            "native/sqlite-single/pirate-chat-result.txt",
+            "native/sqlite-single/pirate-reloaded-evidence.txt"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Pass",
+          "evidence": [
+            "native/pg-single/pirate-save-state.txt",
+            "native/pg-single/pirate-use-in-chat.txt",
+            "native/pg-single/pirate-chat-send.txt",
+            "native/pg-single/pirate-reloaded-evidence.txt"
+          ],
+          "limits": [
+            "Premature harness Back click before save settled caused unsaved-change confirmation; dismissed without losing saved Prompt"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 8,
+      "journey": "TestBot Character selection, real response and reload",
+      "cells": {
+        "sqlite-single": {
+          "status": "Fail236; Character completion/reload blocked",
+          "issues": [
+            "UAT-236"
+          ],
+          "evidence": [
+            "native/sqlite-single/testbot-create.txt",
+            "native/sqlite-single/testbot-three-attempts-final.txt",
+            "native/sqlite-single/testbot-chat-recovery-final.txt"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Fail UAT-236; adjacent world-book read fails UAT-239",
+          "issues": [
+            "UAT-236",
+            "UAT-239"
+          ],
+          "evidence": [
+            "native/pg-single/testbot-create-and-entry.txt",
+            "native/pg-single/testbot-entry-result.txt",
+            "native/pg-single/testbot-blocked-snapshot.txt",
+            "native/pg-single/worldbook-error-excerpt.json"
+          ],
+          "limits": [
+            "Character3 created201; no complete-v2 or BEEP BOOP",
+            "Known readiness failure reproduced once; no redundant three-attempt retry in this cell"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 9,
+      "journey": "Chat to Note/backlink and reviewed card/Study controls",
+      "cells": {
+        "sqlite-single": {
+          "status": "Partial; re-rate preview Fail235; mixed/early-End blocked234",
+          "issues": [
+            "UAT-235"
+          ],
+          "evidence": [
+            "native/sqlite-single/chat-card-review-events-final.txt",
+            "native/sqlite-single/chat-card-review-deltas.json",
+            "native/sqlite-single/chat-card-reloaded-snapshot.txt",
+            "native/sqlite-single/chat-card-source-note-snapshot.txt"
+          ],
+          "limits": [
+            "Mixed deck/undecked and early-End not verified after five-card generation234 failed"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Partial; re-rate preview Fail235; media-grounded and five-card paths blocked238/234",
+          "issues": [
+            "UAT-235",
+            "UAT-240"
+          ],
+          "evidence": [
+            "native/pg-single/answer-save-note.txt",
+            "native/pg-single/answer-card-save.txt",
+            "native/pg-single/answer-original-note-selected.txt",
+            "native/pg-single/answer-note-backlink.txt",
+            "native/pg-single/study-practice-complete.txt",
+            "native/pg-single/study-restored.txt",
+            "native/pg-single/study-rerate-observed.txt",
+            "native/pg-single/study-rerate-reloaded.txt",
+            "native/pg-single/study-note-source.txt",
+            "native/pg-single/browser-interruption.json"
+          ],
+          "limits": [
+            "Uses actual Pirate answer; not media-grounded reuse",
+            "One reviewed card; no exact-five-card or mixed/early-End pass",
+            "Browser closed for unknown reason after practice check; fresh browser reentered existing key and recovered saved data"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 10,
+      "journey": "Source analysis, Multi-Item Review and changed reanalysis",
+      "cells": {
+        "sqlite-single": {
+          "status": "Pass; controlled backend availability failure, not upstream outage",
+          "evidence": [
+            "native/sqlite-single/analysis-one-settled.txt",
+            "native/sqlite-single/analysis-multi-review-one.txt",
+            "native/sqlite-single/analysis-two-settled.txt",
+            "native/sqlite-single/analysis-failure-result.txt",
+            "native/sqlite-single/analysis-visible-failure-preserved.txt",
+            "audits/sqlite-single-analysis-metadata-diagnosis.md"
+          ],
+          "limits": [
+            "Exact token workflow confirms generation/save/readback, not semantic analysis quality",
+            "Streaming failure recovered through actual nonstream fallback before both attempts were failed",
+            "Original metadata remains in version1; latest-version projection has null metadata"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Blocked by source persistence failure UAT-238",
+          "issues": [
+            "UAT-238"
+          ],
+          "evidence": [
+            "native/pg-single/ingest-observation.txt"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 11,
+      "journey": "Permission-aware soft delete, Trash and exact restore",
+      "cells": {
+        "sqlite-single": {
+          "status": "Pass",
+          "evidence": [
+            "native/sqlite-single/trash-deleted-empty.txt",
+            "native/sqlite-single/trash-open.txt",
+            "native/sqlite-single/trash-dated-evidence.txt",
+            "native/sqlite-single/trash-restored-evidence.txt"
+          ]
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Blocked by source persistence failure UAT-238",
+          "issues": [
+            "UAT-238"
+          ],
+          "evidence": [
+            "native/pg-single/ingest-observation.txt"
+          ]
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    },
+    {
+      "row": 12,
+      "journey": "Reciprocal multi-user metadata/content/draft/job isolation",
+      "cells": {
+        "sqlite-single": {
+          "status": "Not applicable: single-user setup has no reciprocal ordinary accounts",
+          "evidence": []
+        },
+        "sqlite-multi": {
+          "status": "Not Started",
+          "evidence": []
+        },
+        "pg-single": {
+          "status": "Not applicable: single user",
+          "evidence": []
+        },
+        "pg-multi": {
+          "status": "Not Started",
+          "evidence": []
+        }
+      }
+    }
+  ],
+  "preparation": {
+    "sourceFilesPerCell": 33433,
+    "allFourPreflightsPassed": true,
+    "independentAudit": "copy-preparation/independent-review.md",
+    "sqliteSingleInitializerExit": 0,
+    "sqliteSingleApiHealth": 200,
+    "sqliteSingleFrontendHealth": 200
+  }
+}

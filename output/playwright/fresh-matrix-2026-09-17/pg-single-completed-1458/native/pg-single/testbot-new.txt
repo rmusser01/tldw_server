@@ -1,0 +1,13 @@
+### Result
+{"at":"2026-09-17T14:33:37.054Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n1 character found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n27m ago\nUpdated 27m ago\n\t\n1\n10 / page\nCharacters\nNew character\n\nDefine a reusable character you can chat with in the sidebar.\n\nChoose a template\nCancel\nWriting Assistant\nHelps improve writing, provides feedback, and suggests edits\nPatient Teacher\nExplains concepts step-by-step with examples and checks understanding\nResearch Helper\nAssists with research tasks, finding sources, and analyzing information\nCode Reviewer\nReviews code for bugs, best practices, and suggests improvements\nCreative Partner\nBrainstorms ideas, helps develop stories, and sparks creativity\nGenerate character with AI\nSelect model\nGenerate\n\nAI will generate all character fields based on your concept. You can edit the results before saving.\n\nName*\n0 / 500\nBehavior / instructions*\n(required)\n0 / 2000\nExplain the character's role, tone, and constraints. For example: \"You are a patient math tutor who explains concepts step by step.\"\nShow example\nPrompt preset\nDefault (legacy)\nControls how character fields are formatted in system prompts for character chats.\nGreeting message (optional)\n0 / 1000\nOptional first message the character will send when you start a chat.\nDescription\nDescription: brief blurb shown in character lists and cards.\nTags\nPopular:\nassistant\n(1)\ndefault\n(1)\nneutral\n(1)\nAdd tags\nUse tags to group characters by use case (e.g., “writing”, “teaching”).\nAvatar (optional)\nURL\nUpload\nGenerate\nShow advanced fields\nHide preview\nPREVIEW\nUntitled character\nFill in the form to see a preview\nCreate character\n\nCharacters | tldw"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"New character",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/characters
+- Page Title: Characters | tldw
+- Console: 1 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-06-41-484Z.log#L71-L72
+

@@ -1,0 +1,12 @@
+### Result
+{"at":"2026-09-17T14:25:52.947Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nSkip to notes list\nSkip to editor\n\nKeyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.\n\nNOTES\n1 TOTAL\nVIEWS\nNotes\nTrash\nList\nTimeline\nInbox\nCollection\nGraph\nORGANIZE\nDate modified (newest first)\nFILTERS\nCaptured\nSearch tips\nFilter by tag\nBrowse tags\nFor in-note search, use browser Ctrl/Cmd+F.\nRECENT NOTES\nBiology Basics — Fresh PostgreSQL 20260917\nRESULTS\nImport\nSync folder\nExport\nBiology Basics — Fresh PostgreSQL 20260917\nThe mitochondria is the powerhouse of the cell.\n9/17/2026, 7:25:33 AM\nShowing 1-1 of 1\n1\n20 / page\nBiology Basics — Fresh PostgreSQL 20260917\nSaved just now\nSave\nSave & new\nEdit\nSplit\nPreview\nCreate study pack\nGenerate title\nKeyboard shortcuts\nTags\nAll changes saved\nCONNECTIONS\nMarkdown\nWYSIWYG\nFORMATTING\nASSIST\nSummarize\nExpand outline\nSuggest tags\nMarkdown + LaTeX supported\n35 words · 227 chars · 1 min read\nVersion 1 · Last saved 9/17/2026, 7:25:33 AM\nOrigin: Typed manually\nCreate\nDuplicate\nFrom Template\nOrganize\nPin\nAI\nNotes Studio\nGenerate flashcards\nExport\nCopy note content\nExport\nDelete\nMore actions\n\nNotes | tldw"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("region",{name:"Note editor",exact:true}).getByRole("button",{name:"More actions",exact:true}).click(); await page.getByRole("menuitem",{name:"Generate flashcards",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18682/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-06-41-484Z.log#L47-L49
+

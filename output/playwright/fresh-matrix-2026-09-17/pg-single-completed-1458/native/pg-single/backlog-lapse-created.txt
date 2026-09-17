@@ -1,0 +1,34 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.182 - Compute-Study-lapse-and-retention-analytics-from-actual-lapse-outcomes.md
+
+Task TASK-13260.182 - Compute Study lapse and retention analytics from actual lapse outcomes
+==================================================
+
+Status: ○ To Do
+Priority: Medium
+Created: 2026-09-17 14:59
+Labels: uat, flashcards, analytics
+Parent: TASK-13260
+
+Description:
+--------------------------------------------------
+UAT240: Fresh PostgreSQL single-user Study rates Easy, Good3, then Hard2. Scheduler saves Hard successfully with lapses0 and14-day interval, but dashboard analytics drops retention100 to66.7 and raises lapse0 to33.3. Analytics classifies rating<3 as a lapse instead of the persisted actual was_lapse outcome. Current Study Guide describes Hard as recalled with effort and lapse as forgetting learned content. Preserve rating and scheduler semantics; repair analytics and verify both database engines.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [ ] #1 Native Hard recall with was_lapse=false does not increase lapse rate or reduce retention
+- [ ] #2 Actual forgetting/lapse outcomes produce correct aggregate and deck-level metrics in SQLite and PostgreSQL
+- [ ] #3 Regression coverage proves metrics use persisted scheduler outcome with a documented legacy-row policy
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Fresh frozen8f877 PG-single evidence native/pg-single/study-rerate-reloaded.txt and auth-outage-recovered.txt. Independently diagnosed by source013. No product source change in current frozen matrix.
+

@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-17T14:58:42.118Z",
+  "cell": "pg-single",
+  "stoppedPids": [
+    40346,
+    30012
+  ],
+  "signal": "SIGTERM",
+  "browserClosed": true,
+  "databasesRetained": true,
+  "officialFixtureHolderPid": 29823,
+  "reason": "Native pass complete with failures; retain original data for repairs"
+}

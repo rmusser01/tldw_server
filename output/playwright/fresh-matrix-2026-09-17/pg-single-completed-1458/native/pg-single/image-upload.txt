@@ -1,0 +1,201 @@
+### Ran Playwright code
+```js
+await fileChooser.setFiles(["/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/tldw-frontend/public/icon/128.png"])
+```
+### Page
+- Page URL: http://127.0.0.1:18682/chat
+- Page Title: Describe this attached public test icon in one sentence. | tldw
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-pg-single/browser-evidence/1789654603779-f6dfe8fb-a9ca-416b-9c5e-c49b0efc1035-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T14-06-41-484Z.log#L33-L34
+
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e4]:
+    - link "Skip to main content" [ref=f3e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e6]:
+      - button "Expand sidebar" [ref=f3e7] [cursor=pointer]
+      - button "New Chat" [ref=f3e11] [cursor=pointer]
+      - generic [ref=f3e14]:
+        - button "Quick Ingest" [ref=f3e15] [cursor=pointer]
+        - button "Chat" [ref=f3e19] [cursor=pointer]
+        - button "Prompts" [ref=f3e22] [cursor=pointer]
+        - button "Characters" [ref=f3e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e31] [cursor=pointer]
+        - button "World Books" [ref=f3e35] [cursor=pointer]
+        - button "Notes" [ref=f3e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e42] [cursor=pointer]
+        - button "Media" [ref=f3e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e59] [cursor=pointer]
+        - button "Kanban" [ref=f3e65] [cursor=pointer]
+        - button "Watchlists" [ref=f3e67] [cursor=pointer]
+      - generic [ref=f3e72]:
+        - button "Open Notes Dock" [ref=f3e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e78] [cursor=pointer]
+        - button "Settings" [ref=f3e81] [cursor=pointer]
+    - main [ref=f3e85]:
+      - generic [ref=f3e86]:
+        - generic [ref=f3e89]:
+          - generic [ref=f3e90]:
+            - button "Expand sidebar" [ref=f3e91] [cursor=pointer]
+            - generic [ref=f3e93]:
+              - img "tldw Assistant" [ref=f3e94]
+              - generic [ref=f3e95]: tldw Assistant
+              - button "Companion Home" [ref=f3e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e100] [cursor=pointer]
+            - button "Describe this attached public test icon in one sentence." [ref=f3e104] [cursor=pointer]
+            - generic "Saved chat. History is persisted." [ref=f3e106]: Saved
+          - generic [ref=f3e107]:
+            - button "Search - Open command palette" [ref=f3e108] [cursor=pointer]:
+              - generic [ref=f3e112]: Search
+              - generic [ref=f3e113]: ⌘K
+            - button "New saved chat" [ref=f3e114] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f3e118] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f3e119] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f3e120] [cursor=pointer]
+            - button "Open settings" [ref=f3e127] [cursor=pointer]
+            - generic [ref=f3e139]:
+              - button "Notifications, 0 unread" [ref=f3e140] [cursor=pointer]
+              - status [ref=f3e144]: Notifications are active
+            - button "Switch to light theme" [ref=f3e145] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e152] [cursor=pointer]:
+              - generic [ref=f3e153]: "?"
+        - generic [ref=f3e154]:
+          - heading "Chat" [level=1] [ref=f3e155]
+          - generic [ref=f3e158]:
+            - paragraph [ref=f3e159]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f3e160]:
+              - main [ref=f3e161]:
+                - generic [ref=f3e162]:
+                  - generic [ref=f3e164]:
+                    - generic [ref=f3e165]:
+                      - generic [ref=f3e166]: Standard chat
+                      - generic [ref=f3e167]: Conversation timeline
+                    - generic [ref=f3e168]:
+                      - button "Switch to light theme" [ref=f3e169] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f3e176] [cursor=pointer]:
+                        - generic [ref=f3e182]: Focus
+                      - button "Shortcuts" [ref=f3e183] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f3e187]
+                  - log "Chat messages" [ref=f3e189]:
+                    - generic [ref=f3e191]:
+                      - article "User message 1 of 2" [ref=f3e192]:
+                        - generic [ref=f3e195]:
+                          - generic [ref=f3e197]:
+                            - generic [ref=f3e198]: You
+                            - generic [ref=f3e199]: • 7:16 AM
+                          - paragraph [ref=f3e201]: Describe this attached public test icon in one sentence.
+                          - generic [ref=f3e203]:
+                            - generic [ref=f3e204]:
+                              - img "Uploaded Image" [ref=f3e205]
+                              - generic [ref=f3e206] [cursor=pointer]
+                            - button "Delete image" [ref=f3e207] [cursor=pointer]
+                          - button "More actions" [ref=f3e213] [cursor=pointer]: •••
+                      - article "Assistant message 2 of 2" [ref=f3e217]:
+                        - generic [ref=f3e223]:
+                          - generic [ref=f3e225]:
+                            - generic [ref=f3e226]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                            - generic [ref=f3e227]: • 7:16 AM
+                          - alert [ref=f3e229]:
+                            - paragraph [ref=f3e230]: Image support is not confirmed for this model.
+                            - paragraph [ref=f3e231]: Choose a model that supports images, or start a new text-only conversation.
+                            - button "Show technical details" [ref=f3e232] [cursor=pointer]
+                            - generic [ref=f3e233]:
+                              - generic [ref=f3e234]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                              - button "Retry same model" [ref=f3e235] [cursor=pointer]
+                              - button "Switch model" [ref=f3e236] [cursor=pointer]
+                              - button "Try provider fallback" [ref=f3e237] [cursor=pointer]
+                              - button "Continue from partial" [ref=f3e238] [cursor=pointer]
+                          - generic [ref=f3e240]:
+                            - generic [ref=f3e241]:
+                              - button "Previous response" [ref=f3e242] [cursor=pointer]
+                              - generic [ref=f3e245]: 2 of 2
+                              - button "Next response" [disabled] [ref=f3e246]
+                            - button "More actions" [ref=f3e249] [cursor=pointer]: •••
+                  - generic [ref=f3e250]:
+                    - generic [ref=f3e251]: Composer
+                    - button "Scroll to latest messages" [ref=f3e253] [cursor=pointer]
+                    - generic [ref=f3e259]:
+                      - button "Attachments (1) 1" [ref=f3e262] [cursor=pointer]:
+                        - generic [ref=f3e263]:
+                          - generic [ref=f3e264]: Attachments (1)
+                          - generic [ref=f3e265]: "1"
+                      - generic [ref=f3e275]:
+                        - button [aria-hidden] [ref=f3e276]
+                        - button [aria-hidden] [ref=f3e277]
+                        - generic [ref=f3e278]:
+                          - alert [ref=f3e279]:
+                            - generic [ref=f3e280]:
+                              - generic [ref=f3e281]:
+                                - generic [ref=f3e282]: Error
+                                - generic [ref=f3e283]:
+                                  - heading "Image support is not confirmed for this model." [level=2] [ref=f3e284]
+                                  - generic [ref=f3e285]: Choose a model that supports images, or start a new text-only conversation.
+                              - generic [ref=f3e286]:
+                                - button "Retry chat" [ref=f3e287] [cursor=pointer]
+                                - button "Edit provider" [ref=f3e288] [cursor=pointer]
+                                - button "Switch provider" [ref=f3e289] [cursor=pointer]
+                                - button "View in Health & Diagnostics" [ref=f3e290] [cursor=pointer]
+                                - button "Close" [ref=f3e291] [cursor=pointer]
+                          - generic [ref=f3e293]:
+                            - button "Hide composer options" [expanded] [ref=f3e294] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f3e299]
+                            - generic [ref=f3e300]:
+                              - button "Improve prompt" [ref=f3e303] [cursor=pointer]
+                              - generic [ref=f3e308]:
+                                - button "Send message" [ref=f3e309] [cursor=pointer]:
+                                  - generic [ref=f3e310]: Send
+                                - button "Open message delivery options" [ref=f3e315] [cursor=pointer]
+                          - generic [ref=f3e320]:
+                            - generic [ref=f3e322]:
+                              - group "Mode and context controls" [ref=f3e323]:
+                                - button "Modes" [ref=f3e324] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f3e331] [cursor=pointer]':
+                                  - generic [ref=f3e332]:
+                                    - generic [ref=f3e333]: MCP
+                                    - generic [ref=f3e334]: None
+                                - button "Search & Context" [ref=f3e337] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f3e342] [cursor=pointer]:
+                                  - generic [ref=f3e345]: Prompt
+                                - button "Select character or persona" [ref=f3e346] [cursor=pointer]
+                                - button "Role-play setup" [ref=f3e351] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f3e358] [cursor=pointer]
+                              - group "Run input controls" [ref=f3e364]:
+                                - button "OpenUI" [ref=f3e365] [cursor=pointer]
+                                - button "Start dictation" [ref=f3e371] [cursor=pointer]
+                                - generic [ref=f3e375]:
+                                  - button "Attach image" [ref=f3e377] [cursor=pointer]
+                                  - button "More attachments" [ref=f3e381] [cursor=pointer]
+                                - button "More tools" [ref=f3e384] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f3e387] [cursor=pointer]:
+                                  - generic [ref=f3e391]: Chat Settings
+                            - generic "Active context" [ref=f3e392]:
+                              - button "Custom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f3e394] [cursor=pointer]:
+                                - generic "Provider status" [ref=f3e399]: Healthy
+                              - button "Chat 2 messages" [ref=f3e400] [cursor=pointer]:
+                                - generic [ref=f3e401]: Chat
+                                - generic [ref=f3e402]: 2 messages
+                              - button "Configure context window size" [ref=f3e404] [cursor=pointer]:
+                                - generic [ref=f3e405]: 95 + ~0 = 95 tokens
+                              - button "Saved" [ref=f3e407] [cursor=pointer]
+                              - button "Advanced controls" [ref=f3e409] [cursor=pointer]
+                          - status [ref=f3e413]:
+                            - generic [ref=f3e414]: Model recommendations
+                            - generic [ref=f3e416]:
+                              - generic [ref=f3e417]:
+                                - paragraph [ref=f3e418]: Switch to a vision-capable model
+                                - paragraph [ref=f3e419]: This prompt includes an image attachment but the current model does not advertise vision input support.
+                              - generic [ref=f3e420]:
+                                - button "Review models" [ref=f3e421] [cursor=pointer]
+                                - button "Dismiss recommendation" [ref=f3e422] [cursor=pointer]
+              - generic [ref=f3e426]:
+                - button "Restore context sidechannel" [ref=f3e427] [cursor=pointer]:
+                  - generic [ref=f3e431]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f3e432]:
+                - button "Restore runtime sidechannel" [ref=f3e433] [cursor=pointer]:
+                  - generic [ref=f3e434]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - alert [ref=f3e438]
