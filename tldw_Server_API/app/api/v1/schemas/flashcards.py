@@ -443,6 +443,12 @@ class FlashcardReviewResponse(BaseModel):
     next_intervals: FlashcardReviewIntervalPreviews
     review_session_id: int | None = None
 
+    @field_validator("due_at", "last_reviewed_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class FlashcardReviewSessionSummary(BaseModel):
     """Public summary of a flashcard review session returned by history endpoints."""
