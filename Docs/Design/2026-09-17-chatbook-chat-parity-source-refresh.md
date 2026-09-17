@@ -2,7 +2,9 @@
 
 Tracking: TASK-13261.1. This is a source delta review during H1 implementation, supplementing the [parity inventory](2026-09-16-chatbook-console-parity-matrix.md) and [review closure](2026-09-16-chatbook-chat-parity-review-closure.md). It does not award an implemented or Equivalent status.
 
-## Verified source change
+Latest verified pins on this date: server `59049e094e0845a4611ea725ae19b7c1754ea709`, Chatbook `c97a64eba54d18f88cecc77bf6233e208df8bf24`. The two refreshes below preserve their own evidence and scope.
+
+## First refresh — provider and settings behavior
 
 Fresh `git ls-remote --heads` queries on 2026-09-17 returned:
 
@@ -35,3 +37,15 @@ The delta does not modify `console_chat_store.py`, `chat_persistence_service.py`
 H1 Task3.2 already binds the exact composed payload and resolved model/settings behind a captured connection lease. Preserve that requirement for any capacity or provider option the existing composer actually consumes; do not perform fresh mutable resolution after finalization. Porting the new capacity-discovery service, full settings retention/default behavior and readiness surfaces belongs to C07/C08 and the model/context delivery, with their own tests. H1 remains in progress; H2/H3/H4/F02 and the broader parity rows remain open.
 
 Before integration, recheck both remote heads again. Future source changes need another explicit delta review rather than rewriting historical evidence pins.
+
+## Second refresh — optional installation and batch transcription
+
+A later read-only `git ls-remote origin refs/heads/dev` on 2026-09-17 found server dev unchanged and Chatbook advanced to `c97a64eba54d18f88cecc77bf6233e208df8bf24`, merging [PR 2705](https://github.com/rmusser01/tldw_chatbook/pull/2705). The delta from `1c0327b3` contains three implementation/documentation commits and the merge, touching 17 files (six production modules plus tests/docs/tracking). Immutable objects were already available locally; no fetch, checkout change, source test run or clipboard/provider operation was performed.
+
+The six production changes were inspected directly. [Selected STT warnings](https://github.com/rmusser01/tldw_chatbook/blob/c97a64eba54d18f88cecc77bf6233e208df8bf24/tldw_chatbook/Library/ingest_capabilities.py) and [ingest state](https://github.com/rmusser01/tldw_chatbook/blob/c97a64eba54d18f88cecc77bf6233e208df8bf24/tldw_chatbook/Library/library_ingest_state.py) now project dependency warnings to the selected batch-transcription backend before display and consent forecasting, preserving the captured inventory for later provider changes. Invalid restored provider values remain visibly repairable and cannot silently render as Auto. Auto still selects faster-whisper; the new projection does not switch runtimes. Parakeet setup distinguishes runtime packages from model download.
+
+[Install-command copying](https://github.com/rmusser01/tldw_chatbook/blob/c97a64eba54d18f88cecc77bf6233e208df8bf24/tldw_chatbook/Utils/install_clipboard.py), [the shared optional-feature dialog](https://github.com/rmusser01/tldw_chatbook/blob/c97a64eba54d18f88cecc77bf6233e208df8bf24/tldw_chatbook/Utils/widget_helpers.py) and [the Library canvas](https://github.com/rmusser01/tldw_chatbook/blob/c97a64eba54d18f88cecc77bf6233e208df8bf24/tldw_chatbook/Widgets/Library/library_ingest_canvas.py) distinguish acknowledged native copying from unconfirmed remote/client copying, retain the literal command for manual recovery, quote install extras and clean up cancelled clipboard subprocesses. The remaining module adds strict batch-provider validation to the existing input validators.
+
+For later shared ingestion/setup work, retain the selected-backend warning/consent match, invalid-saved-choice recovery, separate runtime/model readiness and honest clipboard-result behavior. These are batch-ingestion and optional-feature improvements; this delta does not establish a changed dictation, realtime voice or chat-history contract. Browser implementations should use their own clipboard capability rather than copying the TUI's native subprocess mechanism. No new `tldw-agent` responsibility is implied.
+
+The delta changes no Chat, DB, Agents, Sync or Sync_Interop source path and adds no identified H1 ancestry, fork ownership, controller/admission or uncertain-outcome requirement. Current H1 fixes and required browser qualification continue unchanged. Earlier source test evidence remains tied to its earlier commit; broader parity receives no completion credit from this source inspection.
