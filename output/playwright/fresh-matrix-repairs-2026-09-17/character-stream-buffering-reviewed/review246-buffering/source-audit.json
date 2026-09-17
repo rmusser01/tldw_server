@@ -1,0 +1,44 @@
+{
+  "phase": "provisional source review, no test replay yet",
+  "sourceManifestSha256": "95260c44c7a0746fcbf85946c79e05cbeaa0a8f3a77002e213ebc4d565a1e445",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "sha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "sha256": "732e9acbbab097c336d83bdac871a99115732a08b632ae95212943e89815b9e7"
+    },
+    {
+      "path": "apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sha256": "0d131569bcfe56947e0d70a989b79228ce7afc2bc2f5178f56119b8da7b94a48"
+    }
+  ],
+  "allHashesMatch": true,
+  "changedTopLevelDefinitions": [
+    "character_chat_completion"
+  ],
+  "streamingResponseHeaders": [
+    {
+      "line": 6762,
+      "headers": "sse_headers"
+    },
+    {
+      "line": 7002,
+      "headers": "sse_headers"
+    },
+    {
+      "line": 6921,
+      "headers": "sse_headers"
+    }
+  ],
+  "installedNextVersion": "16.1.4",
+  "nextCompressionSha256": "1f7514e04e72e4b518fbeca4996c2d77868ae531f9d399b253c5f7bb8e9f52cb",
+  "notes": [
+    "No timeout/provider/auth/persistence changes in the production diff.",
+    "Next held-terminal tests assert first body bytes before release; actual backend tests connect the canonical header contract across all three responses.",
+    "Fallback avoids upstream thread creation; all scenarios release gates and close iterator/background/runtime.",
+    "Native historical timeout attribution remains unproven; source/fixture evidence establishes compression buffering and the proposed remedy only."
+  ]
+}

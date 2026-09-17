@@ -6711,9 +6711,6 @@ async def character_chat_completion(
                 return []
             return [text[i : i + size] for i in range(0, len(text), size)]
 
-        # Intermediaries must deliver SSE frames without compression buffering.
-        sse_headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
-
         def _stream_text_as_sse(text: str) -> StreamingResponse:
             async def _stream_text():
                 try:
@@ -6759,7 +6756,10 @@ async def character_chat_completion(
                     yield f"data: {json.dumps({'error': str(e)})}\n\n"
                     yield "data: [DONE]\n\n"
 
-            return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=sse_headers)
+            headers = {}
+            if streams_unified:
+                headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=headers)
 
         # Initialize assistant_text to avoid potential UnboundLocalError in edge cases
         assistant_text = ""
@@ -6918,10 +6918,14 @@ async def character_chat_completion(
                             await producer
                         await stream_cleanup()
 
+                headers = {
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                }
                 response = StreamingResponse(
                     _generator(),
                     media_type="text/event-stream",
-                    headers=sse_headers,
+                    headers=headers,
                     background=BackgroundTask(stream_cleanup),
                 )
                 credential_runtime_owned_by_stream = True
@@ -7002,7 +7006,6 @@ async def character_chat_completion(
             response = StreamingResponse(
                 _sse_provider(),
                 media_type="text/event-stream",
-                headers=sse_headers,
                 background=BackgroundTask(stream_cleanup),
             )
             credential_runtime_owned_by_stream = True

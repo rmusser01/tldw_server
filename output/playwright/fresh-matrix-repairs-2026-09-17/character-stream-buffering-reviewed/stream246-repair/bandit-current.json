@@ -1,0 +1,457 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T20:30:18Z",
+  "metrics": {
+    "./apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs": {
+      "loc": 234,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 7837,
+      "nosec": 0,
+      "skipped_tests": 9
+    },
+    "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py": {
+      "CONFIDENCE.HIGH": 20,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 20,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 146,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 20,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 20,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 8217,
+      "nosec": 0,
+      "skipped_tests": 9
+    }
+  },
+  "results": [
+    {
+      "code": "72             entered.set()\n73             assert first.wait(5)\n74             yield 'data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}'\n",
+      "col_offset": 12,
+      "end_col_offset": 32,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 73,
+      "line_range": [
+        73
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "74             yield 'data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}'\n75             assert finish.wait(5)\n76             yield 'data: {\"choices\":[{\"delta\":{\"content\":\"BEEP BOOP\"}}]}'\n",
+      "col_offset": 12,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 75,
+      "line_range": [
+        75
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "120     try:\n121         assert response.headers[\"content-type\"].startswith(\"text/event-stream\")\n122         assert set(response.headers.get(\"cache-control\", \"\").replace(\" \", \"\").split(\",\")) >= {\"no-cache\", \"no-transform\"}\n",
+      "col_offset": 8,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 121,
+      "line_range": [
+        121
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "121         assert response.headers[\"content-type\"].startswith(\"text/event-stream\")\n122         assert set(response.headers.get(\"cache-control\", \"\").replace(\" \", \"\").split(\",\")) >= {\"no-cache\", \"no-transform\"}\n123         assert response.headers.get(\"x-accel-buffering\") == \"no\"\n",
+      "col_offset": 8,
+      "end_col_offset": 121,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 122,
+      "line_range": [
+        122
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "122         assert set(response.headers.get(\"cache-control\", \"\").replace(\" \", \"\").split(\",\")) >= {\"no-cache\", \"no-transform\"}\n123         assert response.headers.get(\"x-accel-buffering\") == \"no\"\n124         if scenario == \"fallback\":\n",
+      "col_offset": 8,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 123,
+      "line_range": [
+        123
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "125             chunks = [str(chunk) async for chunk in response.body_iterator]\n126             assert any(\"BEEP BOOP\" in chunk for chunk in chunks)\n127             assert sum(\"[DONE]\" in chunk for chunk in chunks) == 1\n",
+      "col_offset": 12,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 126,
+      "line_range": [
+        126
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "126             assert any(\"BEEP BOOP\" in chunk for chunk in chunks)\n127             assert sum(\"[DONE]\" in chunk for chunk in chunks) == 1\n128             await asyncio.wait_for(runtime_closed.wait(), 3)\n",
+      "col_offset": 12,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 127,
+      "line_range": [
+        127
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "128             await asyncio.wait_for(runtime_closed.wait(), 3)\n129             assert [row[\"id\"] for row in db.get_messages_for_conversation(chat)] == [message]\n130             assert requests == []\n",
+      "col_offset": 12,
+      "end_col_offset": 93,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 129,
+      "line_range": [
+        129
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "129             assert [row[\"id\"] for row in db.get_messages_for_conversation(chat)] == [message]\n130             assert requests == []\n131             return\n",
+      "col_offset": 12,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 130,
+      "line_range": [
+        130
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "131             return\n132         assert await asyncio.to_thread(entered.wait, 3)\n133         # Successful headers do not imply body delivery while the provider is silent.\n",
+      "col_offset": 8,
+      "end_col_offset": 55,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 132,
+      "line_range": [
+        132
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "133         # Successful headers do not imply body delivery while the provider is silent.\n134         assert response.status_code == 200 and not pending.done()\n135         first.set()\n",
+      "col_offset": 8,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 134,
+      "line_range": [
+        134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "136         initial = await asyncio.wait_for(pending, 3)\n137         assert '\"role\"' in str(initial) and not finish.is_set()\n138         assert len(requests) == 1\n",
+      "col_offset": 8,
+      "end_col_offset": 63,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 137,
+      "line_range": [
+        137
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "137         assert '\"role\"' in str(initial) and not finish.is_set()\n138         assert len(requests) == 1\n139         assert \"BEEP BOOP\" in json.dumps(requests[0][\"messages\"])\n",
+      "col_offset": 8,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 138,
+      "line_range": [
+        138
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "138         assert len(requests) == 1\n139         assert \"BEEP BOOP\" in json.dumps(requests[0][\"messages\"])\n140         if scenario == \"disconnect\":\n",
+      "col_offset": 8,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 139,
+      "line_range": [
+        139
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "149             chunks = [str(chunk) async for chunk in response.body_iterator]\n150             assert any(\"BEEP BOOP\" in chunk for chunk in chunks)\n151             assert sum(\"[DONE]\" in chunk for chunk in chunks) == 1\n",
+      "col_offset": 12,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 150,
+      "line_range": [
+        150
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "150             assert any(\"BEEP BOOP\" in chunk for chunk in chunks)\n151             assert sum(\"[DONE]\" in chunk for chunk in chunks) == 1\n152         await asyncio.wait_for(runtime_closed.wait(), 3)\n",
+      "col_offset": 12,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 151,
+      "line_range": [
+        151
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "152         await asyncio.wait_for(runtime_closed.wait(), 3)\n153         assert \"response_closed\" in lifecycle and \"client_closed\" in lifecycle\n154         assert lifecycle.index(\"client_closed\") < lifecycle.index(\"runtime_closed\")\n",
+      "col_offset": 8,
+      "end_col_offset": 78,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 153,
+      "line_range": [
+        153
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "153         assert \"response_closed\" in lifecycle and \"client_closed\" in lifecycle\n154         assert lifecycle.index(\"client_closed\") < lifecycle.index(\"runtime_closed\")\n155         assert [row[\"id\"] for row in db.get_messages_for_conversation(chat)] == [message]\n",
+      "col_offset": 8,
+      "end_col_offset": 83,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 154,
+      "line_range": [
+        154
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "154         assert lifecycle.index(\"client_closed\") < lifecycle.index(\"runtime_closed\")\n155         assert [row[\"id\"] for row in db.get_messages_for_conversation(chat)] == [message]\n156         assert len(requests) == 1\n",
+      "col_offset": 8,
+      "end_col_offset": 89,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 155,
+      "line_range": [
+        155
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "155         assert [row[\"id\"] for row in db.get_messages_for_conversation(chat)] == [message]\n156         assert len(requests) == 1\n157     finally:\n",
+      "col_offset": 8,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 156,
+      "line_range": [
+        156
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

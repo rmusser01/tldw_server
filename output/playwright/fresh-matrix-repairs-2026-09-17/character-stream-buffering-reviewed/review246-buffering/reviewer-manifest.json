@@ -1,0 +1,102 @@
+{
+  "task": "TASK13260.188",
+  "verdict": "clear",
+  "files": [
+    {
+      "path": "REVIEW246.md",
+      "sha256": "539fb8e68979476077011b93502395a34f97a94c69bc61fcddd78159f519fc17",
+      "bytes": 5553
+    },
+    {
+      "path": "author-hash-verification.json",
+      "sha256": "43cab972c499950cb08f1e5482db5280cb4c3c3722038e0c456f02839b4cc495",
+      "bytes": 840
+    },
+    {
+      "path": "backend-command.json",
+      "sha256": "c99c65f604613e56e9284ba87a5a6bae7a6967fa96a422f9455042fd26de12ec",
+      "bytes": 464
+    },
+    {
+      "path": "backend-receipt.log",
+      "sha256": "b9c758e7ffa48e55edc12f63a0b5960d03ce0957d5e66e51a00ffe88a382c3c8",
+      "bytes": 1984
+    },
+    {
+      "path": "backend.redacted.log",
+      "sha256": "95f4c0ee550567b62f46b4df477fc9d77c9fd2ec643e5da92c086085b8ed49db",
+      "bytes": 6949
+    },
+    {
+      "path": "bandit-production.json",
+      "sha256": "447da8f3d29cd807a610eef47155cfb7b643bf62d19f1d2f8047860dd9e07331",
+      "bytes": 782
+    },
+    {
+      "path": "bandit-tests.json",
+      "sha256": "8a1b271f53871bcf1dc8e43fcb4eebd348bc4c6707c707a9b9fdcf894c7ca42c",
+      "bytes": 801
+    },
+    {
+      "path": "commands.json",
+      "sha256": "db2d5d1ab197318e4b09f59da5fc48febb2f0dcd773388610c6e17033416d153",
+      "bytes": 527
+    },
+    {
+      "path": "eslint-baseline.json",
+      "sha256": "56f33286bc7b46c5dde23418dbbd8b46e85232dc224bc195deac446577dabae4",
+      "bytes": 359
+    },
+    {
+      "path": "eslint-current.json",
+      "sha256": "56f33286bc7b46c5dde23418dbbd8b46e85232dc224bc195deac446577dabae4",
+      "bytes": 359
+    },
+    {
+      "path": "final-hash-audit.json",
+      "sha256": "2656b7aeace597c3214e73fed14a6ce8e47a6d01b5e1134a98c15d6ae402ee9f",
+      "bytes": 837
+    },
+    {
+      "path": "next-green.log",
+      "sha256": "9cad6bfa3e8b0a0c592a2e29056c700a6720bee6171cdc639b1f889d5c5487f8",
+      "bytes": 1288
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "5e2eb5f0b85a4dce8f71288a82862cf5900ca4f16fcd532a59119435acce8500",
+      "bytes": 12213
+    },
+    {
+      "path": "ruff-comparison.json",
+      "sha256": "9b22c4d7217655acad5dd39f91753580d019bde94fb87227153a7024b98a9c3c",
+      "bytes": 96
+    },
+    {
+      "path": "ruff-current.json",
+      "sha256": "873559cd553ce2c2229e06bb1276d067f0de68df762592af8de210fbc5ea92b1",
+      "bytes": 12213
+    },
+    {
+      "path": "runtime-test-dependencies.json",
+      "sha256": "e852141b93a145d9babd7f7fea38f6e235fdcff5a06a70d96ef9431d777010a8",
+      "bytes": 468
+    },
+    {
+      "path": "secret-scan.json",
+      "sha256": "12018c795727f25b4f4256735dee52a186771523247ca8b6540c112490697b98",
+      "bytes": 237
+    },
+    {
+      "path": "source-audit.json",
+      "sha256": "f0a31be275e8850eeeb7c31525797e71f192aba43dbb9b2ceef3f835c42520b1",
+      "bytes": 1708
+    },
+    {
+      "path": "static-checks.json",
+      "sha256": "5f70d4e47a9922e942560dde0936539757596b7c8553580fd76e5e1e7a975e43",
+      "bytes": 891
+    }
+  ],
+  "excludes": "No private raw logs, runtime profiles/configs or credentials."
+}

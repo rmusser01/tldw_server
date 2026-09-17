@@ -1,0 +1,7 @@
+{
+  "activate": "source .venv/bin/activate",
+  "backend": "TLDW_UAT_EVIDENCE_LABEL=uat246-independent-buffering node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py -q -rs",
+  "next": "node --test apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+  "requiredPostgres": true,
+  "nativeProviderCalls": false
+}

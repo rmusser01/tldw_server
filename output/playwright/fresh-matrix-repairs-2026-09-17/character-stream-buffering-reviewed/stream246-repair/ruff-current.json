@@ -1,0 +1,122 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 2,
+      "row": 153
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "import asyncio\nimport contextlib\nimport hashlib\nimport inspect\nimport json\nimport os\nimport re\nimport secrets\nimport threading\nimport time\nimport uuid\nfrom collections import deque\nfrom collections.abc import Awaitable, Callable, Mapping\nfrom datetime import datetime, timezone\nfrom functools import lru_cache, partial\nfrom types import SimpleNamespace\nfrom typing import Any, Literal, Optional\n\nfrom fastapi import (\n    APIRouter,\n    BackgroundTasks,\n    Body,\n    Depends,\n    Header,\n    HTTPException,\n    Path,\n    Query,\n    Request,\n    Response,\n    status,\n)\nfrom fastapi.responses import StreamingResponse\nfrom loguru import logger\nfrom pydantic import ValidationError\nfrom starlette.background import BackgroundTask\n\nfrom tldw_Server_API.app.api.v1.API_Deps.auth_deps import (\n    User,\n    get_request_user,\n    require_expected_user,\n)\n\n# Database and authentication dependencies\nfrom tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user\nfrom tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (\n    get_request_routing_decision_store,\n)\nfrom tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta\n\n# Schemas\nfrom tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (\n    ConversationScopeParams,\n)\nfrom tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (\n    DEFAULT_LLM_PROVIDER,\n)\nfrom tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (\n    AssistantOverlaySettings,\n    AuthorNoteInfoResponse,\n    CharacterChatCompletionPrepRequest,\n    CharacterChatCompletionPrepResponse,\n    CharacterChatCompletionV2Request,\n    CharacterChatCompletionV2Response,\n    CharacterChatStreamPersistRequest,\n    CharacterChatStreamPersistResponse,\n    ChatLinkedResearchRunsListResponse,\n    ChatSessionCreate,\n    ChatSessionListItem,\n    ChatSessionListResponse,\n    ChatSessionResponse,\n    ChatSessionUpdate,\n    ChatSettingsResponse,\n    ChatSettingsUpdate,\n    DiagnosticTurnEntry,\n    GreetingItem,\n    GreetingListResponse,\n    GreetingSelectRequest,\n    GreetingSelectResponse,\n    LorebookDiagnosticExportResponse,\n    MessageResponse,\n    PresetCreate,\n    PresetDetail,\n    PresetListResponse,\n    PresetTokenInfo,\n    PresetUpdate,\n    PromptPreviewResponse,\n)\nfrom tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers\nfrom tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http\nfrom tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta\nfrom tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope\nfrom tldw_Server_API.app.core.AuthNZ.byok_runtime import (\n    ByokResolutionError,\n    record_byok_missing_credentials,\n)\nfrom tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (\n    apply_llm_provider_overrides_to_listing,\n    capture_provider_override_call_snapshot,\n    get_llm_provider_overrides_snapshot,\n    get_override_model_priority,\n)\nfrom tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (\n    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,\n    ProviderCredentialRuntime,\n)\n\n# Character chat helpers\nfrom tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (\n    map_sender_to_role,\n    post_message_to_conversation,\n    replace_placeholders,\n)\nfrom tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (\n    PENDING_GREETING_SETTINGS_KEY,\n    PROMPT_COMPLETION_SETTING_CLASSIFICATION,\n    build_pending_greeting_authority,\n    collect_character_greeting_texts,\n    create_character_conversation,\n    load_character_greeting_source,\n    materialize_roleplay_behavior_settings,\n    reject_resumable_behavior_credentials,\n    validate_resumable_behavior_boole,\n)\n\n# Rate limiting\nfrom tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (\n    get_character_rate_limiter,\n)\nfrom tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (\n    INTERNAL_CHAT_SETTINGS_KEYS,\n    ChatSettingsSizeError,\n    validate_chat_settings_storage,\n)\n\n# Import shared constants\nfrom tldw_Server_API.app.core.Character_Chat.constants import (\n    MAX_STREAMING_BYTES,\n    MAX_STREAMING_CHUNKS,\n    MAX_TOOL_CALLS_COUNT,\n    MAX_TOOL_CALLS_SIZE,\n    THROTTLE_CACHE_MAX_KEYS,\n    THROTTLE_STALE_SECONDS,\n)\nfrom tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (\n    apply_world_book_prompt_context,\n    build_world_book_prompt_context,\n)\nfrom tldw_Server_API.app.core.exceptions import raise_detached_error\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 155
+          },
+          "location": {
+            "column": 1,
+            "row": 7
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 7
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 7,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 52,
+      "row": 256
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.core.Character_Chat.emote_directives import (\n    CharacterEmoteEvent,\n    append_character_emote_prompt_instruction,\n    resolve_character_emote_completion,\n    validate_emote_events_for_text,\n)\nfrom tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (\n    resolve_character_generation_settings,\n)\nfrom tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (\n    DEFAULT_PROMPT_PRESET,\n    build_character_system_prompt,\n    build_custom_system_prompt,\n    resolve_character_prompt_preset,\n)\nfrom tldw_Server_API.app.core.Character_Chat.modules.character_utils import (\n    sanitize_sender_name,\n)\nfrom tldw_Server_API.app.core.Chat.bounded_daemon import (\n    STREAM_CLEANUP_DAEMON_POOL,\n    STREAM_DAEMON_POOL,\n    await_bounded_daemon_with_timeout,\n    await_owned_worker,\n)\nfrom tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError\n\n# Chat helpers and utilities\n# For chat completions\nfrom tldw_Server_API.app.core.Chat.chat_service import (\n    is_model_known_for_provider,\n    perform_chat_api_call,\n    perform_chat_api_call_async,\n    resolve_provider_and_model,\n)\nfrom tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope\nfrom tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (\n    evaluate_prompt_cost_guardrails,\n    load_prompt_cost_guardrail_config,\n)\nfrom tldw_Server_API.app.core.Chat.streaming_utils import (\n    StreamTaskCapacityError,\n    await_bounded_owned_operation,\n    invoke_owned_stream_close,\n    invoke_stream_close_bounded,\n    normalize_provider_stream_error,\n    provider_stream_error_payload,\n    sanitized_provider_stream_exception,\n)\nfrom tldw_Server_API.app.core.config import load_and_log_configs\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (\n    CharactersRAGDB,\n    CharactersRAGDBError,\n    ConflictError,\n    InputError,\n)\nfrom tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError\nfrom tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths\nfrom tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB\nfrom tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved\nfrom tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name\nfrom tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key\nfrom tldw_Server_API.app.core.LLM_Calls.routing import (\n    InMemoryRoutingDecisionStore,\n    RouterRequest,\n    RoutingPolicy,\n    RoutingUsageContext,\n    build_provider_order_for_routing,\n    extract_router_choice,\n    flatten_provider_listing_for_routing,\n    log_model_router_usage,\n    resolve_routing_policy,\n    route_model,\n    select_llm_router_choice,\n)\nfrom tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (\n    build_candidate_pool,\n)\nfrom tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_done\nfrom tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (\n    PersonaExemplarPromptAssembly,\n    assemble_persona_exemplar_prompt,\n)\nfrom tldw_Server_API.app.core.Research.service import ResearchService\n\n# Completion schemas centralized in schemas/chat_session_schemas.py\nfrom tldw_Server_API.app.core.Streaming.streams import SSEStream\nfrom tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError\nfrom tldw_Server_API.app.core.Sync.v2.server_origin import (\n    SyncServerOriginIdempotencyConflictError,\n    SyncServerOriginMaterializationError,\n    SyncServerOriginMutationNotSupportedError,\n    capture_server_origin_mutation,\n    get_active_server_origin_sync_service_for_user,\n    server_origin_object_id,\n    server_origin_stable_key,\n)\nfrom tldw_Server_API.app.core.Sync.v2.service import SyncV2Service\nfrom tldw_Server_API.app.core.testing import is_truthy\nfrom tldw_Server_API.app.core.Utils.common import parse_boolean\nfrom tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService\n\nfrom .llm_providers import get_configured_providers\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 258
+          },
+          "location": {
+            "column": 1,
+            "row": 156
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 156
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 156,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "F401",
+    "end_location": {
+      "column": 38,
+      "row": 3894
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.api.v1.endpoints.character_memory import (\n            get_or_create_character_persona_profile,\n        )",
+          "end_location": {
+            "column": 10,
+            "row": 3896
+          },
+          "location": {
+            "column": 9,
+            "row": 3893
+          }
+        }
+      ],
+      "message": "Remove unused import: `tldw_Server_API.app.api.v1.endpoints.character_memory._persona_id_for_character`"
+    },
+    "location": {
+      "column": 13,
+      "row": 3894
+    },
+    "message": "`tldw_Server_API.app.api.v1.endpoints.character_memory._persona_id_for_character` imported but unused",
+    "noqa_row": 3894,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unused-import"
+  },
+  {
+    "cell": null,
+    "code": "B904",
+    "end_location": {
+      "column": 18,
+      "row": 8471
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "fix": null,
+    "location": {
+      "column": 17,
+      "row": 8468
+    },
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "noqa_row": 8468,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/raise-without-from-inside-except"
+  }
+]

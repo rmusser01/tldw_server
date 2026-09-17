@@ -21,9 +21,6 @@ let abortClosed;
 const abortedRequestArrived = new Promise(resolve => { abortArrived = resolve; });
 const abortedRequestClosed = new Promise(resolve => { abortClosed = resolve; });
 const pendingTimers = new Set();
-const gatedStreams = new Map();
-const roleFrame = 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n';
-const finalFrames = 'data: {"choices":[{"delta":{"content":"BEEP BOOP"}}]}\n\ndata: [DONE]\n\n';
 const upstream = createServer(async (req, res) => {
   let body = '';
   for await (const chunk of req) body += chunk;
@@ -47,21 +44,6 @@ const upstream = createServer(async (req, res) => {
     }, 31_500);
     pendingTimers.add(timer);
     res.once('close', () => { timing.closedAfterMs = Date.now() - started; clearTimeout(timer); pendingTimers.delete(timer); });
-  } else if (req.url.startsWith('/api/v1/gated-sse?')) {
-    const params = new URL(req.url, 'http://fixture.invalid').searchParams;
-    let release;
-    const held = new Promise(resolve => { release = resolve; });
-    const gate = { released: false, wroteRoleAt: Date.now(), release: () => { gate.released = true; release(); } };
-    gatedStreams.set(params.get('case'), gate);
-    res.once('close', gate.release);
-    res.setHeader('content-type', 'text/event-stream');
-    // Canonical Character header contract is separately asserted against the real backend response.
-    res.setHeader('cache-control', params.get('legacy') === '1' ? 'no-cache' : 'no-cache, no-transform');
-    res.setHeader('x-accel-buffering', 'no');
-    res.flushHeaders();
-    res.write(roleFrame);
-    await held;
-    if (!res.destroyed) res.end(finalFrames);
   } else if (req.url === '/api/v1/flashcards/generate') {
     // Real wall time: this must outlast Next's default 30-second rewrite cutoff.
     const timer = setTimeout(() => {
@@ -139,7 +121,6 @@ after(async () => {
     await exited;
     clearTimeout(force);
   }
-  for (const gate of gatedStreams.values()) gate.release();
   for (const timer of pendingTimers) clearTimeout(timer);
   upstream.closeAllConnections();
   await new Promise(resolve => upstream.close(resolve));
@@ -199,47 +180,3 @@ test('preserves established SSE after an early role frame and 30 seconds of sile
     context.diagnostic(JSON.stringify({ headersAfterMs, elapsedMs: Date.now() - started, upstream: records.find(row => row.kind === 'sse-timing') }));
   }
 });
-
-
-for (const control of [
-  { name: 'canonical-gzip', encoding: 'gzip', legacy: false, early: true },
-  { name: 'identity', encoding: 'identity', legacy: false, early: true },
-  { name: 'legacy-gzip-adverse', encoding: 'gzip', legacy: true, early: false },
-]) {
-  test('first SSE body delivery with terminal held: ' + control.name, { timeout: 8000 }, async context => {
-    const controller = new AbortController();
-    let reader;
-    let gate;
-    const started = Date.now();
-    try {
-      const response = await fetch(origin + '/api/v1/gated-sse?case=' + control.name + '&legacy=' + Number(control.legacy), {
-        method: 'POST', headers: { 'accept-encoding': control.encoding }, signal: controller.signal,
-      });
-      gate = gatedStreams.get(control.name);
-      assert.ok(gate && !gate.released, 'upstream terminal must still be held');
-      const contentEncoding = response.headers.get('content-encoding');
-      const headersAfterMs = Date.now() - started;
-      reader = response.body.getReader();
-      const pendingRead = reader.read();
-      const first = await Promise.race([pendingRead, delay(control.early ? 2000 : 300).then(() => null)]);
-      context.diagnostic(JSON.stringify({ case: control.name, contentEncoding, headersAfterMs, readObservedAfterMs: Date.now() - started, firstRead: first !== null, terminalReleased: gate.released }));
-      assert.equal(gate.released, false, 'a terminal response cannot satisfy first-frame delivery');
-      if (control.early) {
-        assert.ok(first && !first.done, 'early SSE role bytes must arrive before upstream completion');
-        assert.equal(new TextDecoder().decode(first.value), roleFrame);
-      } else {
-        assert.equal(first, null, 'adverse gzip control must demonstrate the unflushed buffering boundary');
-      }
-      assert.equal(contentEncoding, control.legacy ? 'gzip' : null);
-      gate.release();
-      const initial = first || await pendingRead;
-      let body = new TextDecoder().decode(initial.value);
-      while (true) { const part = await reader.read(); if (part.done) break; body += new TextDecoder().decode(part.value); }
-      assert.equal(body, roleFrame + finalFrames);
-    } finally {
-      (gate || gatedStreams.get(control.name))?.release();
-      controller.abort();
-      if (reader) await reader.cancel().catch(() => undefined);
-    }
-  });
-}

@@ -1,0 +1,72 @@
+[
+  {
+    "path": "apps/tldw-frontend/next.config.mjs",
+    "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/tldw-frontend/next.config.mjs",
+    "nativeSha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+    "matches": true
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "sha256": "ba4153ec740b15703cb56e88cb3ebc5f8fa55538b5c2d27b08fc9371243da394",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "nativeSha256": "ba4153ec740b15703cb56e88cb3ebc5f8fa55538b5c2d27b08fc9371243da394",
+    "matches": true
+  },
+  {
+    "path": "tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py",
+    "sha256": "906543b6aed89fef19573957fa61bb10f8dd3c8542e7b22e44ae1d8bf799a2af",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py",
+    "nativeSha256": "906543b6aed89fef19573957fa61bb10f8dd3c8542e7b22e44ae1d8bf799a2af",
+    "matches": true
+  },
+  {
+    "path": "apps/packages/ui/src/services/background-proxy.ts",
+    "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/packages/ui/src/services/background-proxy.ts",
+    "nativeSha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+    "matches": true
+  },
+  {
+    "path": "apps/tldw-frontend/node_modules/next/dist/server/lib/router-server.js",
+    "sha256": "74f584998fb395fe92bbcd6a1096575491f3a537fab2a3bdd141df4a413cfa05",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/dist/server/lib/router-server.js",
+    "nativeSha256": "74f584998fb395fe92bbcd6a1096575491f3a537fab2a3bdd141df4a413cfa05",
+    "matches": true
+  },
+  {
+    "path": "apps/tldw-frontend/node_modules/next/dist/server/lib/router-utils/proxy-request.js",
+    "sha256": "26c521dc09d71e5a798a384b3a8f5e85a535dcc1b5943cbc7acb0dbc4c28ff57",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/dist/server/lib/router-utils/proxy-request.js",
+    "nativeSha256": "26c521dc09d71e5a798a384b3a8f5e85a535dcc1b5943cbc7acb0dbc4c28ff57",
+    "matches": true
+  },
+  {
+    "path": "apps/tldw-frontend/node_modules/next/dist/compiled/compression/index.js",
+    "sha256": "1f7514e04e72e4b518fbeca4996c2d77868ae531f9d399b253c5f7bb8e9f52cb",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/dist/compiled/compression/index.js",
+    "nativeSha256": "1f7514e04e72e4b518fbeca4996c2d77868ae531f9d399b253c5f7bb8e9f52cb",
+    "matches": true
+  },
+  {
+    "path": "apps/tldw-frontend/node_modules/next/dist/compiled/http-proxy/index.js",
+    "sha256": "3023fb45c653345028b6afcb2ce55af99ed2ee0e975eab4b2308bdc0eaaf60c1",
+    "nativePath": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-single/apps/tldw-frontend/node_modules/next/dist/compiled/http-proxy/index.js",
+    "nativeSha256": "3023fb45c653345028b6afcb2ce55af99ed2ee0e975eab4b2308bdc0eaaf60c1",
+    "matches": true
+  },
+  {
+    "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot-terminal.txt",
+    "sha256": "14aa0801cb768dadb8a6a2fcf9d74ba7a5a88dca1aeb170d94b52f56e18485dd"
+  },
+  {
+    "path": ".tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/middleware/gzip.py",
+    "sha256": "fed86909172d82ec34b4c33a2768839408f9bd996897d4faef7207b5fbdfc501",
+    "matchesWorkspace": true
+  },
+  {
+    "path": ".tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/starlette/responses.py",
+    "sha256": "8e95e773bdb3718b3dffc789dd258e53a46b9a8781c98e98cfb3c36e69fea897",
+    "matchesWorkspace": true
+  }
+]

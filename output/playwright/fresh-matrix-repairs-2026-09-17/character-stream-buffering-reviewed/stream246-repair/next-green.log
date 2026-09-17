@@ -1,0 +1,20 @@
+✔ forwards ordinary request body and authorization through the real rewrite (726.585625ms)
+✔ preserves upstream error status and body (3.031584ms)
+✔ client cancellation closes the upstream connection (3.006791ms)
+✔ delivers a generation response after the former 30-second cutoff (31505.594458ms)
+✔ preserves established SSE after an early role frame and 30 seconds of silence (31504.982708ms)
+ℹ {"headersAfterMs":3,"elapsedMs":31505,"upstream":{"kind":"sse-timing","contentAfterMs":31502,"closedAfterMs":31502}}
+✔ first SSE body delivery with terminal held: canonical-gzip (4.571292ms)
+ℹ {"case":"canonical-gzip","contentEncoding":null,"headersAfterMs":3,"readObservedAfterMs":3,"firstRead":true,"terminalReleased":false}
+✔ first SSE body delivery with terminal held: identity (2.995541ms)
+ℹ {"case":"identity","contentEncoding":null,"headersAfterMs":3,"readObservedAfterMs":3,"firstRead":true,"terminalReleased":false}
+✔ first SSE body delivery with terminal held: legacy-gzip-adverse (305.836916ms)
+ℹ {"case":"legacy-gzip-adverse","contentEncoding":"gzip","headersAfterMs":4,"readObservedAfterMs":305,"firstRead":false,"terminalReleased":false}
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65794.735292

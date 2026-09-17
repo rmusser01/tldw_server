@@ -1,0 +1,12 @@
+{
+  "cwd": "/Users/macbook-dev/Documents/GitHub/tldw_server2",
+  "backendRed": "source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=stream246-backend-red node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py -q -rs > .tmp/uat-repairs-231-246/stream246-repair/backend-red-receipt.log 2>&1",
+  "backendGreen": "source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=stream246-backend-green node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py -q -rs > .tmp/uat-repairs-231-246/stream246-repair/backend-green-receipt.log 2>&1",
+  "nextRed": "node --test --test-name-pattern='first SSE body delivery' apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs > .tmp/uat-repairs-231-246/stream246-repair/next-red.log 2>&1",
+  "nextGreen": "node --test apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs > .tmp/uat-repairs-231-246/stream246-repair/next-green.log 2>&1",
+  "eslint": "node .tmp/uat-repairs-231-246/stream246-repair/lint-next.mjs > .tmp/uat-repairs-231-246/stream246-repair/eslint.log 2>&1",
+  "ruff": "source .venv/bin/activate && python -m ruff check tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py --output-format json",
+  "banditProduction": "source .venv/bin/activate && python -m bandit tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py -f json -o .tmp/uat-repairs-231-246/stream246-repair/bandit-production.json",
+  "syntax": "node --check apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+  "replayNote": "Use a unique TLDW_UAT_EVIDENCE_LABEL for independent replay; do not overwrite retained author logs. Official runner requires approved local fixture access; no held native database is used."
+}
