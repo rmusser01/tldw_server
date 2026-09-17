@@ -5373,6 +5373,7 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
+                            history_persistence_ack=history_admission is not None,
                             system_message_id=system_message_id,
                             audit_service=audit_service,
                             audit_context=context,

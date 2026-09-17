@@ -303,6 +303,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [null, vi.fn()]
 }))
 
+vi.mock("@/services/actor-settings", () => ({
+  getActorSettingsForChat: vi.fn(async () => null)
+}))
+
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => mocks.notification
 }))
@@ -313,9 +317,13 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
 
 vi.mock("@/hooks/chat/effective-assistant-state", () => ({
   resolveEffectiveAssistantState: () => ({
-    mode: "plain",
-    kind: null,
-    id: null,
+    mode: h1.persona
+      ? "tracked_persona"
+      : h1.native
+        ? "tracked_character"
+        : "plain",
+    kind: h1.persona ? "persona" : h1.native ? "character" : null,
+    id: h1.native || h1.persona ? "12" : null,
     displayName: null,
     avatarUrl: null,
     systemPromptSnapshot: null
@@ -369,6 +377,8 @@ vi.mock("@/libs/get-html", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getCharacter: h1.live,
+    createChat: (...args: any[]) => h1.create(...args),
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
     addChatMessage: (...args: any[]) => h1.append(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
@@ -436,6 +446,13 @@ vi.mock("@/utils/mcp-disclosure", () => ({
 import { useMessage } from "../useMessage"
 
 const h1 = vi.hoisted(() => ({
+  native: false,
+  persona: false,
+  create: vi.fn(),
+  live: vi.fn(() => {
+    throw new Error("live card deleted")
+  }),
+  auth: new AbortController(),
   controller: null as any,
   capture: vi.fn(),
   append: vi.fn(),
@@ -551,17 +568,29 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  h1.auth = new AbortController()
+  h1.native = false
+  h1.persona = false
+  mocks.chatBaseState.historyId = "history-1"
+  mocks.storeState.temporaryChat = false
+  mocks.storeState.serverChatCharacterId = null
+  mocks.storeState.serverChatAssistantKind = null
   h1.controller = makeController()
   mocks.chatBaseState.chatMode = "normal"
   mocks.chatBaseState.useOCR = false
   mocks.chatBaseState.selectedSystemPrompt = ""
   mocks.storeState.fileRetrievalEnabled = false
+  mocks.storeState.toolChoice = "auto"
   mocks.storeState.serverChatId = "tracked-chat-1"
   mocks.chatBaseState.history = [
     { role: "user", content: "old question" },
     { role: "assistant", content: "wrong latest" }
   ]
-  mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
+  mocks.loadServicePromptSnapshot.mockResolvedValue(
+    mocks.makeSnapshot("supported", undefined, undefined, {
+      scopeInvalidatedSignal: h1.auth.signal
+    })
+  )
   const { HumanMessage } = await import("@/types/messages")
   mocks.humanMessageFormatter.mockImplementation(
     async ({ content }: any) => new HumanMessage({ content })
@@ -685,4 +714,441 @@ it("an older sidepanel send cannot clear the newer send's activity or Stop contr
     expect(mocks.setStreaming).toHaveBeenLastCalledWith(false)
     expect(mocks.setAbortController).toHaveBeenLastCalledWith(null)
   })
+})
+
+it("mounted sidepanel native character uses owner selection and ACK without legacy persistence", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* (request) {
+    yield {
+      tldw_history_admission_v1: {
+        version: 1,
+        owner_key: "native-key",
+        conversation_id: "tracked-chat-1",
+        input_message_id: "native-input",
+        input_message_revision: "r",
+        selection_digest: request.tldw_history_selection_v1.selection_digest,
+        messages: request.tldw_history_selection_v1.messages,
+        originating_selection_revision: 1
+      }
+    }
+    yield { choices: [{ delta: { content: "native answer" } }] }
+    yield {
+      tldw_message_id: "native-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0]).toMatchObject({
+    save_to_db: true,
+    conversation_id: "tracked-chat-1",
+    messages: [{ role: "user", content: "next" }]
+  })
+  expect(
+    h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages.map(
+      (row: any) => row.id
+    )
+  ).toEqual(["u-old", "a1"])
+  expect(h1.controller.followResult).toHaveBeenCalledWith(
+    expect.objectContaining({ view_session_id: "origin" }),
+    "native-result"
+  )
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+const nativeAdmission = (request: any) => ({
+  version: 1,
+  owner_key: "native-key",
+  conversation_id: "tracked-chat-1",
+  input_message_id: "native-input",
+  input_message_revision: "native-r",
+  selection_digest: request.tldw_history_selection_v1.selection_digest,
+  messages: request.tldw_history_selection_v1.messages,
+  originating_selection_revision:
+    request.tldw_history_selection_v1.selection_revision
+})
+
+it("native before-first sends no historical content and retains unacknowledged text separately", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const current = h1.controller.getCurrent()
+  current.view.cursor = { kind: "empty" }
+  current.capture = captureFor(current.view)
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield {
+      choices: [{ delta: { content: "unsaved text" }, finish_reason: "stop" }]
+    }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire.mock.calls[0][0].messages).toEqual([
+    { role: "user", content: "next" }
+  ])
+  expect(h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages).toEqual(
+    []
+  )
+  expect(h1.recover.mock.calls[0][2]).toMatchObject({
+    persistence: "server",
+    state: "dispatching"
+  })
+  expect(h1.recover.mock.calls[0][2].input_id).toBeUndefined()
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    state: "generated_unsaved",
+    input_id: "native-input",
+    result_text: "unsaved text"
+  })
+  expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  expect(h1.controller.refreshRecovery).toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it.each(["wrong-selection", "result-before-admission", "wrong-conversation"])(
+  "native %s cannot supply an owner result",
+  async (failure) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    h1.wire.mockImplementation(async function* (request) {
+      if (failure !== "result-before-admission")
+        yield {
+          tldw_history_admission_v1: {
+            ...nativeAdmission(request),
+            ...(failure === "wrong-selection"
+              ? { selection_digest: "forged" }
+              : {})
+          }
+        }
+      yield {
+        tldw_message_id: "forged-result",
+        tldw_conversation_id:
+          failure === "wrong-conversation" ? "other" : "tracked-chat-1"
+      }
+    })
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+    expect(h1.dismiss).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "completed"
+    )
+    expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
+    expect(h1.append).not.toHaveBeenCalled()
+  }
+)
+
+it("native selection navigation preserves server ownership and never overwrites the new view", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const { result } = renderHook(() => useMessage())
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    h1.controller.navigate()
+    mocks.setMessages.mockClear()
+    yield { choices: [{ delta: { content: "old result" } }] }
+    yield {
+      tldw_message_id: "owner-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  expect(h1.dismiss).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ conversation_id: "tracked-chat-1" }),
+    expect.any(String),
+    "completed"
+  )
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it("native settings drift during capture prevents dispatch", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const { useMcpToolsStore } = (await import("@/store/mcp-tools")) as any
+  const previous = useMcpToolsStore.getState()
+  h1.capture.mockImplementationOnce(async (_id, request) => {
+    useMcpToolsStore.setState({ ...previous })
+    return captureFor(request.view)
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.recover).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it("native account changes retain accepted evidence under the origin and stop consuming", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    h1.auth.abort()
+    mocks.setMessages.mockClear()
+    yield { choices: [{ delta: { content: "new account must not see" } }] }
+    yield {
+      tldw_message_id: "late-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    state: "accepted_unsent",
+    owner_key: "native-key",
+    input_id: "native-input",
+    result_text: ""
+  })
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it("a disconnect after the native owner ACK preserves the completed outcome", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield {
+      tldw_message_id: "owner-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+    throw new Error("late disconnect")
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.dismiss).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.anything(),
+    expect.any(String),
+    "completed"
+  )
+  expect(h1.controller.followResult).toHaveBeenCalledWith(
+    expect.anything(),
+    "owner-result"
+  )
+  expect(h1.append).not.toHaveBeenCalled()
+})
+
+it.each(["asset", "temporary", "local-owner"])(
+  "native %s is visibly gated without dispatch",
+  async (unsupported) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    if (unsupported === "local-owner")
+      h1.controller.getCurrent().owner = {
+        kind: "local",
+        owner_key: "local",
+        conversation_id: "local",
+        profile_id: "profile"
+      }
+    mocks.storeState.temporaryChat = unsupported === "temporary"
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "next",
+        image: unsupported === "asset" ? "data:image/png;base64,asset" : ""
+      })
+    })
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(mocks.notification.error).toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+  }
+)
+
+it.each([false, true])(
+  "native first creation is fenced around its ACK (navigation=%s)",
+  async (navigate) => {
+    h1.native = true
+    mocks.chatBaseState.historyId = null as any
+    mocks.storeState.serverChatId = null
+    mocks.storeState.serverChatCharacterId = null
+    let origin = true
+    let current: any = { owner: null, view: null, status: "idle" }
+    const ready = makeController().getCurrent()
+    ready.view.cursor = { kind: "empty" }
+    ready.capture = captureFor(ready.view)
+    const load = vi.fn(async (_target, _reference, onLoaded) => {
+      current = ready
+      onLoaded({ owner: current.owner, view: current.view })
+      return true
+    })
+    h1.controller = {
+      getCurrent: () => current,
+      fence: () => () => origin,
+      loadConversation: load,
+      followResult: vi.fn(async () => true),
+      refreshRecovery: vi.fn()
+    }
+    h1.create.mockImplementation(async () => {
+      if (navigate) origin = false
+      return { id: "tracked-chat-1" }
+    })
+    h1.wire.mockImplementation(async function* (request) {
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      yield {
+        tldw_message_id: "native-result",
+        tldw_conversation_id: "tracked-chat-1"
+      }
+    })
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    expect(h1.create).toHaveBeenCalledOnce()
+    if (navigate) {
+      expect(h1.wire).not.toHaveBeenCalled()
+      expect(load).not.toHaveBeenCalled()
+      expect(mocks.storeState.setServerChatId).not.toHaveBeenCalled()
+    } else {
+      expect(h1.wire).toHaveBeenCalledOnce()
+      expect(
+        h1.wire.mock.calls[0][0].tldw_history_selection_v1.messages
+      ).toEqual([])
+      expect(mocks.storeState.setServerChatId).toHaveBeenCalledWith(
+        "tracked-chat-1"
+      )
+    }
+    expect(h1.live).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+  }
+)
+
+it("native dispatch freezes workspace routing independently of the view owner", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const workspace = { type: "workspace", workspaceId: "original-workspace" }
+  h1.controller.getCurrent().owner.scope = workspace
+  h1.wire.mockImplementation(async function* (request) {
+    workspace.workspaceId = "new-workspace"
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    yield {
+      tldw_message_id: "owner-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire.mock.calls[0][1].scope).toEqual({
+    type: "workspace",
+    workspaceId: "original-workspace"
+  })
+  expect(h1.live).not.toHaveBeenCalled()
+})
+
+it("an older native completion cannot release a newer operation's Stop control", async () => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  let enterFirst!: () => void,
+    enterSecond!: () => void,
+    releaseFirst!: () => void,
+    releaseSecond!: () => void
+  const firstEntered = new Promise<void>((resolve) => {
+    enterFirst = resolve
+  })
+  const secondEntered = new Promise<void>((resolve) => {
+    enterSecond = resolve
+  })
+  const firstHeld = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  const secondHeld = new Promise<void>((resolve) => {
+    releaseSecond = resolve
+  })
+  h1.wire.mockImplementationOnce(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    enterFirst()
+    await firstHeld
+    yield {
+      tldw_message_id: "first-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  h1.wire.mockImplementationOnce(async function* (request) {
+    yield { tldw_history_admission_v1: nativeAdmission(request) }
+    enterSecond()
+    await secondHeld
+    yield {
+      tldw_message_id: "second-result",
+      tldw_conversation_id: "tracked-chat-1"
+    }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    const first = result.current.onSubmit({ message: "first", image: "" })
+    await firstEntered
+    const second = result.current.onSubmit({ message: "second", image: "" })
+    await secondEntered
+    mocks.setStreaming.mockClear()
+    mocks.setAbortController.mockClear()
+    releaseFirst()
+    await first
+    expect(mocks.setStreaming).not.toHaveBeenCalledWith(false)
+    expect(mocks.setAbortController).not.toHaveBeenCalledWith(null)
+    releaseSecond()
+    await second
+    expect(mocks.setStreaming).toHaveBeenLastCalledWith(false)
+    expect(mocks.setAbortController).toHaveBeenLastCalledWith(null)
+  })
+})
+
+it("native required client tools are explicitly gated rather than silently discarded", async () => {
+  h1.native = true
+  mocks.storeState.toolChoice = "required"
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(mocks.notification.error).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: "native_history_client_tools_unsupported"
+    })
+  )
+})
+
+it("native persona limitations remain visible before any owner operation", async () => {
+  h1.persona = true
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(h1.wire).not.toHaveBeenCalled()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(mocks.notification.error).toHaveBeenCalledWith(
+    expect.objectContaining({
+      description: "native_history_persona_unsupported"
+    })
+  )
 })

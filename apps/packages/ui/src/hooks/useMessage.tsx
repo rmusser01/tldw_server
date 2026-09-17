@@ -1,3 +1,4 @@
+import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -2769,11 +2770,18 @@ export const useMessage = () => {
           });
           if (
             historySelection &&
-            (sendMode === "tracked_character" || sendMode === "tracked_persona")
+            sendMode === "tracked_persona"
           ) {
-            throw new Error(
-              "selected_history_tracked_assistant_requires_versioned_context"
-            );
+            notification.error({
+              message: t("error"),
+              description: "native_history_persona_unsupported"
+            });
+            if (releaseNormalControllerIfOwned()) {
+              setAbortController(null);
+              setIsProcessing(false);
+              setStreaming(false);
+            }
+            return;
           }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
@@ -2791,6 +2799,57 @@ export const useMessage = () => {
               : null;
 
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
+            if (historySelection) {
+              try {
+                await sendNativeHistoryCharacter({
+                  controller: historySelection,
+                  originIsCurrent: historyOriginIsCurrent!,
+                  signal,
+                  temporary: temporaryChat,
+                  historyId,
+                  serverChatId: serverChatIdOverride || serverChatId,
+                  characterId: trackedCharacterForSend.id,
+                  model,
+                  currentModel: selectedModel,
+                  toolChoice: resolvedToolChoice,
+                  settings: currentChatModelSettings,
+                  message,
+                  image,
+                  setServerChatId,
+                  setMessages,
+                  unsupportedContext: Boolean(
+                    resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
+                    conversationContextOverrides.historyForModel ||
+                    conversationContextOverrides.messageForModel
+                  ),
+                  onCreated: (characterId) => {
+                    setServerChatCharacterId(characterId);
+                    setServerChatAssistantKind("character");
+                    setServerChatAssistantId(null);
+                    setServerChatPersonaMemoryMode(null);
+                    setServerChatMetaLoaded(true);
+                  },
+                  releaseActivity: () => {
+                    if (releaseNormalControllerIfOwned()) {
+                      setAbortController(null);
+                      setIsProcessing(false);
+                      setStreaming(false);
+                    }
+                  }
+                });
+              } catch (error) {
+                notification.error({
+                  message: t("error"),
+                  description: error instanceof Error ? error.message : "Native history completion failed"
+                });
+                if (releaseNormalControllerIfOwned()) {
+                  setAbortController(null);
+                  setIsProcessing(false);
+                  setStreaming(false);
+                }
+              }
+              return;
+            }
             const hydratedTrackedCharacter =
               await hydrateTrackedCharacterForSend(
                 trackedCharacterForSend,

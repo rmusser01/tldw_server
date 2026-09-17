@@ -528,6 +528,19 @@ export const historyAdmissionReference = (
     selection_digest: admission.selection_digest
   })
 
+/** Validate native admission without inventing a client-selected server input ID. */
+export const parseNativeHistoryAdmission = (
+  owner: NativeHistoryOwnerV1, selection: HistorySelectionV1, value: unknown
+): HistoryAdmissionV1 => {
+  const admission = parse(admissionSchema, value) as HistoryAdmissionV1
+  assertNativeBinding(owner, admission, true)
+  if (admission.selection_digest !== selection.selection_digest ||
+      admission.originating_selection_revision !== selection.selection_revision ||
+      canonicalHistoryJson(admission.messages) !== canonicalHistoryJson(selection.messages))
+    fail("invalid_history_admission")
+  return freeze(admission)
+}
+
 export const appendSelectedUser = async (
   owner: HistoryOwnerV1,
   selection: HistorySelectionV1,

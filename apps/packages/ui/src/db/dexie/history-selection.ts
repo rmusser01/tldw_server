@@ -871,6 +871,7 @@ export const saveHistoryTurnRecovery = async (
     operation_id: turn.operation_id, origin_view: turn.origin_view,
     selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
     owner_key: turn.owner_key, conversation_id: turn.conversation_id,
+    persistence: turn.persistence ?? "client",
     input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
     input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
     ...(turn.admission ? {admission: {
@@ -878,15 +879,17 @@ export const saveHistoryTurnRecovery = async (
       conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,
       input_message_revision: turn.admission.input_message_revision, selection_digest: turn.admission.selection_digest
     }} : {})
-  })
+  }) as HistoryTurnRecovery
   await db.transaction("rw", [db.userSettings, db.historySelections], async () => {
     await assertBookmarkProfile(scope)
     if (!detached.operation_id || detached.owner_key !== view.owner_key || detached.conversation_id !== view.conversation_id)
       fail("owner_conversation_mismatch")
     const previous = await db.historySelections.get(bookmarkKey(scope, view))
     if (previous?.history_turn_outcomes?.[detached.operation_id]) return
-    if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || !detached.input_id || !detached.assistant_id)
+    if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || (detached.persistence !== "server" && (!detached.input_id || !detached.assistant_id)))
       fail("invalid_history_operation")
+    if (detached.persistence === "server" && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
+      fail("history_operation_conflict")
     if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
       fail("history_operation_conflict")
     const prior = previous?.pending_turns?.[detached.operation_id]
@@ -894,10 +897,15 @@ export const saveHistoryTurnRecovery = async (
       const immutable = (value: HistoryTurnRecovery) => ({
         origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
         operation_id: value.operation_id, owner_key: value.owner_key, conversation_id: value.conversation_id,
-        input_id: value.input_id, assistant_id: value.assistant_id, created_at: value.created_at,
+        persistence: value.persistence ?? "client",
+        ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
         input_text: value.input_text, input_images: value.input_images
       })
       if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
+      if (prior.persistence === "server") {
+        if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
+        if (prior.assistant_id && !detached.assistant_id) return
+      }
       if (prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
       if (prior.admission && !detached.admission) return
       if (prior.result_text && !detached.result_text) return

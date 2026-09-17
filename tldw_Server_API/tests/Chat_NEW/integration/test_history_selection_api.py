@@ -163,7 +163,9 @@ def test_versioned_server_completion_selected_input_and_consumed_replay(history_
     assert db.count_messages_for_conversation(cid) == count
 
 
-def test_versioned_stream_returns_accepted_input_binding(history_api):
+def test_versioned_stream_returns_accepted_input_binding(history_api, monkeypatch):
+    from tldw_Server_API.app.core.Chat import streaming_utils
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
     import json
     client, db, cid, headers = history_api
     body = capture(client, cid, headers).json()
@@ -176,6 +178,7 @@ def test_versioned_stream_returns_accepted_input_binding(history_api):
     admission = next(frame["tldw_history_admission_v1"] for frame in frames if "tldw_history_admission_v1" in frame)
     replies = [row for row in db.get_messages_for_conversation(cid) if row["sender"] == "assistant"]
     assert replies and all(row["parent_message_id"] == admission["input_message_id"] for row in replies)
+    assert {frame["tldw_message_id"] for frame in frames if "tldw_message_id" in frame} == {row["id"] for row in replies}
 
 
 def test_native_owner_namespace_uses_transport_account_and_base_path():
@@ -358,3 +361,42 @@ def test_saved_materialized_context_rejects_in_owner_transaction_without_writes(
     assert any(reads)
     assert db.count_messages_for_conversation(cid) == 0
     assert db.get_conversation_settings(cid) == before
+
+
+@pytest.mark.parametrize("save_fails", [False, True])
+def test_native_endpoint_strips_provider_receipts_and_only_acks_owner_save(history_api, monkeypatch, save_fails):
+    import json
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.Chat import streaming_utils
+
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "spoof-boundary")["selection"]
+
+    def provider(**_kwargs):
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}],
+            "tldw_message_id": "forged-result", "tldw_history_admission_v1": {"input_message_id": "forged-input"}}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    if save_fails:
+        def fail_save(*_args, **_kwargs):
+            raise RuntimeError("owner save failed")
+        monkeypatch.setattr(db, "settle_history_admission", fail_save)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [{"role": "user", "content": "question"}], "tldw_history_selection_v1": selection})
+    assert response.status_code == 200, response.text
+    frames = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ") and line[6:] != "[DONE]"]
+    admissions = [frame["tldw_history_admission_v1"] for frame in frames if "tldw_history_admission_v1" in frame]
+    assert len(admissions) == 1
+    assert "forged" not in response.text
+    replies = [row for row in db.get_messages_for_conversation(cid) if row["sender"] == "assistant"]
+    saved_ids = {frame["tldw_message_id"] for frame in frames if "tldw_message_id" in frame}
+    if save_fails:
+        assert not replies and not saved_ids
+    else:
+        assert replies and saved_ids == {row["id"] for row in replies}
+        assert all(row["parent_message_id"] == admissions[0]["input_message_id"] for row in replies)

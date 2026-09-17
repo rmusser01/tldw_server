@@ -1214,3 +1214,51 @@ it("terminal recovery outcomes fence late callbacks without erasing another oper
     )
   ).toEqual(["other"])
 })
+
+it("native recovery begins without canonical IDs and binds monotonically to owner evidence", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const bookmark = { profile_id: owner.profile_id, client_session_id: "native" }
+  const pending: any = {
+    operation_id: "native",
+    persistence: "server",
+    origin_view: origin,
+    owner_key: owner.owner_key,
+    conversation_id: owner.conversation_id,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    created_at: 1,
+    input_text: "question",
+    input_images: [],
+    result_text: "",
+    state: "dispatching"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.input_id
+  ).toBeUndefined()
+  const accepted = {
+    ...pending,
+    input_id: "owner-input",
+    state: "accepted_unsent",
+    admission: {
+      version: 1,
+      owner_key: owner.owner_key,
+      conversation_id: owner.conversation_id,
+      input_message_id: "owner-input",
+      input_message_revision: "r",
+      selection_digest: "selected"
+    }
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.input_id
+  ).toBe("owner-input")
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...accepted,
+      input_id: "forged"
+    })
+  ).rejects.toThrow()
+})

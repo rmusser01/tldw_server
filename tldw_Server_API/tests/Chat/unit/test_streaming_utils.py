@@ -2331,3 +2331,45 @@ class TestSSENormalization:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("versioned,save_fails", [(True, False), (True, True), (False, False)])
+async def test_native_ack_uses_only_owner_saved_id_with_metadata_disabled(monkeypatch, versioned, save_fails):
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+
+    async def provider():
+        yield 'data: ' + json.dumps({"choices": [{"delta": {"content": "reply"}, "finish_reason": "stop"}],
+            "tldw_message_id": "forged", "tldw_history_admission_v1": {"input_message_id": "forged"}}) + '\n\n'
+
+    async def save(*_args):
+        if save_fails:
+            raise RuntimeError("save failed")
+        return "owner-result"
+
+    request = StreamingPipelineRequest(stream=provider(), conversation_id="conv", model_name="model", save_callback=save, history_persistence_ack=versioned)
+    frames = [frame async for frame in create_chat_streaming_response(request=request, stream_factory=create_streaming_response_with_timeout)]
+    wire = "".join(frames)
+    if versioned:
+        assert "forged" not in wire
+        assert "tldw_history_admission_v1" not in wire
+        assert ('"tldw_message_id": "owner-result"' in wire) is (not save_fails)
+    else:
+        assert "owner-result" not in wire
+
+
+@pytest.mark.asyncio
+async def test_native_cancelled_stream_never_fabricates_saved_identity(monkeypatch):
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+    handler = StreamingResponseHandler("conv", "model")
+    handler.history_persistence_ack = True
+    save = AsyncMock(return_value="not-saved")
+
+    async def provider():
+        yield "partial"
+        handler.cancel()
+        yield "cancelled"
+
+    wire = "".join([frame async for frame in handler.safe_stream_generator(provider(), save)])
+    save.assert_not_awaited()
+    assert "tldw_message_id" not in wire

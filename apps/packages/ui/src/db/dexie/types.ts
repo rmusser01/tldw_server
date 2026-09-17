@@ -266,15 +266,17 @@ export type HistoryTurnRecovery = {
   request_context_digest: string;
   owner_key: string;
   conversation_id: string;
-  input_id: string;
-  assistant_id: string;
   created_at: number;
   input_text: string;
   input_images: string[];
   result_text: string;
   state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
-};
+} & (
+  | { persistence?: "client"; input_id: string; assistant_id: string }
+  | { persistence: "server"; input_id?: string; assistant_id?: string }
+);
+
 export type HistoryBookmark = HistoryBookmarkScope & {
   pending_turns?: Record<string, HistoryTurnRecovery>
   history_turn_outcomes?: Record<string, "completed" | "dismissed">

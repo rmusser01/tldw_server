@@ -1019,6 +1019,7 @@ export interface ResearchRunResponse {
 }
 
 export interface ChatCompletionRequest {
+  tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
   messages: ChatMessage[]
   model: string
   routing?: {
@@ -1057,6 +1058,7 @@ export interface ChatCompletionRequest {
 }
 
 export type ChatCompletionRequestOptions = {
+  scope?: ChatScope
   signal?: AbortSignal
   timeoutMs?: number
   debugMetadata?: ChatRequestDebugMetadata

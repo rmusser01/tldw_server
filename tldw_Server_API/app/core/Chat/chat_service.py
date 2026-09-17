@@ -4696,6 +4696,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
+    history_persistence_ack: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -6020,6 +6021,7 @@ async def execute_streaming_call(
                     before_success_callback=_await_mandatory_moderation_audits,
                     system_message_id=system_message_id,
                     continuation_metadata=normalized_continuation_metadata,
+                    history_persistence_ack=history_persistence_ack or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )

@@ -1,3 +1,4 @@
+import { sendNativeHistoryCharacter } from "./native-history-character-send"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import type { NotificationInstance } from "antd/es/notification/interface"
@@ -3286,11 +3287,10 @@ export const useChatActions = ({
       if (
         historySelection &&
         !compareModeActive &&
-        (turnResolvedSendMode === "tracked_character" ||
-          turnResolvedSendMode === "tracked_persona")
+        turnResolvedSendMode === "tracked_persona"
       ) {
         throw new Error(
-          "selected_history_tracked_assistant_requires_versioned_context"
+          "native_history_persona_unsupported"
         )
       }
       if (
@@ -3672,6 +3672,52 @@ export const useChatActions = ({
               setStreaming(false)
               setAbortController(null)
               return chatSubmitSkipped("No model selected for character chat")
+            }
+            if (historySelection) {
+              await sendNativeHistoryCharacter({
+                controller: historySelection,
+                originIsCurrent: historyOriginIsCurrent!,
+                signal,
+                temporary: temporaryChat,
+                historyId,
+                serverChatId: serverChatIdOverride || serverChatId,
+                scope,
+                characterId: resolvedSelectedCharacter.id,
+                model: resolvedModel,
+                currentModel: getEffectiveSelectedModel(),
+                toolChoice: servicePromptChatModeParams.toolChoice,
+                settings: servicePromptChatModeParams.currentChatModelSettings,
+                message,
+                image,
+                setServerChatId,
+                setMessages,
+                unsupportedContext: Boolean(
+                  servicePromptChatModeParams.webSearch ||
+                  servicePromptChatModeParams.selectedSystemPrompt ||
+                  uploadedFiles?.length ||
+                  servicePromptChatModeParams.actorSettings?.isEnabled ||
+                  servicePromptChatModeParams.systemPromptAppendix ||
+                  shouldConsumeSteering || replyActive ||
+                  servicePromptChatModeParams.researchContext ||
+                  servicePromptChatModeParams.dynamicUIRequest ||
+                  requestOverrides?.historyForModel || requestOverrides?.messageForModel
+                ),
+                onCreated: (characterId) => {
+                  setServerChatCharacterId(characterId)
+                  setServerChatAssistantKind("character")
+                  setServerChatAssistantId(null)
+                  setServerChatPersonaMemoryMode(null)
+                  setServerChatMetaLoaded(true)
+                },
+                releaseActivity: () => {
+                  if (releaseAbortControllerIfOwned(signal)) {
+                    setAbortController(null)
+                    setIsProcessing(false)
+                    setStreaming(false)
+                  }
+                }
+              })
+              return { status: "submitted" }
             }
             markSteeringApplied()
             const characterResult = await characterChatMode({
