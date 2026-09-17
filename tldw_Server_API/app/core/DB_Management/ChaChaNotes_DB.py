@@ -32561,12 +32561,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if row is None:
                 raise ConflictError("Referenced message not found", entity="messages", entity_id=item_id)  # noqa: TRY003
             return
-        if table_name not in {"notes", "conversations", "keywords", "keyword_collections", "note_folders"}:
+        if table_name not in {"notes", "conversations", "keywords", "keyword_collections", "note_folders", "study_packs", "flashcards"}:
             raise InputError("Unsupported Notes parent table")  # noqa: TRY003
+        lookup_column = "uuid" if table_name == "flashcards" else "id"
         table_name = self._map_table_for_backend(table_name)
         deleted_clause = "" if include_deleted else " AND deleted = FALSE"
         row = conn.execute(
-            f"SELECT id FROM {table_name} WHERE id = ? AND client_id = ?{deleted_clause} FOR UPDATE",  # nosec B608
+            f"SELECT id FROM {table_name} WHERE {lookup_column} = ? AND client_id = ?{deleted_clause} FOR UPDATE",  # nosec B608
             (item_id, owner_client_id),
         ).fetchone()
         if row is None:
@@ -38503,6 +38504,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
+                self._require_selected_owner_row(conn, "study_packs", superseded_by_pack_id, self.client_id)
                 insert_sql = (
                     "INSERT INTO study_packs("
                     "workspace_id, title, deck_id, source_bundle_json, generation_options_json, "
@@ -39194,6 +39197,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_study_pack(self, pack_id: int) -> dict[str, Any] | None:
         """Fetch a single active study pack by id."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = """
             SELECT id, workspace_id, title, deck_id, source_bundle_json, generation_options_json,
                    status, superseded_by_pack_id, created_at, last_modified, deleted, client_id, version
@@ -39201,7 +39205,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE id = ? AND deleted = 0
         """
         try:
-            cursor = self.execute_query(query, (pack_id,))
+            cursor = self.execute_query(query + owner_clause, (pack_id, *owner_params))
             row = cursor.fetchone()
             return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
         except CharactersRAGDBError:  # noqa: TRY203
@@ -39233,6 +39237,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "study_packs", study_pack_id, self.client_id)
+                if self.backend_type == BackendType.POSTGRESQL:
+                    for card_uuid in sorted(set(flashcard_uuids)):
+                        self._require_selected_owner_row(conn, "flashcards", card_uuid, self.client_id)
                 before_row = conn.execute(
                     "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
                     (study_pack_id,),
@@ -39253,16 +39261,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_study_pack_cards(self, study_pack_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         """List study pack membership rows in insertion order."""
         deleted_clause = "1=1" if include_deleted else "spc.deleted = 0"
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "spc")
+        if owner_params:
+            owner_clause += (
+                " AND f.client_id = ? AND EXISTS (SELECT 1 FROM study_packs sp "
+                "WHERE sp.id = spc.study_pack_id AND sp.client_id = ?)"
+            )
+            owner_params += (self.client_id, self.client_id)
         query = f"""
             SELECT spc.id, spc.study_pack_id, spc.flashcard_uuid, spc.created_at, spc.last_modified,
                    spc.deleted, spc.client_id, spc.version, f.deck_id
               FROM study_pack_cards spc
               LEFT JOIN flashcards f ON f.uuid = spc.flashcard_uuid
-             WHERE spc.study_pack_id = ? AND {deleted_clause}
+             WHERE spc.study_pack_id = ? AND {deleted_clause}{owner_clause}
              ORDER BY spc.id
         """  # nosec B608
         try:
-            cursor = self.execute_query(query, (study_pack_id,))
+            cursor = self.execute_query(query, (study_pack_id, *owner_params))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -39307,7 +39322,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         try:
-            with self.transaction() as _:
+            with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 self.execute_many(
                     """
                     INSERT INTO flashcard_citations(
@@ -39361,15 +39377,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             )
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_citations
                        SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE flashcard_uuid = ? AND deleted = 0
-                    """,
-                    (now, self.client_id, flashcard_uuid),
+                     WHERE flashcard_uuid = ? AND deleted = 0{owner_clause}
+                    """,  # nosec B608 - fixed owner predicate; values remain bound.
+                    (now, self.client_id, flashcard_uuid, *owner_params),
                 )
                 if params:
                     self.execute_many(
@@ -39439,8 +39457,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             )
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 row = conn.execute(
                     "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
                     (flashcard_uuid,),
@@ -39463,12 +39483,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     ),
                 )
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_citations
                        SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE flashcard_uuid = ? AND deleted = 0
-                    """,
-                    (now, self.client_id, flashcard_uuid),
+                     WHERE flashcard_uuid = ? AND deleted = 0{owner_clause}
+                    """,  # nosec B608 - fixed owner predicate; values remain bound.
+                    (now, self.client_id, flashcard_uuid, *owner_params),
                 )
                 if params:
                     self.execute_many(
@@ -39495,15 +39515,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_flashcard_citations(self, flashcard_uuid: str, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         """List citations for a flashcard ordered by ordinal."""
         deleted_clause = "1=1" if include_deleted else "deleted = 0"
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
+        if owner_params:
+            owner_clause += (
+                " AND EXISTS (SELECT 1 FROM flashcards f "
+                "WHERE f.uuid = flashcard_citations.flashcard_uuid AND f.client_id = ?)"
+            )
+            owner_params += (self.client_id,)
         query = f"""
             SELECT id, flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
                    created_at, last_modified, deleted, client_id, version
               FROM flashcard_citations
-             WHERE flashcard_uuid = ? AND {deleted_clause}
+             WHERE flashcard_uuid = ? AND {deleted_clause}{owner_clause}
              ORDER BY ordinal, id
         """  # nosec B608
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,), read_only=True)
+            cursor = self.execute_query(query, (flashcard_uuid, *owner_params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -39526,6 +39553,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 row = conn.execute(
                     "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
                     (flashcard_uuid,),
@@ -39555,17 +39583,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_study_pack_for_flashcard(self, flashcard_uuid: str) -> dict[str, Any] | None:
         """Return the first active study pack containing the flashcard."""
-        query = """
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "sp")
+        if owner_params:
+            owner_clause += (
+                " AND spc.client_id = ? AND EXISTS (SELECT 1 FROM flashcards f "
+                "WHERE f.uuid = spc.flashcard_uuid AND f.client_id = ?)"
+            )
+            owner_params += (self.client_id, self.client_id)
+        query = f"""
             SELECT sp.id, sp.workspace_id, sp.title, sp.deck_id, sp.source_bundle_json, sp.generation_options_json,
                    sp.status, sp.superseded_by_pack_id, sp.created_at, sp.last_modified, sp.deleted, sp.client_id, sp.version
               FROM study_pack_cards spc
               JOIN study_packs sp ON sp.id = spc.study_pack_id
-             WHERE spc.flashcard_uuid = ? AND spc.deleted = 0 AND sp.deleted = 0
+             WHERE spc.flashcard_uuid = ? AND spc.deleted = 0 AND sp.deleted = 0{owner_clause}
              ORDER BY spc.id ASC, sp.id ASC
              LIMIT 1
-        """
+        """  # nosec B608 - fixed owner predicate; values remain bound.
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,), read_only=True)
+            cursor = self.execute_query(query, (flashcard_uuid, *owner_params), read_only=True)
             row = cursor.fetchone()
             return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
         except CharactersRAGDBError:  # noqa: TRY203
@@ -39576,6 +39611,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "study_packs", pack_id, self.client_id, include_deleted=True)
                 row = conn.execute("SELECT version, deleted FROM study_packs WHERE id = ?", (pack_id,)).fetchone()
                 if not row:
                     raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
@@ -39632,8 +39668,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     locked_rows: dict[int, Any] = {}
                     for locked_pack_id in sorted((pack_id, superseded_by_pack_id)):
                         locked_row = conn.execute(
-                            "SELECT id, version, deleted FROM study_packs WHERE id = ? FOR UPDATE",
-                            (locked_pack_id,),
+                            "SELECT id, version, deleted FROM study_packs WHERE id = ? AND client_id = ? FOR UPDATE",
+                            (locked_pack_id, self.client_id),
                         ).fetchone()
                         if locked_row:
                             locked_rows[int(locked_row["id"])] = locked_row
