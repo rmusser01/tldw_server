@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-17T00:03:15.014Z",
+  "sourceHead": "bb5a0c01f178006d7b996122f2ea606bba4cb520",
+  "restoredConfigSha256": "5f8da2bfa807c632dd914ddb55cc38f5724c50cb06ae6bd2cee20a4238d93da2",
+  "backendPid": 2996,
+  "fixtureStopped": true,
+  "verify": {
+    "profile": "pg-multi",
+    "apiStatus": 200,
+    "webStatus": 200,
+    "expectedGemmaAdvertised": true,
+    "ollamaUnavailable": true,
+    "noInferenceRequested": true
+  },
+  "limit": "API/UI health and provider inventory pass; native Notes requests expose a separate restart database failure under diagnosis. No global workflow recovery claim."
+}

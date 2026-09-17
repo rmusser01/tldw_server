@@ -1,0 +1,117 @@
+{
+  "at": "2026-09-17T00:11:41.043Z",
+  "files": [
+    {
+      "file": "restart-diagnosis.md",
+      "source": ".tmp/uat171-native-20260916/restart-diagnosis.md",
+      "original_sha256": "3a31ca7a202075c01563dd644563d0ef17f520e82ce5353e8c694750431f4748",
+      "retained_sha256": "3a31ca7a202075c01563dd644563d0ef17f520e82ce5353e8c694750431f4748",
+      "normalization": "none"
+    },
+    {
+      "file": "blocking-metadata-000323.json",
+      "source": ".tmp/uat171-native-20260916/blocking-metadata-000323.json",
+      "original_sha256": "e0efbaff12faa653771366a2f884855583ff58b2c833565b338984a87a33d93b",
+      "retained_sha256": "e0efbaff12faa653771366a2f884855583ff58b2c833565b338984a87a33d93b",
+      "normalization": "none"
+    },
+    {
+      "file": "blocker-locks-000518.json",
+      "source": ".tmp/uat171-native-20260916/blocker-locks-000518.json",
+      "original_sha256": "3c506089103aa9252141703499d3d4ae2c30990220d467204052faf92253170b",
+      "retained_sha256": "3c506089103aa9252141703499d3d4ae2c30990220d467204052faf92253170b",
+      "normalization": "none"
+    },
+    {
+      "file": "after-cleanup-metadata-000745.json",
+      "source": ".tmp/uat171-native-20260916/after-cleanup-metadata-000745.json",
+      "original_sha256": "ce30bc57997a71e352870b4fff91a6483a87323a937f218a0c2f4dcf4327efa2",
+      "retained_sha256": "ce30bc57997a71e352870b4fff91a6483a87323a937f218a0c2f4dcf4327efa2",
+      "normalization": "none"
+    },
+    {
+      "file": "before-notes.json",
+      "source": ".tmp/uat171-native-20260916/before-notes.json",
+      "original_sha256": "a4f51ae88349091e3d46f70e665c2d99b89e56b313bc7e515d429e0ef716abea",
+      "retained_sha256": "a4f51ae88349091e3d46f70e665c2d99b89e56b313bc7e515d429e0ef716abea",
+      "normalization": "none"
+    },
+    {
+      "file": "after-notes.json",
+      "source": ".tmp/uat171-native-20260916/after-notes.json",
+      "original_sha256": "ec027d70991ed211b99c1a6703f762a737459adb69a8d54cefb8830fad7fe08c",
+      "retained_sha256": "ec027d70991ed211b99c1a6703f762a737459adb69a8d54cefb8830fad7fe08c",
+      "normalization": "none"
+    },
+    {
+      "file": "after-restart-notes.json",
+      "source": ".tmp/uat171-native-20260916/after-restart-notes.json",
+      "original_sha256": "a9af60f334b32d33992facebc0abec64c549fe2961ebe855baed1a85444ef290",
+      "retained_sha256": "a9af60f334b32d33992facebc0abec64c549fe2961ebe855baed1a85444ef290",
+      "normalization": "none"
+    },
+    {
+      "file": "after-old-api-exit.json",
+      "source": ".tmp/uat171-native-20260916/after-old-api-exit.json",
+      "original_sha256": "5cbe25e735d039ebb148df616f3f0a6b21f7539ad1b52db803f4a2e44c4d7fa1",
+      "retained_sha256": "5cbe25e735d039ebb148df616f3f0a6b21f7539ad1b52db803f4a2e44c4d7fa1",
+      "normalization": "none"
+    },
+    {
+      "file": "api-stop-receipt.json",
+      "source": ".tmp/uat171-native-20260916/api-stop-receipt.json",
+      "original_sha256": "be3b8cb2e6a2008e0ff41135d7006327ea941d667026c29c43379ed3a95ce17c",
+      "retained_sha256": "be3b8cb2e6a2008e0ff41135d7006327ea941d667026c29c43379ed3a95ce17c",
+      "normalization": "none"
+    },
+    {
+      "file": "draining-api-stop.json",
+      "source": ".tmp/uat171-native-20260916/draining-api-stop.json",
+      "original_sha256": "d1effb26573823ac84f5ed28984753e3eb8491a4fed0f013113464185bfe860a",
+      "retained_sha256": "d1effb26573823ac84f5ed28984753e3eb8491a4fed0f013113464185bfe860a",
+      "normalization": "none"
+    },
+    {
+      "file": "draining-api-state.json",
+      "source": ".tmp/uat171-native-20260916/draining-api-state.json",
+      "original_sha256": "af308075b3b3823dd6c0e0b332d272bcaf5153a1b4189c14fdbd5bf11d26ca82",
+      "retained_sha256": "af308075b3b3823dd6c0e0b332d272bcaf5153a1b4189c14fdbd5bf11d26ca82",
+      "normalization": "none"
+    },
+    {
+      "file": "replacement-ready.json",
+      "source": ".tmp/uat171-native-20260916/replacement-ready.json",
+      "original_sha256": "1ff94f42c1ea99b3844075cbdf8c42bf10cd035d67a02cefa26be6dd01a34ca6",
+      "retained_sha256": "1ff94f42c1ea99b3844075cbdf8c42bf10cd035d67a02cefa26be6dd01a34ca6",
+      "normalization": "none"
+    },
+    {
+      "file": "notes-before-restart.txt",
+      "source": ".tmp/uat171-native-20260916/notes-before-restart.txt",
+      "original_sha256": "47d7c562bfcd7180a464d364ab64fea3a2d5c8698a550c371f96c81e12d9299c",
+      "retained_sha256": "cbbb3f82adbeb05e875e8eb8b0a89bd15498bc35fa8fc4df6b4afd7fe415e51a",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "notes-after-restart.txt",
+      "source": ".tmp/uat171-native-20260916/notes-after-restart.txt",
+      "original_sha256": "dcf637fec8608cf17af92304881200a967c435fcaa9dc94362343ee5a3b40716",
+      "retained_sha256": "7fddebb9254df340f295a1aa0d7f696212553b2489f6168ff95236186c0b35fa",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "notes-restart-failure.png",
+      "source": ".tmp/uat171-native-20260916/notes-restart-failure.png",
+      "original_sha256": "2e2bdc03aa912f6c17fe5fb1991b16a722274eb7806d28e804407ff3a5717ecc",
+      "retained_sha256": "2e2bdc03aa912f6c17fe5fb1991b16a722274eb7806d28e804407ff3a5717ecc",
+      "normalization": "none"
+    },
+    {
+      "file": "notes-after-old-api-exit.txt",
+      "source": ".tmp/uat171-native-20260916/notes-after-old-api-exit.txt",
+      "original_sha256": "bbe7dfd75c679f7a39ad387afda34aeff46854539e0cbc0bc089c1b576db9ff5",
+      "retained_sha256": "7a27df4e8bff25be89b34fbb6fa0c35ba9cecf8bea3a43c1c6a85d9c6ed49058",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

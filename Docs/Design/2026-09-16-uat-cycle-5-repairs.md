@@ -155,3 +155,11 @@ The rebuilt targeted profile's normal auth path reads the repository's existing 
 ## UAT172: recover the current account deck list during explicit Save/Retry
 
 If the scoped deck query is errored, refetch through its existing observer, assert the original scope again, and resolve the target from the successful returned list. Pending queries retain the wait guard; ready queries retain existing behavior. A repeated failure keeps drafts and inline recovery feedback. Test edited draft/provenance, changed/aborted/unresolved account, deleted target, empty catalogue and duplicate active click. TASK13260.109; retained design/review in followup172.
+
+## UAT181 — finish known standalone Flashcards and related read scopes
+
+TASK13260.118. Native replacement API initialization blocks on flashcards ADD COLUMN IF NOT EXISTS while seven old implicit read transactions hold AccessShareLock. Pure Notes reads release their locks under171; the subsequent bootstrap failure is a distinct scope. Stopping only old owned API740 removes all seven blockers and Notes Retry recovers; that is diagnosis, not acceptance.
+
+Use the reviewed171 execute_query(read_only=True) helper at35 inspected side-effect-free SELECT sites:25 Flashcards/deck sites,4 Study-assistant reads,5 Buddy reads and the persona read used by populated Buddy responses. The helper owns a read transaction only when the raw connection starts IDLE and both explicit transaction depths are zero. Preserve genericdefaults, SQL interpretation, explicit/implicit caller work, locking reads, writes, schema and APIs. Do not globally commit/rollback pinned connections.
+
+Causal official-PostgreSQL regressions must cover standalone starters and the real same-connection workflow read chain followed by second-connection schema initialization/locking. Retain explicit/nested/caller rollback/commit and locking-read/write controls; run SQLite parity and adjacent regression suites, independent review and scoped Bandit/lint. Native reacceptance repeats actual Flashcards/deck/Buddy/Notes reads, starts a replacement while the oldAPI drains, checks actual routes and scoped locks, and preserves all results before another full matrix. This is bounded to inspected reads, not a claim that every unrelated domain has correct transaction ownership.

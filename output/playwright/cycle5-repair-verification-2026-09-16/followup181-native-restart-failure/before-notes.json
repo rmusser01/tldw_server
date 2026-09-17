@@ -1,0 +1,90 @@
+{
+  "observedAt": "2026-09-16T23:59:06.585024+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 61615,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61639,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61647,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61648,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61649,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61650,
+      "state": "idle"
+    },
+    {
+      "pid": 61651,
+      "state": "idle"
+    },
+    {
+      "pid": 61652,
+      "state": "idle"
+    },
+    {
+      "pid": 61660,
+      "state": "idle"
+    },
+    {
+      "pid": 61661,
+      "state": "idle"
+    },
+    {
+      "pid": 61665,
+      "state": "idle"
+    },
+    {
+      "pid": 61666,
+      "state": "idle"
+    },
+    {
+      "pid": 61667,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61668,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61669,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61670,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61816,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 61817,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 64803,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 64811,
+      "state": "idle"
+    }
+  ],
+  "locks": [],
+  "transactionReadOnlyVerified": true
+}

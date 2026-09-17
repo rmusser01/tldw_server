@@ -1,0 +1,4 @@
+# UAT181 native PostgreSQL restart failure
+
+Notes standalone reads release their own locks. Replacement per-user database bootstrap instead waits on Flashcards DDL behind seven old read transactions. Actual Notes routes500; roothealth/UI/catalog200 remain narrower reachability checks. Stopping only the owned already-draining oldAPI740 removes the seven blockers and nativeRetryrecovers. This is diagnosis/workaround, not repair acceptance. Sanitized metadata subsets preserve the precise waiting statement and lock chain; source remains bb5a0c01f1. TASK13260.118 tracks the bounded read-ownership repair.
+Originals preserved. Manifest records original/retained hashes; text trailing whitespace normalized, PNG bytes unchanged. Known runtime credentials and JWT/PEM patterns scanned with zero matches.
