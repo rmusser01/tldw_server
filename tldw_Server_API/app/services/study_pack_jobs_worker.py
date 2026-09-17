@@ -35,10 +35,7 @@ def _close_worker_database(db: Any) -> None:
 
 async def _get_databases_for_user(user_id: str) -> tuple[Any, Any]:
     normalized_user_id = int(str(user_id).strip())
-    note_db = await get_chacha_db_for_user_id(
-        normalized_user_id,
-        client_id=f"study-pack-worker-{normalized_user_id}",
-    )
+    note_db = await get_chacha_db_for_user_id(normalized_user_id)
     try:
         media_db = get_media_db_for_owner(normalized_user_id)
     except Exception:
