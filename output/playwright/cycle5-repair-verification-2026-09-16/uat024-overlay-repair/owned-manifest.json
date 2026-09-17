@@ -1,0 +1,20 @@
+{
+  "task": "TASK13260.6",
+  "finding": "UAT024",
+  "baselineHead": "f29ffd480255b4ec4e2a50ff22931e0dd392fff0",
+  "reviewHead": "f29ffd480255b4ec4e2a50ff22931e0dd392fff0",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "sha256": "ea45ab82cd617752cc074c20f2c7e9ba01b4ff3d9b15ef9af6953b6381695e63",
+      "bytes": 39944,
+      "snapshot": ".tmp/uat024-repair-20260916/review-snapshot/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts"
+    },
+    {
+      "path": "apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx",
+      "sha256": "7f3e3ff9a4c9c6ad0da7345ed4107bd5a7ffec25b2d010bfd68e186858b4c254",
+      "bytes": 17009,
+      "snapshot": ".tmp/uat024-repair-20260916/review-snapshot/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx"
+    }
+  ]
+}

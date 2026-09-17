@@ -1,0 +1,89 @@
+{
+  "at": "2026-09-16T23:59:31.503Z",
+  "files": [
+    {
+      "file": "DESIGN024.md",
+      "source": ".tmp/uat024-repair-20260916/DESIGN024.md",
+      "original_sha256": "6e0c8b01a862e911eae26ef5bbfe7ff9e472e8aabf995bd166ac6cf2cf33cf0d",
+      "retained_sha256": "6e0c8b01a862e911eae26ef5bbfe7ff9e472e8aabf995bd166ac6cf2cf33cf0d",
+      "normalization": "none"
+    },
+    {
+      "file": "REPAIR024-REVIEW.md",
+      "source": ".tmp/uat024-repair-20260916/REPAIR024-REVIEW.md",
+      "original_sha256": "a0cc313513f9c4b0cc912ec3a017097e072bd83f6b782ec919d873c0cf8eaa92",
+      "retained_sha256": "a0cc313513f9c4b0cc912ec3a017097e072bd83f6b782ec919d873c0cf8eaa92",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat024-repair-20260916/owned-manifest.json",
+      "original_sha256": "2b93c4d9337f3e461154cbf0af50c6d2b1c6154ceab6a247d097948b3977422c",
+      "retained_sha256": "2b93c4d9337f3e461154cbf0af50c6d2b1c6154ceab6a247d097948b3977422c",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat024-repair-20260916/owned.patch",
+      "original_sha256": "d15abdaca5d64ae290cd8921fc6d692edc2f0adf1ceedb14c90faffeb4f33d90",
+      "retained_sha256": "7b4a2beb81e97db900bc8339998d7161f697f85d75d47cc0874296a86ebec58b",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "red-next.log",
+      "source": ".tmp/uat024-repair-20260916/red-next.log",
+      "original_sha256": "cbef70d1a4199ed22535b8dfb22261df0ffbb3ce8010abe0a00c42f7c1553709",
+      "retained_sha256": "628e5217459ca21e93c662dfd5f65fbd7bdc5d7f17f9ed26dfe915270d1c05ed",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "green-scoped.log",
+      "source": ".tmp/uat024-repair-20260916/green-scoped.log",
+      "original_sha256": "667709a986bf6be5252faeed9c34c05ebc635eb430a2ab35d350e919357ae892",
+      "retained_sha256": "0b8f9f8af9f864462938f417b5f7e6c441f3719fa1fe28af155b5a919b7d7e7e",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "green-generation-controls.log",
+      "source": ".tmp/uat024-repair-20260916/green-generation-controls.log",
+      "original_sha256": "48e1876a12ec7cf71749b56ff64eacb46cffced4e1610cfe6347162a325d015d",
+      "retained_sha256": "b17b83e098e307f5ae62a9b2a62eeb708c146bb469bbef34646946921456f5ae",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "root-independent-tests.log",
+      "source": ".tmp/uat024-repair-20260916/root-independent-tests.log",
+      "original_sha256": "981fee0c65157ace00f904b2cc06ba20c549f246b3702166a6233b4e52667a78",
+      "retained_sha256": "887b97d99dc9b858325c913f5fa8d9fb60d6abe92001a4e997991b0c86fa85ce",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "eslint.json",
+      "source": ".tmp/uat024-repair-20260916/eslint.json",
+      "original_sha256": "cee2f3da92d64570168b451851a0f633855dfac1e5917086aca7b34d5621574f",
+      "retained_sha256": "cee2f3da92d64570168b451851a0f633855dfac1e5917086aca7b34d5621574f",
+      "normalization": "none"
+    },
+    {
+      "file": "tsc-comparison.json",
+      "source": ".tmp/uat024-repair-20260916/tsc-comparison.json",
+      "original_sha256": "32869e3d49ecee50063c8853eaa1520c1426410fcc13ad6327ed04b1fd98d93d",
+      "retained_sha256": "32869e3d49ecee50063c8853eaa1520c1426410fcc13ad6327ed04b1fd98d93d",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit.json",
+      "source": ".tmp/uat024-repair-20260916/bandit.json",
+      "original_sha256": "5ff69a9da129e59035acfe0b6a9358a9518434bd301a751225708c690ab0b575",
+      "retained_sha256": "8683e8b418add737328ebe305fcd8f0d9773a8a7d7974601efff491eb7ff2f82",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "diff-check.txt",
+      "source": ".tmp/uat024-repair-20260916/diff-check.txt",
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

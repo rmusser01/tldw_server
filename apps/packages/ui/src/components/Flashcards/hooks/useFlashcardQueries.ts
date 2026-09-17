@@ -95,11 +95,11 @@ const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
       query.queryKey[0].startsWith("flashcards:")
   })
 
-const reportCreateMutationError = (message: string, error: unknown) => {
+const reportFlashcardMutationError = (message: string, error: unknown) => {
   if (error instanceof Error && "status" in error &&
     typeof error.status === "number" && Number.isInteger(error.status) &&
     error.status >= 400 && error.status <= 599) {
-    // HTTP failures are recoverable by the save UI. Next's Pages Router turns
+    // HTTP failures are recoverable by the generation/save UI. Next's Pages Router turns
     // console.error(message, Error) into a blocking runtime overlay.
     console.warn(message, error)
     return
@@ -717,7 +717,7 @@ export function useCreateFlashcardMutation() {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      reportCreateMutationError("Failed to create flashcard:", error)
+      reportFlashcardMutationError("Failed to create flashcard:", error)
     }
   })
 }
@@ -783,7 +783,7 @@ export function useCreateDeckMutation() {
       invalidateFlashcardsQueries(qc)
     },
     onError: (error) => {
-      reportCreateMutationError("Failed to create deck:", error)
+      reportFlashcardMutationError("Failed to create deck:", error)
     }
   })
 }
@@ -1066,7 +1066,7 @@ export function useGenerateFlashcardsMutation() {
       }, params.requestOptions)
     },
     onError: (error) => {
-      console.error("Failed to generate flashcards:", error)
+      reportFlashcardMutationError("Failed to generate flashcards:", error)
     }
   })
 }

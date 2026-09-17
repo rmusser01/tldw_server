@@ -1,0 +1,166 @@
+diff --git a/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts b/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
+index 378d6e7316..93251cab8a 100644
+--- a/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
++++ b/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts
+@@ -95,11 +95,11 @@ const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
+       query.queryKey[0].startsWith("flashcards:")
+   })
+
+-const reportCreateMutationError = (message: string, error: unknown) => {
++const reportFlashcardMutationError = (message: string, error: unknown) => {
+   if (error instanceof Error && "status" in error &&
+     typeof error.status === "number" && Number.isInteger(error.status) &&
+     error.status >= 400 && error.status <= 599) {
+-    // HTTP failures are recoverable by the save UI. Next's Pages Router turns
++    // HTTP failures are recoverable by the generation/save UI. Next's Pages Router turns
+     // console.error(message, Error) into a blocking runtime overlay.
+     console.warn(message, error)
+     return
+@@ -717,7 +717,7 @@ export function useCreateFlashcardMutation() {
+       invalidateFlashcardsQueries(qc)
+     },
+     onError: (error) => {
+-      reportCreateMutationError("Failed to create flashcard:", error)
++      reportFlashcardMutationError("Failed to create flashcard:", error)
+     }
+   })
+ }
+@@ -783,7 +783,7 @@ export function useCreateDeckMutation() {
+       invalidateFlashcardsQueries(qc)
+     },
+     onError: (error) => {
+-      reportCreateMutationError("Failed to create deck:", error)
++      reportFlashcardMutationError("Failed to create deck:", error)
+     }
+   })
+ }
+@@ -1066,7 +1066,7 @@ export function useGenerateFlashcardsMutation() {
+       }, params.requestOptions)
+     },
+     onError: (error) => {
+-      console.error("Failed to generate flashcards:", error)
++      reportFlashcardMutationError("Failed to generate flashcards:", error)
+     }
+   })
+ }
+diff --git a/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx b/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx
+index fd719f96d1..ce4d807910 100644
+--- a/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx
++++ b/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx
+@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+ import { MemoryRouter } from "react-router-dom"
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+ import { GeneratePanel } from "@/components/Flashcards/tabs/ImportExport/GeneratePanel"
+-import { useCreateDeckMutation, useCreateFlashcardMutation } from "@/components/Flashcards/hooks/useFlashcardQueries"
++import { useCreateDeckMutation, useCreateFlashcardMutation, useGenerateFlashcardsMutation } from "@/components/Flashcards/hooks/useFlashcardQueries"
+ import type { ServicePromptSnapshot } from "@/services/service-prompts"
+
+ const boundary = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), fetch: vi.fn() }))
+@@ -77,7 +77,7 @@ const wrapper = (client: QueryClient) => function Wrapper({ children }: { childr
+   return <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>
+ }
+
+-describe("generated saves through the real request and Next Pages error paths", () => {
++describe("generation and saves through the real request and Next Pages error paths", () => {
+   beforeEach(() => {
+     vi.clearAllMocks()
+     boundary.get.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+@@ -87,6 +87,79 @@ describe("generated saves through the real request and Next Pages error paths",
+   })
+   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
++  it("keeps a generation claim-verification 422 inline, retains options, and allows another generation", async () => {
++    const sourceText = "The trial response rate was 10%."
++    const guidance = "The generated cards could not be verified against your source. Add clearer source details or request fewer cards, then generate again."
++    const failure = { detail: { code: "claim_verification_failed", claimVerification: {
++      verdict: "failed", report: { numerical_error_count: 1, claims: [{
++        claim_id: "flashcard:1:back:c1", claim_text: "The trial response rate was 90%.",
++        status: "numerical_error", confidence: 0.85
++      }] }, unitResults: [{ unit_id: "flashcard:1:back", verdict: "failed", statuses: ["numerical_error"] }]
++    } } }
++    let failing = true
++    boundary.fetch.mockImplementation(async (url: string, init: RequestInit) => {
++      const pathname = new URL(url).pathname
++      if (pathname.endsWith("/decks") && init.method === "GET") return response([])
++      if (pathname.endsWith("/generate") && init.method === "POST") return failing
++        ? response(failure, 422)
++        : response({ flashcards: [{ front: "What was the trial response rate?", back: "10%", tags: [], model_type: "basic" }], count: 1 })
++      throw new Error(`Unexpected request: ${init.method} ${pathname}`)
++    })
++    const observer = installNextPagesErrorObserver()
++    const warning = vi.spyOn(console, "warn")
++    const client = makeClient()
++    const scope = makeScope()
++    const transfer = vi.fn()
++    try {
++      render(<GeneratePanel generationScope={scope} initialIntent={{ ...source, text: sourceText }} onTransferAction={transfer} />, { wrapper: wrapper(client) })
++      await waitFor(() => expect(client.getQueryCache().getAll().find(query => query.queryKey[0] === "flashcards:decks:scoped")?.state.status).toBe("success"))
++      fireEvent.change(screen.getByTestId("flashcards-generate-count"), { target: { value: "2" } })
++      fireEvent.mouseDown(screen.getByTestId("flashcards-generate-card-type").querySelector("input")!)
++      fireEvent.click(await screen.findByText("Basic (reverse)", { selector: ".ant-select-item-option-content" }))
++      fireEvent.mouseDown(screen.getByTestId("flashcards-generate-difficulty").querySelector("input")!)
++      fireEvent.click(await screen.findByText("Hard", { selector: ".ant-select-item-option-content" }))
++      fireEvent.change(screen.getByTestId("flashcards-generate-focus-topics"), { target: { value: "trial, response rate" } })
++      fireEvent.change(screen.getByTestId("flashcards-generate-provider"), { target: { value: "custom-openai-api-99" } })
++      fireEvent.change(screen.getByTestId("flashcards-generate-model"), { target: { value: "uat024-claim-negative-control" } })
++      fireEvent.click(screen.getByTestId("flashcards-generate-button"))
++      expect(await screen.findByText(guidance)).toBeVisible()
++      await waitFor(() => expect(screen.getByTestId("flashcards-generate-button")).toBeEnabled())
++      expect(screen.getByTestId("flashcards-generate-text")).toHaveValue(sourceText)
++      expect(screen.getByTestId("flashcards-generate-count")).toHaveValue(2)
++      expect(screen.getByTestId("flashcards-generate-card-type")).toHaveTextContent("Basic (reverse)")
++      expect(screen.getByTestId("flashcards-generate-difficulty")).toHaveTextContent("Hard")
++      expect(screen.getByTestId("flashcards-generate-focus-topics")).toHaveValue("trial, response rate")
++      expect(screen.getByTestId("flashcards-generate-provider")).toHaveValue("custom-openai-api-99")
++      expect(screen.getByTestId("flashcards-generate-model")).toHaveValue("uat024-claim-negative-control")
++      expect(screen.queryByTestId("flashcards-generate-save-button")).not.toBeInTheDocument()
++      expect(screen.queryByDisplayValue("What was the trial response rate?")).not.toBeInTheDocument()
++      expect(document.body).not.toHaveTextContent("claim_verification_failed")
++      expect(document.body).not.toHaveTextContent("numerical_error")
++      expect(transfer).toHaveBeenCalledWith({ area: "generate", status: "error", message: guidance })
++      const failedMutation = client.getMutationCache().getAll().find(mutation => mutation.state.status === "error")
++      expect(failedMutation?.state.error).toMatchObject({ status: 422 })
++      expect(observer.unhandled).toEqual([])
++      expect(observer.rejections).toEqual([])
++      expect(observer.errors).toEqual([])
++      expect(warning).toHaveBeenCalledWith("Failed to generate flashcards:", failedMutation?.state.error)
++
++      failing = false
++      fireEvent.click(screen.getByTestId("flashcards-generate-button"))
++      expect(await screen.findByDisplayValue("What was the trial response rate?")).toBeVisible()
++      expect(screen.getByDisplayValue("10%")).toBeVisible()
++      expect(screen.queryByText(guidance)).not.toBeInTheDocument()
++      expect(screen.getByTestId("flashcards-generate-save-button")).toBeEnabled()
++      const posts = boundary.fetch.mock.calls.filter(([, init]) => init.method === "POST")
++      expect(posts).toHaveLength(2)
++      for (const [url, init] of posts) {
++        expect(url).toBe("https://source.test/api/v1/flashcards/generate")
++        expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("1")
++        expect(JSON.parse(init.body as string)).toEqual({ text: sourceText, num_cards: 2, card_type: "basic_reverse", difficulty: "hard", focus_topics: ["trial", "response rate"], provider: "custom-openai-api-99", model: "uat024-claim-negative-control" })
++      }
++      expect(observer.errors).toEqual([])
++    } finally { observer.restore(); client.clear() }
++  })
++
+   it.each([["deck", 409], ["deck", 500], ["card", 422], ["card", 500]] as const)("keeps a %s HTTP %i save failure inline and retries the edited draft", async (stage, status) => {
+     let failing = true
+     let deckCreated = false
+@@ -154,15 +227,16 @@ describe("generated saves through the real request and Next Pages error paths",
+     } finally { observer.restore(); client.clear() }
+   })
+
+-  it.each(["deck", "card"] as const)("preserves the %s programming error rejection and Next diagnostic", async stage => {
++  it.each(["deck", "card", "generation"] as const)("preserves the %s programming error rejection and Next diagnostic", async stage => {
+     const observer = installNextPagesErrorObserver()
+     const client = makeClient()
+     try {
+-      const { result } = renderHook(() => ({ deck: useCreateDeckMutation(), card: useCreateFlashcardMutation() }), { wrapper: wrapper(client) })
++      const { result } = renderHook(() => ({ deck: useCreateDeckMutation(), card: useCreateFlashcardMutation(), generation: useGenerateFlashcardsMutation() }), { wrapper: wrapper(client) })
+       let caught: unknown
+       await act(async () => {
+         try {
+           if (stage === "deck") await result.current.deck.mutateAsync({ name: null as unknown as string })
++          else if (stage === "generation") await result.current.generation.mutateAsync({ get text(): string { throw new TypeError("Invalid source getter") } })
+           else await result.current.card.mutateAsync({ get front(): string { throw new TypeError("Invalid draft getter") }, back: "A" })
+         } catch (error) { caught = error }
+       })
