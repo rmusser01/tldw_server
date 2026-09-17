@@ -44114,7 +44114,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for row in cursor.fetchall():
                 entry = dict(row)
                 try:
-                    entry['payload'] = json.loads(entry['payload'])
+                    entry['payload'] = json.loads(entry['payload']) if entry['payload'] is not None else None
                 except json.JSONDecodeError:
                     logger.warning(
                         f"Failed to decode JSON payload for sync_log ID {entry['change_id']}. Payload: {entry['payload'][:100]}")
