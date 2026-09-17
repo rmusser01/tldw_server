@@ -2721,7 +2721,7 @@ class NoteStore:
             GROUP BY nk.keyword_id
         """.format_map(locals())  # nosec B608
 
-        cursor = self._db.execute_query(query, tuple(params) if params else None)
+        cursor = self._db.execute_query(query, tuple(params) if params else None, read_only=True)
         out: dict[int, int] = {}
         for row in cursor.fetchall():
             try:

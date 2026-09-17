@@ -739,7 +739,7 @@ class KeywordStore:
             f"WHERE deleted = {self._deleted_literal(False)}"
         )
         try:
-            cursor = self._db.execute_query(query)
+            cursor = self._db.execute_query(query, read_only=True)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0
         except CharactersRAGDBError as exc:
@@ -915,7 +915,7 @@ class KeywordStore:
                   AND k.deleted = {deleted_false} \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self._db.execute_query(query, (collection_id,))
+        cursor = self._db.execute_query(query, (collection_id,), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def count_collection_keyword_links(self) -> int:

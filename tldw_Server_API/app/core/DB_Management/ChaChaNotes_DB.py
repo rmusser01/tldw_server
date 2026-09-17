@@ -32544,7 +32544,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         table_name = self._map_table_for_backend(table_name)
         query = f"SELECT * FROM {table_name} WHERE deleted = 0 ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
         try:
-            cursor = self.execute_query(query, (limit, offset))
+            cursor = self.execute_query(query, (limit, offset), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
             logger.error(f"Database error listing {table_name}: {e}")

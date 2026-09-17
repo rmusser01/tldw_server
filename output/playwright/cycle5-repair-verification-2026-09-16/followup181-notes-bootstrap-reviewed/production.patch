@@ -1,0 +1,42 @@
+--- a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
++++ b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+@@ -32544,7 +32544,7 @@
+         table_name = self._map_table_for_backend(table_name)
+         query = f"SELECT * FROM {table_name} WHERE deleted = 0 ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
+         try:
+-            cursor = self.execute_query(query, (limit, offset))
++            cursor = self.execute_query(query, (limit, offset), read_only=True)
+             return [dict(row) for row in cursor.fetchall()]
+         except CharactersRAGDBError as e:
+             logger.error(f"Database error listing {table_name}: {e}")
+--- a/tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py
+@@ -739,7 +739,7 @@
+             f"WHERE deleted = {self._deleted_literal(False)}"
+         )
+         try:
+-            cursor = self._db.execute_query(query)
++            cursor = self._db.execute_query(query, read_only=True)
+             row = cursor.fetchone()
+             return int(row["cnt"]) if row else 0
+         except CharactersRAGDBError as exc:
+@@ -915,7 +915,7 @@
+                   AND k.deleted = {deleted_false} \
+                 {order_clause}
+                 """.format_map(locals())  # nosec B608
+-        cursor = self._db.execute_query(query, (collection_id,))
++        cursor = self._db.execute_query(query, (collection_id,), read_only=True)
+         return [dict(row) for row in cursor.fetchall()]
+
+     def count_collection_keyword_links(self) -> int:
+--- a/tldw_Server_API/app/core/DB_Management/chacha/note_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/note_store.py
+@@ -2721,7 +2721,7 @@
+             GROUP BY nk.keyword_id
+         """.format_map(locals())  # nosec B608
+
+-        cursor = self._db.execute_query(query, tuple(params) if params else None)
++        cursor = self._db.execute_query(query, tuple(params) if params else None, read_only=True)
+         out: dict[int, int] = {}
+         for row in cursor.fetchall():
+             try:
