@@ -1,0 +1,509 @@
+{
+  "verdict": "CLEAR",
+  "at": "2026-09-17T22:03:05.909Z",
+  "packet": "output/playwright/fresh-matrix-repairs-2026-09-17/native-upgrade-account-accepted",
+  "acceptedFindings": [
+    243,
+    248,
+    254
+  ],
+  "fullMatrixAccepted": false,
+  "payloadCount": 74,
+  "totalFiles": 77,
+  "checkpointEntries": 76,
+  "independentSourceInventoryCount": 74,
+  "privateInputsExcluded": 20,
+  "manifestSha256": "6cb62377b2f6c39218c4c367164540648053dd0722203ddee778e66d07d1ff3f",
+  "checksumsSha256": "8ccdc5991de8c7c28331b30f35c864471c52c3b61e1741ebb4e820abe089bcdc",
+  "retainerSha256": "aab2aec4d01940739d14e8ae42b42f57eee2395fc527cb06cad2530c0afb252b",
+  "gzipResults": [
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/pg-single-source-manifest.json",
+      "storedBytes": 1848840,
+      "sourceBytes": 8354106,
+      "storedSha256": "a0c8efadc4ef815379c173c4774ad06d3f3202882a4cd34693c85e29e5df7953",
+      "sourceSha256": "b7901065c3f7859edee24dc879536ef4dfeeccd9715b04d9b6df0a62fcf122fb",
+      "exactRoundtrip": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/pg-multi-source-manifest.json",
+      "storedBytes": 1848840,
+      "sourceBytes": 8354105,
+      "storedSha256": "9b866d086287dcb59a4a570d953ac60f279a804b33331fe1e4f6b6a7da138bce",
+      "sourceSha256": "87eb97a92e3e31851e031b7e9ca35503ec87ed94b168b1f71928c4bb168634f8",
+      "exactRoundtrip": true
+    }
+  ],
+  "payloadResults": [
+    {
+      "source": ".tmp/uat-next-matrix-20260916/matrix-upgrade.mjs",
+      "sha256": "5e0cc74c2c66a5c01eb7fc2f0d1680cffe018c072a892dd566041cdfac73567f",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sha256": "edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/gate.json",
+      "sha256": "fcc90556941bb7fdd3a119bd9ea472ef3d22217fa94720c9b0fd1809eeb9da2b",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/complete.json",
+      "sha256": "7309c846cd0339ce49d6955dd1245f2f6d348e38abab7570f8ac9b50bebf1368",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/python-reuse.json",
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/pg-single-source-manifest.json",
+      "sha256": "b7901065c3f7859edee24dc879536ef4dfeeccd9715b04d9b6df0a62fcf122fb",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/tldw-frontend/next.config.mjs",
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/tldw_Server_API/app/main.py",
+      "sha256": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-single/apps/tldw-frontend/scripts/validate-networking-config.mjs",
+      "sha256": "eac9a0e9424e499bc89e07de5e291157d3b2dfcb890e7151daeaab38207c464a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/preparation/pg-multi-source-manifest.json",
+      "sha256": "87eb97a92e3e31851e031b7e9ca35503ec87ed94b168b1f71928c4bb168634f8",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/tldw-frontend/next.config.mjs",
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/tldw_Server_API/app/main.py",
+      "sha256": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/tldw-frontend/scripts/validate-networking-config.mjs",
+      "sha256": "eac9a0e9424e499bc89e07de5e291157d3b2dfcb890e7151daeaab38207c464a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-upgraded-read-v2.txt",
+      "sha256": "f8dd8bc0ef2d9fafd77a05abde1ba331f6443962aae7afdaf41a4b5b236f5970",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media-upgraded-read.txt",
+      "sha256": "816dea22d75ff94871c1c4581e18c2951c16273c42a7b6f6adc1f3c5e7adb31e",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ordinary-reloaded.txt",
+      "sha256": "9efac2a01c1e77cb0f9cab977e9e00a3d7812b28d567a06c3754621fcfa97eb8",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ordinary-terminal.txt",
+      "sha256": "8ded6fe1170c8e13b5f24ff818f31db80fbcd2b6a1daf9a6c8a3da4a41c4f32f",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-captured.txt",
+      "sha256": "0d246af6591a44573f77bcec4fb1e533395ba51538511cd6b85792a9faa1a5dc",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-navigate.txt",
+      "sha256": "c077dc9bd3868e38e7356b18fb9b5116bcfe8f20ff7c7d0dad73427d06d35682",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-settled.txt",
+      "sha256": "a4de265a34594918b0e1c715b02e7f7ba6d5291e9e3fbe0dd0e35db3c5a5d295",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/upgrade-current.txt",
+      "sha256": "778d447dd80dad4fb712f0de09a31685dd58f55f49dbe1d26225c4cebaaae2e5",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/upgrade-tabs.txt",
+      "sha256": "bf7a0084987aebb67b7fc3a9c1da7269dbc760ff24dead536a2534e12fab4708",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-logout.txt",
+      "sha256": "108106a9edb1939c9117db44eb713e91fdb2418d6684cedfa975c330f89d0a23",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-upgrade-login.txt",
+      "sha256": "c3774e7f9eb6b93c51ecb28bd5fd73b9e3d63ec8b9ad64a7365c27b1861a7e71",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-native-review/REVIEW.md",
+      "sha256": "e89ef5f7508ec73347af5509cd68aeffccf17548c8106d0b170e981082b24c47",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-native-review/audit.mjs",
+      "sha256": "d1987bcc27eb13b52ed8a1274981fff4f4aa63333bfcb183f1c8a26d6e80be83",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-native-review/audit.json",
+      "sha256": "be0127da527763cc46b450c3885b8de84c8ebc6dcdc2491cda7bf9873f793be1",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-multi/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-multi/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-multi/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-253-upgrade-20260917/pg-multi/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-253-upgrade-20260917/pg-multi/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-253-upgrade-20260917/pg-multi/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-next-matrix-20260916/repair-sources/repairs251-254-upgrade2-20260917/pg-multi/apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-account-review/audit.mjs",
+      "sha256": "fa73262c39fd1b1ac459014c6813f9bb356bc58046f850de54515a0484d8725c",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-account-review/REVIEW.md",
+      "sha256": "dad17b7ed56f88f85acaf88bb441714785f0b1d976fae607e11a179f077af992",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-after-bob.txt",
+      "sha256": "842e8e06e2187fbd627a6638de1061fcabb05c544c727dbed0f5b8783639f58a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-auth-current.txt",
+      "sha256": "586e49b808fec3f4e97f249bd741fcd3f6f0305870d146281c326cfe70d9171a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-bob-login.txt",
+      "sha256": "816dea22d75ff94871c1c4581e18c2951c16273c42a7b6f6adc1f3c5e7adb31e",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-current.txt",
+      "sha256": "55dd54bdee7639724e5e4d8358a5500a3e52ea178911d26926cd51654a1b602b",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-logout-v2.txt",
+      "sha256": "8da298604ff818f924582fdc91860664fea6a9775dd0ed71acafe5da1e6994a1",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-logout.txt",
+      "sha256": "4039ab2324848f8c1c00681cf048b5cb47bbc31a0a8aa0a38c5e02010aaf16d6",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-prepare.js",
+      "sha256": "924c74eda477816f69e328d8d5dced16bf98ce142feb957f5176fdbe885cabce",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-prepared.txt",
+      "sha256": "d88f64654eb48b42e3a40f0b33e9047e6ee9a132595dba411647876eff90f1fe",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-send-logout-v2.js",
+      "sha256": "71426547400c78818ad1e47288ffe40d0286e2695e06328790a75b18ea65afcc",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/account-boundary-send-logout.js",
+      "sha256": "59ffbbd4fc47283effaab8b42869949049b2d283bc08358a485ecf93dcad2e8b",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/alice-cancel-history-readback.txt",
+      "sha256": "016c41a88be82d48c20282fc3f314164449d4b936f75a8eb503b5f8a963c0f56",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-chat-settled.txt",
+      "sha256": "db4a80b407821d2fbd9647e36dd578f85ae5e75df698b37b640a6cbe7fce1c08",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-new-saved-chat.txt",
+      "sha256": "76d777a490bac070d82b861ecf7baaf457673891e83ef258f8e96fe99820f00f",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ordinary-chat-open.txt",
+      "sha256": "3aecfad1361d035ec9fb12c59eaace3b208bab43b40cd8dd7962a2387ee2695a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-ordinary-send.txt",
+      "sha256": "219c97a81597b1d8773bc022c2e434cb378cb77b5780a920d6b224511d53eafa",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-capture.js",
+      "sha256": "f0f3b2f8e4f94e005fe024045f4daf13a64946dfacced32c70b42ff1064c3fc7",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/bob-upgrade-readback.txt",
+      "sha256": "e2e39210bc496968fe890ede24a96ad6be6e7a21b8b8deb841fcb3c370b2b130",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/upgrade-observer-installed.txt",
+      "sha256": "63f9b92fe7511ac8c74007af8e8cce07ee871d54440c8c396583d374f2525502",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-upgrade-review/REVIEW196.md",
+      "sha256": "3ecc71ee1559c7a0078513cf810ac6e6c9214dc53dad7b941585b733f4c2afa3",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review-chat/REVIEW.json",
+      "sha256": "ee3555a4c4dffa8d7b16e15cfb11b1f06c51ae1cfd7c74f2240c58b578d93546",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review-chat/REVIEW.md",
+      "sha256": "76e0d05809a989e54ca9166c96077b06e9227022531d67bf251bd7757dfe7118",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review-chat/source-after.json",
+      "sha256": "1429158f6c792b77f84439747141d1a974c6210ae08fc9fc8cb3891f474dfe7e",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/REVIEW.json",
+      "sha256": "95385b0ca701f54d786481f2e30ce7a40da9129cbecd206b604ef8ad995981b8",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/REVIEW.md",
+      "sha256": "5395ce708f1f9b9369da8103e040034d8ed37c675c752598cd9a17e44b66be67",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/review248/source-after.json",
+      "sha256": "ad433a2a8cd291fb6a2b3b416971e60d8be301a184f9606a056c25d98f8eb6bd",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sha256": "64cd2a246a39f573fae8e91689dbfe4088941c74eb81550b80dc1ee67eb59767",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": "apps/packages/ui/src/services/tldw/service-prompt-scope-error.ts",
+      "sha256": "ba7effe6714a980ae7130481dde2e7b8aa9bae819e823e5578549f311cdc268a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": "backlog/tasks/task-13260.185 - Align-newly-saved-ordinary-Chat-presentation-after-account-switch.md",
+      "sha256": "620638f00b224690927b0c56ef40e252c17592d6de2eca83c5e8d1df078bb3cf",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": "backlog/tasks/task-13260.190 - Retire-Character-stream-and-persistence-after-actual-account-invalidation.md",
+      "sha256": "9995a531eca4cf2b66104d4787f982a95a30b2fe2fdbe5932add58004257354a",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-account-review/audit.json",
+      "sha256": "a322685d0ce457803161c7e8fcce8d843bc4a9657b2db244f499223b93453cc3",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-retention-review/REVIEW.md",
+      "sha256": "4af72e203bb12d9d1e0cf050fda43460dc9269985e9a62486747361cd5226f29",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-retention-review/audit.mjs",
+      "sha256": "e6cce78b8314334131aae94d1c54244621104dd597d81d3b489305ce6f819066",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254-retention-review/audit.json",
+      "sha256": "e6123b48a0bfa217e83ecd264638ad6e321fe12c7d47c0bcc4ff3f22ad095c71",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254/copy-result.txt",
+      "sha256": "41df87a805fc10d8666812d3206a5442476cd80a841f8730b9058ac9d3fe21cf",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/upgrade254/runtime-health.json",
+      "sha256": "5189a6bc1fdc05e4f7bc705f9c5d1c8874db350ff218a21411748d66db004120",
+      "sourceMatches": true,
+      "reviewedHashMatches": true
+    }
+  ],
+  "credentialScan": {
+    "scannedOriginalPayloads": 74,
+    "scannedMetadataFiles": 3,
+    "profiles": [
+      "fresh-final-20260917-pg-multi.profile.private.json",
+      "fresh-final-20260917-pg-single.profile.private.json",
+      "fresh-final-20260917-sqlite-multi.profile.private.json",
+      "fresh-final-20260917-sqlite-single.profile.private.json",
+      "mcp251-fresh-targeted-20260917-pg-single.profile.private.json",
+      "repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "repairs231-250-targeted-20260917-pg-single.profile.private.json"
+    ],
+    "uniqueRawSecrets": 48,
+    "knownVariants": 48,
+    "additionalEncodedVariants": 74,
+    "knownMatches": [],
+    "encodedMatches": [],
+    "jwtMatches": []
+  },
+  "priorPacket": {
+    "manifestSha256": "592c3292c98a5a4abfb5c72f0b9ff1e933751d2cb0c6631207c57e35d0e50f70",
+    "checksumsSha256": "be750f6be7a0eadff9f8580c78f062d9a152e89b94d8220b2ab0f9a5b6ab0b04",
+    "verifiedFiles": 65,
+    "historicalPendingStatusPreserved": true
+  },
+  "problems": []
+}

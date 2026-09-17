@@ -1,0 +1,172 @@
+### Page
+- Page URL: http://127.0.0.1:18783/chat?chatId=e3755001-1cd4-40a4-aaaf-edd4b67b3418
+- Page Title: Reply with exactly: BOB ORDINARY CHAT OK. | tldw
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+            - 'button "Reply with exactly: BOB ORDINARY CHAT OK." [ref=e114] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=e116]: Saved
+          - generic [ref=e117]:
+            - button "Search - Open command palette" [ref=e118] [cursor=pointer]:
+              - generic [ref=e122]: Search
+              - generic [ref=e123]: ⌘K
+            - button "New saved chat" [ref=e124] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=e128] [cursor=pointer]: Temp
+            - button "Character chat" [ref=e129] [cursor=pointer]: Character
+            - button "Share conversation" [ref=e130] [cursor=pointer]
+            - button "Open settings" [ref=e137] [cursor=pointer]
+            - generic [ref=e149]:
+              - button "Notifications, 0 unread" [ref=e150] [cursor=pointer]
+              - status [ref=e154]: Notifications are active
+            - button "Switch to light theme" [ref=e155] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e162] [cursor=pointer]:
+              - generic [ref=e163]: "?"
+        - generic [ref=e164]:
+          - heading "Chat" [level=1] [ref=e165]
+          - generic [ref=e168]:
+            - paragraph [ref=e169]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=e170]:
+              - main [ref=e171]:
+                - generic [ref=e172]:
+                  - generic [ref=e174]:
+                    - generic [ref=e175]:
+                      - generic [ref=e176]: Standard chat
+                      - generic [ref=e177]: Conversation timeline
+                    - generic [ref=e178]:
+                      - button "Switch to light theme" [ref=e179] [cursor=pointer]
+                      - button "Enter focus chat" [ref=e186] [cursor=pointer]:
+                        - generic [ref=e192]: Focus
+                      - button "Shortcuts" [ref=e193] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=e197]
+                  - log "Chat messages" [ref=e199]:
+                    - generic [ref=e201]:
+                      - article "System message 1 of 3" [ref=e202]:
+                        - generic [ref=e208]:
+                          - generic [ref=e210]:
+                            - generic [ref=e211]: System prompt
+                            - generic [ref=e212]: • 2:17 PM
+                          - paragraph [ref=e214]: You are a helpful AI assistant.
+                          - generic [ref=e215]:
+                            - generic [ref=e216]:
+                              - generic [ref=e217]: Was this helpful?
+                              - generic [ref=e218]:
+                                - button "Helpful" [ref=e219] [cursor=pointer]
+                                - button "Not helpful" [ref=e222] [cursor=pointer]
+                                - button "More feedback" [ref=e225] [cursor=pointer]
+                            - button "More actions" [ref=e231] [cursor=pointer]: •••
+                      - article "User message 2 of 3" [ref=e232]:
+                        - generic [ref=e235]:
+                          - generic [ref=e237]:
+                            - generic [ref=e238]: You
+                            - generic [ref=e239]: • 2:17 PM
+                          - paragraph [ref=e241]: "Reply with exactly: BOB ORDINARY CHAT OK."
+                          - button "More actions" [ref=e244] [cursor=pointer]: •••
+                      - article "Assistant message 3 of 3" [ref=e248]:
+                        - generic [ref=e254]:
+                          - generic [ref=e256]:
+                            - generic [ref=e257]: Assistant
+                            - generic [ref=e258]: • 2:17 PM
+                          - paragraph [ref=e261]: BOB ORDINARY CHAT OK.
+                          - generic [ref=e262]:
+                            - generic [ref=e263]:
+                              - generic [ref=e264]: Was this helpful?
+                              - generic [ref=e265]:
+                                - button "Helpful" [ref=e266] [cursor=pointer]
+                                - button "Not helpful" [ref=e269] [cursor=pointer]
+                                - button "More feedback" [ref=e272] [cursor=pointer]
+                            - button "More actions" [ref=e278] [cursor=pointer]: •••
+                  - generic [ref=e279]:
+                    - generic [ref=e280]: Composer
+                    - generic [ref=e288]:
+                      - button [aria-hidden] [ref=e289]
+                      - button [aria-hidden] [ref=e290]
+                      - generic [ref=e291]:
+                        - generic [ref=e293]:
+                          - button "Hide composer options" [expanded] [ref=e294] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=e299]
+                          - generic [ref=e300]:
+                            - button "Improve prompt" [ref=e303] [cursor=pointer]
+                            - generic [ref=e308]:
+                              - button "Send message" [ref=e309] [cursor=pointer]:
+                                - generic [ref=e310]: Send
+                              - button "Open message delivery options" [ref=e315] [cursor=pointer]
+                        - generic [ref=e320]:
+                          - generic [ref=e322]:
+                            - group "Mode and context controls" [ref=e323]:
+                              - button "Modes" [ref=e324] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=e331] [cursor=pointer]':
+                                - generic [ref=e332]:
+                                  - generic [ref=e333]: MCP
+                                  - generic [ref=e334]: None
+                              - button "Search & Context" [ref=e337] [cursor=pointer]
+                              - button "Select a Prompt" [ref=e342] [cursor=pointer]:
+                                - generic [ref=e345]: Prompt
+                              - button "Select character or persona" [ref=e346] [cursor=pointer]
+                              - button "Role-play setup" [ref=e351] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=e358] [cursor=pointer]
+                            - group "Run input controls" [ref=e364]:
+                              - button "OpenUI" [ref=e365] [cursor=pointer]
+                              - button "Start dictation" [ref=e371] [cursor=pointer]
+                              - generic [ref=e375]:
+                                - button "Attach image" [ref=e377] [cursor=pointer]
+                                - button "More attachments" [ref=e381] [cursor=pointer]
+                              - button "More tools" [ref=e384] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=e387] [cursor=pointer]:
+                                - generic [ref=e391]: Chat Settings
+                          - generic "Active context" [ref=e392]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=e394] [cursor=pointer]:
+                              - generic "Provider status" [ref=e398]: Healthy
+                            - button "Chat 3 messages" [ref=e399] [cursor=pointer]:
+                              - generic [ref=e400]: Chat
+                              - generic [ref=e401]: 3 messages
+                            - button "Configure context window size" [ref=e403] [cursor=pointer]:
+                              - generic [ref=e404]: 24 + ~0 = 24 tokens
+                            - button "Saved" [ref=e406] [cursor=pointer]
+                            - button "Advanced controls" [ref=e408] [cursor=pointer]
+              - generic [ref=e412]:
+                - button "Restore context sidechannel" [ref=e413] [cursor=pointer]:
+                  - generic [ref=e417]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=e418]:
+                - button "Restore runtime sidechannel" [ref=e419] [cursor=pointer]:
+                  - generic [ref=e420]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - alert [ref=e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T21-40-45-949Z.log#L3-L6
+

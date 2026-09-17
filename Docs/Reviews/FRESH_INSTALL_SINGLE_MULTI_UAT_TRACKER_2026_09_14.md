@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 254 findings total:237 verified (including Study234/235/240/242 and test fixtures249/250/252),16 reviewed product implementations awaiting native acceptance, and1 harness finding under repair (254). All48 frozen outcomes remain retained. [Reviewed frontend repairs](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/README.md) join the reviewed backend repairs below. Combined verification passes616 backend tests and1092 frontend tests, with zero skips; the full frontend compiler retains90 existing diagnostics with none added. Later independent verification passes139tests for MCP251/fixture252,43 for Character246 and93 for MediaFiles253, each with zero skips. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
+- **Current repair gate:** 254 findings total:240 verified (including Study234/235/240/242, account243/248, harness254 and test fixtures249/250/252),14 reviewed product implementations awaiting native acceptance. All48 frozen outcomes remain retained. [Reviewed frontend repairs](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/README.md) join the reviewed backend repairs below. Combined verification passes616 backend tests and1092 frontend tests, with zero skips; the full frontend compiler retains90 existing diagnostics with none added. Later independent verification passes139tests for MCP251/fixture252,43 for Character246 and93 for MediaFiles253, each with zero skips. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2460,6 +2460,8 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 ## UAT-234 — P1: Quickstart proxy cuts off successful five-card generation at30seconds
 
+- **Current status: verified.** Original native scenario accepted in both PostgreSQL auth modes on86458 after independent audits and retention review. [Accepted evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-study-accepted/README.md). Earlier open statements below are historical.
+
 - Status: open, TASK13260.176; frozen source remains unchanged.
 - Fresh SQLite single-user exact five-fact Notes-to-five-cards request begins13:09:48.169UTC and receives raw500 Internal Server Error at13:10:18.159. The backend completes the same request200 in30558ms at13:10:18.710; the frontend logs exact-path Failed to proxy /ECONNRESET. Backend response arrives551ms after the browser failure. No draft reaches the user.
 - Source diagnosis: flashcard client allows180000ms; quickstart external rewrites provide no experimental.proxyTimeout, so installed Next16.1.4 defaults to30000ms. The backend awaits generation plus verification in one nonstreaming request. This is a proxy/endpoint budget mismatch; no claim that the backend generated exactly5 without its lost body.
@@ -2486,6 +2488,8 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Separate residual console path from007 visible connection copy and164 visible Model Settings empty-state messaging. Keep the source frozen during this matrix, then add focused surface-aware regression, minimal wording correction and native repeat.
 
 ## UAT-235 — P2: Re-rate shows stale scheduling intervals
+
+- **Current status: verified.** Original native scenario accepted in both PostgreSQL auth modes on86458 after independent audits and retention review. [Accepted evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-study-accepted/README.md). Earlier open statements below are historical.
 
 - PostgreSQL fresh-single reproduction: Good200 saved10days/version3 with next Hard14days; native re-rate showed Hard6days; actual Hard200 saved14days/version4. Reload retained3 reviews/sessions. Evidence native/pg-single/study-rerate-observed.txt and study-rerate-reloaded.txt in current packet.
 
@@ -2527,6 +2531,8 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 ## UAT-240 — P2: Hard recall is incorrectly counted as a lapse in Study analytics
 
+- **Current status: verified.** Original native scenario accepted in both PostgreSQL auth modes on86458 after independent audits and retention review. [Accepted evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-study-accepted/README.md). Earlier open statements below are historical.
+
 - Open, TASK13260.182. Fresh PostgreSQL card has three reviews: Easy, Good (API rating3), Hard (rating2). Hard returns200 with successful schedule advancement to14days, repetitions3 and lapses0, but analytics reports retention66.7% and lapse33.3%. Before Hard, retention was100%.
 - The source analytics uses rating<3 rather than the scheduler outcome was_lapse already saved with each review. Current SM-2+/FSRS semantics and Study Guide define Hard as recalled with effort, not forgetting. Numeric shortcut positions are not API rating values; Again0/Hard2/Good3/Easy5 are documented API values.
 - Evidence native/pg-single/study-rerate-reloaded.txt and auth-outage-recovered.txt. This is a distinct analytics bug from235 stale preview. Repair must verify actual lapse and successful recall metrics on SQLite and PostgreSQL and define legacy-row handling; frozen source remains unchanged.
@@ -2549,11 +2555,15 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 ## UAT-242 — P3: One-card Due completion uses plural wording
 
+- **Current status: verified.** Original native scenario accepted in both PostgreSQL auth modes on86458 after independent audits and retention review. [Accepted evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-study-accepted/README.md). Earlier open statements below are historical.
+
 - Open, TASK13260.184. Fresh SQLite multi-user Study completes exactly one Due review but says `1 cards reviewed this session`. Actual review/session card count is1; only displayed grammar is wrong.
 - Separate from137 remaining-card count,166 generated count,184Manage,188streak and189Cram completion. Use existing singular/plural localization without changing counts.
 - Evidence `.tmp/uat-next-matrix-20260916/native/sqlite-multi/study-easy-practice.txt`, complete snapshot, found during independent review. No frozen product edit.
 
 ## UAT-243 — P2: Newly saved ordinary Chat retains Character setup after account switch
+
+- **Current status: verified.** Native ordinary completion transitions to Standard chat without reload; later authenticated canonical readback preserves the same ordinary three-row conversation. The early contradictory reload artifact is retained and excluded from settled acceptance. [Accepted native evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-upgrade-account-accepted/README.md). Earlier open statements below are historical.
 
 - Open, TASK13260.185. After normal Alice logout and Bob login, Bob sends an ordinary Chat request which returns and saves BIRCH-913 through `/chat/completions`. The settled surface still says Character Chat and Choose a character; Modes reports Character / Scene Off. This is an inconsistent presentation after a real ordinary completion. No cross-account content leak is established.
 - The initial empty Character preference alone is intentional and insufficient to establish a defect. Prior123 accepted existing History/Note/cold saved-chat paths; this is a fresh ordinary-create/account-switch residual. Exact route intent and session metadata at the transition were not captured, so the stale-state cause remains unproven.
@@ -2630,6 +2640,8 @@ The real complete-v2 endpoint body iterator and local adapter pass eight control
 UAT231/232/236/243 pass independent327 focused checks;103 adjacent pass with2 speech-fixture failures independently reproduced on original source. Actual client/model-owner/Chat transport/coordinator boundaries are covered. UAT237/241/244 pass independent193 Media/wizard checks and37 actual Chat consumer controls. Review found and corrected two additional stale deletion callbacks within237. Both owned compiler comparisons retain90 identical diagnostics; no added lint findings. Bandit cannot parse the TypeScript scope; its0findings are not security assurance. [Evidence and independent reviews](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/README.md), manifest `33a5f7438880ec0ddb6a155293af00c4cf3c071407a65d77ce871940723db3c8`. These seven findings remain open until original native acceptance.
 
 ## UAT-248 — P1: Character completion can dispatch persistence after actual logout
+
+- **Current status: verified.** Actual logout cancels the active Character stream42ms after logout200. Later Alice canonical history retains the acknowledged user without a late assistant; Bob ordinary chat remains separate. Provider-side cancellation is not claimed. [Accepted native evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-upgrade-account-accepted/README.md). Earlier open statements below are historical.
 
 - Open, TASK13260.190. Independent real service-prompt lease plus actual WebUI authService.logout control aborts both lease signals. The Character path retains the original caller signal and later calls persistCharacterCompletion for the old conversation with a late assistant response and no captured scope options. Replacement local draft stays intact. This proves stale persistence dispatch, **not a native cross-account database write**.
 - Causal evidence: [independent finding](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/review-chat/AUTHORITY-FINDING.md), SHA `7688da44b75e3fb997914b70bc7dc2b9d3a0aaf55361d2d59f711976c18e53dc`; actual-auth lease probe1failure/33filtered. The four prior Chat repairs are independently clear;248 has a separate bounded repair. No timeout policy change or new full UAT.
@@ -2719,6 +2731,14 @@ UAT234/235/240/242 are verified on86458ab88ce3fa62e6518c9d813c3860254ddb2c after
 
 ## UAT-254 — P2 harness: source-upgrade launcher chooses a rejected Next build directory
 
+- **Current status: verified.** Corrected real Next startup and original-data readbacks independently pass. Original profile/init/holder hashes remain unchanged. Initial failed attempt and its historical pending review remain retained. [Accepted native evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-upgrade-account-accepted/README.md). Earlier open statements below are historical.
+
 - TASK13260.196. First actual frontend upgrade exits1 at21:21:40: TLDW_NEXT_DIST_DIR must be a direct .next-live-tier-* child directory. The helper chose .next-upgrade-*; the real app guard correctly rejects it. Existing synthetic124 tests did not exercise that configuration contract. No product configuration guard is changed.
 - Original first-attempt archives/bindings/process receipts and independently reviewed helper snapshots remain intact. Both upgraded APIs started; neither frontend is serving. PostgreSQL holders/profiles/accounts/data are preserved.
 - Actual-config regression fails with the same guard before the minimal helper prefix correction; combined125 controls then pass without skips. Independent correction review and actual startup/data readback remain required. A new copy-run identity will bind the changed helper; historical receipts will not be rewritten. Evidence .tmp/uat-repairs-231-246/upgrade254/{red,green-combined}.log and native-upgrade-preparation/frontend-first-start.redacted.log.
+
+### 22:06 UTC — native account and source-upgrade acceptance
+
+UAT243/248/254 are independently accepted; retained74payloads77files/two exact gzip roundtrips, manifest6cb62377b2f6c39218c4c367164540648053dd0722203ddee778e66d07d1ff3f. [Native review packet](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-upgrade-account-accepted/README.md) preserves failed harness attempts and excludes the stale early-reload evidence. Independent retention scans48knownvariants plus74base64 variants/JWT patterns with zero matches. Original helper correction125tests/zero skips and real startup/readback close254 without changing the product config guard.
+
+Targeted246 fresh first-turn TestBot scenarios now complete/reload in both PostgreSQL modes with13.382/14.104ms first-body delivery afterheaders; independent acceptance review pending. Existing-history repetitions separately produced reasoning without a final answer and actionable interruption guidance. Complete CDP timing corrects the controller's initial mistaken attribution: the single request ended before the later multi request and reload, so neither overlap nor reload-caused cancellation is established. These failed repetitions remain retained; exact generation-limit cause is not yet established. Original single Media1 now returns200/full1914characters; full2066-character source/question Chat yields the correct director/location/code and canonical reload. Native253/241 review remains pending. Fresh targeted MCP251 profile is undergoing normal setup because original setup is completed; no original setup/data reset. No full48matrix release.

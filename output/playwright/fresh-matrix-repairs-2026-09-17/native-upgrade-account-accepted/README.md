@@ -1,0 +1,9 @@
+# Accepted native upgrade and account checks
+
+Independently reviewed bounded acceptance for UAT254 (corrected actual startup/original-data preservation), UAT243 (ordinary completion mode transition), and UAT248 (logout retires the active Character turn). Original source86458 transitions to reviewed product source a7d3155 through explicit separate upgrade receipts. Original profile/init/PG-holder hashes remain unchanged; original Media1 and Bob chat readbacks succeed. This is not a fresh full matrix.
+
+The implementation/harness packet remains separately frozen at ../targeted-upgrade-harness-reviewed. Its README accurately states that actual corrected startup was pending at that earlier checkpoint; the later native review here closes that gap. Source and private process/profile/log files are represented by the independent safe audit where raw retention would disclose secrets. Nonprivate reviewed inputs are retained byte-for-byte, with lossless gzip for large files and original/stored hashes below. Some duplicate source snapshots are intentional audit inputs.
+
+All failed harness attempts and the early contradictory Character label are retained and qualified by the account review. The earlier reload's stale canonical events are excluded; acceptance uses the actual pre-reload Standard chat and later settled authenticated3-row readback. Automation blank-tab recovery does not establish continuous-tab survival. UAT248 proves cancellation before body bytes and absence of a late assistant at later canonical readback, not provider-side cancellation.
+
+No additional product tests were run for this retention. Prior combined and scoped tests remain in their separately reviewed packets. Known credentials and JWT patterns were scanned in every original payload and metadata; zero matches. Bandit cannot certify the JavaScript audit scripts. Other targeted issues and the full48-outcome fresh rerun remain open.

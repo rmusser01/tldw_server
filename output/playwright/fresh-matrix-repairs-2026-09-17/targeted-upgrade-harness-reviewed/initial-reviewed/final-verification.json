@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-17T21:15:45.120Z",
+  "ownedSourceAndSnapshotCount": 3,
+  "sourceMismatches": [],
+  "patchAddedTrailingWhitespace": 0,
+  "banditFindings": 0,
+  "banditParseErrors": 3,
+  "actualRuntimeExecuted": false
+}

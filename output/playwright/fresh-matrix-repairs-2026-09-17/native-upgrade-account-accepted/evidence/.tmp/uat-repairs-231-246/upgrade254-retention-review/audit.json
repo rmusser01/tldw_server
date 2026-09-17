@@ -1,0 +1,24 @@
+{
+  "verdict": "CLEAR",
+  "packet": "output/playwright/fresh-matrix-repairs-2026-09-17/targeted-upgrade-harness-reviewed",
+  "payloadCount": 63,
+  "totalFiles": 66,
+  "checkpointEntries": 65,
+  "sourcePayloadMatches": 63,
+  "initialEvidenceEntries": 32,
+  "initialSourceSnapshots": 3,
+  "correctedSourceSnapshots": 3,
+  "manifestSha256": "592c3292c98a5a4abfb5c72f0b9ff1e933751d2cb0c6631207c57e35d0e50f70",
+  "checksumsSha256": "be750f6be7a0eadff9f8580c78f062d9a152e89b94d8220b2ab0f9a5b6ab0b04",
+  "retainerSha256": "54e2f5480cbf935a07419e0343d0cf1426604db9a7db5651fc02f6c538686522",
+  "credentialScan": {
+    "scannedFiles": 66,
+    "uniqueRawSecrets": 41,
+    "knownVariants": 41,
+    "additionalEncodedVariants": 63,
+    "knownMatches": [],
+    "encodedMatches": [],
+    "jwtMatches": []
+  },
+  "problems": []
+}

@@ -1,0 +1,22 @@
+{
+  "task": "TASK13260.196",
+  "productCandidate": "a7d3155a567afb25982eb360ea24b973cc3249c9",
+  "sourceStatus": "FROZEN",
+  "files": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sha256": "edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b",
+      "snapshot": ".tmp/uat-repairs-231-246/native-upgrade-preparation/review-snapshot/.tmp/uat-next-matrix-20260916/matrix-launcher.mjs"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-upgrade.mjs",
+      "sha256": "1d3254bc0c7403770348132974b42ff28568051fc5e3a06a829f920b410c01e6",
+      "snapshot": ".tmp/uat-repairs-231-246/native-upgrade-preparation/review-snapshot/.tmp/uat-next-matrix-20260916/matrix-upgrade.mjs"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/matrix-upgrade.test.mjs",
+      "sha256": "22dc359843445e5464db7b9276483ede17cb95a60e78b7f4267c9e024a7167b3",
+      "snapshot": ".tmp/uat-repairs-231-246/native-upgrade-preparation/review-snapshot/.tmp/uat-repairs-231-246/native-upgrade-preparation/matrix-upgrade.test.mjs"
+    }
+  ]
+}

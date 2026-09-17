@@ -1,0 +1,51 @@
+(node:51660) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ original launcher exposes exactly the reusable initialization/environment operations (7.306292ms)
+✔ backend upgrades code with original auth/data/ports and untouched origin proofs (8.909417ms)
+✔ frontend uses new Next code and owned build but retains the original API/browser origin (8.068333ms)
+✔ multi-user upgrade retains original JWT identity and its existing auth/content databases (7.757625ms)
+✔ refuses incomplete original preparation before launching or writing upgrade state (5.988083ms)
+✔ refuses wrong original profile cell before launching or writing upgrade state (5.584958ms)
+✔ refuses missing old initialization before launching or writing upgrade state (5.555541ms)
+✔ refuses mismatched old initialization before launching or writing upgrade state (5.22475ms)
+✔ refuses old source fingerprint change before launching or writing upgrade state (5.097375ms)
+✔ refuses released holder before launching or writing upgrade state (5.346708ms)
+✔ refuses foreign holder source before launching or writing upgrade state (6.41425ms)
+✔ refuses privileged holder role before launching or writing upgrade state (5.756542ms)
+✔ refuses live role probe denial before launching or writing upgrade state (6.170625ms)
+✔ refuses missing explicit upgrade policy before launching or writing upgrade state (5.917875ms)
+✔ refuses gate belongs to another original profile before launching or writing upgrade state (5.457875ms)
+✔ refuses unreleased source before launching or writing upgrade state (6.47525ms)
+✔ refuses wrong source manifest cell before launching or writing upgrade state (5.787916ms)
+✔ refuses changed new tracked source before launching or writing upgrade state (5.817458ms)
+✔ refuses tracked source traversal before launching or writing upgrade state (5.774292ms)
+✔ refuses new source symlink escape before launching or writing upgrade state (6.333625ms)
+✔ refuses changed archive bytes before launching or writing upgrade state (6.589291ms)
+✔ refuses origin inspection failure before launching or writing upgrade state (4.821875ms)
+✔ refuses archive already bound to a profile before launching or writing upgrade state (6.066291ms)
+✔ refuses occupied API port before launching or writing upgrade state (6.668ms)
+✔ existing archive data blocks relocation: Databases/system_ops.json (5.562ms)
+✔ existing archive data blocks relocation: Databases/document_upload_drafts.db (5.192292ms)
+✔ existing archive data blocks relocation: Databases/document_upload_drafts.db-wal (5.571875ms)
+✔ existing archive data blocks relocation: Databases/document_upload_drafts.db-shm (4.817708ms)
+✔ existing archive data blocks relocation: Databases/webscraper (5.430625ms)
+✔ existing archive data blocks relocation: Databases/downloads/audio (5.916334ms)
+✔ a dangling root-state symlink and nonempty lock are not treated as absent (5.048708ms)
+✔ unowned Next build is rejected without adopting or deleting its contents (6.236167ms)
+✔ backend and frontend share one immutable upgrade binding with separate attempts (9.204209ms)
+✔ changed original proof cannot rebind an existing upgrade (9.40475ms)
+✔ child failure retains its truthful failure receipt and leaves original initialization alone (7.330708ms)
+✔ cancellation forwards only to the owned child and records no readiness claim (7.353208ms)
+✔ a child exiting zero after requested cancellation still records the interruption (7.523583ms)
+✔ archive-local data through a symlinked parent cannot appear absent (5.329916ms)
+✔ asynchronous spawn errors settle once and remove only owned signal listeners (6.918667ms)
+✔ spawn error preserves a failed attempt without overwriting the old profile (6.620167ms)
+✔ action and run inputs reject reset, same-run and traversal before boundaries (5.242292ms)
+ℹ tests 41
+ℹ suites 0
+ℹ pass 41
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 296.894375

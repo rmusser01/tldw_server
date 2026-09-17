@@ -1,0 +1,27 @@
+{
+  "reports": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-upgrade.mjs",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/matrix-upgrade.test.mjs",
+      "errorCount": 0,
+      "warningCount": 0,
+      "messages": []
+    }
+  ],
+  "baseline": {
+    "errorCount": 0,
+    "warningCount": 0,
+    "messages": []
+  }
+}

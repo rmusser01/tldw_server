@@ -77,8 +77,8 @@
 - [ ]251: repair actual PostgreSQL MCP permission-profile nullable filtering; retain scope controls and native Save packs acceptance.
 - [x]252: repair the baseline-confirmed protected-pool DDL test fixture while preserving the missing governance-table assertion and production guards; independent139combined tests, zero skips and no new static findings.
 - [x]253 implementation: repair actual PostgreSQL MediaFiles bindings in six repository methods; independent93tests/zero skips and retention review clear. Original persisted source/native full-content handoff acceptance remains pending.
-- [ ]196 harness task: independently review a bounded source-upgrade launcher preserving original profiles, data, fixture holders and historical receipts, then record explicit new-runtime provenance for targeted acceptance. This is not a new UAT finding or a fresh-install matrix cell.
-- [ ]254: actual first upgrade frontend exposes incompatible build-directory prefix despite124 synthetic passes. Preserve failed attempt, correct only helper prefix, prove real Next config acceptance (causal RED→125combined passes), independently review and retry with new copy-run identity. Product config guard and original profile/fixture records remain unchanged.
+- [x]196 harness task: independently review a bounded source-upgrade launcher preserving original profiles, data, fixture holders and historical receipts, then record explicit new-runtime provenance for targeted acceptance. This is not a new UAT finding or a fresh-install matrix cell.
+- [x]254: actual first upgrade frontend exposes incompatible build-directory prefix despite124 synthetic passes. Preserve failed attempt, correct only helper prefix, prove real Next config acceptance (causal RED→125combined passes), independently review and retry with new copy-run identity. Product config guard and original profile/fixture records remain unchanged.
 
 ## Stage5: Repeat full fresh UAT
 
@@ -95,3 +95,5 @@
 
 - 2026-09-17 17:51UTC: frozen matrix execution finished;16newfindings231–246 remain open. Runtime ports18603/18683 refused; PG holders29823/96865 remain.
 - Retention review corrected one row7 filename typo; initial manifest081a0d27... superseded by1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593. No outcome changed.
+
+- 22:06UTC checkpoint:243/248 and254 independently native-accepted with retained74payload packet and retention review. Account transitions, cancellation/canonical history and corrected real startup/data preservation verified.246 and253/241 native positives collected; independent acceptance pending. MCP251 uses a new targeted fresh PG single profile without resetting completed original setup. Full matrix remains held.

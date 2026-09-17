@@ -1,0 +1,32 @@
+(node:53135) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✖ upgrade binding retains the exact controller/helper byte identity (12.363ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.966333
+
+✖ failing tests:
+
+test at .tmp/uat-repairs-231-246/native-upgrade-preparation/matrix-upgrade.test.mjs:196:1
+✖ upgrade binding retains the exact controller/helper byte identity (12.363ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b'
+  
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/native-upgrade-preparation/matrix-upgrade.test.mjs:199:10)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'edc9c6489b449e30ce54acbcf71cebb4541811bb42bcb5274c52a626bf90a74b',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

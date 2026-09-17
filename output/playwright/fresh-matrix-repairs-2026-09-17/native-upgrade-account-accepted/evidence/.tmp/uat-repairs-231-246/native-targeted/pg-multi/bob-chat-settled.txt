@@ -1,0 +1,168 @@
+### Open tabs
+- 0: (current) [Chat | tldw](http://127.0.0.1:18783/chat)
+- 1: [Server Settings | tldw](http://127.0.0.1:18783/settings/tldw)
+### Page
+- Page URL: http://127.0.0.1:18783/chat
+- Page Title: Chat | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=f10e1]:
+  - generic [ref=f10e4]:
+    - link "Skip to main content" [ref=f10e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f10e6]:
+      - button "Expand sidebar" [ref=f10e7] [cursor=pointer]
+      - button "New Chat" [ref=f10e11] [cursor=pointer]
+      - generic [ref=f10e14]:
+        - button "Quick Ingest" [ref=f10e15] [cursor=pointer]
+        - button "Chat" [ref=f10e19] [cursor=pointer]
+        - button "Prompts" [ref=f10e22] [cursor=pointer]
+        - button "Characters" [ref=f10e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f10e31] [cursor=pointer]
+        - button "World Books" [ref=f10e35] [cursor=pointer]
+        - button "Notes" [ref=f10e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f10e42] [cursor=pointer]
+        - button "Media" [ref=f10e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f10e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f10e59] [cursor=pointer]
+        - button "Kanban" [ref=f10e65] [cursor=pointer]
+        - button "Watchlists" [ref=f10e67] [cursor=pointer]
+      - generic [ref=f10e72]:
+        - button "Open Notes Dock" [ref=f10e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f10e78] [cursor=pointer]
+        - button "Settings" [ref=f10e81] [cursor=pointer]
+    - main [ref=f10e85]:
+      - generic [ref=f10e86]:
+        - generic [ref=f10e89]:
+          - generic [ref=f10e90]:
+            - button "Expand sidebar" [ref=f10e91] [cursor=pointer]
+            - generic [ref=f10e93]:
+              - img "tldw Assistant" [ref=f10e94]
+              - generic [ref=f10e95]: tldw Assistant
+              - button "Companion Home" [ref=f10e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f10e100] [cursor=pointer]
+            - generic [ref=f10e103]:
+              - generic "Saved chat. History is persisted." [ref=f10e104]: Saved
+              - generic "Character mode is active." [ref=f10e105]: "Character: E2E-TestBot — Repair Alice PGmulti 20260917"
+          - generic [ref=f10e111]:
+            - button "Search - Open command palette" [ref=f10e112] [cursor=pointer]:
+              - generic [ref=f10e116]: Search
+              - generic [ref=f10e117]: ⌘K
+            - button "New saved chat" [ref=f10e118] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f10e122] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f10e123] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=f10e124]
+            - button "Open settings" [ref=f10e131] [cursor=pointer]
+            - generic [ref=f10e143]:
+              - button "Notifications, 0 unread" [ref=f10e144] [cursor=pointer]
+              - status [ref=f10e148]: Notifications are active
+            - button "Switch to light theme" [ref=f10e149] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f10e156] [cursor=pointer]:
+              - generic [ref=f10e157]: "?"
+        - generic [ref=f10e158]:
+          - heading "Chat" [level=1] [ref=f10e159]
+          - generic [ref=f10e162]:
+            - paragraph [ref=f10e163]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f10e164]:
+              - main [ref=f10e165]:
+                - generic [ref=f10e166]:
+                  - generic [ref=f10e168]:
+                    - generic [ref=f10e169]:
+                      - generic [ref=f10e170]:
+                        - text: Character Chat
+                        - generic [ref=f10e171]: E2E-TestBot — Repair Alice PGmulti 20260917
+                      - generic [ref=f10e172]: Conversation timeline
+                    - generic [ref=f10e173]:
+                      - button "Switch to light theme" [ref=f10e174] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f10e181] [cursor=pointer]:
+                        - generic [ref=f10e187]: Focus
+                      - button "Shortcuts" [ref=f10e188] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f10e192]
+                  - log "Chat messages" [ref=f10e194]:
+                    - generic [ref=f10e200]:
+                      - heading "Start a new chat" [level=2] [ref=f10e205]
+                      - paragraph [ref=f10e206]: Experiment with different models, prompts, and knowledge sources here.
+                      - generic [ref=f10e207]:
+                        - button "Start chatting" [ref=f10e208] [cursor=pointer]
+                        - button "Quick Ingest" [ref=f10e209] [cursor=pointer]
+                      - generic [ref=f10e210]:
+                        - generic [ref=f10e212]:
+                          - generic [ref=f10e213]:
+                            - paragraph [ref=f10e214]: Chat modes
+                            - paragraph [ref=f10e215]: Use a different starting point when the conversation needs structure.
+                          - button "Explore chat modes" [ref=f10e216] [cursor=pointer]
+                        - generic [ref=f10e218]:
+                          - generic [ref=f10e219]:
+                            - generic [ref=f10e220]: Type / for commands like /search or /web
+                            - generic [ref=f10e221]: Set a system prompt to customize AI behavior
+                          - button "Take a quick tour" [ref=f10e222] [cursor=pointer]
+                  - generic [ref=f10e226]:
+                    - generic [ref=f10e227]: Composer
+                    - button "Scroll to latest messages" [ref=f10e229] [cursor=pointer]
+                    - generic [ref=f10e238]:
+                      - button [aria-hidden] [ref=f10e239]
+                      - button [aria-hidden] [ref=f10e240]
+                      - generic [ref=f10e241]:
+                        - generic [ref=f10e243]:
+                          - button "Hide composer options" [expanded] [ref=f10e244] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f10e249]
+                          - generic [ref=f10e250]:
+                            - button "Improve prompt" [ref=f10e253] [cursor=pointer]
+                            - generic [ref=f10e258]:
+                              - button "Send message" [ref=f10e259] [cursor=pointer]:
+                                - generic [ref=f10e260]: Send
+                              - button "Open message delivery options" [ref=f10e265] [cursor=pointer]
+                        - generic [ref=f10e270]:
+                          - generic [ref=f10e272]:
+                            - group "Mode and context controls" [ref=f10e273]:
+                              - button "Modes" [ref=f10e274] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f10e281] [cursor=pointer]':
+                                - generic [ref=f10e282]:
+                                  - generic [ref=f10e283]: MCP
+                                  - generic [ref=f10e284]: None
+                              - button "Search & Context" [ref=f10e287] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f10e292] [cursor=pointer]:
+                                - generic [ref=f10e295]: Prompt
+                              - button "E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f10e296] [cursor=pointer]
+                              - button "Role-play setup" [ref=f10e301] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f10e308] [cursor=pointer]
+                            - group "Run input controls" [ref=f10e314]:
+                              - button "OpenUI" [ref=f10e315] [cursor=pointer]
+                              - button "Start dictation" [ref=f10e321] [cursor=pointer]
+                              - generic [ref=f10e325]:
+                                - button "Attach image" [ref=f10e327] [cursor=pointer]
+                                - button "More attachments" [ref=f10e331] [cursor=pointer]
+                              - button "More tools" [ref=f10e334] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f10e337] [cursor=pointer]:
+                                - generic [ref=f10e341]: Chat Settings
+                          - generic "Active context" [ref=f10e342]:
+                            - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f10e344] [cursor=pointer]:
+                              - generic "Provider status" [ref=f10e348]: Healthy
+                            - button "Character E2E-TestBot — Repair Alice PGmulti 20260917" [ref=f10e349] [cursor=pointer]:
+                              - generic [ref=f10e350]: Character
+                              - generic [ref=f10e351]: E2E-TestBot — Repair Alice PGmulti 20260917
+                            - 'generic "Character context: Included" [ref=f10e352]':
+                              - generic [ref=f10e353]: Character context
+                              - generic [ref=f10e354]: Included
+                            - button "Configure context window size" [ref=f10e356] [cursor=pointer]:
+                              - generic [ref=f10e357]: 0 + ~0 = 0 tokens
+                            - button "Saved" [ref=f10e359] [cursor=pointer]
+                            - button "Advanced controls" [ref=f10e361] [cursor=pointer]
+                        - status [ref=f10e365]:
+                          - generic [ref=f10e366]: Add expression images for E2E-TestBot — Repair Alice PGmulti 20260917.
+                          - generic [ref=f10e367]:
+                            - link "Edit expressions" [ref=f10e368] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=4
+                            - button "Dismiss expression image setup" [ref=f10e369] [cursor=pointer]: Dismiss
+              - generic [ref=f10e370]:
+                - button "Restore context sidechannel" [ref=f10e371] [cursor=pointer]:
+                  - generic [ref=f10e375]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f10e376]:
+                - button "Restore runtime sidechannel" [ref=f10e377] [cursor=pointer]:
+                  - generic [ref=f10e378]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - alert [ref=f10e382]
+```
+
