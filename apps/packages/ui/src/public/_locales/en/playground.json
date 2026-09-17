@@ -3493,5 +3493,8 @@
   },
   "historySelection_recoveryState_generated_unsaved": {
     "message": "Generated response needs review"
+  },
+  "historySelection_recoveryState_accepted_response_unknown": {
+    "message": "User input accepted; response outcome unknown"
   }
 }

@@ -120,7 +120,14 @@ export function HistorySelectionReview({
               "The original send outcome is retained separately from history. It will not be sent again automatically."
             )}
           </p>
-          <p>{text(`recoveryState.${entry.turn.state}`, entry.turn.state)}</p>
+          <p>
+            {entry.turn.persistence === "server" && entry.turn.admission
+              ? text(
+                  "recoveryState.accepted_response_unknown",
+                  "User input accepted; response outcome unknown"
+                )
+              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
+          </p>
           <details>
             <summary>
               {text("inspectRecovery", "Inspect original input and result")}

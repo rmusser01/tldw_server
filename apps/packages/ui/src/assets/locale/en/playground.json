@@ -1282,6 +1282,7 @@
       "dispatching": "Send outcome pending or unknown",
       "unknown": "User admission outcome unknown",
       "accepted_unsent": "User input accepted; response not saved",
+      "accepted_response_unknown": "User input accepted; response outcome unknown",
       "generated_unsaved": "Generated response needs review"
     }
   }

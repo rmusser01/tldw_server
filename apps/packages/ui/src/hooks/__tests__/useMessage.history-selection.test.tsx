@@ -802,10 +802,28 @@ it("native before-first sends no historical content and retains unacknowledged t
   })
   expect(h1.recover.mock.calls[0][2].input_id).toBeUndefined()
   expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+    persistence: "server",
     state: "generated_unsaved",
+    owner_key: "native-key",
+    conversation_id: "tracked-chat-1",
+    origin_view: {
+      conversation_id: "tracked-chat-1",
+      view_session_id: "origin"
+    },
+    admission: {
+      owner_key: "native-key",
+      conversation_id: "tracked-chat-1",
+      input_message_id: "native-input"
+    },
     input_id: "native-input",
     result_text: "unsaved text"
   })
+  expect(h1.recover.mock.lastCall?.[0]).toEqual({
+    profile_id: "profile",
+    client_session_id: "client"
+  })
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
   expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
   expect(h1.controller.followResult).not.toHaveBeenCalled()
   expect(h1.controller.refreshRecovery).toHaveBeenCalled()
@@ -898,34 +916,58 @@ it("native settings drift during capture prevents dispatch", async () => {
   expect(h1.append).not.toHaveBeenCalled()
 })
 
-it("native account changes retain accepted evidence under the origin and stop consuming", async () => {
-  h1.native = true
-  mocks.storeState.serverChatCharacterId = "12"
-  mocks.storeState.serverChatAssistantKind = "character"
-  h1.wire.mockImplementation(async function* (request) {
-    yield { tldw_history_admission_v1: nativeAdmission(request) }
-    h1.auth.abort()
-    mocks.setMessages.mockClear()
-    yield { choices: [{ delta: { content: "new account must not see" } }] }
-    yield {
-      tldw_message_id: "late-result",
-      tldw_conversation_id: "tracked-chat-1"
-    }
-  })
-  const { result } = renderHook(() => useMessage())
-  await act(async () => {
-    await result.current.onSubmit({ message: "next", image: "" })
-  })
-  expect(mocks.setMessages).not.toHaveBeenCalled()
-  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
-    state: "accepted_unsent",
-    owner_key: "native-key",
-    input_id: "native-input",
-    result_text: ""
-  })
-  expect(h1.controller.followResult).not.toHaveBeenCalled()
-  expect(h1.append).not.toHaveBeenCalled()
-})
+it.each(["account change", "disconnect"])(
+  "native %s retains accepted evidence under the origin without claiming response settlement",
+  async (interruption) => {
+    h1.native = true
+    mocks.storeState.serverChatCharacterId = "12"
+    mocks.storeState.serverChatAssistantKind = "character"
+    h1.wire.mockImplementation(async function* (request) {
+      yield { tldw_history_admission_v1: nativeAdmission(request) }
+      mocks.setMessages.mockClear()
+      if (interruption === "account change") h1.auth.abort()
+      else throw new Error("connection lost after admission")
+      yield { choices: [{ delta: { content: "new account must not see" } }] }
+      yield {
+        tldw_message_id: "late-result",
+        tldw_conversation_id: "tracked-chat-1"
+      }
+    })
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    if (interruption === "account change")
+      expect(mocks.setMessages).not.toHaveBeenCalled()
+    else expect(h1.controller.refreshRecovery).toHaveBeenCalledOnce()
+    expect(h1.recover.mock.lastCall?.[2]).toMatchObject({
+      persistence: "server",
+      state: "accepted_unsent",
+      owner_key: "native-key",
+      conversation_id: "tracked-chat-1",
+      origin_view: {
+        conversation_id: "tracked-chat-1",
+        view_session_id: "origin"
+      },
+      admission: {
+        owner_key: "native-key",
+        conversation_id: "tracked-chat-1",
+        input_message_id: "native-input"
+      },
+      input_id: "native-input",
+      result_text: ""
+    })
+    expect(h1.recover.mock.lastCall?.[0]).toEqual({
+      profile_id: "profile",
+      client_session_id: "client"
+    })
+    expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
+    expect(h1.dismiss).not.toHaveBeenCalled()
+    expect(h1.wire).toHaveBeenCalledOnce()
+    expect(h1.controller.followResult).not.toHaveBeenCalled()
+    expect(h1.append).not.toHaveBeenCalled()
+  }
+)
 
 it("a disconnect after the native owner ACK preserves the completed outcome", async () => {
   h1.native = true

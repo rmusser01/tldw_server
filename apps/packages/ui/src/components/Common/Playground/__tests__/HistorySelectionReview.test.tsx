@@ -1,12 +1,22 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, value: any) =>
-      typeof value === "string" ? value : value?.defaultValue || _key
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { default: locale } = await import("@/assets/locale/en/playground.json")
+  return {
+    useTranslation: () => ({
+      t: (key: string, value: any) => {
+        const translated = key
+          .split(".")
+          .reduce((node: any, part) => node?.[part], locale)
+        return (
+          translated ??
+          (typeof value === "string" ? value : value?.defaultValue || key)
+        )
+      }
+    })
+  }
+})
 import { HistorySelectionReview } from "../HistorySelectionReview"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 const nodes = Array.from({ length: 20300 }, (_, i) => ({
@@ -140,5 +150,123 @@ it("shows recoverable text separately with copy and dismiss but no replay action
   )
   expect(
     screen.queryByRole("button", { name: /resend|retry|settle/i })
+  ).toBeNull()
+})
+
+const recoveryController = (
+  persistence: "server" | "client" | undefined,
+  state: "accepted_unsent" | "generated_unsaved",
+  resultText = ""
+) => {
+  const origin = {
+    owner_key: "original-owner",
+    conversation_id: "original-chat",
+    view_session_id: "old-view",
+    selection_revision: 1,
+    interpretation: { kind: "parent_graph_v1" },
+    cursor: { kind: "empty" }
+  }
+  return {
+    ...controller(),
+    status: "ready",
+    recoveries: [
+      {
+        scope: {
+          profile_id: "original-profile",
+          client_session_id: "original-client"
+        },
+        turn: {
+          operation_id: "native-interrupted",
+          persistence,
+          state,
+          origin_view: origin,
+          owner_key: origin.owner_key,
+          conversation_id: origin.conversation_id,
+          selection_digest: "selected",
+          request_context_digest: "prepared",
+          input_id: "accepted-input",
+          ...(persistence !== "server"
+            ? { assistant_id: "client-result" }
+            : {}),
+          created_at: 1,
+          input_text: "original accepted question",
+          input_images: [],
+          result_text: resultText,
+          admission: {
+            version: 1,
+            owner_key: origin.owner_key,
+            conversation_id: origin.conversation_id,
+            input_message_id: "accepted-input",
+            input_message_revision: "r1",
+            selection_digest: "selected"
+          }
+        }
+      }
+    ],
+    dismissRecovery: vi.fn()
+  } as unknown as HistorySelectionController
+}
+
+it.each(["accepted_unsent", "generated_unsaved"] as const)(
+  "native %s recovery keeps known admission and uncertain response visible",
+  (state) => {
+    const selection = recoveryController(
+      "server",
+      state,
+      state === "generated_unsaved" ? "unacknowledged generated text" : ""
+    )
+    render(<HistorySelectionReview selection={selection} />)
+    expect(
+      screen.getByText("User input accepted; response outcome unknown")
+    ).toBeVisible()
+    expect(
+      screen.queryByText("User input accepted; response not saved")
+    ).toBeNull()
+    expect(screen.queryByText("User admission outcome unknown")).toBeNull()
+    fireEvent.click(screen.getByText("Inspect original input and result"))
+    expect(screen.getByText("original accepted question")).toBeVisible()
+    if (state === "generated_unsaved")
+      expect(screen.getByText("unacknowledged generated text")).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: /resend|retry|settle/i })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss recovery" }))
+    expect(selection.dismissRecovery).toHaveBeenCalledWith(
+      selection.recoveries[0]
+    )
+    expect(selection.recoveries[0].scope.profile_id).toBe("original-profile")
+  }
+)
+
+it.each([undefined, "client"] as const)(
+  "client-managed recovery retains accepted-but-unsent wording (%s)",
+  (persistence) => {
+    render(
+      <HistorySelectionReview
+        selection={recoveryController(persistence, "accepted_unsent")}
+      />
+    )
+    expect(
+      screen.getByText("User input accepted; response not saved")
+    ).toBeVisible()
+    expect(
+      screen.queryByText("User input accepted; response outcome unknown")
+    ).toBeNull()
+  }
+)
+
+it("client-managed generated text retains its existing review label", () => {
+  render(
+    <HistorySelectionReview
+      selection={recoveryController(
+        "client",
+        "generated_unsaved",
+        "client generated text"
+      )}
+    />
+  )
+  expect(screen.getByText("Generated response needs review")).toBeVisible()
+  expect(
+    screen.queryByText("User input accepted; response outcome unknown")
   ).toBeNull()
 })
