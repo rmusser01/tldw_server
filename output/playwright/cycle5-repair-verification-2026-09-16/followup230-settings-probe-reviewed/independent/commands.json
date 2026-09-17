@@ -1,0 +1,6 @@
+{
+  "test": "cd apps/tldw-frontend && node node_modules/vitest/vitest.mjs run --config vitest.config.ts ../packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx ../packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx ../packages/ui/src/components/Option/Settings/__tests__/tldw.timeouts.form.test.tsx ../packages/ui/src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx ../packages/ui/src/components/Option/Settings/__tests__/tldw-settings-tabs.test.tsx ../packages/ui/src/services/__tests__/tldw-api-client.connection-sync.test.ts",
+  "static": "node --max-old-space-size=8192 .tmp/uat230-independent-20260917/validate-independent.mjs",
+  "lintActual": "ESLint with repo cwd, unchanged imported frontend config, explicit actual settings.next.rootDir; lintText baseline/current at same absolute source path",
+  "bandit": "source .venv/bin/activate && python -m bandit apps/packages/ui/src/components/Option/Settings/tldw.tsx apps/packages/ui/src/services/tldw/TldwApiClient.ts apps/packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx -f json -o .tmp/uat230-independent-20260917/bandit.json"
+}

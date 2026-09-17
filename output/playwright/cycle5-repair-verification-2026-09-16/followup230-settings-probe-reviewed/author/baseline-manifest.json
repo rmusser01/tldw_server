@@ -1,0 +1,25 @@
+{
+  "head": "e1ccad4be7cf5b5c1b4c1e3b7405741a3ad19f0d",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "sha256": "931e92bf7d74580194531b6a47c905d6a296bbfa0e1023a22257da7a81093a69"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "bc7329209881624fa92f68ee8be5e37d3d29157a7882824862177e289ab14aa7"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx",
+      "sha256": "b9367428d439626d3da24a225057a29b5627d1c179c54e6466910d1345ced906"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+      "sha256": "77d71831a5d0ea79154c3c9a30f5259c74edcfe2612699f11d1698129163d3e5"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw-auth-mode.form.test.tsx",
+      "sha256": "026a49957d45e37b73b2f0c88f9cbc5669d3f913f7598bb31aa753e1c983af6c"
+    }
+  ]
+}

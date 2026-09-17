@@ -1,0 +1,32 @@
+{
+  "baseline": 4,
+  "current": 4,
+  "errors": 0,
+  "exactLogicalMatch": true,
+  "messages": [
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx",
+      "severity": 1,
+      "rule": null,
+      "message": "File ignored because outside of base path."
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+      "severity": 1,
+      "rule": null,
+      "message": "File ignored because outside of base path."
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "severity": 1,
+      "rule": null,
+      "message": "File ignored because outside of base path."
+    },
+    {
+      "file": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "severity": 1,
+      "rule": null,
+      "message": "File ignored because outside of base path."
+    }
+  ]
+}

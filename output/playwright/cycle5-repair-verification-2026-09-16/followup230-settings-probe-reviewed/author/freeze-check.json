@@ -1,0 +1,21 @@
+{
+  "all_match": true,
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/tldw.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.cookie-logout.test.tsx",
+      "matches": true
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/Settings/__tests__/tldw.form-lifecycle.test.tsx",
+      "matches": true
+    }
+  ]
+}

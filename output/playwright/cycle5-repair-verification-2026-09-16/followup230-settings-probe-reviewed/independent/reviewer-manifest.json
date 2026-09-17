@@ -1,0 +1,142 @@
+{
+  "at": "2026-09-17T12:03:12.175Z",
+  "disposition": "CLEAR UAT230 source/automated verification; native acceptance pending; copy-script pth finding closed",
+  "authorManifestSha256": "9a41995dec568803117d3604acf8cbf3a75c287ac42af62dfd1b05ccd9be3671",
+  "files": [
+    {
+      "path": "COPY-PREP-REVIEW.md",
+      "sha256": "61c368f7cfbf9a2ddaf37c1264c22fdb1f4e3c057a125f55db7d90ef851a4cd4",
+      "bytes": 1508
+    },
+    {
+      "path": "REVIEW230.md",
+      "sha256": "95cf578e38527750408e3239e5fff3ce1c367a171567077f057722b95031efaf",
+      "bytes": 5100
+    },
+    {
+      "path": "bandit.json",
+      "sha256": "2053f7866416f45270afe5d2d7c18b3ce6993fa45af023c541dfeb51d5f5b3e8",
+      "bytes": 1673
+    },
+    {
+      "path": "bandit.log",
+      "sha256": "a5eda057f8ad9875bc91c58285b17ddd7c41b677fe2d165ce002abd423698dd1",
+      "bytes": 238
+    },
+    {
+      "path": "causal-red.log",
+      "sha256": "107193f4869885bfc51f75af4b0c01491cebd004938f857ff665921748289391",
+      "bytes": 4645
+    },
+    {
+      "path": "commands.json",
+      "sha256": "64eb83b6d86f86b8e1cfa54ee7f3f189348034a9a6dee7b3224833be86112e30",
+      "bytes": 1280
+    },
+    {
+      "path": "copy-script-review-closure.json",
+      "sha256": "dea2fab77ceb7ab4f240f376412bb5584966790720a69e036db22df8508c6a19",
+      "bytes": 619
+    },
+    {
+      "path": "eslint-actual-baseline.json",
+      "sha256": "9b21e123a533f46dcf174e4864e374cd8bdd5c9fb38c164031e84829026829b8",
+      "bytes": 916555
+    },
+    {
+      "path": "eslint-actual-comparison.json",
+      "sha256": "8b0eba76b823fb61c428420c5d9350ccca8522f31a83701672e90c36e4968849",
+      "bytes": 371
+    },
+    {
+      "path": "eslint-actual-current.json",
+      "sha256": "94fb6479f4cfee5f4279b7a3069e5d43d43a769824d84b4ca6227c4508b9d41f",
+      "bytes": 916651
+    },
+    {
+      "path": "eslint-baseline.json",
+      "sha256": "447e9593c5be5416ef34f46ab4407ef98ad22b5495be35152f7699cd9de1cb6e",
+      "bytes": 2153
+    },
+    {
+      "path": "eslint-comparison.json",
+      "sha256": "4bb7f113de64b48897e7c6acf6350901ac2c519be1b17078c5202d19d71f241f",
+      "bytes": 913
+    },
+    {
+      "path": "eslint-current.json",
+      "sha256": "447e9593c5be5416ef34f46ab4407ef98ad22b5495be35152f7699cd9de1cb6e",
+      "bytes": 2153
+    },
+    {
+      "path": "eslint-scoped-baseline.json",
+      "sha256": "9b21e123a533f46dcf174e4864e374cd8bdd5c9fb38c164031e84829026829b8",
+      "bytes": 916555
+    },
+    {
+      "path": "eslint-scoped-comparison.json",
+      "sha256": "9d7e2f3962b9a0da1e68cece1ae602bee4ed559252e976669e251e57601d0803",
+      "bytes": 417
+    },
+    {
+      "path": "eslint-scoped-current.json",
+      "sha256": "94fb6479f4cfee5f4279b7a3069e5d43d43a769824d84b4ca6227c4508b9d41f",
+      "bytes": 916651
+    },
+    {
+      "path": "expanded-red.log",
+      "sha256": "417be69fad26f8b1f79ad450e9e5bdb784790054e305f7663b070c1454fb5f1d",
+      "bytes": 4857
+    },
+    {
+      "path": "independent-green.log",
+      "sha256": "a092fc215270ad08417239995dc6ae2fd1c1fdc742eecb91be8751f2d95371db",
+      "bytes": 14146
+    },
+    {
+      "path": "review-inputs.json",
+      "sha256": "4f342e909633f0282863bb00568fb18803b34fc2840095ed5713a35a7b3aa61e",
+      "bytes": 978
+    },
+    {
+      "path": "reviewer-harness-note.txt",
+      "sha256": "6d6a31d030b5d28d86bd08a19aaf43f4870c7e49fbaf28a9e711b932466918b5",
+      "bytes": 279
+    },
+    {
+      "path": "source-after.json",
+      "sha256": "42e44f195f3e3977dc909392d81dfd3e1c7fc42dde1f77cb2fe7c820a575463d",
+      "bytes": 1699
+    },
+    {
+      "path": "source-before.json",
+      "sha256": "333094b7644a45fd235b6648b02ec35c90135af057bc992ad3e2a2d0aa972666",
+      "bytes": 1649
+    },
+    {
+      "path": "static.log",
+      "sha256": "e0d891424184c4aa837f3f7e8548c85306b21281d5589086e8a48565c650e2fd",
+      "bytes": 101
+    },
+    {
+      "path": "tsc-baseline.json",
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b",
+      "bytes": 35180
+    },
+    {
+      "path": "tsc-comparison.json",
+      "sha256": "83ca35b3539d7b9d731eb3f6a39d5c58c233114b6ccb76e09275c919d15bbbbb",
+      "bytes": 100
+    },
+    {
+      "path": "tsc-current.json",
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b",
+      "bytes": 35180
+    },
+    {
+      "path": "validate-independent.mjs",
+      "sha256": "59cbf91e3af5e7bf71f3afc550138ca76a5f9d45b489110663d0a58f2f644f25",
+      "bytes": 3078
+    }
+  ]
+}

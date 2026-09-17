@@ -432,7 +432,7 @@ const getQuickstartWebUiServerUrl = (
   }
 }
 
-export const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
+const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
   const quickstartUrl = getQuickstartWebUiServerUrl()
   if (!quickstartUrl) return false
   try {

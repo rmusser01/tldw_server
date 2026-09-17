@@ -9,7 +9,7 @@ import {
 import { Link, useNavigate } from "react-router-dom"
 import React, { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { isQuickstartWebUiSameOriginServerUrl, tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
+import { tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { SettingsSkeleton } from "@/components/Common/Settings/SettingsSkeleton"
 import { DEFAULT_TLDW_API_KEY } from "@/services/tldw-server"
@@ -103,7 +103,7 @@ export const TldwSettings = () => {
 
   useEffect(() => {
     setBillingServerUrl(null)
-    if (authMode !== 'multi-user' || !isLoggedIn || !serverUrl || isQuickstartWebUiSameOriginServerUrl(serverUrl)) return
+    if (authMode !== 'multi-user' || !isLoggedIn || !serverUrl) return
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
     let cancelled = false

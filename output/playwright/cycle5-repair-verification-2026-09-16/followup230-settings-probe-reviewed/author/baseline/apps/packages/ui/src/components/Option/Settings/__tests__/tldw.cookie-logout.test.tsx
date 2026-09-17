@@ -44,12 +44,8 @@ const configuredClient = (config: Partial<TldwConfig>) => {
 
 vi.mock("antd", () => {
   const Form = Object.assign(
-    ({ children, onValuesChange, onFinish }: {
-      children?: React.ReactNode; onValuesChange?: () => void; onFinish?: (values: Record<string, unknown>) => void
-    }) => <form onChange={() => onValuesChange?.()} onSubmit={(event) => {
-      event.preventDefault()
-      onFinish?.(form.getFieldsValue())
-    }}>{children}</form>,
+    ({ children, onValuesChange }: { children?: React.ReactNode; onValuesChange?: () => void }) =>
+      <form onChange={() => onValuesChange?.()}>{children}</form>,
     { useForm: () => [form] }
   )
 
@@ -76,8 +72,7 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn()
 }))
 
-vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/services/tldw/TldwApiClient")>(),
+vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: mocks.getConfig,
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -191,7 +186,7 @@ vi.mock("../TldwConnectionSettings", () => ({
 import { TldwSettings } from "../tldw"
 
 describe("TldwSettings cookie logout", () => {
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -290,139 +285,13 @@ describe("TldwSettings cookie logout", () => {
     vi.unstubAllGlobals()
   })
 
-  it.each(["quickstart", "advanced"])("loads direct-backend billing only after all routes are advertised in %s mode", async mode => {
-    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", mode)
-    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
+  it("loads billing only after all billing read routes are advertised", async () => {
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     const paths = Object.fromEntries(['plans', 'subscription', 'usage', 'invoices'].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths }), { status: 200 })))
     render(<TldwSettings />)
     expect(await screen.findByText("Billing controls")).toBeInTheDocument()
     await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/billing/invoices?limit=20" })))
-  })
-
-  describe("billing OpenAPI discovery routing", () => {
-    const billingSpec = () => new Response(JSON.stringify({
-      paths: Object.fromEntries(["plans", "subscription", "usage", "invoices"].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
-    }), { status: 200 })
-    const noBilling = () => {
-      expect(screen.queryByText("Billing controls")).not.toBeInTheDocument()
-      expect(mocks.apiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: expect.stringContaining("/billing/") }))
-    }
-
-    it.each(["", "/"])("skips unsupported same-origin quickstart discovery with suffix '%s'", async suffix => {
-      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
-      configuredClient({ serverUrl: `${window.location.origin}${suffix}`, authMode: "multi-user", accessToken: "synthetic-access" })
-      const probe = vi.fn().mockResolvedValue(new Response("Not Found", { status: 404 }))
-      vi.stubGlobal("fetch", probe)
-      render(<TldwSettings />)
-      await waitFor(() => expect(screen.getByTestId("login-status")).toHaveTextContent("Logged In"))
-      fireEvent.click(screen.getByRole("button", { name: "Test connection", exact: true }))
-      await waitFor(() => expect(screen.getByTestId("connection-status")).toHaveTextContent("success"))
-      expect(probe).not.toHaveBeenCalled()
-      noBilling()
-    })
-
-    it("keeps same-origin advanced-mode discovery when the backend advertises Billing", async () => {
-      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
-      vi.stubEnv("NEXT_PUBLIC_API_URL", window.location.origin)
-      configuredClient({ serverUrl: window.location.origin, authMode: "multi-user", accessToken: "synthetic-access" })
-      const probe = vi.fn().mockImplementation(async () => billingSpec())
-      vi.stubGlobal("fetch", probe)
-      render(<TldwSettings />)
-      expect(await screen.findByText("Billing controls")).toBeInTheDocument()
-      expect(probe).toHaveBeenCalledWith(`${window.location.origin}/openapi.json`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
-      await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/billing/invoices?limit=20" })))
-    })
-
-    it("treats a direct-backend 404 as absent optional Billing without repeated probes", async () => {
-      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
-      configuredClient({ serverUrl: "https://backend.example.test", authMode: "multi-user", accessToken: "synthetic-access" })
-      const probe = vi.fn().mockResolvedValue(new Response("Not Found", { status: 404 }))
-      vi.stubGlobal("fetch", probe)
-      render(<TldwSettings />)
-      await waitFor(() => expect(probe).toHaveBeenCalledTimes(1))
-      await act(async () => { await Promise.resolve() })
-      noBilling()
-      expect(screen.getByTestId("login-status")).toHaveTextContent("Logged In")
-    })
-
-    it("aborts a pending capability request on logout and ignores its late advertised result", async () => {
-      configuredClient({ serverUrl: "https://backend.example.test", authMode: "multi-user", accessToken: "synthetic-access" })
-      let release!: (response: Response) => void
-      let signal!: AbortSignal
-      vi.stubGlobal("fetch", vi.fn((_url, init) => {
-        signal = init.signal
-        return new Promise<Response>(resolve => { release = resolve })
-      }))
-      render(<TldwSettings />)
-      await waitFor(() => expect(signal).toBeDefined())
-      mocks.getConfig.mockResolvedValue(null)
-      fireEvent.click(screen.getByRole("button", { name: "Logout", exact: true }))
-      await waitFor(() => expect(signal.aborted).toBe(true))
-      await act(async () => { release(billingSpec()) })
-      noBilling()
-      expect(screen.getByTestId("login-status")).toHaveTextContent("Login Required")
-    })
-
-    it("aborts a pending capability request when Settings unmounts", async () => {
-      configuredClient({ serverUrl: "https://backend.example.test", authMode: "multi-user", accessToken: "synthetic-access" })
-      let signal!: AbortSignal
-      vi.stubGlobal("fetch", vi.fn((_url, init) => {
-        signal = init.signal
-        return new Promise<Response>(() => {})
-      }))
-      const mounted = render(<TldwSettings />)
-      await waitFor(() => expect(signal).toBeDefined())
-      mounted.unmount()
-      expect(signal.aborted).toBe(true)
-      expect(mocks.apiSend).not.toHaveBeenCalled()
-    })
-
-    it("aborts old-target discovery on save and ignores its late advertised result", async () => {
-      const first = { serverUrl: "https://first.example.test", authMode: "multi-user" as const, accessToken: "synthetic-first" }
-      const second = { serverUrl: "https://second.example.test", authMode: "multi-user" as const, accessToken: "synthetic-second" }
-      configuredClient(first)
-      let release!: (response: Response) => void
-      let oldSignal!: AbortSignal
-      const probe = vi.fn((url, init) => {
-        if (url === `${first.serverUrl}/openapi.json`) {
-          oldSignal = init.signal
-          return new Promise<Response>(resolve => { release = resolve })
-        }
-        return Promise.resolve(new Response("Not Found", { status: 404 }))
-      })
-      vi.stubGlobal("fetch", probe)
-      const mounted = render(<TldwSettings />)
-      await waitFor(() => expect(oldSignal).toBeDefined())
-      configuredClient(second)
-      Object.assign(formValues, second)
-      fireEvent.submit(mounted.container.querySelector("form")!)
-      await waitFor(() => expect(screen.getByTestId("server-url")).toHaveTextContent(second.serverUrl))
-      await waitFor(() => expect(probe).toHaveBeenCalledWith(`${second.serverUrl}/openapi.json`, expect.anything()))
-      expect(oldSignal.aborted).toBe(true)
-      await act(async () => { release(billingSpec()) })
-      noBilling()
-    })
-
-    it("aborts an unresponsive capability request after five seconds", async () => {
-      configuredClient({ serverUrl: "https://backend.example.test", authMode: "multi-user", accessToken: "synthetic-access" })
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-      let signal!: AbortSignal
-      vi.stubGlobal("fetch", vi.fn((_url, init) => {
-        signal = init.signal
-        return new Promise<Response>((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
-        })
-      }))
-      await act(async () => { render(<TldwSettings />) })
-      expect(signal.aborted).toBe(false)
-      await act(async () => { await vi.advanceTimersByTimeAsync(4999) })
-      expect(signal.aborted).toBe(false)
-      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-      expect(signal.aborted).toBe(true)
-      noBilling()
-    })
   })
 
   it("describes rejected multi-user sessions without calling them invalid API keys", async () => {

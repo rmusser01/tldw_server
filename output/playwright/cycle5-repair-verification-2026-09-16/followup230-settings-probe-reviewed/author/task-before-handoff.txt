@@ -1,0 +1,37 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.171 - Avoid-unsupported-same-origin-OpenAPI-requests-in-Settings.md
+
+Task TASK-13260.171 - Avoid unsupported same-origin OpenAPI requests in Settings
+==================================================
+
+Status: ◒ In Progress
+Priority: Medium
+Created: 2026-09-17 11:49
+Labels: uat, frontend
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT230: native administrator Settings/login on the quickstart WebUI requests /openapi.json twice and receives404 because that same-origin route is not proxied. Settings bypasses the existing API client quickstart capability guard. Preserve direct-backend Billing capability discovery and stale-request/abort behavior while removing the unsupported probe. Related earlier UAT012 and TASK12104 are distinct repaired paths.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [ ] #1 A causal mounted Settings regression reproduces the authenticated same-origin quickstart OpenAPI request before repair.
+- [ ] #2 The minimal repair suppresses unsupported quickstart probes while preserving direct-backend advertised capabilities, unavailable capabilities and request lifecycle controls.
+- [ ] #3 Independent regression/static review and native Settings acceptance pass; original404 evidence, changes and limits are retained in the running tracker.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Plan:
+--------------------------------------------------
+Use the existing quickstart URL/capability behavior; establish causal RED, implement a bounded frontend correction, independently verify, commit and repeat the normal Settings interaction before the fresh matrix.
+
+Implementation Notes:
+--------------------------------------------------
+Observed during native UAT225 acceptance, which separately passed. Full fresh matrix remains gated. No new product edits have started.

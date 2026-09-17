@@ -11,9 +11,7 @@ vi.mock("@plasmohq/storage", async () =>
 )
 
 const mocks = vi.hoisted(() => ({ getConfig: vi.fn(), logout: vi.fn() }))
-vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/services/tldw/TldwApiClient")>(),
-  tldwClient: {
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   getConfig: mocks.getConfig,
   initialize: vi.fn(), updateConfig: vi.fn(), ragHealth: vi.fn()
 } }))
