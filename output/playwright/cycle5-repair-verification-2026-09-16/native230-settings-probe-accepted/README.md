@@ -1,0 +1,3 @@
+# UAT230 native Settings acceptance
+
+Three authenticated same-origin quickstart Settings rounds pass on committed db2b0602acd2a738fb752613a4086956b3e93bf3: visible navigation, normal reload, then normal logout/login. No OpenAPI or Billing request occurs; initial/final Test Connection shows Core reachable and RAG healthy. Independent audit verifies all24 inputs, six safe identity events and four stable source hashes against the commit. Each settled round exceeds the original five-second probe deadline. Direct-backend controls remain separately covered by87 tests. Existing privileged PostgreSQL profile, no fresh matrix or clean-console claim. Login-helper output is excluded.

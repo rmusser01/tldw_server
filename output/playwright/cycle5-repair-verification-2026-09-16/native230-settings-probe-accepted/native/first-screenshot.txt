@@ -1,0 +1,11 @@
+### Result
+- [Screenshot of viewport](.tmp/uat230-native-20260917/first-settings.png)
+### Ran Playwright code
+```js
+// Screenshot viewport and save it as .tmp/uat230-native-20260917/first-settings.png
+await page.screenshot({
+  path: '.tmp/uat230-native-20260917/first-settings.png',
+  scale: 'css',
+  type: 'png'
+});
+```

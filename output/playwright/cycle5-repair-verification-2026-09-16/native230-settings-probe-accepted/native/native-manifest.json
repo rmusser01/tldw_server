@@ -1,0 +1,101 @@
+{
+  "at": "2026-09-17T12:08:45.163Z",
+  "files": [
+    {
+      "path": ".tmp/uat230-native-20260917/ACCEPTANCE230.md",
+      "sha256": "895900635fee4ff69d28b2c02632593a07d2030f2ae9d04345726eb03b54f1b5"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/NATIVE-REPORT230.md",
+      "sha256": "735442b7301ad9003a6e539341b1f1ba25b7881fb7a6a6b7224b139b09f48aca"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/acceptance-result.json",
+      "sha256": "2b8e4d8f9ef50f682a02253742a44f3330dccf445aa205b8893071025637230b"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/source-before.json",
+      "sha256": "283fbb17e3ec72d3bcc752e22313681a99e2d34c506f5c8486236a46b9bde237"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/source-after.json",
+      "sha256": "e9494f9503edf7d41b42d334ae52e059c521a0811985a874c5eae28c2c4a5fea"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/observe.js",
+      "sha256": "26a5e5ebb3bd562d61c0de8f593f6469154d552fdf68934242481de8849045a9"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/events.js",
+      "sha256": "be90a1eec598e2d1e2b33c1e28ad46daf48c35a779a4dc23757fe4f7e7be18af"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/observe.txt",
+      "sha256": "da085a151f2c5c5da96d51043c3675183f14c87df6d3e41c45995f3bfed30f0d"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/initial-snapshot.txt",
+      "sha256": "625cdcb3bc31ce10b60e16dab0fe03d7a6b585663810c78b1457b3e83a3cb6f0"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/settings-enter.txt",
+      "sha256": "aca94fa36f32216ebb586dab97c529d215f1f5696aab8e966781d31e65b77968"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/server-enter.txt",
+      "sha256": "ed82ed76578ac056e69956991a75271ff8892f4bb2acef6727a5eab9b4e6bfe6"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/test-connection.txt",
+      "sha256": "e368d18ebbe2ee2bd9fe1adfff32470b6f4adc9e04bb9b9906ad97fcaf02e5d9"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/first-events.txt",
+      "sha256": "6425816fa828044b432dcd7de39f0262c453a22b51b562223592ebd1c5546159"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/first-settings.png",
+      "sha256": "b2140d75253b0a7fed5b92a6ce7479fe685e2cc6bd07b3bd83a228f8b8e89fde"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/first-screenshot.txt",
+      "sha256": "077e9c0f5282d844a5a3fa65541919861913d1c3280984c633a2318a492f294e"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/reload.txt",
+      "sha256": "82d91bce7d74da180ab45cc4461172b0a5933ec7dd563f841c0d472efbe091d2"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/reload-events.txt",
+      "sha256": "b6f244b68d83661d2475cac41b5f4eeec381d4d5463bf54b549a563bdd655182"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/reload-snapshot.txt",
+      "sha256": "3c9bf3cac989c0519e3b6e576dd15c663fcba271f6d6a8d5ad45fe2c1f5a8598"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/logout.txt",
+      "sha256": "68063de4f53e404d026983d2d12260d20b9d16cff7e964e139658ed5bda1d38c"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/login-snapshot.txt",
+      "sha256": "8767cb9c08051c1ac8321fa83ae6298a853e293a447f73b50e9edabd987dd79f"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/relogin-connection.txt",
+      "sha256": "1a4f0ea1414d2844213fad6a6e45d952b4c7820a8287df9eb35ce62c70ce88d1"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/final-events.txt",
+      "sha256": "daa3f15f90aa947d9daa00e7e937447b105e9ae60bd35ff30e4c63c998e8bf07"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/final-settings.png",
+      "sha256": "344230deba29f39a559df42cd7aada76acd8478dbe605336b9894939d77829f7"
+    },
+    {
+      "path": ".tmp/uat230-native-20260917/final-screenshot.txt",
+      "sha256": "eae35a979ba01d57d85c8f5e313573e9603d303f76b72b26a321b482576f154b"
+    }
+  ]
+}

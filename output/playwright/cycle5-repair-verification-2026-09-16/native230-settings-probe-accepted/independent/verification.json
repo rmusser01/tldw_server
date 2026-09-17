@@ -1,0 +1,50 @@
+{
+  "at": "2026-09-17T12:10:50.401403+00:00",
+  "verifiedManifestEntries": 24,
+  "sourceRevision": "db2b0602acd2a738fb752613a4086956b3e93bf3",
+  "sourceFourMatchBeforeAfterReviewedAndCommit": true,
+  "observerAttachedAt": "2026-09-17T12:05:06.909Z",
+  "observerAttachedUrl": "http://127.0.0.1:18583/notes",
+  "stages": [
+    {
+      "file": "first-events.txt",
+      "at": "2026-09-17T12:05:58.841Z",
+      "lastIdentityAt": "2026-09-17T12:05:37.451Z",
+      "secondsAfterLastIdentity": 21.39,
+      "loggedIn": true,
+      "connection": true,
+      "cumulativeIdentityEvents": 3,
+      "matchingOpenApiBillingEvents": 0,
+      "pageerrors": 0
+    },
+    {
+      "file": "reload-events.txt",
+      "at": "2026-09-17T12:06:38.864Z",
+      "lastIdentityAt": "2026-09-17T12:06:15.659Z",
+      "secondsAfterLastIdentity": 23.205,
+      "loggedIn": true,
+      "connection": false,
+      "cumulativeIdentityEvents": 5,
+      "matchingOpenApiBillingEvents": 0,
+      "pageerrors": 0
+    },
+    {
+      "file": "final-events.txt",
+      "at": "2026-09-17T12:07:53.669Z",
+      "lastIdentityAt": "2026-09-17T12:07:25.971Z",
+      "secondsAfterLastIdentity": 27.698,
+      "loggedIn": true,
+      "connection": true,
+      "cumulativeIdentityEvents": 6,
+      "matchingOpenApiBillingEvents": 0,
+      "pageerrors": 0
+    }
+  ],
+  "uniqueIdentityEvents": 6,
+  "observationSeconds": 166.76,
+  "screenshotsViewed": [
+    "first-settings.png",
+    "final-settings.png"
+  ],
+  "limits": "Page-level OpenAPI/Billing and identity/pageerror observer; no all-network or clean-console claim."
+}

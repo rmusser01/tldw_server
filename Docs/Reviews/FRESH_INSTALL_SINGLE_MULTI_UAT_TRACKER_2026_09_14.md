@@ -1,6 +1,10 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint: 230 unique findings — 229 verified, 1 unresolved (230).** Original administrator Graph suggestion reads now pass independent native acceptance, including after normal reload/reopen on committed e1ccad4be7. The worker remains truthfully unavailable. Two Settings OpenAPI404 requests are separately tracked under TASK13260.171. Full fresh matrix remains Not Started. [Native Graph evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native225-original-suggestion-reads-accepted/README.md). [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-settings-open.json).
+- **Latest checkpoint: all 230 findings verified; 0 unresolved or awaiting acceptance.** UAT230 passes independent native Settings entry/reload/logout-login on db2b0602. The repair gate is released for fresh matrix preparation; no row of the new48-row matrix has run yet. The matrix uses SQLite/PostgreSQL × single/multi-user, with12 named journeys per configuration. [Final repair ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json). [Settings acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native230-settings-probe-accepted/README.md).
+
+- **Task reconciliation:**38 older repair tasks/127 criteria audited against82 retained inputs and updated through Backlog CLI. PostgreSQL full-matrix TASK13260.75 remains pending. [Per-criterion evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/older-task-criteria-reconciled/review.json).
+
+- **Prior checkpoint: 230 unique findings — 229 verified, 1 unresolved (230).** Original administrator Graph suggestion reads now pass independent native acceptance, including after normal reload/reopen on committed e1ccad4be7. The worker remains truthfully unavailable. Two Settings OpenAPI404 requests are separately tracked under TASK13260.171. Full fresh matrix remains Not Started. [Native Graph evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native225-original-suggestion-reads-accepted/README.md). [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-settings-open.json).
 
 - **Prior checkpoint: 229 unique findings — 228 verified, 1 awaiting native acceptance (225), 0 unresolved implementations.** The complete local suggestion lifecycle has independent173 focused and200 adjacent passing tests, zero skips; all16 hashes and static checks pass. Original administrator Graph capability/list reads remain the final repair acceptance check. Full fresh matrix remains Not Started. [Reviewed lifecycle evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup225-local-lifecycle-reviewed/README.md). [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-all-repairs-reviewed.json).
 
@@ -2108,7 +2112,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Actual PostgreSQL analytics response contains study_streak_days1 and the visible Study dashboard renders1 days. The numerical metric is correct; the localized day label is wrong. Native screenshot and response receipts: `.tmp/uat-study-native-20260917/study-one-day-streak.png` and `repaired-study-bootstrap-events.txt`.
 - TASK13260.126 precedes edits. Use the existing full ICU count-message pattern, preserve0/multiple and the actual value, add causal real-localization checks, and recapture the genuine one-day response after review. Separate from137 remaining-card and184 Manage count wording.
 
-## UAT-189 — P3, implemented; native acceptance pending — one-card Cram completion uses plural grammar
+## UAT-189 — P3, verified — one-card Cram completion uses plural grammar
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2117,7 +2121,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Actual filtered scheduled Cram completes session2/cards_reviewed1, but the visible celebration says `1 cards practiced in this cram session`. This is a separate completion message from137 remaining-card wording. TASK13260.127 owns localized singular/plural correction without count changes.
 - Evidence: `.tmp/uat-study-native-20260917/disposable-rating-real-retry.txt`, `disposable-completed-session.png`, and `disposable-rating-success-evidence.txt`. Actual rating/end/session-list responses all200. New causal tests and design precede production changes.
 
-## UAT-190 — P2, implemented; native acceptance pending — completed filtered Cram reports no matching cards
+## UAT-190 — P2, verified — completed filtered Cram reports no matching cards
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2126,7 +2130,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - The tag-filtered queue contains one saved disposable card. After its successful scheduled rating and completed session, the UI says `No cards match this cram tag filter.` above `You reached the end of your cram queue.` The actual matching-card list remains nonempty; the session is exhausted, not an initially empty search.
 - TASK13260.128 owns the completed versus initial-empty distinction. Preserve loading/error recovery178, rating/re-rating progression128, genuine no-match guidance and scope changes. Same native completion evidence as189; no full UAT restart.
 
-## UAT-191 — P2, implemented; native acceptance pending — scheduled Cram previews one day but saves ten minutes
+## UAT-191 — P2, verified — scheduled Cram previews one day but saves ten minutes
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2135,7 +2139,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - New disposable card, Update schedule on: the Good button displays1 day. Actual successful rating at02:09:54.135UTC sets due02:19:54.135UTC, a ten-minute gap; the saved toast accurately reports10minutes. The controlled preceding invalid-rating422 did not write a review. The final successful response is version3/repetitions1/session2.
 - TASK13260.129 owns diagnosis of the displayed interval source versus active scheduler output. Evidence: `.tmp/uat-study-native-20260917/disposable-answer-visible.txt` and `disposable-rating-success-evidence.txt`. Preserve the scheduler algorithm and practice-only behavior; do not change scheduling merely to fit the stale preview. The original Citrine card is unchanged.
 
-## UAT-192 — P1, implemented; native acceptance pending — PostgreSQL Flashcard tag writes read named rows as tuples
+## UAT-192 — P1, verified — PostgreSQL Flashcard tag writes read named rows as tuples
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2180,7 +2184,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - TASK13260.134 owns concise localized duplicate-name guidance at the actual deck-create conflict boundary. Preserve full diagnostic reporting, draft/source/account-scope guards, unrelated errors and edited-name Retry. No generic message stripping or UI-wide error taxonomy rewrite.
 
 
-## UAT-197 — P1, implemented; native acceptance pending — PostgreSQL Study Pack card append reads named counts as tuples
+## UAT-197 — P1, verified — PostgreSQL Study Pack card append reads named counts as tuples
 
 - Current status: Implemented and independently reviewed, commit053ff74116. Exactly two named-count accesses, unchangedSQL; actual8PG/SQLite controls and worker persistence pass in independent29/0skip. NativeStudyPack pending. [Repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup197-study-pack-counts-reviewed/README.md). Earlier status statements below are historical.
 
@@ -2201,7 +2205,7 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 - Distinct from151: that original frontend bug retained Alice labels despite an empty Bob catalogue.151 remains pending; this backend response blocks its positive acceptance. TASK13260.136 tracks official-fixture reproduction, minimal contract-preserving repair and independent/native verification.
 - Private retained raw evidence: .tmp/uat151-scope-native-20260917/uat198-native-read-failure.json, bob-repaired-events.txt and bob-server-returned-alice.png. Root observed the screenshot; durable scanned retention follows.
 
-## UAT-199 — P1, implemented; native acceptance pending — PostgreSQL conversation updates query nonexistent rowid
+## UAT-199 — P1, verified — PostgreSQL conversation updates query nonexistent rowid
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2209,7 +2213,7 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 
 - Bob’s owned default3 creates conversationc0d85261-ecd0-4c78-af71-47c88dab9d1d and greeting/user messages201. Both message-triggered conversation updates then log PostgreSQL column rowid does not exist (04:35:17.993/18.085UTC). The function selects rowid but never uses it. TASK13260.137 owns causal real-backend tests and the minimal projection correction; preserve version/deleted/search behavior.
 
-## UAT-200 — P1, implemented; native acceptance pending — Persona Memory boolean filter aborts PostgreSQL Chat completion
+## UAT-200 — P1, verified — Persona Memory boolean filter aborts PostgreSQL Chat completion
 
 - Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
@@ -2225,7 +2229,7 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 
 - Official two-owner fixture proves Bob cannot create a private deck with Alice’s name because of the global decks.name uniqueness constraint; SQLite per-file control passes. TASK13260.139 tracks owner-scoped atomic migration with data/catalog/rollback controls. No native same-name attempt yet.
 
-## UAT-202 — P2, implemented; native acceptance pending — Reusing an owned deleted PostgreSQL deck name fails
+## UAT-202 — P2, verified — Reusing an owned deleted PostgreSQL deck name fails
 
 - Actual owned delete/add-same-name fixture raises KeyError(0) at deleted_row[0]; SQLite control passes. TASK13260.140 tracks named PostgreSQL row access preserving restoration/version semantics and198 ownership.
 
@@ -2245,7 +2249,7 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 
 UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 original assertions and seeded data survive real historical migration steps. Author105 and independent12 pass, zero skips; production guards unchanged. [Retained review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup183-persona-historical-fixtures-reviewed/README.md). Current totals203:183verified/17native acceptance pending/3unresolved198,201,202.
 
-## UAT-204 — P1, implemented; native acceptance pending — Cold Study Pack worker stores resources under a worker label
+## UAT-204 — P1, verified — Cold Study Pack worker stores resources under a worker label
 
 - Actual runtime cache/accessor/factory plus source resolution and persistence use client_id=study-pack-worker-2 when the worker is first for owner2 after restart. The generated deck/card rows carry that label; an independent canonical owner2 DB cannot read the deck. A later canonical owner accessor reuses the same incorrectly labelled cache object. Hot numeric-owner-first and SQLite per-file controls pass.
 - Official fixture proof:1causal PostgreSQL failure/3controls, zero skips,5.47s; source hashes stable. Model output was stubbed to isolate storage identity; no real-provider/native acceptance is claimed. Initial probe prematurely closed its shared pool, a retained harness error corrected before the valid run.
@@ -2254,14 +2258,14 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - 05:34UTC acceptance-path correction: running Import/Export exposes Create study pack. The earlier source-search inference of no frontend control was incorrect. Use this visible workflow for197/204 and qualify only unexposed HTTP surfaces separately. Native Alice2 auth/me and own cards/decks return200; five cards/three decks retained.
 
 
-## UAT-205 — P2, unresolved — Study Pack drawer hides accepted job progress and allows repeated submission
+## UAT-205 — P2, verified — Study Pack drawer hides accepted job progress and allows repeated submission
 
 - Native PostgreSQL multi-user Alice submits one owned Note through Import/Export → Create study pack. POST202 accepts job2; ordinary GET200 polling reports queued for several minutes. The drawer remains visually unchanged, with no queued/running status and an enabled Create study pack button between polls. Root did not resubmit. Screenshot and events: `.tmp/uat198-181-native-20260917/pack-queued-no-status.png`, `pack-queued-events.txt`.
 - Source diagnosis: StudyPackCreateDrawer canSubmit excludes only createMutation.isPending; its loading state uses transient jobQuery.isFetching. A queued job is not held as pending between polls. Worker availability remains under separate diagnosis; no worker product defect is claimed yet.
 - Task13260.143 owns bounded visible progress and duplicate-submission guard, with causal tests, terminal retry/success behavior, review and native acceptance.
 
 
-## UAT-206 — P1, unresolved — Startup extraction stops the default Study Pack worker
+## UAT-206 — P1, verified — Startup extraction stops the default Study Pack worker
 
 - Native Study Pack POST202 creates job2; status stays queued under fresh isolated profile defaults. Active declarative startup requires explicit true STUDY_PACK_JOBS_WORKER_ENABLED, while the profile correctly leaves the flag unset. The earlier route-based policy started the worker for enabled Flashcards and respected explicit disable/sidecar. The extraction changed that contract; this is not a deliberately disabled UAT worker.
 - Read-only source/history diagnosis and no-I/O policy truth table: `.tmp/uat-study-pack-queued-20260917/DIAGNOSIS.md`. TASK13260.144 owns the bounded StudyPack predicate repair using the existing startup policy. No producer rejection or global worker-policy changes. Root will load reviewed source, preserve queued job2 and separately record any real provider/persistence failure.
@@ -2285,14 +2289,14 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Normal authenticated Bob Character chat load, Retry and reload call visual-identities/bindings/resolve for neutral/thinking. Backend raises NotImplementedError: Visual identity metadata currently supports SQLite ChaChaNotes databases only. Core model completion/persistence succeed, but optional expression requests log server exceptions and console errors. TASK13260.146 owns a truthful capability/fallback boundary, preserving supported SQLite behavior; no PostgreSQL visual-metadata support is claimed. Original console and owned runtime evidence are preserved with207.
 
 
-## UAT-209 — P1, implemented; targeted acceptance pending — Bob receives Alice private Notes through PostgreSQL catalogue
+## UAT-209 — P1, verified — Bob receives Alice private Notes through PostgreSQL catalogue
 
 - Current status: **implemented; targeted acceptance pending**. Reviewed selected-owner repair committed. Independent202 PASS/0skip includes156 ownership controls; original two-account native Notes acceptance remains pending. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup209-210-217-reviewed-supplemental/README.md). Earlier status statements below are historical.
 
 - Normal auth/me identifies Bob3 at06:08:42UTC. GET /api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc returns200 with Alice owner2 Note b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8/title/content and two Bob owner3 greeting Notes. Actual visible Notes list corroborates the foreign fixture. Keyword catalogue also contains owner2 keyword; intended keyword ownership remains under diagnosis.
 - Native role is the already qualified privileged/BYPASSRLS service setup. No ordinary-role leakage or native foreign mutation is claimed. Private evidence `.tmp/uat198-181-native-20260917/bob-greeting-notes-events.txt`, `bob-notes-foreign-visible.png`. Task13260.147 precedes any repair, preserving SQLite per-file semantics, sharing, rollback/version and current-owner boundaries.
 
-## UAT-210 — P2, implemented; targeted acceptance pending — PostgreSQL Notes graph seed reads named rows positionally
+## UAT-210 — P2, verified — PostgreSQL Notes graph seed reads named rows positionally
 
 - Current status: **implemented; targeted acceptance pending**. Residual mapped keyword JOIN committed after independent202 PASS/0skip including24 graph controls. Earlier five-method repair47e23bd5f3 remains accepted; native graph acceptance pending. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup209-210-217-reviewed-supplemental/README.md). Earlier status statements below are historical.
 
@@ -2325,7 +2329,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-213 — P1, implemented; targeted acceptance pending — PostgreSQL conversation settings read uses nonexistent QueryResult.fetchone
+## UAT-213 — P1, verified — PostgreSQL conversation settings read uses nonexistent QueryResult.fetchone
 
 - Current checkpoint: implemented-awaiting-acceptance. Settings reader reviewed; independent30actualPG/SQLite0skip across213/214. Nativepostrestartpending.
 
@@ -2333,7 +2337,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-214 — P1, implemented; targeted acceptance pending — PostgreSQL Character world-book read enters unsupported connection context
+## UAT-214 — P1, verified — PostgreSQL Character world-book read enters unsupported connection context
 
 - Current checkpoint: implemented-awaiting-acceptance. WorldBook two pure reads reviewed; independent30actualPG/SQLite0skip. LegacyCRUD outside verifiedscope. Nativepostrestartpending.
 
@@ -2341,7 +2345,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-215 — P1, implemented; targeted acceptance pending — Quarantined Study Pack job is reported as queued with no error
+## UAT-215 — P1, verified — Quarantined Study Pack job is reported as queued with no error
 
 - Current checkpoint: implemented-awaiting-acceptance. Quarantined maps tofailed withsafeerror; independent13actualbackendcases0skip and21frontendcontrols. Originaljob2 postrestartGETpending.
 
@@ -2349,7 +2353,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
 - Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
 
-## UAT-216 — P1, implemented; targeted acceptance pending — PostgreSQL Study Pack creation fails and job is quarantined
+## UAT-216 — P1, verified — PostgreSQL Study Pack creation fails and job is quarantined
 
 - Current status: **implemented; targeted acceptance pending**. Three Study Pack trigger templates adapt to the existing shared identifier. Root independent55 PASS/0skip; native worker completion remains pending. Reverse initialization is separate218. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup216-shared-study-sync-reviewed/README.md). Earlier status statements below are historical.
 
@@ -2374,13 +2378,13 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - TASK13260.156. Real ChaCha-first thenMedia bootstrap fails creating idx_sync_log_entity_uuid on entity_uuid when existingtable usesentity_id. Official216both-ordersRED retainsfailure beforeworker. Separatefrom216StudyPacktriggers; exactschema/readwritecontract diagnosis underway, nofixturebypass. Bothinitializationorders andSQLite mustpassafterreviewedrepair.
 
 
-## UAT-219 — P1, unresolved — Completed PostgreSQL Study Pack response rejects timestamps
+## UAT-219 — P1, verified — Completed PostgreSQL Study Pack response rejects timestamps
 
 - TASK13260.157. Native API76778 uses committed6d06aae9bd with3668sourcehashes unchanged across startup. Actual Alice job5 accepted202 at08:13:54, progressesrunning, then GET status500. The separate authenticated job catalogue confirms completed. Safe traceback identifies StudyPackSummaryResponse created_at/last_modified receiving PostgreSQL datetime values where strings are required. Original job5 is preserved for repaired readback; no regeneration.
 - Approved bounded schema response normalization matching existing datetime-only validators; retain strings/null and invalid-type rejection. RealPG/SQLite completedjob/detail regression and independent review precede native same-job acceptance. Native evidence is referenced by the current ledger.
 - Automation note: source-selector input was covered by its own visible label; clicking the visible selector worked. This locator timeout is retained and is not counted as a demonstrated product defect.
 
-## UAT-220 — P2, unresolved — PostgreSQL flashcard citation response rejects datetimes
+## UAT-220 — P2, verified — PostgreSQL flashcard citation response rejects datetimes
 
 - TASK13260.158 tracks an actual official-fixture assistant GET with persisted citation: PostgreSQL fails four timestamp validations in citations and primary_citation; SQLite passes. Separate from219 pack summary. Minimal datetime-only schema normalization approved; preserve ownership, stored data, strings/null and strict invalid-type handling. Evidence: `.tmp/uat219-repair-20260917/IMPLEMENTATION219.md`.
 
@@ -2412,7 +2416,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - UAT171/213/214 meet their bounded native criteria after independent audit; all three tasks closed. API source captures match3668files per runtime; Character user201/completion200/persistence200 and canonical parent linkage pass. Startup research polling500 before readiness is preserved. UAT181 remains open because direct Flashcards/deck reads were first retained after replacement. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native171-213-214-accepted-181-gap/README.md).
 
-## UAT-225 — P2, implemented; native acceptance pending — Graph suggestion reads are unavailable on PostgreSQL
+## UAT-225 — P2, verified — Graph suggestion reads are unavailable on PostgreSQL
 
 - **Current status: verified.** Original administrator Graph/list/capabilities/runs return200 before and after normal reload/reopen. Independent native audit and prior373 actualSQLite/PostgreSQL tests, zero skips, complete the recorded criteria. Worker-unavailable and privileged-profile limits remain explicit; no native generation or full-matrix claim. [Acceptance evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native225-original-suggestion-reads-accepted/README.md). Earlier statements below are historical.
 
@@ -2440,7 +2444,9 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - TASK13260.170. A brace-bearing exception is replaced by a Loguru formatting error before rollback; the actual connection remains in a transaction with its pending write visible. The permanent causal run has five failures and six passing controls, including actual PostgreSQL controls. The bounded repair parameterizes four existing transaction error messages. Final causal6 failures/9 controls are retained; independent47 transaction checks pass without skips, including actual SQLite/PostgreSQL. Original exception identity, rollback and commit-error causes are preserved; Ruff/Bandit clear. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup229-transaction-logging-reviewed/README.md).
 
-## UAT-230 — P2, unresolved — Settings requests an unsupported same-origin OpenAPI URL
+## UAT-230 — P2, verified — Settings requests an unsupported same-origin OpenAPI URL
+
+- **Current status: verified.** Independent87tests and native three-round Settings acceptance pass; all4reviewed source hashes remain unchanged on db2b0602. Direct backend discovery/lifecycle controls remain positive. [Repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup230-settings-probe-reviewed/README.md), [native evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native230-settings-probe-accepted/README.md). Earlier statements below are historical.
 
 - TASK13260.171. Normal administrator Settings/login produces two /openapi.json404 responses on quickstart WebUI18583. The Settings Billing capability probe bypasses the existing API-client guard; Next quickstart does not proxy this route. This is a separate integration/console defect from the now-verified Graph225 reads.
 - Repair uses the existing quickstart guard before the current Settings fetch; direct-backend advertised Billing discovery, missing capabilities, timeout, abort and stale-target handling must remain covered. Causal mounted regression, independent review and original native acceptance precede the full rerun.

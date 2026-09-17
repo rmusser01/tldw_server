@@ -1,5 +1,7 @@
 # Cycle 5 repair and verification plan
 
+Current gate2026-09-17:230verified/0pending/0unresolved, independent230native acceptance complete. Stage3 Complete; Stage4 preparation released. No newmatrixrow has run. Freeze a fullcommit, createfour source archives and copied dependencies, pass relocation/source/runtime preflights, then execute12named journeys×4cells. Harness172 independently54Node+42Python0skip and copy-script full7pthguard reviewed. Older38tasks/127ACs reconciled;75fullPGmatrix remains pending. Ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json. Historical checkpoints below remain unchanged.
+
 Latest checkpoint 2026-09-17 11:52UTC:230findings,229verified/1unresolved230. UAT225 original administrator native reads independently pass on e1ccad4be7, including normal reload/reopen; tasks163/164 are Done. TASK13260.171 repairs separate Settings OpenAPI404 requests. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-settings-open.json. Stage3 remains active and Stage4 Not Started.
 
 Current Stage3 checkpoint (2026-09-17): 229 unique findings — 228 verified, 1 awaiting native acceptance (225), 0 unresolved implementations. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-all-repairs-reviewed.json. Complete225B independently passes173focused+200adjacent tests with zero skips and static/hash checks clear. Task168 is Done. Original administrator native reads on the committed repair remain the final acceptance gate. Stage4 full matrix remains Not Started; harness166 is reviewed.
@@ -14,7 +16,7 @@ Latest197-worker-reviewed ledger:181 verified/12 awaitingnative/4 unresolved183,
 
 Latest197-finding checkpoint2026-09-17:181 verified,10 awaiting native acceptance,6 unresolved181/193–197. Native166/172/167/174/175 accepted; HTTP checkout ownership committed07e0abf1c4 with independent77/0skip, author164/0skip. Remaining worker lifetime, character ownership/name migration, exemplar parameter typing, duplicate copy and StudyPack count fixes stay in Stage3. Harness125 is reopened for actual direct non-bypass PostgreSQL runtime-role cold-init proof. Stage4 remains Not Started; no final matrix profile has been launched. See the current tracker/197-row ledger rather than historical counts below.
 
-**Gate: BLOCKED — user reaffirmed repair and verification before rerun on 2026-09-16.** Continue bounded repairs and targeted acceptance checks. Stage 4 cannot begin merely because implementation or automated suites pass.
+**Gate: RELEASED FOR FRESH MATRIX PREPARATION (2026-09-17).** All230 known findings have reviewed repairs and required bounded acceptance. Fresh archives, environment preflights and actual48-row execution remain. Earlier blocked checkpoints below are historical.
 
 - At23:04UTC,172 findings reconcile to163verified/7awaiting/2unresolved171/172.169 natural PostgreSQL scheduler and170 native layout/picker acceptance pass.166–168 are reviewed and committed but require native acceptance alongside024/031/137/151. Actual restart exposed171 retained Notes read transactions; preserved-draft Retry exposed172 failed deck-query recovery. Repair both before another full matrix; no full UAT restart.
 
@@ -69,7 +71,7 @@ Assignments are dispatched explicitly only after Stage1 closes. No worker broad 
 **Goal:** Show the actual repaired workflows work together before another full UAT.
 **Success Criteria:** Relevant combined tests pass; no new compiler/lint/Bandit findings; each confirmed repair has targeted native evidence and honest remaining limits.
 **Tests:** Affected frontend/backend suites, comparison to90 existing compiler diagnostics, scoped lint and Python Bandit, independent review, exact native acceptance from the design.
-**Status:** In Progress
+**Status:** Complete
 
 - Combined shared UI3000/128 and WebUI312/16 pass (overlapping suites are separate runs); full TypeScript retains exactly90 existing diagnostics,0added/removed. Bandit10production Python paths has0findings/errors. Combined backend689pass/1pre-existing streaming-concurrency skip with mandatory PostgreSQL; no PostgreSQL skips. Independent bounded required-PG32backend+2AuthNZ checks pass with0skips on18.6.
 - Targeted native acceptance uses preserved server data and new persistent repair browsers after original CLI sessions closed. The native freeze ended15:09:54UTC after134 terminal invalidation. Both owned Next frontends are paused.137/138 are reviewed and committed as010b864500;140 as7c7f4093df.013 and139/141/142 now pass independent review and focused regressions; native acceptance remains pending for all follow-ups. Expanded combined coverage exposed143's six additional failing Chat suites, which must be diagnosed and corrected before a green rerun is claimed.
