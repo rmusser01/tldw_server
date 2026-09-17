@@ -23354,13 +23354,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(f"Failed ensuring PostgreSQL study pack schema: {exc}") from exc  # noqa: TRY003
 
         try:
+            sync_columns = {column.get("name") for column in self.backend.get_table_info("sync_log", connection=conn)}
+            if "entity_id" in sync_columns:
+                sync_entity_column = "entity_id"
+            elif "entity_uuid" in sync_columns:
+                sync_entity_column = "entity_uuid"
+            else:
+                raise SchemaError("Study pack sync log has no supported entity identifier column")  # noqa: TRY003
+
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION study_packs_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -23385,7 +23393,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -23413,7 +23421,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -23441,16 +23449,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION study_pack_cards_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -23470,7 +23478,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -23493,7 +23501,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -23516,16 +23524,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION flashcard_citations_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -23549,7 +23557,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -23576,7 +23584,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -23603,7 +23611,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
