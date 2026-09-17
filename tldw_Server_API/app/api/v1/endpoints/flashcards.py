@@ -268,6 +268,7 @@ _STUDY_PACK_JOB_STATUS_MAP = {
     "processing": "running",
     "completed": "completed",
     "failed": "failed",
+    "quarantined": "failed",
     "cancelled": "cancelled",
 }
 
@@ -457,7 +458,7 @@ def _public_study_pack_job_error(job: dict[str, Any]) -> str | None:
     if raw_status == "cancelled":
         reason = str(job.get("cancellation_reason") or "").strip()
         return reason or "Study pack generation was cancelled."
-    if raw_status != "failed":
+    if raw_status not in {"failed", "quarantined"}:
         return None
 
     raw_error = str(job.get("last_error") or job.get("error_message") or "").strip()
