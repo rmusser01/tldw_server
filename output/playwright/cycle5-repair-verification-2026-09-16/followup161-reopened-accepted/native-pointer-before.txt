@@ -1,0 +1,27 @@
+### Error
+TimeoutError: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for locator('aria-ref=f12e492')[22m
+[2m    - locator resolved to <button type="button" aria-busy="false" aria-label="Create" class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid">…</button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <nextjs-portal></nextjs-portal> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is visible, enabled and stable[22m
+[2m      - scrolling into view if needed[22m
+[2m      - done scrolling[22m
+[2m      - <nextjs-portal></nextjs-portal> intercepts pointer events[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    10 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is visible, enabled and stable[22m
+[2m       - scrolling into view if needed[22m
+[2m       - done scrolling[22m
+[2m       - <nextjs-portal></nextjs-portal> intercepts pointer events[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m

@@ -90,8 +90,9 @@ const contentSecurityPolicy = [
 const nextConfig = {
   reactStrictMode: true,
   reactCompiler: false,
-  // Keep development errors visible without covering the sidebar Settings button.
-  devIndicators: { position: 'bottom-right' },
+  // Keep the optional development badge clear of sidebar and drawer actions.
+  // Runtime error overlays remain enabled independently of this badge.
+  devIndicators: false,
   ...(liveTierDistDir ? { distDir: liveTierDistDir } : {}),
   // Preserve backend API paths exactly in quickstart mode. FastAPI routes such as
   // POST /api/v1/chats/ are slash-sensitive and otherwise bounce through redirects
