@@ -75,7 +75,9 @@ def test_v65_database_upgrade_preserves_conversation_and_adds_independent_storag
         database = CharactersRAGDB(path, "1")
         conversation_id = database.add_conversation({"title": "Keep this", "client_id": "1"})
         database.close_connection()
-    database = CharactersRAGDB(path, "1")
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 66)
+        database = CharactersRAGDB(path, "1")
     try:
         with sqlite3.connect(path) as conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -91,6 +93,12 @@ def test_v65_database_upgrade_preserves_conversation_and_adds_independent_storag
             "buddy_turn_owners",
             "buddy_turns",
         } <= tables
+        assert database.get_conversation_by_id(conversation_id)["title"] == "Keep this"
+    finally:
+        database.close_connection()
+    database = CharactersRAGDB(path, "1")
+    try:
+        assert database._get_db_version(database.get_connection()) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert database.get_conversation_by_id(conversation_id)["title"] == "Keep this"
     finally:
         database.close_connection()
@@ -116,9 +124,9 @@ def test_migration_failure_rolls_back_all_buddy_tables_and_version(tmp_path, mon
         assert not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'buddy_%'").fetchall()
 
 
-def test_schema_head_v66_has_one_sqlite_and_postgres_step():
-    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 66
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 66
+def test_v66_migration_remains_registered_for_sqlite_and_postgres():
+    assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 66
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 66
     assert (
         CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[65].__name__
         == "_migrate_from_v65_to_v66"
@@ -183,7 +191,9 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
         database = CharactersRAGDB(":memory:", client_id="1", backend=backend)
     try:
         conversation_id = database.add_conversation({"title": "Retained", "client_id": "1"})
-        database._initialize_schema_postgres()
+        with monkeypatch.context() as patch:
+            patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 66)
+            database._initialize_schema_postgres()
         assert (
             backend.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name = %s", (CharactersRAGDB._SCHEMA_NAME,)
@@ -216,6 +226,15 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
         ).rows
         assert {row["tablename"] for row in policies} == set(tables)
         assert all("user_id" in row["qual"] and "app.current_user_id" in row["with_check"] for row in policies)
+        database.close_connection()
+        database = CharactersRAGDB(":memory:", client_id="1", backend=backend)
+        assert (
+            backend.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = %s", (CharactersRAGDB._SCHEMA_NAME,)
+            ).scalar
+            == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+        )
+        assert database.get_conversation_by_id(conversation_id)["title"] == "Retained"
         with _client(database) as client:
             buddy = _create(client)
             url = f"/api/v1/buddies/{buddy['id']}"

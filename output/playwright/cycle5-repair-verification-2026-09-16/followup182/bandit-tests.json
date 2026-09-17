@@ -1,0 +1,354 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T00:24:53Z",
+  "metrics": {
+    "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py": {
+      "CONFIDENCE.HIGH": 16,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 16,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 91,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 16,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 16,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 91,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "62     metadata = asset_db.get_flashcard_asset(asset_uuid)\n63     assert metadata[\"uuid\"] == asset_uuid\n64     assert metadata[\"byte_size\"] == len(PNG_BYTES)\n",
+      "col_offset": 4,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 63,
+      "line_range": [
+        63
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "63     assert metadata[\"uuid\"] == asset_uuid\n64     assert metadata[\"byte_size\"] == len(PNG_BYTES)\n65     assert metadata[\"sha256\"] == hashlib.sha256(PNG_BYTES).hexdigest()\n",
+      "col_offset": 4,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 64,
+      "line_range": [
+        64
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "64     assert metadata[\"byte_size\"] == len(PNG_BYTES)\n65     assert metadata[\"sha256\"] == hashlib.sha256(PNG_BYTES).hexdigest()\n66     assert asset_db.get_flashcard_asset_content(asset_uuid) == PNG_BYTES\n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 65,
+      "line_range": [
+        65
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "65     assert metadata[\"sha256\"] == hashlib.sha256(PNG_BYTES).hexdigest()\n66     assert asset_db.get_flashcard_asset_content(asset_uuid) == PNG_BYTES\n67 \n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 66,
+      "line_range": [
+        66
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "72         uploaded = client.post(\"/api/v1/flashcards/assets\", files={\"file\": (\"pixel.png\", PNG_BYTES, \"image/png\")})\n73         assert uploaded.status_code == 200, uploaded.text\n74         metadata = uploaded.json()\n",
+      "col_offset": 8,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 73,
+      "line_range": [
+        73
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "74         metadata = uploaded.json()\n75         assert metadata[\"byte_size\"] == len(PNG_BYTES)\n76         assert (metadata[\"width\"], metadata[\"height\"]) == (1, 1)\n",
+      "col_offset": 8,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 75,
+      "line_range": [
+        75
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "75         assert metadata[\"byte_size\"] == len(PNG_BYTES)\n76         assert (metadata[\"width\"], metadata[\"height\"]) == (1, 1)\n77         assert metadata[\"reference\"] == f\"flashcard-asset://{metadata['asset_uuid']}\"\n",
+      "col_offset": 8,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 76,
+      "line_range": [
+        76
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "76         assert (metadata[\"width\"], metadata[\"height\"]) == (1, 1)\n77         assert metadata[\"reference\"] == f\"flashcard-asset://{metadata['asset_uuid']}\"\n78         for _ in range(2):\n",
+      "col_offset": 8,
+      "end_col_offset": 85,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 77,
+      "line_range": [
+        77
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "79             content = client.get(f\"/api/v1/flashcards/assets/{metadata['asset_uuid']}/content\")\n80             assert content.status_code == 200, content.text\n81             assert content.headers[\"content-type\"] == \"image/png\"\n",
+      "col_offset": 12,
+      "end_col_offset": 59,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 80,
+      "line_range": [
+        80
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "80             assert content.status_code == 200, content.text\n81             assert content.headers[\"content-type\"] == \"image/png\"\n82             assert content.content == PNG_BYTES\n",
+      "col_offset": 12,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 81,
+      "line_range": [
+        81
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "81             assert content.headers[\"content-type\"] == \"image/png\"\n82             assert content.content == PNG_BYTES\n83 \n",
+      "col_offset": 12,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 82,
+      "line_range": [
+        82
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "92             conn.execute(\"UPDATE flashcard_assets SET deleted = ? WHERE uuid = ?\", (True, asset_uuid))\n93     assert asset_db.get_flashcard_asset_content(asset_uuid) is None\n94     with _client(asset_db) as client:\n",
+      "col_offset": 4,
+      "end_col_offset": 67,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 93,
+      "line_range": [
+        93
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "95         content = client.get(f\"/api/v1/flashcards/assets/{asset_uuid}/content\")\n96         assert content.status_code == 404, content.text\n97         assert content.json() == {\"detail\": \"Flashcard asset not found\"}\n",
+      "col_offset": 8,
+      "end_col_offset": 55,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 96,
+      "line_range": [
+        96
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "96         assert content.status_code == 404, content.text\n97         assert content.json() == {\"detail\": \"Flashcard asset not found\"}\n98 \n",
+      "col_offset": 8,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 97,
+      "line_range": [
+        97
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "110     result = db.get_flashcard_asset_content(\"row-boundary-control\")\n111     assert result == (None if blob is None else bytes(blob))\n112     assert result is None or isinstance(result, bytes)\n",
+      "col_offset": 4,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 111,
+      "line_range": [
+        111
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "111     assert result == (None if blob is None else bytes(blob))\n112     assert result is None or isinstance(result, bytes)\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 112,
+      "line_range": [
+        112
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

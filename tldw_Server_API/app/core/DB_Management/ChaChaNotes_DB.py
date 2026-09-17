@@ -27299,12 +27299,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             cursor = self.execute_query(
                 "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL",
                 (workspace_id,),
+                read_only=True,
             )
         else:
             cursor = self.execute_query(
                 "SELECT * FROM workspaces "
                 "WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL",
                 (workspace_id,),
+                read_only=True,
             )
         row = cursor.fetchone()
         return self._workspace_row_to_dict(row) if row else None
@@ -34847,7 +34849,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             query += "WHERE " + " AND ".join(conditions) + " ORDER BY d.name LIMIT ? OFFSET ?"
             params_list.extend([limit, offset])
             try:
-                cursor = self.execute_query(query, tuple(params_list))
+                cursor = self.execute_query(query, tuple(params_list), read_only=True)
                 return [dict(row) for row in cursor.fetchall()]
             except CharactersRAGDBError:  # noqa: TRY203
                 raise
@@ -34877,7 +34879,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 query = select_sql + "WHERE deleted = 0 AND workspace_id IS NULL ORDER BY name LIMIT ? OFFSET ?"
                 params = (limit, offset)
         try:
-            cursor = self.execute_query(query, params)
+            cursor = self.execute_query(query, params, read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -34889,7 +34891,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "FROM decks WHERE id = ?"
         )
         try:
-            cursor = self.execute_query(query, (deck_id,))
+            cursor = self.execute_query(query, (deck_id,), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -34910,7 +34912,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "ORDER BY id LIMIT 1"
             )
         try:
-            cursor = self.execute_query(query, (name,))
+            cursor = self.execute_query(query, (name,), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -35001,6 +35003,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                  ORDER BY user_id
                 """,
                 (int(deck_id),),
+                read_only=True,
             )
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
@@ -35016,6 +35019,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                  WHERE deck_id = ? AND user_id = ?
                 """,
                 (int(deck_id), int(user_id)),
+                read_only=True,
             )
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -35405,6 +35409,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor = self.execute_query(
             "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
             (self._flashcard_template_deleted_value(False),),
+            read_only=True,
         )
         row = cursor.fetchone()
         return int(row["cnt"]) if row else 0
@@ -35418,6 +35423,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor = self.execute_query(
             query,
             (self._flashcard_template_deleted_value(False), limit, offset),
+            read_only=True,
         )
         return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
 
@@ -35431,7 +35437,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(self._flashcard_template_deleted_value(False))
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         row = cursor.fetchone()
         return self._serialize_flashcard_template_row(dict(row)) if row else None
 
@@ -35955,7 +35961,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """.format_map(locals())  # nosec B608
         params.extend([limit, offset])
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -36028,7 +36034,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE {where_sql} {fts_filter}
         """.format_map(locals())  # nosec B608
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0
         except CharactersRAGDBError:  # noqa: TRY203
@@ -36087,7 +36093,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params.append(limit)
 
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [
                 {"tag": str(row["tag"]), "count": int(row["usage_count"] or 0)}
                 for row in cursor.fetchall()
@@ -36112,7 +36118,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE f.uuid IN ({placeholders}) AND {deleted_clause}
         """.format_map(locals())  # nosec B608
         try:
-            cursor = self.execute_query(query, tuple(uuids))
+            cursor = self.execute_query(query, tuple(uuids), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -36254,7 +36260,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         try:
             for reason, query, params in selections:
-                cursor = self.execute_query(query, tuple(params))
+                cursor = self.execute_query(query, tuple(params), read_only=True)
                 row = cursor.fetchone()
                 if not row:
                     continue
@@ -36462,7 +36468,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params.append(self._normalize_flashcard_review_session_status(status))
         query_parts.append("ORDER BY last_activity_at DESC, started_at DESC, id DESC LIMIT ?")
         params.append(max(1, int(limit)))
-        cursor = self.execute_query(" ".join(query_parts), tuple(params))
+        cursor = self.execute_query(" ".join(query_parts), tuple(params), read_only=True)
         return [
             session
             for row in cursor.fetchall()
@@ -36598,6 +36604,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE id = ?
             """,
             (int(session_id),),
+            read_only=True,
         )
         row = cursor.fetchone()
         return self._deserialize_flashcard_review_session_row(row) if row else None
@@ -36628,6 +36635,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                  WHERE id = ?
                 """,
                 (int(session_id),),
+                read_only=True,
             ).fetchone()
             return self._deserialize_flashcard_review_session_row(row) or {}
         except CharactersRAGDBError:
@@ -36729,6 +36737,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              ORDER BY MIN(fr.id)
             """,
             (int(session_id),),
+            read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -36747,6 +36756,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              LIMIT 1
             """,
             (card_uuid,),
+            read_only=True,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -37166,7 +37176,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE f.uuid = ? AND f.deleted = 0
         """
         try:
-            cur = self.execute_query(query, (card_uuid,))
+            cur = self.execute_query(query, (card_uuid,), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -37232,7 +37242,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE fa.uuid = ? AND fa.deleted = 0
         """
         try:
-            cur = self.execute_query(query, (asset_uuid,))
+            cur = self.execute_query(query, (asset_uuid,), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -37242,13 +37252,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Fetch raw bytes for a flashcard asset by UUID."""
         query = "SELECT image_data FROM flashcard_assets WHERE uuid = ? AND deleted = 0"
         try:
-            cur = self.execute_query(query, (asset_uuid,))
+            cur = self.execute_query(query, (asset_uuid,), read_only=True)
             row = cur.fetchone()
         except CharactersRAGDBError:  # noqa: TRY203
             raise
         if not row:
             return None
-        blob = row[0]
+        blob = row["image_data"]
         if isinstance(blob, memoryview):
             return blob.tobytes()
         return bytes(blob) if blob is not None else None
@@ -37502,7 +37512,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              {order_clause}
         """.format_map(locals())  # nosec B608
         try:
-            cur = self.execute_query(query, (card_uuid,))
+            cur = self.execute_query(query, (card_uuid,), read_only=True)
             return [dict(r) for r in cur.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -39039,7 +39049,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              ORDER BY ordinal, id
         """  # nosec B608
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,))
+            cursor = self.execute_query(query, (flashcard_uuid,), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -39101,7 +39111,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              LIMIT 1
         """
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,))
+            cursor = self.execute_query(query, (flashcard_uuid,), read_only=True)
             row = cursor.fetchone()
             return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
         except CharactersRAGDBError:  # noqa: TRY203
@@ -42141,7 +42151,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         else:
             raise InputError("context_type must be 'flashcard' or 'quiz_attempt_question'.")  # noqa: TRY003
 
-        existing = self.execute_query(select_sql, where_params).fetchone()
+        existing = self.execute_query(select_sql, where_params, read_only=True).fetchone()
         if existing:
             item = dict(existing)
             item["deleted"] = bool(item.get("deleted"))
@@ -42184,7 +42194,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to create study assistant thread: {exc}") from exc  # noqa: TRY003
 
-        created = self.execute_query(select_sql, where_params).fetchone()
+        created = self.execute_query(select_sql, where_params, read_only=True).fetchone()
         if not created:
             raise CharactersRAGDBError("Study assistant thread was not readable after create")  # noqa: TRY003
         item = dict(created)
@@ -42198,7 +42208,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "created_at, last_modified, deleted, client_id, version "
             "FROM study_assistant_threads WHERE id = ? AND deleted = 0"
         )
-        row = self.execute_query(query, (thread_id,)).fetchone()
+        row = self.execute_query(query, (thread_id,), read_only=True).fetchone()
         if not row:
             return None
         item = dict(row)
@@ -42218,7 +42228,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "context_snapshot_json, provider, model, created_at, client_id "
             "FROM study_assistant_messages WHERE thread_id = ? ORDER BY id ASC LIMIT ? OFFSET ?"
         )
-        cursor = self.execute_query(query, (thread_id, int(limit), int(offset)))
+        cursor = self.execute_query(query, (thread_id, int(limit), int(offset)), read_only=True)
         items: list[dict[str, Any]] = []
         for row in cursor.fetchall():
             item = self._deserialize_row_fields(row, ["structured_payload_json", "context_snapshot_json"])

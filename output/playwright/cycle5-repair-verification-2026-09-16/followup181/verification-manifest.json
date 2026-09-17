@@ -1,0 +1,8 @@
+{
+  "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
+  "tldw_Server_API/app/core/DB_Management/Buddy_DB.py": "ffd4c2b1dfd7c10e7beed095d354b33b186f26b0515af2f6d3b70980521dffa3",
+  "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py": "23f9d6959ac21052310d3051bb40daa7d41b4247456c34de7ff578fd87476abe",
+  "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": "d089e822c3b32de000d66eb85c5f9f541530bcedd07a5c9796ee47531328166c",
+  "tldw_Server_API/tests/DB_Management/test_chacha_postgres_study_read_lifecycle.py": "c7efdc1af2520b040dfad006b5d6a83a297c98adcafba263eb4355a433f03e71",
+  "tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py": "ae40117d61f71deb53c8e198d99539b994d27000bb6a4895ab30a7c95f46178a"
+}

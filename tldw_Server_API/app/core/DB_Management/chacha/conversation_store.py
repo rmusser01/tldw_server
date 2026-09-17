@@ -503,7 +503,7 @@ class ConversationStore:
             "SELECT * FROM conversations WHERE id = ? AND deleted = 0"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id,))
+            cursor = self._db.execute_query(query, (conversation_id,), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
@@ -912,7 +912,7 @@ class ConversationStore:
         )
         params.extend([limit, offset])
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._db.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as exc:
             logger.error(f"Database error listing conversations for client_id {client_id}: {exc}")

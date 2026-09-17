@@ -1780,7 +1780,7 @@ class PersonaStateStore:
         params: list[Any] = [persona_id, user_id]
         if not include_deleted:
             query += " AND deleted = 0"
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return self._persona_profile_row_to_dict(cursor.fetchone())
 
     def list_persona_profiles(

@@ -1,0 +1,23 @@
+{
+  "at": "2026-09-17T00:40:01.783Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_note_read_lifecycle.py",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_analytics_backends.py",
+    "tldw_Server_API/tests/Flashcards/test_study_response_timestamp_contract.py",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_count_backends.py",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_lifecycle_backends.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_conversation_scope_db.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_conversation_store.py",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+    "tldw_Server_API/tests/Persona/test_independent_buddies.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

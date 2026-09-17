@@ -1,0 +1,236 @@
+[
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_workspace",
+    "baseline_line": 27299,
+    "query_argument": "\"SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_workspace",
+    "baseline_line": 27304,
+    "query_argument": "\"SELECT * FROM workspaces \"\n                \"WHERE id = ? AND deleted = 0 AND system_operation_state IS NULL\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_decks",
+    "baseline_line": 34880,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_decks",
+    "baseline_line": 34850,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_deck",
+    "baseline_line": 34892,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_deck_by_name",
+    "baseline_line": 34913,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_deck_shares",
+    "baseline_line": 34996,
+    "query_argument": "\"\"\"\n                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version\n                  FROM deck_shares\n                 WHERE deck_id = ?\n                 ORDER BY user_id\n                \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_deck_share",
+    "baseline_line": 35012,
+    "query_argument": "\"\"\"\n                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version\n                  FROM deck_shares\n                 WHERE deck_id = ? AND user_id = ?\n                \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "count_flashcard_templates",
+    "baseline_line": 35405,
+    "query_argument": "\"SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_flashcard_templates",
+    "baseline_line": 35418,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard_template",
+    "baseline_line": 35434,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_flashcards",
+    "baseline_line": 35958,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "count_flashcards",
+    "baseline_line": 36031,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_flashcard_tag_suggestions",
+    "baseline_line": 36090,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcards_by_uuids",
+    "baseline_line": 36115,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_next_review_card",
+    "baseline_line": 36257,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_flashcard_review_sessions",
+    "baseline_line": 36465,
+    "query_argument": "\" \".join(query_parts)"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard_review_session",
+    "baseline_line": 36592,
+    "query_argument": "\"\"\"\n            SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,\n                   started_at, last_activity_at, completed_at, client_id,\n                   cards_reviewed, correct_count, source_bundle_json, study_pack_id\n              FROM flashcard_review_sessions\n             WHERE id = ?\n            \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "mark_flashcard_review_session_completed",
+    "baseline_line": 36622,
+    "query_argument": "\"\"\"\n                SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,\n                       started_at, last_activity_at, completed_at, client_id,\n                       cards_reviewed, correct_count, source_bundle_json, study_pack_id\n                  FROM flashcard_review_sessions\n                 WHERE id = ?\n                \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard_reviewed_cards",
+    "baseline_line": 36717,
+    "query_argument": "\"\"\"\n            SELECT f.uuid,\n                   MAX(f.tags_json) AS tags_json,\n                   MAX(f.source_ref_type) AS source_ref_type,\n                   MAX(f.source_ref_id) AS source_ref_id,\n                   MAX(d.name) AS deck_name\n              FROM flashcard_reviews fr\n              JOIN flashcards f ON f.id = fr.card_id\n              LEFT JOIN decks d ON d.id = f.deck_id\n             WHERE fr.review_session_id = ?\n             GROUP BY f.uuid\n             ORDER BY MIN(fr.id)\n            \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_latest_flashcard_review",
+    "baseline_line": 36737,
+    "query_argument": "\"\"\"\n            SELECT fr.id, fr.card_id, fr.reviewed_at, fr.rating, fr.answer_time_ms,\n                   fr.scheduled_interval_days, fr.new_ef, fr.new_repetitions, fr.was_lapse,\n                   fr.client_id, fr.scheduler_type, fr.previous_queue_state, fr.next_queue_state,\n                   fr.previous_due_at, fr.next_due_at, fr.review_session_id\n              FROM flashcard_reviews fr\n              JOIN flashcards f ON f.id = fr.card_id\n             WHERE f.uuid = ?\n             ORDER BY fr.id DESC\n             LIMIT 1\n            \"\"\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard",
+    "baseline_line": 37169,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard_asset",
+    "baseline_line": 37235,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_flashcard_asset_content",
+    "baseline_line": 37245,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_keywords_for_flashcard",
+    "baseline_line": 37505,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_flashcard_citations",
+    "baseline_line": 39042,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_study_pack_for_flashcard",
+    "baseline_line": 39104,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_or_create_study_assistant_thread",
+    "baseline_line": 42144,
+    "query_argument": "select_sql"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_or_create_study_assistant_thread",
+    "baseline_line": 42187,
+    "query_argument": "select_sql"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "get_study_assistant_thread",
+    "baseline_line": 42201,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "function": "list_study_assistant_messages",
+    "baseline_line": 42221,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+    "function": "get",
+    "baseline_line": 83,
+    "query_argument": "\"SELECT * FROM buddy_profiles WHERE id = ? AND user_id = ? AND deleted = 0\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+    "function": "list_profiles",
+    "baseline_line": 90,
+    "query_argument": "\"SELECT * FROM buddy_profiles WHERE user_id = ? AND deleted = 0 ORDER BY created_at, id LIMIT ? OFFSET ?\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+    "function": "assets",
+    "baseline_line": 99,
+    "query_argument": "\"SELECT * FROM buddy_assets WHERE buddy_id = ? AND user_id = ? ORDER BY id\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+    "function": "attachment",
+    "baseline_line": 163,
+    "query_argument": "\"SELECT client_slot, buddy_id, scope_type, scope_id, version FROM buddy_attachments WHERE user_id = ? AND client_slot = ?\""
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+    "function": "latest_results",
+    "baseline_line": 239,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+    "function": "get_persona_profile",
+    "baseline_line": 1783,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+    "function": "get_conversation_by_id",
+    "baseline_line": 506,
+    "query_argument": "query"
+  },
+  {
+    "file": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+    "function": "get_conversations_for_user",
+    "baseline_line": 915,
+    "query_argument": "query"
+  }
+]

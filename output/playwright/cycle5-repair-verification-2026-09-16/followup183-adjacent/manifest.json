@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T00:44:11.939Z",
+  "files": [
+    {
+      "file": "uat183-adjacent-green-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat183-adjacent-green-command.json",
+      "original_sha256": "768b43b24777f38a3cda598db2a54dd6dee58362594cc259d19bd3c36127db1f",
+      "retained_sha256": "768b43b24777f38a3cda598db2a54dd6dee58362594cc259d19bd3c36127db1f",
+      "normalization": "none"
+    },
+    {
+      "file": "uat183-adjacent-green.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat183-adjacent-green.redacted.log",
+      "original_sha256": "5bdff3c4c9de35e5e654a2a425538a0ff02f7ddb7a6771433cb60653e020f49f",
+      "retained_sha256": "5bdff3c4c9de35e5e654a2a425538a0ff02f7ddb7a6771433cb60653e020f49f",
+      "normalization": "none"
+    }
+  ]
+}

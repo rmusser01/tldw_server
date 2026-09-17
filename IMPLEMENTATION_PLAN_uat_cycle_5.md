@@ -113,3 +113,9 @@ Stage3 remains active at23:45UTC: all180 identified defects have reviewed implem
 23:59UTC: reopened024 generation console reporting is repaired with causal RED, independent26/4 passing and no changed compiler diagnostics. Actual native422 now remains inline; audit/config restoration still in progress. Stage3 remains active.
 
 2026-09-17 00:05UTC:024 accepted with independent native evidence;181 newly blocks replacement ChaCha initialization through retained Flashcards/deck read transactions. Stage3 remains active;171 restart acceptance depends on181. Current181-row ledger164verified/16pending/1unresolved.
+
+00:19UTC:181 expanded causal RED includes populated Buddy paths; final39-site read-scope repair underway. Separate182 populated asset-content row indexing is confirmed and tracked before edits. Stage3 remains active;182total/164verified/16pending/2unresolved.
+
+00:37UTC:181/182 are independently reviewed; root85 lifecycle/Notes and12 asset checks pass with zero skips. Native acceptance remains pending. The four baseline adjacent migration-test failures have separate183/TASK13260.120 for bounded fixture correction with all production guards unchanged. Stage3 remains active;183total/164verified/18pending/1unresolved. Stage4 has not started.
+
+00:44UTC:183 verified with all162 adjacent tests and4 independent controls passing, zero skips; real historical fixture and exact66/current-head contracts preserve migration guards. Native Manage reveals184 singular wording, tracked before edits under13260.121. Frozen181/182 production is running for targeted Study/image/restart acceptance. Stage3 remains active;184total/165verified/18pending/1unresolved. Full matrix not started.

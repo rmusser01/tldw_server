@@ -83,6 +83,7 @@ class BuddyRepository:
             self.db.execute_query(
                 "SELECT * FROM buddy_profiles WHERE id = ? AND user_id = ? AND deleted = 0",
                 (buddy_id, self.user_id),
+                read_only=True,
             ).fetchone()
         )
 
@@ -90,6 +91,7 @@ class BuddyRepository:
         rows = self.db.execute_query(
             "SELECT * FROM buddy_profiles WHERE user_id = ? AND deleted = 0 ORDER BY created_at, id LIMIT ? OFFSET ?",
             (self.user_id, limit, offset),
+            read_only=True,
         ).fetchall()
         return [self._profile(row) for row in rows]
 
@@ -99,6 +101,7 @@ class BuddyRepository:
             for row in self.db.execute_query(
                 "SELECT * FROM buddy_assets WHERE buddy_id = ? AND user_id = ? ORDER BY id",
                 (buddy_id, self.user_id),
+                read_only=True,
             ).fetchall()
         ]
 
@@ -163,6 +166,7 @@ class BuddyRepository:
         row = self.db.execute_query(
             "SELECT client_slot, buddy_id, scope_type, scope_id, version FROM buddy_attachments WHERE user_id = ? AND client_slot = ?",
             (self.user_id, client_slot),
+            read_only=True,
         ).fetchone()
         return (
             dict(row)
@@ -237,7 +241,8 @@ class BuddyRepository:
         return [
             dict(row)
             for row in self.db.execute_query(
-                query, (client_slot, self.user_id, *conversation_ids, self.user_id, client_slot)
+                query, (client_slot, self.user_id, *conversation_ids, self.user_id, client_slot),
+                read_only=True,
             ).fetchall()
         ]
 

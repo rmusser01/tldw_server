@@ -1,0 +1,33 @@
+{
+  "at": "2026-09-17T00:36:54.027Z",
+  "files": [
+    {
+      "file": "uat181-root-independent.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat181-root-independent.redacted.log",
+      "original_sha256": "8961761acb2c0e5ab326f544b82446e508a1a49b2beff68230d9a41c97d434aa",
+      "retained_sha256": "8961761acb2c0e5ab326f544b82446e508a1a49b2beff68230d9a41c97d434aa",
+      "normalization": "none"
+    },
+    {
+      "file": "uat181-root-independent-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat181-root-independent-command.json",
+      "original_sha256": "72460907cc9f8ad67bf86b59db5c9e723464946d297ae642b512e120a97f4612",
+      "retained_sha256": "72460907cc9f8ad67bf86b59db5c9e723464946d297ae642b512e120a97f4612",
+      "normalization": "none"
+    },
+    {
+      "file": "uat182-root-independent.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat182-root-independent.redacted.log",
+      "original_sha256": "ac77307705677944f11e6560861fc757c81255b8f2b9b6b83fe836dc4b188f58",
+      "retained_sha256": "ac77307705677944f11e6560861fc757c81255b8f2b9b6b83fe836dc4b188f58",
+      "normalization": "none"
+    },
+    {
+      "file": "uat182-root-independent-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat182-root-independent-command.json",
+      "original_sha256": "b6b9a38362dd80c5a3f1dea49d96bc0d57b077b89cc4f6eff48a6bf40a66b6ae",
+      "retained_sha256": "b6b9a38362dd80c5a3f1dea49d96bc0d57b077b89cc4f6eff48a6bf40a66b6ae",
+      "normalization": "none"
+    }
+  ]
+}

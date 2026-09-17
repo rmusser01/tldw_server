@@ -1,0 +1,131 @@
+{
+  "at": "2026-09-17T00:36:54.018Z",
+  "files": [
+    {
+      "file": "DESIGN.md",
+      "source": ".tmp/uat181-repair-20260916/DESIGN.md",
+      "original_sha256": "f58755b5ac0be5da8a303c4f003ccb97109fa3420c7aec18cd1d129eabd6de25",
+      "retained_sha256": "f58755b5ac0be5da8a303c4f003ccb97109fa3420c7aec18cd1d129eabd6de25",
+      "normalization": "none"
+    },
+    {
+      "file": "IMPLEMENTATION.md",
+      "source": ".tmp/uat181-repair-20260916/IMPLEMENTATION.md",
+      "original_sha256": "5e4d51541d39142e513b4356ff8e46da30b4afe3dfb8af81b1b4709135950f2f",
+      "retained_sha256": "5e4d51541d39142e513b4356ff8e46da30b4afe3dfb8af81b1b4709135950f2f",
+      "normalization": "none"
+    },
+    {
+      "file": "adjacent-failures.md",
+      "source": ".tmp/uat181-repair-20260916/adjacent-failures.md",
+      "original_sha256": "372b25c6a10cd8474a026562fbad7ca2ac8b34882d7d46690382ef0d54dbd424",
+      "retained_sha256": "372b25c6a10cd8474a026562fbad7ca2ac8b34882d7d46690382ef0d54dbd424",
+      "normalization": "none"
+    },
+    {
+      "file": "ast-equivalence.json",
+      "source": ".tmp/uat181-repair-20260916/ast-equivalence.json",
+      "original_sha256": "b60e9d68bc9c6e9a36aa25a2051cf5b8af395d17c4f63994596226939db44e28",
+      "retained_sha256": "b60e9d68bc9c6e9a36aa25a2051cf5b8af395d17c4f63994596226939db44e28",
+      "normalization": "none"
+    },
+    {
+      "file": "read-inventory.json",
+      "source": ".tmp/uat181-repair-20260916/read-inventory.json",
+      "original_sha256": "d0629fca7059dafc3f3cf26268062b201a41cfd804a52c341e546fd0d5e60039",
+      "retained_sha256": "d0629fca7059dafc3f3cf26268062b201a41cfd804a52c341e546fd0d5e60039",
+      "normalization": "none"
+    },
+    {
+      "file": "production-freeze.json",
+      "source": ".tmp/uat181-repair-20260916/production-freeze.json",
+      "original_sha256": "e67c692dbe38f679c58aff624a96f2a848550e10ae4221eccb725a5b85af6280",
+      "retained_sha256": "e67c692dbe38f679c58aff624a96f2a848550e10ae4221eccb725a5b85af6280",
+      "normalization": "none"
+    },
+    {
+      "file": "production.patch",
+      "source": ".tmp/uat181-repair-20260916/production.patch",
+      "original_sha256": "75c0b0114e64fec012b36a90e0d623847c0757c9a9ae32e6d3051aaa4eebac6b",
+      "retained_sha256": "5c2d16117bed5ee4704dd65e58039b71d388667b76911af3140240fdc8d43d38",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat181-repair-20260916/owned-manifest.json",
+      "original_sha256": "17ec7cddb995c11d6e6a6deeb57abcad5be3e1c6641798b3959f33ad20daae96",
+      "retained_sha256": "17ec7cddb995c11d6e6a6deeb57abcad5be3e1c6641798b3959f33ad20daae96",
+      "normalization": "none"
+    },
+    {
+      "file": "verification-manifest.json",
+      "source": ".tmp/uat181-repair-20260916/verification-manifest.json",
+      "original_sha256": "edf9574aeba153353d1cf3043889059e1a98632cb03fbc486ea41f6d95462a75",
+      "retained_sha256": "edf9574aeba153353d1cf3043889059e1a98632cb03fbc486ea41f6d95462a75",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff-baseline.json",
+      "source": ".tmp/uat181-repair-20260916/ruff-baseline.json",
+      "original_sha256": "c7463a7e6ddc744fb28475f9ab696f98066ff1a700809fd17b6619c80ab9a1ab",
+      "retained_sha256": "c7463a7e6ddc744fb28475f9ab696f98066ff1a700809fd17b6619c80ab9a1ab",
+      "normalization": "none"
+    },
+    {
+      "file": "ruff-current.json",
+      "source": ".tmp/uat181-repair-20260916/ruff-current.json",
+      "original_sha256": "c7463a7e6ddc744fb28475f9ab696f98066ff1a700809fd17b6619c80ab9a1ab",
+      "retained_sha256": "c7463a7e6ddc744fb28475f9ab696f98066ff1a700809fd17b6619c80ab9a1ab",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit-current.json",
+      "source": ".tmp/uat181-repair-20260916/bandit-current.json",
+      "original_sha256": "7c5a3676d55a9c1134c1ccb1ab24b328f296fe0fbfd859592a84e39b24072313",
+      "retained_sha256": "1c000081917d8253959719cc5df65f6d2407cd67bae8ee6da03071843e809431",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat181-red.redacted.log",
+      "source": ".tmp/uat181-repair-20260916/uat181-red.redacted.log",
+      "original_sha256": "2c978470bd79a6a92a86bf5f4439b093e25728b96f2fe006eab9dedaba5ff9d2",
+      "retained_sha256": "6425a7583476094de11202a5883c314060e3f84af3bab9ba7f26f70702143623",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat181-populated-buddy-red.redacted.log",
+      "source": ".tmp/uat181-repair-20260916/uat181-populated-buddy-red.redacted.log",
+      "original_sha256": "133950237bfa15e4e5eea529a54b584f26804823985ed53f9a5550987d983a38",
+      "retained_sha256": "40b739833509a9d78c6006e11377637369872add43c4d993469e3d9d17c3136f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat181-182-final-green.redacted.log",
+      "source": ".tmp/uat181-repair-20260916/uat181-182-final-green.redacted.log",
+      "original_sha256": "09887473ef0c2783f19f5c4d78f6c86a26ed79c840ca902ac46079d85db65e01",
+      "retained_sha256": "09887473ef0c2783f19f5c4d78f6c86a26ed79c840ca902ac46079d85db65e01",
+      "normalization": "none"
+    },
+    {
+      "file": "uat181-182-final-green-command.json",
+      "source": ".tmp/uat181-repair-20260916/uat181-182-final-green-command.json",
+      "original_sha256": "07068814d01efe029084a39eb27c924f87b020b0b1e2eb68bc6f1c6e9187f42e",
+      "retained_sha256": "07068814d01efe029084a39eb27c924f87b020b0b1e2eb68bc6f1c6e9187f42e",
+      "normalization": "none"
+    },
+    {
+      "file": "uat181-adjacent.redacted.log",
+      "source": ".tmp/uat181-repair-20260916/uat181-adjacent.redacted.log",
+      "original_sha256": "6578f59d6724ebcd0483b7e5571b5039c996b6e371e46b8ce9172900f83d5f26",
+      "retained_sha256": "503a82f2e82e8d2d94b488d0694dd6fe8e9afeb19fef3a32a0bccab22262d2c2",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "uat181-adjacent-baseline-replay.redacted.log",
+      "source": ".tmp/uat181-repair-20260916/uat181-adjacent-baseline-replay.redacted.log",
+      "original_sha256": "a5686b271ccc1d860f921350f2559976f28f9354b66b1dc19d902397d96687dc",
+      "retained_sha256": "b62bad84f5d341cf2d960b0bb00c87651ea996a3759b3cbefe0ffca92394985a",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

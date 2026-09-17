@@ -1,0 +1,3861 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T00:40:22Z",
+  "metrics": {
+    "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py": {
+      "CONFIDENCE.HIGH": 70,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 70,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 356,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/tests/Persona/test_independent_buddies.py": {
+      "CONFIDENCE.HIGH": 115,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 115,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 627,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 185,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 185,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 983,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "45                 steps[version](conn)\n46                 assert db._get_db_version(conn) == version + 1\n47 \n",
+      "col_offset": 16,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 46,
+      "line_range": [
+        46
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "53             with seeded.transaction() as conn:\n54                 assert seeded._get_db_version(conn) == 39\n55                 tables = {\n",
+      "col_offset": 16,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 54,
+      "line_range": [
+        54
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "58                 }\n59                 assert {\"persona_buddies\", \"note_attachments\"}.isdisjoint(tables)\n60                 # Seed only columns present in the historical conversation schema.\n",
+      "col_offset": 16,
+      "end_col_offset": 81,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 59,
+      "line_range": [
+        59
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "87 \n88     assert schema_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION\n89     assert \"persona_buddies\" in tables\n",
+      "col_offset": 4,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 88,
+      "line_range": [
+        88
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "88     assert schema_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION\n89     assert \"persona_buddies\" in tables\n90     assert \"source_fingerprint\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 89,
+      "line_range": [
+        89
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "89     assert \"persona_buddies\" in tables\n90     assert \"source_fingerprint\" in buddy_columns\n91     assert \"derivation_version\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 90,
+      "line_range": [
+        90
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "90     assert \"source_fingerprint\" in buddy_columns\n91     assert \"derivation_version\" in buddy_columns\n92     assert \"persona_id\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 91,
+      "line_range": [
+        91
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "91     assert \"derivation_version\" in buddy_columns\n92     assert \"persona_id\" in buddy_columns\n93     assert \"user_id\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 92,
+      "line_range": [
+        92
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "92     assert \"persona_id\" in buddy_columns\n93     assert \"user_id\" in buddy_columns\n94     assert \"derived_core_json\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 37,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 93,
+      "line_range": [
+        93
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "93     assert \"user_id\" in buddy_columns\n94     assert \"derived_core_json\" in buddy_columns\n95     assert \"overlay_preferences_json\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 94,
+      "line_range": [
+        94
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "94     assert \"derived_core_json\" in buddy_columns\n95     assert \"overlay_preferences_json\" in buddy_columns\n96     assert \"created_at\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 95,
+      "line_range": [
+        95
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "95     assert \"overlay_preferences_json\" in buddy_columns\n96     assert \"created_at\" in buddy_columns\n97     assert \"last_modified\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 96,
+      "line_range": [
+        96
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "96     assert \"created_at\" in buddy_columns\n97     assert \"last_modified\" in buddy_columns\n98     assert \"version\" in buddy_columns\n",
+      "col_offset": 4,
+      "end_col_offset": 43,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 97,
+      "line_range": [
+        97
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "97     assert \"last_modified\" in buddy_columns\n98     assert \"version\" in buddy_columns\n99     assert \"idx_persona_buddies_user\" in buddy_indexes\n",
+      "col_offset": 4,
+      "end_col_offset": 37,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 98,
+      "line_range": [
+        98
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "98     assert \"version\" in buddy_columns\n99     assert \"idx_persona_buddies_user\" in buddy_indexes\n100     assert (\"persona_profiles\", \"persona_id\", \"id\") in fk_targets\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 99,
+      "line_range": [
+        99
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "99     assert \"idx_persona_buddies_user\" in buddy_indexes\n100     assert (\"persona_profiles\", \"persona_id\", \"id\") in fk_targets\n101     conversation = migrated.get_conversation_by_id(conversation_id)\n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 100,
+      "line_range": [
+        100
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "101     conversation = migrated.get_conversation_by_id(conversation_id)\n102     assert conversation[\"title\"] == \"Retained from v39\"\n103     assert conversation[\"client_id\"] == \"seed-client\"\n",
+      "col_offset": 4,
+      "end_col_offset": 55,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 102,
+      "line_range": [
+        102
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "102     assert conversation[\"title\"] == \"Retained from v39\"\n103     assert conversation[\"client_id\"] == \"seed-client\"\n104     migrated.close_connection()\n",
+      "col_offset": 4,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 103,
+      "line_range": [
+        103
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "111     before = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n112     assert before is not None\n113 \n",
+      "col_offset": 4,
+      "end_col_offset": 29,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 112,
+      "line_range": [
+        112
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "117 \n118     assert persisted is not None\n119     assert after is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 32,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 118,
+      "line_range": [
+        118
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "118     assert persisted is not None\n119     assert after is not None\n120     assert buddy[\"persona_id\"] == persona_id\n",
+      "col_offset": 4,
+      "end_col_offset": 28,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 119,
+      "line_range": [
+        119
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "119     assert after is not None\n120     assert buddy[\"persona_id\"] == persona_id\n121     assert persisted[\"persona_id\"] == persona_id\n",
+      "col_offset": 4,
+      "end_col_offset": 44,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 120,
+      "line_range": [
+        120
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "120     assert buddy[\"persona_id\"] == persona_id\n121     assert persisted[\"persona_id\"] == persona_id\n122     assert int(after[\"version\"]) == int(before[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 121,
+      "line_range": [
+        121
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "121     assert persisted[\"persona_id\"] == persona_id\n122     assert int(after[\"version\"]) == int(before[\"version\"])\n123 \n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 122,
+      "line_range": [
+        122
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "131     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n132     assert profile is not None\n133     original = ensure_persona_buddy_for_profile(db_instance, profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 132,
+      "line_range": [
+        132
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "134 \n135     assert db_instance.update_persona_profile(\n136         persona_id=persona_id,\n137         user_id=\"user-1\",\n138         update_data={\"name\": \"Renamed Buddy Persona\"},\n139         expected_version=int(profile[\"version\"]),\n140     )\n141     updated_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 135,
+      "line_range": [
+        135,
+        136,
+        137,
+        138,
+        139,
+        140
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "141     updated_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n142     assert updated_profile is not None\n143     repaired = ensure_persona_buddy_for_profile(db_instance, updated_profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 142,
+      "line_range": [
+        142
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "144 \n145     assert repaired[\"source_fingerprint\"] != original[\"source_fingerprint\"]\n146     assert int(repaired[\"version\"]) > int(original[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 145,
+      "line_range": [
+        145
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "145     assert repaired[\"source_fingerprint\"] != original[\"source_fingerprint\"]\n146     assert int(repaired[\"version\"]) > int(original[\"version\"])\n147 \n",
+      "col_offset": 4,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 146,
+      "line_range": [
+        146
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "153     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n154     assert profile is not None\n155 \n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 154,
+      "line_range": [
+        154
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "160 \n161     assert persisted_before is not None\n162     assert persisted_after is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 39,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 161,
+      "line_range": [
+        161
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "161     assert persisted_before is not None\n162     assert persisted_after is not None\n163     assert int(first[\"version\"]) == int(second[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 162,
+      "line_range": [
+        162
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "162     assert persisted_after is not None\n163     assert int(first[\"version\"]) == int(second[\"version\"])\n164     assert int(persisted_before[\"version\"]) == int(persisted_after[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 163,
+      "line_range": [
+        163
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "163     assert int(first[\"version\"]) == int(second[\"version\"])\n164     assert int(persisted_before[\"version\"]) == int(persisted_after[\"version\"])\n165     assert persisted_before[\"last_modified\"] == persisted_after[\"last_modified\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 78,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 164,
+      "line_range": [
+        164
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "164     assert int(persisted_before[\"version\"]) == int(persisted_after[\"version\"])\n165     assert persisted_before[\"last_modified\"] == persisted_after[\"last_modified\"]\n166 \n",
+      "col_offset": 4,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 165,
+      "line_range": [
+        165
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "172     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n173     assert profile is not None\n174     original = ensure_persona_buddy_for_profile(db_instance, profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 173,
+      "line_range": [
+        173
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "185 \n186     assert persisted is not None\n187     assert int(repeated[\"version\"]) == int(original[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 32,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 186,
+      "line_range": [
+        186
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "186     assert persisted is not None\n187     assert int(repeated[\"version\"]) == int(original[\"version\"])\n188     assert int(persisted[\"version\"]) == int(original[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 63,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 187,
+      "line_range": [
+        187
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "187     assert int(repeated[\"version\"]) == int(original[\"version\"])\n188     assert int(persisted[\"version\"]) == int(original[\"version\"])\n189     assert repeated[\"last_modified\"] == original[\"last_modified\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 188,
+      "line_range": [
+        188
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "188     assert int(persisted[\"version\"]) == int(original[\"version\"])\n189     assert repeated[\"last_modified\"] == original[\"last_modified\"]\n190     assert persisted[\"last_modified\"] == original[\"last_modified\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 189,
+      "line_range": [
+        189
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "189     assert repeated[\"last_modified\"] == original[\"last_modified\"]\n190     assert persisted[\"last_modified\"] == original[\"last_modified\"]\n191 \n",
+      "col_offset": 4,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 190,
+      "line_range": [
+        190
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "197     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n198     assert profile is not None\n199     original = ensure_persona_buddy_for_profile(db_instance, profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 198,
+      "line_range": [
+        198
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "209 \n210     assert db_instance.update_persona_profile(\n211         persona_id=persona_id,\n212         user_id=\"user-1\",\n213         update_data={\"name\": \"Overlay Persona Renamed\"},\n214         expected_version=int(profile[\"version\"]),\n215     )\n216     updated_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 210,
+      "line_range": [
+        210,
+        211,
+        212,
+        213,
+        214,
+        215
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "216     updated_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n217     assert updated_profile is not None\n218     repaired = ensure_persona_buddy_for_profile(db_instance, updated_profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 217,
+      "line_range": [
+        217
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "219 \n220     assert repaired[\"source_fingerprint\"] != original[\"source_fingerprint\"]\n221     assert repaired[\"overlay_preferences\"] == overlay_preferences\n",
+      "col_offset": 4,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 220,
+      "line_range": [
+        220
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "220     assert repaired[\"source_fingerprint\"] != original[\"source_fingerprint\"]\n221     assert repaired[\"overlay_preferences\"] == overlay_preferences\n222 \n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 221,
+      "line_range": [
+        221
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "231     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n232     assert profile is not None\n233     ensure_persona_buddy_for_profile(db_instance, profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 232,
+      "line_range": [
+        232
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "261 \n262     assert (\n263         db_instance.get_persona_buddy(\n264             persona_id=\"persona-1\",\n265             user_id=\"user-1\",\n266             include_deleted_personas=False,\n267         )\n268         is None\n269     )\n270 \n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 262,
+      "line_range": [
+        262,
+        263,
+        264,
+        265,
+        266,
+        267,
+        268,
+        269
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "270 \n271     assert \"pp.deleted = ?\" in str(captured[\"query\"])\n272     assert captured[\"params\"] == (\"persona-1\", \"user-1\", False, False)\n",
+      "col_offset": 4,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 271,
+      "line_range": [
+        271
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "271     assert \"pp.deleted = ?\" in str(captured[\"query\"])\n272     assert captured[\"params\"] == (\"persona-1\", \"user-1\", False, False)\n273 \n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 272,
+      "line_range": [
+        272
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "281     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n282     assert profile is not None\n283     buddy_before_delete = ensure_persona_buddy_for_profile(db_instance, profile)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 282,
+      "line_range": [
+        282
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "285 \n286     assert db_instance.soft_delete_persona_profile(\n287         persona_id=persona_id,\n288         user_id=\"user-1\",\n289         expected_version=deleted_version,\n290     )\n291     assert db_instance.get_persona_buddy(persona_id=persona_id, user_id=\"user-1\") is None\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 286,
+      "line_range": [
+        286,
+        287,
+        288,
+        289,
+        290
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "290     )\n291     assert db_instance.get_persona_buddy(persona_id=persona_id, user_id=\"user-1\") is None\n292     deleted_profile = db_instance.get_persona_profile(\n",
+      "col_offset": 4,
+      "end_col_offset": 89,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 291,
+      "line_range": [
+        291
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "296     )\n297     assert deleted_profile is not None\n298 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 297,
+      "line_range": [
+        297
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "306 \n307     assert restored is True\n308     assert restored_profile is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 27,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 307,
+      "line_range": [
+        307
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "307     assert restored is True\n308     assert restored_profile is not None\n309     assert restored_profile[\"is_active\"] is True\n",
+      "col_offset": 4,
+      "end_col_offset": 39,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 308,
+      "line_range": [
+        308
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "308     assert restored_profile is not None\n309     assert restored_profile[\"is_active\"] is True\n310     assert restored_buddy is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 309,
+      "line_range": [
+        309
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "309     assert restored_profile[\"is_active\"] is True\n310     assert restored_buddy is not None\n311     assert int(restored_buddy[\"version\"]) == int(buddy_before_delete[\"version\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 37,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 310,
+      "line_range": [
+        310
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "310     assert restored_buddy is not None\n311     assert int(restored_buddy[\"version\"]) == int(buddy_before_delete[\"version\"])\n312     assert restored_buddy[\"resolved_profile\"] == buddy_before_delete[\"resolved_profile\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 311,
+      "line_range": [
+        311
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "311     assert int(restored_buddy[\"version\"]) == int(buddy_before_delete[\"version\"])\n312     assert restored_buddy[\"resolved_profile\"] == buddy_before_delete[\"resolved_profile\"]\n313 \n",
+      "col_offset": 4,
+      "end_col_offset": 88,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 312,
+      "line_range": [
+        312
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "345 \n346     assert db_instance.restore_persona_profile(\n347         persona_id=\"persona-1\",\n348         user_id=\"user-1\",\n349         expected_version=3,\n350     )\n351 \n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 346,
+      "line_range": [
+        346,
+        347,
+        348,
+        349,
+        350
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "356     )\n357     assert \"deleted = ?\" in update_query\n358     assert update_params[-1] is True\n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 357,
+      "line_range": [
+        357
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "357     assert \"deleted = ?\" in update_query\n358     assert update_params[-1] is True\n359 \n",
+      "col_offset": 4,
+      "end_col_offset": 36,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 358,
+      "line_range": [
+        358
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "365     profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\")\n366     assert profile is not None\n367     assert db_instance.soft_delete_persona_profile(\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 366,
+      "line_range": [
+        366
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "366     assert profile is not None\n367     assert db_instance.soft_delete_persona_profile(\n368         persona_id=persona_id,\n369         user_id=\"user-1\",\n370         expected_version=int(profile[\"version\"]),\n371     )\n372     deleted_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\", include_deleted=True)\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 367,
+      "line_range": [
+        367,
+        368,
+        369,
+        370,
+        371
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "372     deleted_profile = db_instance.get_persona_profile(persona_id, user_id=\"user-1\", include_deleted=True)\n373     assert deleted_profile is not None\n374     stale_version = int(deleted_profile[\"version\"]) - 1\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 373,
+      "line_range": [
+        373
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "424     result = db_instance._persona_buddy_row_to_dict(fake_row)\n425     assert result is not None\n426     assert result[\"resolved_profile\"] is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 29,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 425,
+      "line_range": [
+        425
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "425     assert result is not None\n426     assert result[\"resolved_profile\"] is not None\n427     assert result[\"resolved_profile\"][\"species_id\"] == \"owl\"\n",
+      "col_offset": 4,
+      "end_col_offset": 49,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 426,
+      "line_range": [
+        426
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "426     assert result[\"resolved_profile\"] is not None\n427     assert result[\"resolved_profile\"][\"species_id\"] == \"owl\"\n428     assert result[\"resolved_profile\"][\"compatibility_status\"] == \"exact\"\n",
+      "col_offset": 4,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 427,
+      "line_range": [
+        427
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "427     assert result[\"resolved_profile\"][\"species_id\"] == \"owl\"\n428     assert result[\"resolved_profile\"][\"compatibility_status\"] == \"exact\"\n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/ChaChaNotesDB/test_persona_buddy_db.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 428,
+      "line_range": [
+        428
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "48     response = client.post(\"/api/v1/buddies\", json=payload)\n49     assert response.status_code == 201, response.text\n50     return response.json()\n",
+      "col_offset": 4,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 49,
+      "line_range": [
+        49
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "86             ).fetchone()[0]\n87         assert version == 66\n88         assert {\n",
+      "col_offset": 8,
+      "end_col_offset": 28,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 87,
+      "line_range": [
+        87
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "87         assert version == 66\n88         assert {\n89             \"buddy_profiles\",\n90             \"buddy_assets\",\n91             \"buddy_attachments\",\n92             \"buddy_result_acknowledgements\",\n93             \"buddy_turn_owners\",\n94             \"buddy_turns\",\n95         } <= tables\n96         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Keep this\"\n",
+      "col_offset": 8,
+      "end_col_offset": 19,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 88,
+      "line_range": [
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "95         } <= tables\n96         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Keep this\"\n97     finally:\n",
+      "col_offset": 8,
+      "end_col_offset": 87,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 96,
+      "line_range": [
+        96
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "100     try:\n101         assert database._get_db_version(database.get_connection()) == CharactersRAGDB._CURRENT_SCHEMA_VERSION\n102         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Keep this\"\n",
+      "col_offset": 8,
+      "end_col_offset": 109,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 101,
+      "line_range": [
+        101
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "101         assert database._get_db_version(database.get_connection()) == CharactersRAGDB._CURRENT_SCHEMA_VERSION\n102         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Keep this\"\n103     finally:\n",
+      "col_offset": 8,
+      "end_col_offset": 87,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 102,
+      "line_range": [
+        102
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "117     with sqlite3.connect(path) as conn:\n118         assert (\n119             conn.execute(\n120                 \"SELECT version FROM db_schema_version WHERE schema_name = ?\", (CharactersRAGDB._SCHEMA_NAME,)\n121             ).fetchone()[0]\n122             == 65\n123         )\n124         assert not conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'buddy_%'\").fetchall()\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 118,
+      "line_range": [
+        118,
+        119,
+        120,
+        121,
+        122,
+        123
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "123         )\n124         assert not conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'buddy_%'\").fetchall()\n125 \n",
+      "col_offset": 8,
+      "end_col_offset": 119,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 124,
+      "line_range": [
+        124
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "127 def test_v66_migration_remains_registered_for_sqlite_and_postgres():\n128     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 66\n129     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 66\n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 128,
+      "line_range": [
+        128
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "128     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 66\n129     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 66\n130     assert (\n",
+      "col_offset": 4,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 129,
+      "line_range": [
+        129
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "129     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 66\n130     assert (\n131         CharactersRAGDB.__new__(CharactersRAGDB)._sqlite_linear_migration_steps()[65].__name__\n132         == \"_migrate_from_v65_to_v66\"\n133     )\n134     assert hasattr(CharactersRAGDB, \"_migrate_from_v65_to_v66_postgres\")\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 130,
+      "line_range": [
+        130,
+        131,
+        132,
+        133
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "133     )\n134     assert hasattr(CharactersRAGDB, \"_migrate_from_v65_to_v66_postgres\")\n135 \n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 134,
+      "line_range": [
+        134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "141     prepared = transform_sqlite_query_for_postgres(\"SELECT id FROM buddy_profiles WHERE deleted = 0\")\n142     assert \"deleted = FALSE\" in prepared\n143     assert columns[\"deleted\"] == \"BOOLEAN\"\n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 142,
+      "line_range": [
+        142
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "142     assert \"deleted = FALSE\" in prepared\n143     assert columns[\"deleted\"] == \"BOOLEAN\"\n144 \n",
+      "col_offset": 4,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 143,
+      "line_range": [
+        143
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "163                     )\n164                     assert \"deleted = FALSE\" in prepared\n165                     deleted_bindings.append(values[3])\n",
+      "col_offset": 20,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 164,
+      "line_range": [
+        164
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "165                     deleted_bindings.append(values[3])\n166                     assert type(values[3]) is bool\n167                 return self.connection.execute(query, params or ())\n",
+      "col_offset": 20,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 166,
+      "line_range": [
+        166
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "175         url = f\"/api/v1/buddies/{buddy['id']}\"\n176         assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Updated\"}).status_code == 200\n177         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n",
+      "col_offset": 8,
+      "end_col_offset": 100,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 176,
+      "line_range": [
+        176
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "176         assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Updated\"}).status_code == 200\n177         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n178         assert deleted_bindings == [False, True]\n",
+      "col_offset": 8,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 177,
+      "line_range": [
+        177
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "177         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n178         assert deleted_bindings == [False, True]\n179 \n",
+      "col_offset": 8,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 178,
+      "line_range": [
+        178
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "196             database._initialize_schema_postgres()\n197         assert (\n198             backend.execute(\n199                 \"SELECT version FROM db_schema_version WHERE schema_name = %s\", (CharactersRAGDB._SCHEMA_NAME,)\n200             ).scalar\n201             == 66\n202         )\n203         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Retained\"\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 197,
+      "line_range": [
+        197,
+        198,
+        199,
+        200,
+        201,
+        202
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "202         )\n203         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Retained\"\n204         assert (\n",
+      "col_offset": 8,
+      "end_col_offset": 86,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 203,
+      "line_range": [
+        203
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "203         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Retained\"\n204         assert (\n205             backend.execute(\n206                 \"SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'buddy_profiles' AND column_name = 'deleted'\"\n207             ).scalar\n208             == \"boolean\"\n209         )\n210         tables = [\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 204,
+      "line_range": [
+        204,
+        205,
+        206,
+        207,
+        208,
+        209
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "220         ).rows\n221         assert {row[\"relname\"] for row in relations} == set(tables)\n222         assert all(row[\"relrowsecurity\"] and row[\"relforcerowsecurity\"] for row in relations)\n",
+      "col_offset": 8,
+      "end_col_offset": 67,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 221,
+      "line_range": [
+        221
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "221         assert {row[\"relname\"] for row in relations} == set(tables)\n222         assert all(row[\"relrowsecurity\"] and row[\"relforcerowsecurity\"] for row in relations)\n223         policies = backend.execute(\n",
+      "col_offset": 8,
+      "end_col_offset": 93,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 222,
+      "line_range": [
+        222
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "226         ).rows\n227         assert {row[\"tablename\"] for row in policies} == set(tables)\n228         assert all(\"user_id\" in row[\"qual\"] and \"app.current_user_id\" in row[\"with_check\"] for row in policies)\n",
+      "col_offset": 8,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 227,
+      "line_range": [
+        227
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "227         assert {row[\"tablename\"] for row in policies} == set(tables)\n228         assert all(\"user_id\" in row[\"qual\"] and \"app.current_user_id\" in row[\"with_check\"] for row in policies)\n229         database.close_connection()\n",
+      "col_offset": 8,
+      "end_col_offset": 111,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 228,
+      "line_range": [
+        228
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "230         database = CharactersRAGDB(\":memory:\", client_id=\"1\", backend=backend)\n231         assert (\n232             backend.execute(\n233                 \"SELECT version FROM db_schema_version WHERE schema_name = %s\", (CharactersRAGDB._SCHEMA_NAME,)\n234             ).scalar\n235             == CharactersRAGDB._POSTGRES_SCHEMA_VERSION\n236         )\n237         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Retained\"\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 231,
+      "line_range": [
+        231,
+        232,
+        233,
+        234,
+        235,
+        236
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "236         )\n237         assert database.get_conversation_by_id(conversation_id)[\"title\"] == \"Retained\"\n238         with _client(database) as client:\n",
+      "col_offset": 8,
+      "end_col_offset": 86,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 237,
+      "line_range": [
+        237
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "240             url = f\"/api/v1/buddies/{buddy['id']}\"\n241             assert client.get(url).status_code == 200\n242             assert client.get(\"/api/v1/buddies\").json()[\"buddies\"][0][\"id\"] == buddy[\"id\"]\n",
+      "col_offset": 12,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 241,
+      "line_range": [
+        241
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "241             assert client.get(url).status_code == 200\n242             assert client.get(\"/api/v1/buddies\").json()[\"buddies\"][0][\"id\"] == buddy[\"id\"]\n243             assert client.get(buddy[\"assets\"][0][\"content_url\"]).content.startswith(b\"\\x89PNG\")\n",
+      "col_offset": 12,
+      "end_col_offset": 90,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 242,
+      "line_range": [
+        242
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "242             assert client.get(\"/api/v1/buddies\").json()[\"buddies\"][0][\"id\"] == buddy[\"id\"]\n243             assert client.get(buddy[\"assets\"][0][\"content_url\"]).content.startswith(b\"\\x89PNG\")\n244             updated = client.patch(url, json={\"expected_version\": 1, \"name\": \"Updated\"})\n",
+      "col_offset": 12,
+      "end_col_offset": 95,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 243,
+      "line_range": [
+        243
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "244             updated = client.patch(url, json={\"expected_version\": 1, \"name\": \"Updated\"})\n245             assert updated.status_code == 200, updated.text\n246             assert updated.json()[\"version\"] == 2\n",
+      "col_offset": 12,
+      "end_col_offset": 59,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 245,
+      "line_range": [
+        245
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "245             assert updated.status_code == 200, updated.text\n246             assert updated.json()[\"version\"] == 2\n247             assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n",
+      "col_offset": 12,
+      "end_col_offset": 49,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 246,
+      "line_range": [
+        246
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "246             assert updated.json()[\"version\"] == 2\n247             assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n248             assert (\n",
+      "col_offset": 12,
+      "end_col_offset": 102,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 247,
+      "line_range": [
+        247
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "247             assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n248             assert (\n249                 client.put(\n250                     \"/api/v1/buddies/attachment\",\n251                     json={\n252                         \"expected_version\": 0,\n253                         \"buddy_id\": buddy[\"id\"],\n254                         \"scope_type\": \"conversation\",\n255                         \"scope_id\": conversation_id,\n256                     },\n257                 ).status_code\n258                 == 200\n259             )\n260             result_id = database.add_message(\n",
+      "col_offset": 12,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 248,
+      "line_range": [
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        259
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "268             activity = client.get(\"/api/v1/buddies/attachment/activity\")\n269             assert activity.status_code == 200, activity.text\n270             assert activity.json()[\"items\"][0][\"result\"][\"id\"] == result_id\n",
+      "col_offset": 12,
+      "end_col_offset": 61,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 269,
+      "line_range": [
+        269
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "269             assert activity.status_code == 200, activity.text\n270             assert activity.json()[\"items\"][0][\"result\"][\"id\"] == result_id\n271             ack = client.post(\n",
+      "col_offset": 12,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 270,
+      "line_range": [
+        270
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "274             )\n275             assert ack.status_code == 200, ack.text\n276             assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0][\"acknowledged\"] is True\n",
+      "col_offset": 12,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 275,
+      "line_range": [
+        275
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "275             assert ack.status_code == 200, ack.text\n276             assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0][\"acknowledged\"] is True\n277             assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n",
+      "col_offset": 12,
+      "end_col_offset": 111,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 276,
+      "line_range": [
+        276
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "276             assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0][\"acknowledged\"] is True\n277             assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n278             assert client.get(url).status_code == 404\n",
+      "col_offset": 12,
+      "end_col_offset": 88,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 277,
+      "line_range": [
+        277
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "277             assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n278             assert client.get(url).status_code == 404\n279             assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"] == []\n",
+      "col_offset": 12,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 278,
+      "line_range": [
+        278
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "278             assert client.get(url).status_code == 404\n279             assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"] == []\n280     finally:\n",
+      "col_offset": 12,
+      "end_col_offset": 90,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 279,
+      "line_range": [
+        279
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "298         response = client.get(f\"/api/v1/buddies/conversation-targets/{conversation}\")\n299         assert response.status_code == 200\n300         assert response.json() == {\n",
+      "col_offset": 8,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 299,
+      "line_range": [
+        299
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "299         assert response.status_code == 200\n300         assert response.json() == {\n301             \"id\": conversation,\n302             \"title\": \"Scoped chat\",\n303             \"created_at\": \"2026-09-08T12:30:00Z\",\n304             \"scope_type\": \"workspace\",\n305             \"workspace_id\": \"ws\",\n306             \"version\": 1,\n307             \"assistant_kind\": None,\n308             \"assistant_id\": None,\n309             \"assistant_name\": None,\n310         }\n311     with _client(db, 2) as client:\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 300,
+      "line_range": [
+        300,
+        301,
+        302,
+        303,
+        304,
+        305,
+        306,
+        307,
+        308,
+        309,
+        310
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "311     with _client(db, 2) as client:\n312         assert client.get(f\"/api/v1/buddies/conversation-targets/{conversation}\").status_code == 404\n313 \n",
+      "col_offset": 8,
+      "end_col_offset": 100,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 312,
+      "line_range": [
+        312
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "321         response = client.get(f\"/api/v1/buddies/conversation-targets/{conversation}\")\n322         assert response.status_code == 200\n323         assert response.json()[\"assistant_kind\"] == \"persona\"\n",
+      "col_offset": 8,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 322,
+      "line_range": [
+        322
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "322         assert response.status_code == 200\n323         assert response.json()[\"assistant_kind\"] == \"persona\"\n324         assert response.json()[\"assistant_id\"] == persona_id\n",
+      "col_offset": 8,
+      "end_col_offset": 61,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 323,
+      "line_range": [
+        323
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "323         assert response.json()[\"assistant_kind\"] == \"persona\"\n324         assert response.json()[\"assistant_id\"] == persona_id\n325         assert response.json()[\"assistant_name\"] == persona_id\n",
+      "col_offset": 8,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 324,
+      "line_range": [
+        324
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "324         assert response.json()[\"assistant_id\"] == persona_id\n325         assert response.json()[\"assistant_name\"] == persona_id\n326     row = db.get_conversation_by_id(conversation)\n",
+      "col_offset": 8,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 325,
+      "line_range": [
+        325
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "328     with _client(db) as client:\n329         assert client.get(f\"/api/v1/buddies/conversation-targets/{conversation}\").status_code == 404\n330 \n",
+      "col_offset": 8,
+      "end_col_offset": 100,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 329,
+      "line_range": [
+        329
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "334         buddy = _create(client)\n335         assert buddy[\"optional_persona_id\"] is None\n336         assert buddy[\"display_mode\"] == \"dynamic\"\n",
+      "col_offset": 8,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 335,
+      "line_range": [
+        335
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "335         assert buddy[\"optional_persona_id\"] is None\n336         assert buddy[\"display_mode\"] == \"dynamic\"\n337         assert buddy[\"manifest\"][\"states\"][\"idle\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 49,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 336,
+      "line_range": [
+        336
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "336         assert buddy[\"display_mode\"] == \"dynamic\"\n337         assert buddy[\"manifest\"][\"states\"][\"idle\"]\n338         assert buddy[\"attribution\"][\"license_label\"] == \"LicenseRef-User-Supplied\"\n",
+      "col_offset": 8,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 337,
+      "line_range": [
+        337
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "337         assert buddy[\"manifest\"][\"states\"][\"idle\"]\n338         assert buddy[\"attribution\"][\"license_label\"] == \"LicenseRef-User-Supplied\"\n339         assert db.list_persona_profiles(user_id=\"1\") == []\n",
+      "col_offset": 8,
+      "end_col_offset": 82,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 338,
+      "line_range": [
+        338
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "338         assert buddy[\"attribution\"][\"license_label\"] == \"LicenseRef-User-Supplied\"\n339         assert db.list_persona_profiles(user_id=\"1\") == []\n340         assert client.get(buddy[\"assets\"][0][\"content_url\"]).content.startswith(b\"\\x89PNG\")\n",
+      "col_offset": 8,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 339,
+      "line_range": [
+        339
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "339         assert db.list_persona_profiles(user_id=\"1\") == []\n340         assert client.get(buddy[\"assets\"][0][\"content_url\"]).content.startswith(b\"\\x89PNG\")\n341         assert client.get(\"/api/v1/buddies\").json()[\"buddies\"][0][\"id\"] == buddy[\"id\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 91,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 340,
+      "line_range": [
+        340
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "340         assert client.get(buddy[\"assets\"][0][\"content_url\"]).content.startswith(b\"\\x89PNG\")\n341         assert client.get(\"/api/v1/buddies\").json()[\"buddies\"][0][\"id\"] == buddy[\"id\"]\n342 \n",
+      "col_offset": 8,
+      "end_col_offset": 86,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 341,
+      "line_range": [
+        341
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "358         restored = client.get(f\"/api/v1/buddies/{buddy['id']}\")\n359         assert restored.status_code == 200\n360         assert restored.json()[\"optional_persona_available\"] is False\n",
+      "col_offset": 8,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 359,
+      "line_range": [
+        359
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "359         assert restored.status_code == 200\n360         assert restored.json()[\"optional_persona_available\"] is False\n361         assert restored.json()[\"attribution\"] == buddy[\"attribution\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 69,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 360,
+      "line_range": [
+        360
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "360         assert restored.json()[\"optional_persona_available\"] is False\n361         assert restored.json()[\"attribution\"] == buddy[\"attribution\"]\n362         assert client.get(buddy[\"assets\"][0][\"content_url\"]).content == first.content\n",
+      "col_offset": 8,
+      "end_col_offset": 69,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 361,
+      "line_range": [
+        361
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "361         assert restored.json()[\"attribution\"] == buddy[\"attribution\"]\n362         assert client.get(buddy[\"assets\"][0][\"content_url\"]).content == first.content\n363 \n",
+      "col_offset": 8,
+      "end_col_offset": 85,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 362,
+      "line_range": [
+        362
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "368     with _client(db, 2) as stranger:\n369         assert stranger.get(\"/api/v1/buddies\").json() == {\"buddies\": []}\n370         assert stranger.get(f\"/api/v1/buddies/{buddy['id']}\").status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 369,
+      "line_range": [
+        369
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "369         assert stranger.get(\"/api/v1/buddies\").json() == {\"buddies\": []}\n370         assert stranger.get(f\"/api/v1/buddies/{buddy['id']}\").status_code == 404\n371         assert stranger.get(buddy[\"assets\"][0][\"content_url\"]).status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 370,
+      "line_range": [
+        370
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "370         assert stranger.get(f\"/api/v1/buddies/{buddy['id']}\").status_code == 404\n371         assert stranger.get(buddy[\"assets\"][0][\"content_url\"]).status_code == 404\n372         assert (\n",
+      "col_offset": 8,
+      "end_col_offset": 81,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 371,
+      "line_range": [
+        371
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "371         assert stranger.get(buddy[\"assets\"][0][\"content_url\"]).status_code == 404\n372         assert (\n373             stranger.patch(f\"/api/v1/buddies/{buddy['id']}\", json={\"expected_version\": 1, \"name\": \"Stolen\"}).status_code\n374             == 404\n375         )\n376 \n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 372,
+      "line_range": [
+        372,
+        373,
+        374,
+        375
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "382         updated = client.patch(url, json={\"expected_version\": 1, \"name\": \"Renamed\", \"display_mode\": \"static\"})\n383         assert updated.status_code == 200\n384         assert updated.json()[\"version\"] == 2\n",
+      "col_offset": 8,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 383,
+      "line_range": [
+        383
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "383         assert updated.status_code == 200\n384         assert updated.json()[\"version\"] == 2\n385         assert updated.json()[\"manifest\"] == buddy[\"manifest\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 45,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 384,
+      "line_range": [
+        384
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "384         assert updated.json()[\"version\"] == 2\n385         assert updated.json()[\"manifest\"] == buddy[\"manifest\"]\n386         assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n",
+      "col_offset": 8,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 385,
+      "line_range": [
+        385
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "385         assert updated.json()[\"manifest\"] == buddy[\"manifest\"]\n386         assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n387         assert client.delete(url, params={\"expected_version\": 1}).status_code == 409\n",
+      "col_offset": 8,
+      "end_col_offset": 98,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 386,
+      "line_range": [
+        386
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "386         assert client.patch(url, json={\"expected_version\": 1, \"name\": \"Stale\"}).status_code == 409\n387         assert client.delete(url, params={\"expected_version\": 1}).status_code == 409\n388         assert client.patch(url, json={\"expected_version\": 2, \"manifest\": {}}).status_code == 422\n",
+      "col_offset": 8,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 387,
+      "line_range": [
+        387
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "387         assert client.delete(url, params={\"expected_version\": 1}).status_code == 409\n388         assert client.patch(url, json={\"expected_version\": 2, \"manifest\": {}}).status_code == 422\n389         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n",
+      "col_offset": 8,
+      "end_col_offset": 97,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 388,
+      "line_range": [
+        388
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "388         assert client.patch(url, json={\"expected_version\": 2, \"manifest\": {}}).status_code == 422\n389         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n390         assert client.get(buddy[\"assets\"][0][\"content_url\"]).status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 389,
+      "line_range": [
+        389
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "389         assert client.delete(url, params={\"expected_version\": 2}).status_code == 204\n390         assert client.get(buddy[\"assets\"][0][\"content_url\"]).status_code == 404\n391 \n",
+      "col_offset": 8,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 390,
+      "line_range": [
+        390
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "398     with _client(db) as client:\n399         assert (\n400             client.post(\n401                 \"/api/v1/buddies\",\n402                 json={\n403                     \"name\": \"No\",\n404                     \"source\": {\"kind\": \"persona_pack\", \"persona_id\": persona_id, \"pack_id\": source[\"id\"]},\n405                 },\n406             ).status_code\n407             == 404\n408         )\n409         assert (\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 399,
+      "line_range": [
+        399,
+        400,
+        401,
+        402,
+        403,
+        404,
+        405,
+        406,
+        407,
+        408
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "408         )\n409         assert (\n410             client.post(\n411                 \"/api/v1/buddies\",\n412                 json={\n413                     \"name\": \"No\",\n414                     \"source\": {\"kind\": \"starter\", \"starter_id\": \"pixel-migu\"},\n415                     \"optional_persona_id\": persona_id,\n416                 },\n417             ).status_code\n418             == 404\n419         )\n420 \n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 409,
+      "line_range": [
+        409,
+        410,
+        411,
+        412,
+        413,
+        414,
+        415,
+        416,
+        417,
+        418,
+        419
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "427         url = \"/api/v1/buddies/attachment?client_slot=browser-a\"\n428         assert client.get(url).json()[\"version\"] == 0\n429         body = {\n",
+      "col_offset": 8,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 428,
+      "line_range": [
+        428
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "435         attached = client.put(url, json=body)\n436         assert attached.status_code == 200, attached.text\n437         assert attached.json()[\"version\"] == 1\n",
+      "col_offset": 8,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 436,
+      "line_range": [
+        436
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "436         assert attached.status_code == 200, attached.text\n437         assert attached.json()[\"version\"] == 1\n438         assert client.put(url, json=body).status_code == 409\n",
+      "col_offset": 8,
+      "end_col_offset": 46,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 437,
+      "line_range": [
+        437
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "437         assert attached.json()[\"version\"] == 1\n438         assert client.put(url, json=body).status_code == 409\n439         assert client.put(url, json={**body, \"expected_version\": 1, \"scope_id\": other_id}).status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 438,
+      "line_range": [
+        438
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "438         assert client.put(url, json=body).status_code == 409\n439         assert client.put(url, json={**body, \"expected_version\": 1, \"scope_id\": other_id}).status_code == 404\n440         row = db.get_conversation_by_id(conversation_id)\n",
+      "col_offset": 8,
+      "end_col_offset": 109,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 439,
+      "line_range": [
+        439
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "442         current = client.get(url).json()\n443         assert current[\"attachment\"] is None\n444         assert current[\"unavailable_reason\"] == \"target_unavailable\"\n",
+      "col_offset": 8,
+      "end_col_offset": 44,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 443,
+      "line_range": [
+        443
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "443         assert current[\"attachment\"] is None\n444         assert current[\"unavailable_reason\"] == \"target_unavailable\"\n445         assert client.delete(url + \"&expected_version=1\").json()[\"version\"] == 2\n",
+      "col_offset": 8,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 444,
+      "line_range": [
+        444
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "444         assert current[\"unavailable_reason\"] == \"target_unavailable\"\n445         assert client.delete(url + \"&expected_version=1\").json()[\"version\"] == 2\n446         assert client.get(url).json()[\"attachment\"] is None\n",
+      "col_offset": 8,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 445,
+      "line_range": [
+        445
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "445         assert client.delete(url + \"&expected_version=1\").json()[\"version\"] == 2\n446         assert client.get(url).json()[\"attachment\"] is None\n447 \n",
+      "col_offset": 8,
+      "end_col_offset": 59,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 446,
+      "line_range": [
+        446
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "461         )\n462         assert response.status_code == 200, response.text\n463         db.delete_workspace(workspace[\"id\"], expected_version=workspace[\"version\"])\n",
+      "col_offset": 8,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 462,
+      "line_range": [
+        462
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "463         db.delete_workspace(workspace[\"id\"], expected_version=workspace[\"version\"])\n464         assert client.get(\"/api/v1/buddies/attachment\").json()[\"unavailable_reason\"] == \"target_unavailable\"\n465 \n",
+      "col_offset": 8,
+      "end_col_offset": 108,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 464,
+      "line_range": [
+        464
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "476     with _client(db) as client:\n477         assert client.post(\"/api/v1/buddies\", json=payload).status_code == 422\n478 \n",
+      "col_offset": 8,
+      "end_col_offset": 78,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 477,
+      "line_range": [
+        477
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "491         missing = client.put(\"/api/v1/buddies/attachment\", json={**payload, \"scope_id\": \"missing\"})\n492         assert denied.status_code == missing.status_code == 404\n493         assert denied.json() == missing.json()\n",
+      "col_offset": 8,
+      "end_col_offset": 63,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 492,
+      "line_range": [
+        492
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "492         assert denied.status_code == missing.status_code == 404\n493         assert denied.json() == missing.json()\n494         assert client.get(\"/api/v1/buddies/attachment\").json()[\"attachment\"] is None\n",
+      "col_offset": 8,
+      "end_col_offset": 46,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 493,
+      "line_range": [
+        493
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "493         assert denied.json() == missing.json()\n494         assert client.get(\"/api/v1/buddies/attachment\").json()[\"attachment\"] is None\n495 \n",
+      "col_offset": 8,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 494,
+      "line_range": [
+        494
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "518         )\n519         assert attached.json()[\"target\"] == {\"title\": \"My workspace\", \"workspace_id\": \"ws\"}\n520         listed = client.get(\"/api/v1/buddies/attachment/conversations\").json()\n",
+      "col_offset": 8,
+      "end_col_offset": 91,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 519,
+      "line_range": [
+        519
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "520         listed = client.get(\"/api/v1/buddies/attachment/conversations\").json()\n521         assert listed[\"conversations\"] == [\n522             {\n523                 \"id\": owned_id,\n524                 \"title\": \"Own scoped chat\",\n525                 \"created_at\": \"2026-09-08T12:30:00Z\",\n526                 \"scope_type\": \"workspace\",\n527                 \"workspace_id\": \"ws\",\n528                 \"version\": 1,\n529                 \"assistant_kind\": None,\n530                 \"assistant_id\": None,\n531                 \"assistant_name\": None,\n532             }\n533         ]\n534 \n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 521,
+      "line_range": [
+        521,
+        522,
+        523,
+        524,
+        525,
+        526,
+        527,
+        528,
+        529,
+        530,
+        531,
+        532,
+        533
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "539     asset = starter[\"assets\"][0]\n540     assert asset[\"width\"] > 0\n541     assert asset[\"height\"] > 0\n",
+      "col_offset": 4,
+      "end_col_offset": 29,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 540,
+      "line_range": [
+        540
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "540     assert asset[\"width\"] > 0\n541     assert asset[\"height\"] > 0\n542     content, mime_type = catalog.get_starter_asset_content(\"pixel-migu\", asset[\"asset_key\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 541,
+      "line_range": [
+        541
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "542     content, mime_type = catalog.get_starter_asset_content(\"pixel-migu\", asset[\"asset_key\"])\n543     assert content.startswith(b\"\\x89PNG\")\n544     assert mime_type == \"image/png\"\n",
+      "col_offset": 4,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 543,
+      "line_range": [
+        543
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "543     assert content.startswith(b\"\\x89PNG\")\n544     assert mime_type == \"image/png\"\n545     with pytest.raises(Exception, match=\"not found\"):\n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 544,
+      "line_range": [
+        544
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "565     with TestClient(app) as client:\n566         assert client.get(url).status_code == 401\n567         app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)\n",
+      "col_offset": 8,
+      "end_col_offset": 49,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 566,
+      "line_range": [
+        566
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "568         response = client.get(url)\n569         assert response.status_code == 200\n570         assert response.headers[\"content-type\"] == \"image/png\"\n",
+      "col_offset": 8,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 569,
+      "line_range": [
+        569
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "569         assert response.status_code == 200\n570         assert response.headers[\"content-type\"] == \"image/png\"\n571         assert response.content.startswith(b\"\\x89PNG\")\n",
+      "col_offset": 8,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 570,
+      "line_range": [
+        570
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "570         assert response.headers[\"content-type\"] == \"image/png\"\n571         assert response.content.startswith(b\"\\x89PNG\")\n572         assert client.get(url.replace(\"idle-1\", \"missing\")).status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 571,
+      "line_range": [
+        571
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "571         assert response.content.startswith(b\"\\x89PNG\")\n572         assert client.get(url.replace(\"idle-1\", \"missing\")).status_code == 404\n573     assert db.list_persona_profiles(user_id=\"1\") == []\n",
+      "col_offset": 8,
+      "end_col_offset": 78,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 572,
+      "line_range": [
+        572
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "572         assert client.get(url.replace(\"idle-1\", \"missing\")).status_code == 404\n573     assert db.list_persona_profiles(user_id=\"1\") == []\n574 \n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 573,
+      "line_range": [
+        573
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "587         service.create(BuddyCreate(name=\"No partial profile\", source={\"kind\": \"starter\", \"starter_id\": \"pixel-migu\"}))\n588     assert service.list_profiles(limit=50, offset=0) == {\"buddies\": []}\n589     assert not list((tmp_path / \"1\" / \"buddies\").rglob(\"*.png\"))\n",
+      "col_offset": 4,
+      "end_col_offset": 71,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 588,
+      "line_range": [
+        588
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "588     assert service.list_profiles(limit=50, offset=0) == {\"buddies\": []}\n589     assert not list((tmp_path / \"1\" / \"buddies\").rglob(\"*.png\"))\n590 \n",
+      "col_offset": 4,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 589,
+      "line_range": [
+        589
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "614     monkeypatch.setattr(db, \"get_conversations_for_user\", move_after_listing)\n615     assert BuddyService(db, \"1\").conversations(\"default\", limit=50, offset=0)[\"conversations\"] == []\n616 \n",
+      "col_offset": 4,
+      "end_col_offset": 100,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 615,
+      "line_range": [
+        615
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "654         response = client.get(\"/api/v1/buddies/attachment/activity\")\n655         assert response.status_code == 200, response.text\n656         item = response.json()[\"items\"][0]\n",
+      "col_offset": 8,
+      "end_col_offset": 57,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 655,
+      "line_range": [
+        655
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "656         item = response.json()[\"items\"][0]\n657         assert item[\"result\"][\"id\"] == result_id\n658         assert len(item[\"result\"][\"content\"]) == 2000\n",
+      "col_offset": 8,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 657,
+      "line_range": [
+        657
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "657         assert item[\"result\"][\"id\"] == result_id\n658         assert len(item[\"result\"][\"content\"]) == 2000\n659         assert item[\"acknowledged\"] is False\n",
+      "col_offset": 8,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 658,
+      "line_range": [
+        658
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "658         assert len(item[\"result\"][\"content\"]) == 2000\n659         assert item[\"acknowledged\"] is False\n660         invalid = client.post(\n",
+      "col_offset": 8,
+      "end_col_offset": 44,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 659,
+      "line_range": [
+        659
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "663         )\n664         assert invalid.status_code == 404\n665         ack = client.post(\n",
+      "col_offset": 8,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 664,
+      "line_range": [
+        664
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "668         )\n669         assert ack.status_code == 200, ack.text\n670         assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0][\"acknowledged\"] is True\n",
+      "col_offset": 8,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 669,
+      "line_range": [
+        669
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "669         assert ack.status_code == 200, ack.text\n670         assert client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0][\"acknowledged\"] is True\n671         newer_id = db.add_message(\n",
+      "col_offset": 8,
+      "end_col_offset": 107,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 670,
+      "line_range": [
+        670
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "684         newer = client.get(\"/api/v1/buddies/attachment/activity\").json()[\"items\"][0]\n685         assert newer[\"result\"][\"id\"] == newer_id\n686         assert newer[\"acknowledged\"] is False\n",
+      "col_offset": 8,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 685,
+      "line_range": [
+        685
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "685         assert newer[\"result\"][\"id\"] == newer_id\n686         assert newer[\"acknowledged\"] is False\n687 \n",
+      "col_offset": 8,
+      "end_col_offset": 45,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 686,
+      "line_range": [
+        686
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "704         )\n705         assert result.status_code == 404\n",
+      "col_offset": 8,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/Persona/test_independent_buddies.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 705,
+      "line_range": [
+        705
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

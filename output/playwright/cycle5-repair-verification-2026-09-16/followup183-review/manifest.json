@@ -1,0 +1,47 @@
+{
+  "at": "2026-09-17T00:44:11.938Z",
+  "files": [
+    {
+      "file": "independent-review.md",
+      "source": ".tmp/uat183-review-20260917/independent-review.md",
+      "original_sha256": "7302130ac2bd18f7b8ac822f470fc658e104e0b50f5a2b2611f34c4192727658",
+      "retained_sha256": "7302130ac2bd18f7b8ac822f470fc658e104e0b50f5a2b2611f34c4192727658",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-four-green-command.json",
+      "source": ".tmp/uat183-review-20260917/independent-four-green-command.json",
+      "original_sha256": "b62b05c379984bcd395847d10a023e38e7531bb0063d858d36b03918b97347ab",
+      "retained_sha256": "b62b05c379984bcd395847d10a023e38e7531bb0063d858d36b03918b97347ab",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-four-green.redacted.log",
+      "source": ".tmp/uat183-review-20260917/independent-four-green.redacted.log",
+      "original_sha256": "c6013f07db63385735c3b4f431e7ae1c2fef784f1e188b48746067628fc784eb",
+      "retained_sha256": "c6013f07db63385735c3b4f431e7ae1c2fef784f1e188b48746067628fc784eb",
+      "normalization": "none"
+    },
+    {
+      "file": "source-and-assertion-check.json",
+      "source": ".tmp/uat183-review-20260917/source-and-assertion-check.json",
+      "original_sha256": "efbaacf1241f08d0adaed2d1946538a846efce73f2596809aaf177a75461385c",
+      "retained_sha256": "efbaacf1241f08d0adaed2d1946538a846efce73f2596809aaf177a75461385c",
+      "normalization": "none"
+    },
+    {
+      "file": "reviewed.patch",
+      "source": ".tmp/uat183-review-20260917/reviewed.patch",
+      "original_sha256": "a582970ed64e965487917a75e9d0d3bc82200f2f9303660d03387737f1dd38af",
+      "retained_sha256": "3a898d8a93dccc8b62c91b0fd262ec0a9f4a251e8162939a7e34d2cd1b974b1f",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "evidence-manifest.json",
+      "source": ".tmp/uat183-review-20260917/evidence-manifest.json",
+      "original_sha256": "f43800809770c8c32ab4893f474716eef6549a9ef64d507a524793e9963da8ab",
+      "retained_sha256": "f43800809770c8c32ab4893f474716eef6549a9ef64d507a524793e9963da8ab",
+      "normalization": "none"
+    }
+  ]
+}

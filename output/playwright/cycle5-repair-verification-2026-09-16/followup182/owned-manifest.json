@@ -1,0 +1,20 @@
+{
+  "task": "TASK13260.119",
+  "finding": "UAT182",
+  "sourceBaselineIncludes": "frozen UAT18139 read_only flags",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
+      "bytes": 2188717,
+      "snapshot": ".tmp/uat182-repair-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+      "sha256": "ae40117d61f71deb53c8e198d99539b994d27000bb6a4895ab30a7c95f46178a",
+      "bytes": 4411,
+      "snapshot": ".tmp/uat182-repair-20260917/review-snapshot/tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py"
+    }
+  ],
+  "sourceBefore182Sha256": "0e71405bd53b8ea9b7fed933fa9647315721f41bc352614b89eb26e6899526dd"
+}
