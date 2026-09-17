@@ -19,6 +19,38 @@ class VisualIdentityServiceError(BadRequestError):
     """Raised when Visual Identity service input violates the domain contract."""
 
 
+def validate_visual_identity_actor(
+    db: CharactersRAGDB,
+    owner_user_id: int,
+    actor_kind: str,
+    actor_id: ActorId,
+) -> ActorId:
+    """Validate an actor without requiring optional visual metadata storage."""
+    if actor_kind == "character":
+        try:
+            character_id = int(actor_id)
+        except (TypeError, ValueError) as exc:
+            raise VisualIdentityServiceError("visual_identity_character_not_found") from exc
+        if db.get_character_card_by_id(character_id) is None:
+            raise VisualIdentityServiceError("visual_identity_character_not_found")
+        return character_id
+
+    if actor_kind == "persona":
+        persona_id = str(actor_id).strip()
+        if not persona_id:
+            raise VisualIdentityServiceError("visual_identity_persona_not_found")
+        persona = db.get_persona_profile(
+            persona_id,
+            user_id=str(owner_user_id),
+            include_deleted=False,
+        )
+        if persona is None:
+            raise VisualIdentityServiceError("visual_identity_persona_not_found")
+        return persona_id
+
+    raise VisualIdentityServiceError("visual_identity_actor_kind_invalid")
+
+
 @dataclass(frozen=True)
 class VisualIdentityActivationResult:
     """Result returned after a draft has been activated into a pack version."""
@@ -572,29 +604,7 @@ class VisualIdentityService:
         actor_id: ActorId,
     ) -> ActorId:
         """Validate that an actor exists and is owned by the current user."""
-        if actor_kind == "character":
-            try:
-                character_id = int(actor_id)
-            except (TypeError, ValueError) as exc:
-                raise VisualIdentityServiceError("visual_identity_character_not_found") from exc
-            if self.db.get_character_card_by_id(character_id) is None:
-                raise VisualIdentityServiceError("visual_identity_character_not_found")
-            return character_id
-
-        if actor_kind == "persona":
-            persona_id = str(actor_id).strip()
-            if not persona_id:
-                raise VisualIdentityServiceError("visual_identity_persona_not_found")
-            persona = self.db.get_persona_profile(
-                persona_id,
-                user_id=str(self.owner_user_id),
-                include_deleted=False,
-            )
-            if persona is None:
-                raise VisualIdentityServiceError("visual_identity_persona_not_found")
-            return persona_id
-
-        raise VisualIdentityServiceError("visual_identity_actor_kind_invalid")
+        return validate_visual_identity_actor(self.db, self.owner_user_id, actor_kind, actor_id)
 
     def _resolved_asset(
         self,
