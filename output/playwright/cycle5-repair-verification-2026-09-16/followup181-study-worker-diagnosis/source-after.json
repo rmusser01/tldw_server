@@ -1,0 +1,13 @@
+{
+  "tldw_Server_API/app/services/study_pack_jobs_worker.py": "d0a79e1a4eebad6d24019f73c334eb229c513a1f1d3b6e9c2ddb38c676d451e8",
+  "tldw_Server_API/app/services/study_suggestions_jobs_worker.py": "598ab8b97e9d48d30819fdd5afd3c229426a8cb692c1357c67b3da9a4f88e1fb",
+  "tldw_Server_API/app/core/StudyPacks/generation_service.py": "a598c294cbc6835ca7f2f18a494d68e8678397b96a5191f9fb2be22a5147c365",
+  "tldw_Server_API/app/core/StudyPacks/source_resolver.py": "0198b2c3e7d8b00962742f8fe360e7509ce661785b0609c99e86e192b8aede59",
+  "tldw_Server_API/app/core/StudySuggestions/snapshot_service.py": "a723d471094fd0ddf0415af1b67ce43a2d4d8d6cb8b43d35121ca5107fa4895a",
+  "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "e2e421774716e4eaf7a4f69357940655ecde4c6b96fffa728e8e1c1626d5ab9e",
+  "tldw_Server_API/app/core/DB_Management/chacha/operation_scope.py": "736108ac483ca597e408f488d54895be1d43026c5601272edaed54b09ed5e806",
+  "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": "deab1710097b472b595ccad93f22862e30ffb299a5df39eacae0f9e5cba19bef",
+  "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "6a85f94a1aaf7346a5d92ec237205238e72d20a47e61d118567dc771cdf9deb3",
+  "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": "6dd5a2b86caaf2f04135d56b115bbbe4863bab2d63e7122307eaf9305d64902a",
+  "tldw_Server_API/app/core/Jobs/worker_sdk.py": "b0fefdee93d48bade931978466900b2fe0e383d7539f9715b5bb25920c0b0d47"
+}
