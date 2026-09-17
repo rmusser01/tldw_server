@@ -1,0 +1,15 @@
+{
+  "task": "TASK13260.144",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/services/startup_study_privilege_jobs_pollers.py",
+      "sha256": "ede2e5dac545c9cccb139aaa2cb1f15c995dcf6f0da47b9184c8d2fc32ff7afb",
+      "bytes": 12673
+    },
+    {
+      "path": "tldw_Server_API/tests/Services/test_study_pack_startup_default.py",
+      "sha256": "90e016d87974220f85145a9c992c6780242365e6b68062a1cdc149ef7853e826",
+      "bytes": 5438
+    }
+  ]
+}

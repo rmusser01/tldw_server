@@ -1,0 +1,33 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.139 - Scope-PostgreSQL-deck-names-to-their-owner.md
+
+Task TASK-13260.139 - Scope PostgreSQL deck names to their owner
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 04:44
+Updated: 2026-09-17 05:31
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT201: Official two-owner PostgreSQL fixture proves Bob cannot create a private deck with Alice deck name because decks.name is globally unique. SQLite per-user control succeeds. Track separately from198 access predicates. Use exact schema migration and verify existing rows, same-owner uniqueness, concurrent owners, catalog and rollback; coordinate shared ChaCha source with198.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Real PostgreSQL regression reproduces cross-owner same-name conflict while same-owner conflict and SQLite behavior remain valid.
+- [x] #2 Atomic migration preserves rows and references, enforces correct owner-scoped name uniqueness, handles reopens and unexpected catalogs safely, and passes required PostgreSQL tests.
+- [ ] #3 Independent review, security checks and native per-owner deck creation pass with retained evidence.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Integrated61e5af6702, atomic PostgreSQL68-to69 owner-local deck names. Actual historical schema/catalog/rollback/data and concurrency controls pass within author126+322/independent183, zero skips. Exact prior Character67-to68 contract remains. Durable followup198-201-202-flashcards-ownership-reviewed. Native same-name per-owner creation remains open.

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "rg",
+    "-n",
+    "exemplars/search|search_character_exemplars|searchCharacterExemplars",
+    "apps/packages/ui/src",
+    "apps/tldw-frontend",
+    "--glob",
+    "*.{ts,tsx,js,jsx}",
+    "--glob",
+    "!**/node_modules/**",
+    "--glob",
+    "!**/.next/**"
+  ],
+  "exitCode": 1,
+  "matches": 0,
+  "limits": "Source search over checked-in frontend/shared UI JS/TS; no UI operation or dynamic/native tracing."
+}

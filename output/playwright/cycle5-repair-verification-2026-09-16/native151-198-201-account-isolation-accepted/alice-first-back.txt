@@ -1,0 +1,83 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Close' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T05-51-28-782Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T05-33-59-061Z.log#L20-L21
+
+- generic [active] [ref=f20e1]:
+  - generic [ref=f20e4]:
+    - link "Skip to main content" [ref=f20e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f20e6]:
+      - button "Expand sidebar" [ref=f20e7] [cursor=pointer]
+      - button "New Chat" [ref=f20e11] [cursor=pointer]
+      - generic [ref=f20e14]:
+        - button "Quick Ingest" [ref=f20e15] [cursor=pointer]
+        - button "Chat" [ref=f20e19] [cursor=pointer]
+        - button "Prompts" [ref=f20e22] [cursor=pointer]
+        - button "Characters" [ref=f20e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f20e31] [cursor=pointer]
+        - button "World Books" [ref=f20e35] [cursor=pointer]
+        - button "Notes" [ref=f20e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f20e42] [cursor=pointer]
+        - button "Media" [ref=f20e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f20e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f20e59] [cursor=pointer]
+        - button "Kanban" [ref=f20e65] [cursor=pointer]
+        - button "Watchlists" [ref=f20e67] [cursor=pointer]
+      - generic [ref=f20e72]:
+        - button "Open Notes Dock" [ref=f20e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f20e78] [cursor=pointer]
+        - button "Settings" [ref=f20e81] [cursor=pointer]
+    - main [ref=f20e85]:
+      - generic [ref=f20e86]:
+        - generic [ref=f20e89]:
+          - generic [ref=f20e90]:
+            - button "Expand sidebar" [ref=f20e91] [cursor=pointer]
+            - generic [ref=f20e93]:
+              - img "tldw Assistant" [ref=f20e94]
+              - generic [ref=f20e95]: tldw Assistant
+              - button "Companion Home" [ref=f20e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f20e100] [cursor=pointer]
+          - generic [ref=f20e103]:
+            - button "Search - Open command palette" [ref=f20e104] [cursor=pointer]:
+              - generic [ref=f20e108]: Search
+              - generic [ref=f20e109]: ⌘K
+            - button "Open settings" [ref=f20e110] [cursor=pointer]
+            - generic [ref=f20e122]:
+              - button "Notifications, connecting" [ref=f20e123] [cursor=pointer]
+              - status [ref=f20e126]: Notifications are connecting
+            - button "Switch to light theme" [ref=f20e127] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f20e134] [cursor=pointer]:
+              - generic [ref=f20e135]: "?"
+        - generic [ref=f20e139]:
+          - generic [ref=f20e141]:
+            - generic [ref=f20e142]: Study workspace
+            - heading "Flashcards" [level=1] [ref=f20e143]
+          - navigation "Flashcards modes" [ref=f20e144]:
+            - generic [ref=f20e145]: Study
+            - generic [ref=f20e146]: Manage
+            - generic [ref=f20e147]: Import / Export
+            - generic [ref=f20e148]: Templates
+            - generic [ref=f20e149]: Scheduler
+  - alert [ref=f20e159]

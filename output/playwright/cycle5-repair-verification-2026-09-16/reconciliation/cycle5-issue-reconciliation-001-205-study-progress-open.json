@@ -1,15 +1,15 @@
 {
   "metadata": {
-    "at": "2026-09-17T05:32:21.976Z",
-    "source": "a130b8e550",
+    "at": "2026-09-17T05:58:19.503Z",
+    "source": "93004c68d9",
     "counts": {
-      "verified": 183,
-      "implemented-awaiting-acceptance": 21,
-      "unresolved": 0,
+      "verified": 184,
+      "implemented-awaiting-acceptance": 20,
+      "unresolved": 1,
       "blocked": 0
     },
     "gate": "BLOCKED",
-    "previous_checkpoint": "cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json"
+    "previous_checkpoint": "cycle5-issue-reconciliation-001-204-ownership-reviewed.json"
   },
   "issues": [
     {
@@ -8408,11 +8408,11 @@
       "task_records": [
         {
           "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.133 - Repair-PostgreSQL-character-exemplar-search-with-omitted-filters.md",
-          "status_observed": "In Progress"
+          "status_observed": "Done"
         }
       ],
-      "disposition": "implemented-awaiting-acceptance",
-      "reason": "Independently reviewed and committeddf0fbbd73a; independent242+5pass0skip. Native acceptance pending.",
+      "disposition": "verified",
+      "reason": "Original AC2 explicit native-route limitation satisfied by independent route inventory and fresh22PG/SQLitePASS0skip; no native search pass claimed.",
       "latest_repair": {
         "revisions": [
           "df0fbbd73a"
@@ -8422,10 +8422,19 @@
         ]
       },
       "original_scenario_native_acceptance": {
-        "summary": "No native failure or repaired acceptance claimed.",
-        "paths": [],
+        "summary": "Store acceptance with explicit native-route limitation allowed by originalAC2.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/followup195-store-acceptance-route-limitation/ACCEPTANCE195.md"
+        ],
         "limits": [
-          "No full UAT claim."
+          "Authenticated native search and populated selector remain unverified. SharedUI has no directcaller ofexplicitsearch; trackedCharactercompletion usesdifferentpath.",
+          "Credential-interception helper rejected and not used or bypassed."
+        ]
+      },
+      "regression_evidence": {
+        "summary": "CurrentPG69/SQLite67:22PASS0skip23.52s; unchanged independently reviewed CharacterStore.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/followup195-store-acceptance-route-limitation/ACCEPTANCE195.md"
         ]
       }
     },
@@ -8656,6 +8665,28 @@
         "paths": [],
         "limits": [
           "No rewrite of historical PostgreSQL prefix-owned rows or published wrong caches."
+        ]
+      }
+    },
+    {
+      "id": "UAT-205",
+      "finding": "Study Pack drawer hides accepted job progress and allows repeated submission",
+      "task_ids": [
+        "TASK-13260.143"
+      ],
+      "task_records": [
+        {
+          "path": "backlog/tasks/task-13260.143 - Show-Study-Pack-job-progress-and-prevent-duplicate-submission-while-pending.md",
+          "status_observed": "In Progress"
+        }
+      ],
+      "disposition": "unresolved",
+      "reason": "NativePOST202job2 remainsqueued, no visiblejobstate andcreateenabledbetweenpolls. BoundedUIrepairunderway; workeravailabilityseparated.",
+      "original_scenario_native_acceptance": {
+        "summary": "Actual failure retained; repaired acceptance pending.",
+        "paths": [
+          ".tmp/uat198-181-native-20260917/pack-queued-events.txt",
+          ".tmp/uat198-181-native-20260917/pack-queued-no-status.png"
         ]
       }
     }

@@ -1,0 +1,145 @@
+{
+  "at": "2026-09-17T06:12:14.487Z",
+  "files": [
+    {
+      "file": "author-IMPLEMENTATION206.md",
+      "source": ".tmp/uat206-repair-20260917/IMPLEMENTATION206.md",
+      "original_sha256": "da12a09fc13401ca712441b6043e79dcc7f2c77f95c928b43df0c8c2cc63d3a3",
+      "retained_sha256": "da12a09fc13401ca712441b6043e79dcc7f2c77f95c928b43df0c8c2cc63d3a3",
+      "normalization": "none"
+    },
+    {
+      "file": "author-DESIGN206.md",
+      "source": ".tmp/uat206-repair-20260917/DESIGN206.md",
+      "original_sha256": "9febe069a9b73052d7e579a79a1b966bccc554f8d8a305ea664bc953217eb60e",
+      "retained_sha256": "9febe069a9b73052d7e579a79a1b966bccc554f8d8a305ea664bc953217eb60e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned-manifest.json",
+      "source": ".tmp/uat206-repair-20260917/owned-manifest.json",
+      "original_sha256": "c0dacddbcf235d7d5fc1ac209d4aa951e656ff9f0e39d91b0116ec364f076657",
+      "retained_sha256": "c0dacddbcf235d7d5fc1ac209d4aa951e656ff9f0e39d91b0116ec364f076657",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned.patch",
+      "source": ".tmp/uat206-repair-20260917/owned.patch",
+      "original_sha256": "e7a3cd1212d6355a5cc1e06201da309641a820fa183e737d5f40d116cf7821e3",
+      "retained_sha256": "1a9735375f376c923cc7fb6474995a71a039f9d7fc583dd5b20eef6c42a6d5ae",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-commands.json",
+      "source": ".tmp/uat206-repair-20260917/commands.json",
+      "original_sha256": "2b35cd1185405940f14ba269151f07582e0094ce52133750eea82f4bd8560af3",
+      "retained_sha256": "2b35cd1185405940f14ba269151f07582e0094ce52133750eea82f4bd8560af3",
+      "normalization": "none"
+    },
+    {
+      "file": "author-red.log",
+      "source": ".tmp/uat206-repair-20260917/red.log",
+      "original_sha256": "eca04f8fc976ff01ddddc74823beba1b8acbc3fd13b00f7b7d17396f951785e4",
+      "retained_sha256": "eca04f8fc976ff01ddddc74823beba1b8acbc3fd13b00f7b7d17396f951785e4",
+      "normalization": "none"
+    },
+    {
+      "file": "author-green.log",
+      "source": ".tmp/uat206-repair-20260917/green.log",
+      "original_sha256": "e606018875a739bb237588156e76eb9ba8a8afbeed5f7defac14030b389d77e9",
+      "retained_sha256": "e606018875a739bb237588156e76eb9ba8a8afbeed5f7defac14030b389d77e9",
+      "normalization": "none"
+    },
+    {
+      "file": "author-static-summary.json",
+      "source": ".tmp/uat206-repair-20260917/static-summary.json",
+      "original_sha256": "64743ad31aa81f05c6b4a0c81fc28e7df38a9dcc53857947f94a3b28b138a6e7",
+      "retained_sha256": "64743ad31aa81f05c6b4a0c81fc28e7df38a9dcc53857947f94a3b28b138a6e7",
+      "normalization": "none"
+    },
+    {
+      "file": "author-ruff-baseline.json",
+      "source": ".tmp/uat206-repair-20260917/ruff-baseline.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-ruff-current.json",
+      "source": ".tmp/uat206-repair-20260917/ruff-current.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-bandit-production.json",
+      "source": ".tmp/uat206-repair-20260917/bandit-production.json",
+      "original_sha256": "afa2ff616e73b9d0aabce6a906a29ef6828665ee6068e847af5a4b082e3309a7",
+      "retained_sha256": "55d0d373bcf78a4037898e371bb568662c360402cd193916052c9b1f76acf840",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-bandit-tests.json",
+      "source": ".tmp/uat206-repair-20260917/bandit-tests.json",
+      "original_sha256": "14cb5c956ef15a66bb94c78accf6e5fd7dcae0ee152b8e44c95b1b8818194ca7",
+      "retained_sha256": "323d2d6405aec9534ec0f7bab1f0286fa75b71dde854039d62c0743ba756331f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-REVIEW206.md",
+      "source": ".tmp/uat206-independent-20260917/REVIEW206.md",
+      "original_sha256": "a2afc5180a06d20288532badff189b2e149245833e150fb05a9c1a196cd4d858",
+      "retained_sha256": "a2afc5180a06d20288532badff189b2e149245833e150fb05a9c1a196cd4d858",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-bandit.json",
+      "source": ".tmp/uat206-independent-20260917/bandit.json",
+      "original_sha256": "c6e26ad68159db6842f81db40a678784e3ccf96e71fe9a57a330006902073976",
+      "retained_sha256": "4dd0763cf8d0c87d98ea39993ab6271010302b726e901de8734abcb77edc3be8",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-bandit.stderr",
+      "source": ".tmp/uat206-independent-20260917/bandit.stderr",
+      "original_sha256": "67aee0197bdf9b47c64e396e90492b46322bc922775bffafa22e9ff986923d68",
+      "retained_sha256": "67aee0197bdf9b47c64e396e90492b46322bc922775bffafa22e9ff986923d68",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-bandit.stdout",
+      "source": ".tmp/uat206-independent-20260917/bandit.stdout",
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-green.log",
+      "source": ".tmp/uat206-independent-20260917/green.log",
+      "original_sha256": "f4fd53ff0df35745e645d83ebcb7d99a88d9322e829e5585616fed288fbc1969",
+      "retained_sha256": "f4fd53ff0df35745e645d83ebcb7d99a88d9322e829e5585616fed288fbc1969",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-ruff.json",
+      "source": ".tmp/uat206-independent-20260917/ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-source-hashes.json",
+      "source": ".tmp/uat206-independent-20260917/source-hashes.json",
+      "original_sha256": "fcb7d969be0843d5231fbe787a1f3ded1fcf4f99377b683dee90b7c19b71f4c5",
+      "retained_sha256": "fcb7d969be0843d5231fbe787a1f3ded1fcf4f99377b683dee90b7c19b71f4c5",
+      "normalization": "none"
+    },
+    {
+      "file": "DIAGNOSIS.md",
+      "source": ".tmp/uat-study-pack-queued-20260917/DIAGNOSIS.md",
+      "original_sha256": "24a99f0d7afaf616bbe29a00a7cde54981f81ff6b665ac2b4f2b38b16d267a75",
+      "retained_sha256": "24a99f0d7afaf616bbe29a00a7cde54981f81ff6b665ac2b4f2b38b16d267a75",
+      "normalization": "none"
+    }
+  ]
+}

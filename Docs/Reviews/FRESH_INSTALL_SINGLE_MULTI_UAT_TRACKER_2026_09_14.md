@@ -1,6 +1,13 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint:204 unique findings —183 verified,21 awaiting targeted acceptance,0 unresolved implementations.** Flashcards198/201/202 and cold StudyPack204 are independently reviewed and committed61e5af6702/a130b8e550. New PostgreSQL native API30793 is running; targeted browser/API acceptance is underway. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-204-ownership-reviewed.json). Full fresh matrix has not started.
+- **Latest checkpoint:209 unique findings —187 verified,18 awaiting targeted acceptance,4 unresolved (205/207/208/209).** Study Pack startup206 committed8cb76473a8; UI205 review correction underway. Native202 restore passed pending audit. Persona207 shared default-ID conflict and private Notes209 are proven with actual PostgreSQL fixtures. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-209-notes-open.json).
+
+- **Prior checkpoint:208 unique findings —187 verified,17 awaiting targeted acceptance,4 unresolved (205–208).** Account151/198/201 and exemplar195 acceptance retained; Study Pack UI/startup repairs and Persona/visual-expression diagnosis are underway. Bob original-chat Retry and greeting saves succeed, pending complete acceptance audit. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-208-account-accepted.json).
+
+- **Prior checkpoint:205 unique findings —184 verified,20 awaiting targeted acceptance,1 unresolved (205).** Exemplar195 accepted with explicit native-route limitation; Study Pack drawer progress/duplicate-submit defect205 is under repair. Account-switch198/201 native evidence is in independent review;151 still needs literal browser Back. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-205-study-progress-open.json).
+
+
+- **Prior checkpoint:204 unique findings —183 verified,21 awaiting targeted acceptance,0 unresolved implementations.** Flashcards198/201/202 and cold StudyPack204 are independently reviewed and committed61e5af6702/a130b8e550. New PostgreSQL native API30793 is running; targeted browser/API acceptance is underway. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-204-ownership-reviewed.json). Full fresh matrix has not started.
 
 - **Prior checkpoint:204 unique findings —183 verified,17 awaiting targeted acceptance,4 unresolved (198/201/202/204).** Cold StudyPack actual-factory checks prove wrong PostgreSQL owner identity; TASK13260.142 owns the bounded repair. Flashcards ownership fixes and review corrections are frozen for independent verification. Full fresh matrix has not started.
 
@@ -349,6 +356,9 @@
 - Evidence: [actual scoped RAG request](../../output/playwright/cycle5-repair-verification-2026-09-16/followup-native-single/uat013-rag-request.json), [honest failure presentation](../../output/playwright/cycle5-repair-verification-2026-09-16/followup-native-single/uat013-after-send.md), and console in that directory. [Redacted normal backend evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup-native-single/uat152-backend-rag.redacted.log) corroborates the completed request.
 
 ## UAT-151 — P2: Flashcards retains another account's deck label after logout
+
+- Current status: Verified by retained independent native acceptance, including literal browser Back151, two-owner catalogue198 and same-name own deck creation201. [Audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md). Earlier statements below are historical.
+
 
 - In preserved multi-user UAT, Alice opens her Biology Note, uses Generate flashcards, logs out through server settings, and Bob logs in. Browser Back returns to Import/Export. Note text and source provenance correctly clear, but both generated-card and image-occlusion deck selectors still display `Cycle5 Alice Biology`, after settling. A later Forward/Back remount shows Create new deck, so continued leakage through that additional history navigation is not claimed.
 - Actual browser request416 `/auth/me` confirms Bob, user3; request411 `/flashcards/decks?include_workspace_items=false` returns200 with `[]`. The selected deck label is therefore stale client state, not a deck returned by Bob's current API request. No cross-account write has been attempted or demonstrated.
@@ -2081,9 +2091,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - TASK13260.132 owns the read/write boundary, coordinated with193 in one reviewed character-store/schema unit. Preserve factory checks and SQLite sync semantics, cover foreign mutation/child/deleted paths, and use parameterized current-owner predicates plus versioned tenant-name uniqueness. Causal combined193/194 RED8fail16pass0skip; .tmp/uat193-diagnosis-20260917 retains exact paths/results. Root reviewed the role contract and authorized bounded PG-only CharacterStore ownership plus atomic PG67-to68 owner/name uniqueness. Preserve RLS/factory authorization and SQLite semantics. Shared source edits remain coordinated with181; no native repair acceptance yet.
 
 
-## UAT-195 — P1, implemented; targeted acceptance pending — PostgreSQL exemplar search fails with omitted optional filters
+## UAT-195 — P1, verified with native-route limitation — PostgreSQL exemplar search fails with omitted optional filters
 
-- Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
+- Current status: Store repair accepted under the existing TASK13260.133 AC2 explicit route-limitation alternative. Current PostgreSQL69/SQLite67 controls pass22/zero skips; independent acceptance audit confirms unchanged reviewed source. Authenticated native exemplar search and populated selector acceptance remain unverified. Shared UI has no direct caller of the search route, and tracked Character completion follows a different path. [Acceptance and route inventory](../../output/playwright/cycle5-repair-verification-2026-09-16/followup195-store-acceptance-route-limitation/ACCEPTANCE195.md). Prior causal RED, repair and scoped static checks remain in the reviewed193–195 package. Earlier statements below are historical.
 
 - Actual required-PostgreSQL ownership regressions encounter a separate CharacterStore.search_character_exemplars query error when emotion/scenario are omitted. Driver replay confirms IndeterminateDatatype42P18 at parameter4 for both omitted and supplied filters; each IS NULL placeholder lacks type context. Actual owned-list control succeeds. The earlier explicit-filter positive-control hypothesis was rejected. ExistingTASK16 covered deleted filtering only. No native failure is claimed.
 - TASK13260.133 precedes repair. Preserve filtering, result/count/deleted semantics and SQLite; retain exact driver classification, causal RED and mandatory-PG GREEN, then independent review.
@@ -2107,7 +2117,10 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 Alice source and both deck labels clear on Bob’s first return to Import/Export. Normal auth/me confirms Bob3, but deck/card reads fail500 ChaChaNotes DB unavailable on old backendPID63046, started02:00UTC before the reviewed ownership changes. Read-only metadata retains idle transactions and35public-table locks. UAT151 is not accepted; this is preserved old-runtime failure evidence under181, not a regression claim against the newly committed backend. Load reviewed source, warm both owners, then repeat original151 before full UAT.
 
-## UAT-198 — P1, implemented; native acceptance pending — Bob receives Alice’s private Flashcards data
+## UAT-198 — P1, verified — Bob receives Alice’s private Flashcards data
+
+- Current status: Verified by retained independent native acceptance, including literal browser Back151, two-owner catalogue198 and same-name own deck creation201. [Audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md). Earlier statements below are historical.
+
 
 - On the reviewed backend48f89447fc, normal browser auth/me confirms Bob3 three times. Actual04:30:02UTC deck-list200 responses return Alice2 private decks1/4/6, and card-list200 reports all5Alice cards. The first visible selector also displays Alice’s deck because this current catalogue contains it. No native foreign writes were attempted.
 - Native service role is the previously qualified superuser/BYPASSRLS configuration. Ordinary-role behavior is being tested; no inference of ordinary-role enforcement or leakage yet. Source inspection finds missing owner predicates in the deck list and Flashcards visibility helper.
@@ -2127,7 +2140,10 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 - Actual complete-v2 request71df096e-92b6-4ff9-afba-7aba1118647e returns500 on48f89447fc, before a successful model call. PostgreSQL04:35:18.277UTC rejects persona_memory_entries archived=0 as boolean=integer; the following WorldBook CREATE TABLE fails because the transaction is already aborted. This is distinct from176’s corrected unsupported context manager. TASK13260.138 owns the primary SQL and optional-error transaction diagnosis/repair. No artificial provider fault was installed for this Bob send.
 - Both failures retained in .tmp/uat193-031-native-20260917/bob-events.txt and selected redacted backend/PostgreSQL SQL receipts. Character193 passes Bob creation only so far; Alice acceptance and successful completion remain pending.
 
-## UAT-201 — P2, implemented; native acceptance pending — PostgreSQL private deck names collide across users
+## UAT-201 — P2, verified — PostgreSQL private deck names collide across users
+
+- Current status: Verified by retained independent native acceptance, including literal browser Back151, two-owner catalogue198 and same-name own deck creation201. [Audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md). Earlier statements below are historical.
+
 
 - Official two-owner fixture proves Bob cannot create a private deck with Alice’s name because of the global decks.name uniqueness constraint; SQLite per-file control passes. TASK13260.139 tracks owner-scoped atomic migration with data/catalog/rollback controls. No native same-name attempt yet.
 
@@ -2156,3 +2172,34 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Actual runtime cache/accessor/factory plus source resolution and persistence use client_id=study-pack-worker-2 when the worker is first for owner2 after restart. The generated deck/card rows carry that label; an independent canonical owner2 DB cannot read the deck. A later canonical owner accessor reuses the same incorrectly labelled cache object. Hot numeric-owner-first and SQLite per-file controls pass.
 - Official fixture proof:1causal PostgreSQL failure/3controls, zero skips,5.47s; source hashes stable. Model output was stubbed to isolate storage identity; no real-provider/native acceptance is claimed. Initial probe prematurely closed its shared pool, a retained harness error corrected before the valid run.
 - Task13260.142 precedes production edits. Repair is bounded to the StudyPack owner accessor, preserving181 independent operation/cleanup, job identity and transaction decisions. Restricted-role qualification and SQLite sync-label compatibility must be explicit. Private evidence: .tmp/uat-study-pack-owner-diagnosis-20260917.
+
+- 05:34UTC acceptance-path correction: running Import/Export exposes Create study pack. The earlier source-search inference of no frontend control was incorrect. Use this visible workflow for197/204 and qualify only unexposed HTTP surfaces separately. Native Alice2 auth/me and own cards/decks return200; five cards/three decks retained.
+
+
+## UAT-205 — P2, unresolved — Study Pack drawer hides accepted job progress and allows repeated submission
+
+- Native PostgreSQL multi-user Alice submits one owned Note through Import/Export → Create study pack. POST202 accepts job2; ordinary GET200 polling reports queued for several minutes. The drawer remains visually unchanged, with no queued/running status and an enabled Create study pack button between polls. Root did not resubmit. Screenshot and events: `.tmp/uat198-181-native-20260917/pack-queued-no-status.png`, `pack-queued-events.txt`.
+- Source diagnosis: StudyPackCreateDrawer canSubmit excludes only createMutation.isPending; its loading state uses transient jobQuery.isFetching. A queued job is not held as pending between polls. Worker availability remains under separate diagnosis; no worker product defect is claimed yet.
+- Task13260.143 owns bounded visible progress and duplicate-submission guard, with causal tests, terminal retry/success behavior, review and native acceptance.
+
+
+## UAT-206 — P1, unresolved — Startup extraction stops the default Study Pack worker
+
+- Native Study Pack POST202 creates job2; status stays queued under fresh isolated profile defaults. Active declarative startup requires explicit true STUDY_PACK_JOBS_WORKER_ENABLED, while the profile correctly leaves the flag unset. The earlier route-based policy started the worker for enabled Flashcards and respected explicit disable/sidecar. The extraction changed that contract; this is not a deliberately disabled UAT worker.
+- Read-only source/history diagnosis and no-I/O policy truth table: `.tmp/uat-study-pack-queued-20260917/DIAGNOSIS.md`. TASK13260.144 owns the bounded StudyPack predicate repair using the existing startup policy. No producer rejection or global worker-policy changes. Root will load reviewed source, preserve queued job2 and separately record any real provider/persistence failure.
+
+
+## UAT-207 — P1, unresolved — Authenticated PostgreSQL Persona profile catalogue returns500
+
+- Driver-confirmed root cause: shared PostgreSQL default persona ID research_assistant collides across owners (23505), leaving an aborted transaction; Bob retry then fails25P02. Official actual route Alice200/Bob500, SQLiteboth200; causal1FAIL/19PASS/0skip. No boolean repair is indicated.
+- Normal Bob Character chat load and reload produce repeated GET /api/v1/persona/profiles500. Backend reports list persona profiles query execution failure. Initial integer-predicate suspicion was not causal:18 direct PostgreSQL/SQLite list/get/batch controls pass unchanged because existing translation handles those columns. Actual route/cold-default failure remains under official-fixture diagnosis. Separate from200 memory archived predicate and159 anonymous calls. TASK13260.145 owns causal reproduction and minimal reviewed repair. Native evidence: `.playwright-cli/console-2026-09-17T06-00-25-674Z.log`; owned API30793 log.
+
+## UAT-208 — P2, unresolved — Optional visual-expression lookup raises unhandled500 on PostgreSQL
+
+- Normal authenticated Bob Character chat load, Retry and reload call visual-identities/bindings/resolve for neutral/thinking. Backend raises NotImplementedError: Visual identity metadata currently supports SQLite ChaChaNotes databases only. Core model completion/persistence succeed, but optional expression requests log server exceptions and console errors. TASK13260.146 owns a truthful capability/fallback boundary, preserving supported SQLite behavior; no PostgreSQL visual-metadata support is claimed. Original console and owned runtime evidence are preserved with207.
+
+
+## UAT-209 — P1, unresolved — Bob receives Alice private Notes through PostgreSQL catalogue
+
+- Normal auth/me identifies Bob3 at06:08:42UTC. GET /api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc returns200 with Alice owner2 Note b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8/title/content and two Bob owner3 greeting Notes. Actual visible Notes list corroborates the foreign fixture. Keyword catalogue also contains owner2 keyword; intended keyword ownership remains under diagnosis.
+- Native role is the already qualified privileged/BYPASSRLS service setup. No ordinary-role leakage or native foreign mutation is claimed. Private evidence `.tmp/uat198-181-native-20260917/bob-greeting-notes-events.txt`, `bob-notes-foreign-visible.png`. Task13260.147 precedes any repair, preserving SQLite per-file semantics, sharing, rollback/version and current-owner boundaries.

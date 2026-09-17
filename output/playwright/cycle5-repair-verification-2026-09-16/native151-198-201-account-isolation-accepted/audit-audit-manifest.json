@@ -1,0 +1,41 @@
+{
+  "dispositions": {
+    "UAT151": "Native acceptance supported after actual page.goBack capture; retain then close AC3",
+    "UAT198": "Native acceptance supported; retain then close AC3",
+    "UAT201": "Native acceptance supported; retain then close AC3"
+  },
+  "files": [
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/13260.136-criteria.txt",
+      "sha256": "4e63bac140aa9445aa521bbde512f7b3fc5f58b827ffde843baf54f4942e9711"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/13260.139-criteria.txt",
+      "sha256": "ddd1d462d36f797cfea400e604b0324bf0b9856e307d903cac445c26b1e8d066"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/13260.90-criteria.txt",
+      "sha256": "c1a4b50c8df1a48754a17ff37b7ae2c67a48760a5c7b7939a779bfe7d79b28d2"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/ACCEPTANCE.md",
+      "sha256": "99a1f71889b58e579a0557c11059b1842677280a965a9ed7e54547f10f2051f3"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/PRELIMINARY-close-return-only.md",
+      "sha256": "69ff431b69eb3e272e1b144ad9cbc7b73eee14da00db6fadef0acb9a1f32a086"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/asserted-native-summary.json",
+      "sha256": "d69465248ca9639825f36d0992f78ca8546cc179894bdd44605a2da272ba4674"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/input-manifest.json",
+      "sha256": "202b5de39276f038cf5d867b3915f54a60037f33b39e958817b77b025e143b85"
+    },
+    {
+      "path": ".tmp/uat151-198-201-acceptance-20260917/secret-scan.json",
+      "sha256": "843121049e80e7cb6b32021b5be2e35667a57448b59887feab5e675432818341"
+    }
+  ]
+}

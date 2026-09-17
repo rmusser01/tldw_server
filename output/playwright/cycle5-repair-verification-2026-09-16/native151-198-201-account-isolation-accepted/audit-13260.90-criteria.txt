@@ -1,38 +1,39 @@
----
-id: TASK-13260.90
-title: Clear private Flashcards deck selections across account changes
-status: Done
-assignee: []
-created_date: '2026-09-16 17:21'
-updated_date: '2026-09-17 06:06'
-labels: []
-dependencies: []
-parent_task_id: TASK-13260
-priority: high
----
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.90 - Clear-private-Flashcards-deck-selections-across-account-changes.md
 
-## Description
+Task TASK-13260.90 - Clear private Flashcards deck selections across account changes
+==================================================
 
-<!-- SECTION:DESCRIPTION:BEGIN -->
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-16 17:21
+Updated: 2026-09-16 19:14
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
 UAT151: During actual preserved multi-user UAT, Alice transfers a Note to Flashcards, logs out, Bob logs in, then Back returns to Import/Export. Note text and provenance correctly clear, but both generation and image-occlusion deck selectors still display Cycle5 Alice Biology. Actual auth/me confirms Bob id3; Bob deck-list response is empty. Investigate retained deck selection/cache ownership, prevent private labels and stale deck IDs crossing account or server boundaries, and verify real save intent cannot reuse a prior owner deck.
-<!-- SECTION:DESCRIPTION:END -->
 
-## Acceptance Criteria
-<!-- AC:BEGIN -->
+Acceptance Criteria:
+--------------------------------------------------
 - [x] #1 A regression reproduces the actual Alice-to-Bob selected-deck label and ID leakage before the repair.
 - [x] #2 Deck selectors and save/generation intents follow current account/server authority, with same-owner behavior and valid deck handoffs preserved.
-- [x] #3 Independent review, relevant regressions, static checks and the original native account-switch scenario pass with retained evidence.
-<!-- AC:END -->
+- [ ] #3 Independent review, relevant regressions, static checks and the original native account-switch scenario pass with retained evidence.
 
-## Implementation Plan
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 
-<!-- SECTION:PLAN:BEGIN -->
+Implementation Plan:
+--------------------------------------------------
 Trace deck catalogue and selected-value ownership, establish RED at the actual mounted boundary, apply the smallest existing-scope correction, independently review, then repeat preserved native switch and history checks.
-<!-- SECTION:PLAN:END -->
 
-## Implementation Notes
-
-<!-- SECTION:NOTES:BEGIN -->
+Implementation Notes:
+--------------------------------------------------
 Implementation delegated to round2_chat after independent read-only design review at /private/tmp/cycle5-uat151-independent-design-review.md. Root preliminary real-QueryClient test fixture is not valid RED yet: transport path includes query, deck options load asynchronously, AntD6 forwards test IDs and retains hidden dropdowns. These harness failures are not product regression evidence. Agent must establish behavior RED before production edits. Scoped cache requires a distinct flashcards:decks:scoped prefix because the legacy updater writes all exact-prefix deck caches. Existing verified Manager snapshot reused; no global cache rewrite. Native pass ended17:37UTC, all four verified owned frontends stopped; APIs/data preserved.
 
 Implementation begins under approved bounded UAT151 design /private/tmp/cycle5-uat151-independent-design-review.md and native151 section in Docs/Design/2026-09-16-uat-cycle-5-repairs.md. Own seven existing production paths (queries, ImportExport, Generate, Occlusion, flashcards/assets services, exact scope policy) plus actual-boundary tests. First repair inherited RED harness to select only the visible AntD dropdown; no production edit before valid behavior RED. Preserve Manager authority resolver and separately scoped caches; no runtime/browser actions.
@@ -46,22 +47,3 @@ Compiler diagnosis refinement: explicit useQuery generic alone was insufficient.
 Final integration verification: shared UI3326tests/168suites and WebUI332tests/17suites pass separately with no skips; overlapping counts are not summed. Full TypeScript retains90existing signatures,0added/removed. Evidence: output/playwright/cycle5-repair-verification-2026-09-16/followup151-154-combined/README.md. Native151/152/153 acceptance remains pending;154 is test-only. Source hashes match reviewed freezes.
 
 Latest native151 controls and independent audit were reported successful on2d5ad06c86, including first settled Back in both account-switch directions and canonical generated-card save/reload. At19:10UTC the private raw artifacts, runtimes and agent sessions were unavailable before root repository retention. Keep AC3 open and task In Progress until those native boundaries are repeated and retained; do not substitute transcript recollection for raw evidence. Committed200/14 author and independent regressions plus3326/168 combined UI evidence remain unchanged.
-
-Original Alice-to-Bob literal browser Back now clears both unique private deck6 selections and pasted draft; current Bob deck7 catalogue controls are positive. Earlier empty-catalogue Close-return is distinctly retained. Independent native acceptance audit completed with exact39-record durable packet output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted; manifestca95fceef4d5ab6b6c348a6944039a40b43cfc5856ff5a035ebdae7a0e4c0acf. Prior source/static/test review remains valid. No fullfreshmatrixclaim.
-<!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Original Alice-to-Bob literal browser Back now clears both unique private deck6 selections and pasted draft; current Bob deck7 catalogue controls are positive. Earlier empty-catalogue Close-return is distinctly retained. See durable audit-ACCEPTANCE.md for timestamps, IDs and limits.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->

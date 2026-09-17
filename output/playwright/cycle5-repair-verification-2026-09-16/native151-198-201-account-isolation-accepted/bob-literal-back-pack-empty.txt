@@ -1,0 +1,194 @@
+### Ran Playwright code
+```js
+await page.getByTestId('study-pack-launcher-button').click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+- Console: 4 errors, 2 warnings
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T05-59-55-556Z.yml)
+
+- generic [ref=f20e1]:
+  - generic [ref=f20e2]:
+    - generic [ref=f20e1515]:
+      - banner [ref=f20e1516]:
+        - generic [ref=f20e1517]:
+          - generic [ref=f20e1519]:
+            - generic [ref=f20e1520]: Study workspace
+            - heading "Flashcards" [level=1] [ref=f20e1521]
+          - navigation "Flashcards modes" [ref=f20e1522]:
+            - generic [ref=f20e1523]: Study
+            - generic [ref=f20e1524]: Manage
+            - generic [ref=f20e1525]: Import / Export
+            - generic [ref=f20e1526]: Templates
+            - generic [ref=f20e1527]: Scheduler
+      - generic [ref=f20e1530]:
+        - tablist [ref=f20e1531]:
+          - generic [ref=f20e1533]:
+            - tab "Study" [ref=f20e1535] [cursor=pointer]
+            - tab "Manage" [ref=f20e1537] [cursor=pointer]
+            - tab "Import / Export" [selected] [ref=f20e1539] [cursor=pointer]
+            - tab "Templates" [ref=f20e1541] [cursor=pointer]
+            - tab "Scheduler" [ref=f20e1543] [cursor=pointer]
+          - generic [ref=f20e1545]:
+            - button "Test with Quiz" [disabled] [ref=f20e1547]
+            - button "Keyboard Shortcuts" [ref=f20e1548] [cursor=pointer]
+        - tabpanel "Import / Export" [ref=f20e1555]:
+          - generic [ref=f20e1556]:
+            - generic [ref=f20e1557]:
+              - generic [ref=f20e1558]: Task
+              - radiogroup "Create, import, or export task" [ref=f20e1562]:
+                - generic [ref=f20e1563]:
+                  - generic [ref=f20e1564] [cursor=pointer]:
+                    - radio "Create cards" [checked]
+                    - generic "Create cards" [ref=f20e1565]
+                  - generic [ref=f20e1566] [cursor=pointer]:
+                    - radio "Import file"
+                    - generic "Import file" [ref=f20e1567]
+                  - generic [ref=f20e1568] [cursor=pointer]:
+                    - radio "Export backup"
+                    - generic "Export backup" [ref=f20e1569]
+            - region [ref=f20e1570]:
+              - generic [ref=f20e1571]:
+                - heading "Create and generate" [level=5] [ref=f20e1572]
+                - text: Start new study material from study packs, source text, or images.
+              - generic [ref=f20e1573]:
+                - generic [ref=f20e1574]:
+                  - generic [ref=f20e1575]: Study packs
+                  - generic [ref=f20e1579]:
+                    - generic [ref=f20e1580]:
+                      - strong [ref=f20e1582]: Turn media or notes into a review queue.
+                      - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                    - button "Create study pack" [ref=f20e1583] [cursor=pointer]
+                - generic [ref=f20e1585]:
+                  - generic [ref=f20e1586]: Generate Flashcards
+                  - generic [ref=f20e1590]:
+                    - generic [ref=f20e1591]: Generate cards from pasted text, review/edit them, then save to a deck.
+                    - textbox "Paste transcript, notes, or study material..." [ref=f20e1592]
+                    - generic [ref=f20e1593]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                    - generic [ref=f20e1594]:
+                      - generic [ref=f20e1595]:
+                        - switch "Advanced mix" [ref=f20e1596] [cursor=pointer]
+                        - generic [ref=f20e1599]: Advanced mix
+                      - generic [ref=f20e1601]:
+                        - generic "Number of cards" [ref=f20e1603]: "Number of cards :"
+                        - spinbutton [ref=f20e1607]: "10"
+                      - generic [ref=f20e1609]:
+                        - generic "Card type" [ref=f20e1611]: "Card type :"
+                        - generic [ref=f20e1615] [cursor=pointer]:
+                          - generic [ref=f20e1616]:
+                            - generic "Basic" [ref=f20e1617]
+                            - combobox [ref=f20e1618]
+                          - img "down" [ref=f20e1620]
+                      - generic [ref=f20e1624]:
+                        - generic "Difficulty" [ref=f20e1626]: "Difficulty :"
+                        - generic [ref=f20e1630] [cursor=pointer]:
+                          - generic [ref=f20e1631]:
+                            - generic "Mixed" [ref=f20e1632]
+                            - combobox [ref=f20e1633]
+                          - img "down" [ref=f20e1635]
+                      - generic [ref=f20e1639]:
+                        - generic "Deck" [ref=f20e1641]: "Deck :"
+                        - generic [ref=f20e1645] [cursor=pointer]:
+                          - generic [ref=f20e1646]:
+                            - generic "Alice UAT151 Citrine Deck" [ref=f20e1647]
+                            - combobox [ref=f20e1648]
+                          - img "down" [ref=f20e1650]
+                      - generic [ref=f20e1653]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                      - generic [ref=f20e1655]:
+                        - generic "Provider (optional)" [ref=f20e1657]: "Provider (optional) :"
+                        - textbox [ref=f20e1661]
+                      - generic [ref=f20e1663]:
+                        - generic "Model (optional)" [ref=f20e1665]: "Model (optional) :"
+                        - textbox [ref=f20e1669]
+                    - generic [ref=f20e1671]:
+                      - generic "Focus topics (comma-separated)" [ref=f20e1673]: "Focus topics (comma-separated) :"
+                      - textbox "exam 1, chapter 3, formulas" [ref=f20e1677]
+                    - button "Generate cards" [disabled] [ref=f20e1679]
+                - generic [ref=f20e1680]:
+                  - generic [ref=f20e1681]: Image Occlusion
+                  - generic [ref=f20e1685]:
+                    - generic [ref=f20e1686]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                    - generic [ref=f20e1687]:
+                      - generic [ref=f20e1689]:
+                        - generic "Deck" [ref=f20e1691]: "Deck :"
+                        - generic [ref=f20e1695] [cursor=pointer]:
+                          - generic [ref=f20e1696]:
+                            - generic "Alice UAT151 Citrine Deck" [ref=f20e1697]
+                            - combobox [ref=f20e1698]
+                          - img "down" [ref=f20e1700]
+                          - img "close-circle" [ref=f20e1704]
+                      - generic [ref=f20e1707]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                      - generic [ref=f20e1709]:
+                        - generic "Tags" [ref=f20e1711]: "Tags :"
+                        - textbox "tag-1, tag-2" [ref=f20e1715]
+                    - generic [ref=f20e1716]:
+                      - generic [ref=f20e1717]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                      - generic [ref=f20e1718]:
+                        - generic [ref=f20e1719]: Source image
+                        - button "Upload image occlusion source" [ref=f20e1720]
+                      - status [ref=f20e1721]:
+                        - paragraph [ref=f20e1726]: Choose an image to begin authoring occlusions.
+                    - button "Generate occlusion drafts" [ref=f20e1727] [cursor=pointer]
+            - region [ref=f20e1729]:
+              - generic [ref=f20e1730]:
+                - heading "Import and export" [level=5] [ref=f20e1731]
+                - text: Move cards in and out without changing the flashcards route.
+              - generic [ref=f20e1732]:
+                - generic [ref=f20e1733]: Import/export summary
+                - generic [ref=f20e1737]:
+                  - generic [ref=f20e1738]:
+                    - strong [ref=f20e1740]: Supported formats
+                    - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                  - generic [ref=f20e1741]:
+                    - strong [ref=f20e1743]: Current import limits
+                    - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                  - generic [ref=f20e1744]:
+                    - strong [ref=f20e1746]: Last action
+                    - text: No import/export actions yet in this session.
+              - text: ": : : : : :"
+    - dialog "Create study pack" [ref=f20e1748]:
+      - generic [ref=f20e1750]:
+        - button "Close" [ref=f20e1751] [cursor=pointer]:
+          - img "close" [ref=f20e1752]
+        - generic [ref=f20e1755]: Create study pack
+      - generic [ref=f20e1757]:
+        - generic [ref=f20e1758]:
+          - strong [ref=f20e1760]: Title
+          - textbox "Title" [ref=f20e1761]:
+            - /placeholder: Study pack title
+        - generic [ref=f20e1762]:
+          - generic [ref=f20e1763]:
+            - strong [ref=f20e1765]: Sources
+            - generic [ref=f20e1766]: 0 selected
+          - generic [ref=f20e1767]:
+            - generic [ref=f20e1768] [cursor=pointer]:
+              - generic [ref=f20e1769]:
+                - generic "Media" [ref=f20e1770]
+                - combobox "Source Type" [ref=f20e1771]
+              - img "down" [ref=f20e1773]
+            - textbox "Source ID (advanced/manual)" [ref=f20e1776]
+            - textbox "Source Title" [ref=f20e1777]:
+              - /placeholder: Optional title
+            - button "Add source" [ref=f20e1778] [cursor=pointer]
+          - generic [ref=f20e1780]: Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source.
+          - generic [ref=f20e1781]: "Add at least one supported source: Media, Note, or Message."
+      - generic [ref=f20e1783]:
+        - button "Cancel" [ref=f20e1785] [cursor=pointer]
+        - button "Create study pack" [disabled] [ref=f20e1788]
+  - alert [ref=f20e159]: Flashcards | tldw

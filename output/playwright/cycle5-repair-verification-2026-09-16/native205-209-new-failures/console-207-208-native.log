@@ -1,0 +1,28 @@
+[     330ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[     414ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[     804ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[    1282ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[    1601ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=neutral:0
+[    1603ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=neutral 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[   50360ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking:0
+[   50361ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[   50531ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking:0
+[   50532ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[  105345ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  105419ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  105705ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  105914ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  106169ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=neutral:0
+[  106230ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=neutral 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[  106393ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking:0
+[  106446ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[  227876ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  227877ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking:0
+[  228249ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  228250ms] [WARNING] [tldw:request] GET /api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking 500 Internal server error @ http://127.0.0.1:18583/_next/static/chunks/b5795_next_dist_4a8939bd._.js:1360
+[  228271ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  228360ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  228529ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  228773ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  228935ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0
+[  229045ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:18583/api/v1/persona/profiles:0

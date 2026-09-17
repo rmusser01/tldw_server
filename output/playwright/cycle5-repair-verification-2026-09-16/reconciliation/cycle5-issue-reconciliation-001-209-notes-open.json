@@ -1,15 +1,15 @@
 {
   "metadata": {
-    "at": "2026-09-17T05:32:21.976Z",
-    "source": "a130b8e550",
+    "at": "2026-09-17T06:19:10.390Z",
+    "source": "8cb76473a8",
     "counts": {
-      "verified": 183,
-      "implemented-awaiting-acceptance": 21,
-      "unresolved": 0,
+      "verified": 187,
+      "implemented-awaiting-acceptance": 18,
+      "unresolved": 4,
       "blocked": 0
     },
     "gate": "BLOCKED",
-    "previous_checkpoint": "cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json"
+    "previous_checkpoint": "cycle5-issue-reconciliation-001-208-account-accepted.json"
   },
   "issues": [
     {
@@ -6767,21 +6767,22 @@
       "task_ids": [
         "TASK-13260.90"
       ],
-      "disposition": "implemented-awaiting-acceptance",
-      "reason": "Reviewed repair committed; exact native post-repair acceptance remains pending. Latest bounded native controls were reported successful, but raw captures disappeared before retention; repeat and retain before acceptance.",
+      "disposition": "verified",
+      "reason": "Independent native acceptance and original repair/static/test evidence durably retained; exactscope limits documented.",
       "original_scenario_native_acceptance": {
-        "summary": "Original failure on1ea5402c83 retained; reviewed repair has not yet been exercised through native workflow.",
+        "summary": "Literal browser Back after Alice→Bob change clears both uniqueAlice6 selectors and private draft; earlier emptyClose controls separately qualified.",
         "paths": [
-          "/Users/macbook-dev/Documents/GitHub/tldw_server2/output/playwright/cycle5-repair-verification-2026-09-16/followup-native-multi/README.md"
+          "output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md"
         ],
         "limits": [
-          "No native post-repair pass claimed."
+          "TargetedPGmulti only; no fullfreshmatrix orrawSQLRLS claim. Backendsourcea130b8e550; currentrecoveryFE reused.",
+          "See independent audit for data variation, source boundary and exact original-row equality limits."
         ]
       },
       "task_records": [
         {
           "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.90 - Clear-private-Flashcards-deck-selections-across-account-changes.md",
-          "status_observed": "In Progress"
+          "status_observed": "Done"
         }
       ],
       "latest_repair": {
@@ -8408,11 +8409,11 @@
       "task_records": [
         {
           "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.133 - Repair-PostgreSQL-character-exemplar-search-with-omitted-filters.md",
-          "status_observed": "In Progress"
+          "status_observed": "Done"
         }
       ],
-      "disposition": "implemented-awaiting-acceptance",
-      "reason": "Independently reviewed and committeddf0fbbd73a; independent242+5pass0skip. Native acceptance pending.",
+      "disposition": "verified",
+      "reason": "Original AC2 explicit native-route limitation satisfied by independent route inventory and fresh22PG/SQLitePASS0skip; no native search pass claimed.",
       "latest_repair": {
         "revisions": [
           "df0fbbd73a"
@@ -8422,10 +8423,19 @@
         ]
       },
       "original_scenario_native_acceptance": {
-        "summary": "No native failure or repaired acceptance claimed.",
-        "paths": [],
+        "summary": "Store acceptance with explicit native-route limitation allowed by originalAC2.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/followup195-store-acceptance-route-limitation/ACCEPTANCE195.md"
+        ],
         "limits": [
-          "No full UAT claim."
+          "Authenticated native search and populated selector remain unverified. SharedUI has no directcaller ofexplicitsearch; trackedCharactercompletion usesdifferentpath.",
+          "Credential-interception helper rejected and not used or bypassed."
+        ]
+      },
+      "regression_evidence": {
+        "summary": "CurrentPG69/SQLite67:22PASS0skip23.52s; unchanged independently reviewed CharacterStore.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/followup195-store-acceptance-route-limitation/ACCEPTANCE195.md"
         ]
       }
     },
@@ -8495,12 +8505,12 @@
     },
     {
       "id": "UAT-198",
-      "disposition": "implemented-awaiting-acceptance",
-      "reason": "Reviewed and committed; original native acceptance remains open.",
+      "disposition": "verified",
+      "reason": "Independent native acceptance and original repair/static/test evidence durably retained; exactscope limits documented.",
       "task_records": [
         {
           "id": "13260.136",
-          "status_observed": "In Progress"
+          "status_observed": "Done"
         }
       ],
       "latest_repair": {
@@ -8515,6 +8525,16 @@
         "summary": "Author126 focused+322 adjacent and independent183 actual backend cases pass, zero skips; Ruff0/Bandit0.",
         "paths": [
           "output/playwright/cycle5-repair-verification-2026-09-16/followup198-201-202-flashcards-ownership-reviewed/README.md"
+        ]
+      },
+      "original_scenario_native_acceptance": {
+        "summary": "Bob initiallyemptycatalogue, ownmanualcard save/reload owner3, Alice originalowner2 rows only onreturn.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md"
+        ],
+        "limits": [
+          "TargetedPGmulti only; no fullfreshmatrix orrawSQLRLS claim. Backendsourcea130b8e550; currentrecoveryFE reused.",
+          "See independent audit for data variation, source boundary and exact original-row equality limits."
         ]
       }
     },
@@ -8556,12 +8576,12 @@
     },
     {
       "id": "UAT-201",
-      "disposition": "implemented-awaiting-acceptance",
-      "reason": "Reviewed and committed; original native acceptance remains open.",
+      "disposition": "verified",
+      "reason": "Independent native acceptance and original repair/static/test evidence durably retained; exactscope limits documented.",
       "task_records": [
         {
           "id": "13260.139",
-          "status_observed": "In Progress"
+          "status_observed": "Done"
         }
       ],
       "latest_repair": {
@@ -8576,6 +8596,16 @@
         "summary": "Author126 focused+322 adjacent and independent183 actual backend cases pass, zero skips; Ruff0/Bandit0.",
         "paths": [
           "output/playwright/cycle5-repair-verification-2026-09-16/followup198-201-202-flashcards-ownership-reviewed/README.md"
+        ]
+      },
+      "original_scenario_native_acceptance": {
+        "summary": "Bob owner3deck7 created throughUI with same name as Aliceowner2deck1; eachcurrent catalogue excludesotherowner.",
+        "paths": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/native151-198-201-account-isolation-accepted/audit-ACCEPTANCE.md"
+        ],
+        "limits": [
+          "TargetedPGmulti only; no fullfreshmatrix orrawSQLRLS claim. Backendsourcea130b8e550; currentrecoveryFE reused.",
+          "See independent audit for data variation, source boundary and exact original-row equality limits."
         ]
       }
     },
@@ -8656,6 +8686,100 @@
         "paths": [],
         "limits": [
           "No rewrite of historical PostgreSQL prefix-owned rows or published wrong caches."
+        ]
+      }
+    },
+    {
+      "id": "UAT-205",
+      "finding": "Study Pack drawer hides accepted job progress and allows repeated submission",
+      "task_ids": [
+        "TASK-13260.143"
+      ],
+      "task_records": [
+        {
+          "path": "backlog/tasks/task-13260.143 - Show-Study-Pack-job-progress-and-prevent-duplicate-submission-while-pending.md",
+          "status_observed": "In Progress"
+        }
+      ],
+      "disposition": "unresolved",
+      "reason": "NativePOST202job2 remainsqueued, no visiblejobstate andcreateenabledbetweenpolls. BoundedUIrepairunderway; workeravailabilityseparated.",
+      "original_scenario_native_acceptance": {
+        "summary": "Actual failure retained; repaired acceptance pending.",
+        "paths": [
+          ".tmp/uat198-181-native-20260917/pack-queued-events.txt",
+          ".tmp/uat198-181-native-20260917/pack-queued-no-status.png"
+        ]
+      }
+    },
+    {
+      "id": "UAT-206",
+      "finding": "Study Pack worker default stops after startup extraction",
+      "task_ids": [
+        "TASK-13260.144"
+      ],
+      "disposition": "implemented-awaiting-acceptance",
+      "reason": "Reviewed/committed8cb76473a8; author/root116PASS0skip; native defaultworker job2pending.",
+      "original_scenario_native_acceptance": {
+        "summary": "ActualUI failure retained intracker; repaired acceptancepending.",
+        "paths": [
+          "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md"
+        ]
+      },
+      "latest_repair": {
+        "revisions": [
+          "8cb76473a8"
+        ],
+        "evidence": [
+          "output/playwright/cycle5-repair-verification-2026-09-16/followup206-study-pack-startup-reviewed/README.md"
+        ]
+      }
+    },
+    {
+      "id": "UAT-207",
+      "finding": "Authenticated PostgreSQL Persona profile catalogue returns500",
+      "task_ids": [
+        "TASK-13260.145"
+      ],
+      "disposition": "unresolved",
+      "reason": "Native failure tracked; bounded diagnosis orrepairunderway; no repaired acceptance claimed.",
+      "original_scenario_native_acceptance": {
+        "summary": "ActualUI failure retained intracker; repaired acceptancepending.",
+        "paths": [
+          "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md"
+        ]
+      }
+    },
+    {
+      "id": "UAT-208",
+      "finding": "Optional visual-expression lookup raises unhandled500 on PostgreSQL",
+      "task_ids": [
+        "TASK-13260.146"
+      ],
+      "disposition": "unresolved",
+      "reason": "Native failure tracked; bounded diagnosis orrepairunderway; no repaired acceptance claimed.",
+      "original_scenario_native_acceptance": {
+        "summary": "ActualUI failure retained intracker; repaired acceptancepending.",
+        "paths": [
+          "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md"
+        ]
+      }
+    },
+    {
+      "id": "UAT-209",
+      "finding": "Bob receives Alice private Notes through PostgreSQL catalogue",
+      "task_ids": [
+        "TASK-13260.147"
+      ],
+      "disposition": "unresolved",
+      "reason": "NativeGET200returnsowner2NotetoBob3. Causal6PGFAIL/6SQLitePASS0skip; no repairyet.",
+      "original_scenario_native_acceptance": {
+        "summary": "Actual failure; repaired acceptancepending.",
+        "paths": [
+          ".tmp/uat198-181-native-20260917/bob-greeting-notes-events.txt",
+          ".tmp/uat198-181-native-20260917/bob-notes-foreign-visible.png"
+        ],
+        "limits": [
+          "PrivilegedBYPASSRLS native service role; no ordinaryroleleakageclaim."
         ]
       }
     }

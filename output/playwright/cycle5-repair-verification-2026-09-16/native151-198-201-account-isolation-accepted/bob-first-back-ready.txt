@@ -1,0 +1,258 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=importExport)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=importExport
+- Page Title: Flashcards | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f18e1]:
+  - generic [ref=f18e4]:
+    - link "Skip to main content" [ref=f18e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f18e6]:
+      - button "Expand sidebar" [ref=f18e7] [cursor=pointer]
+      - button "New Chat" [ref=f18e11] [cursor=pointer]
+      - generic [ref=f18e14]:
+        - button "Quick Ingest" [ref=f18e15] [cursor=pointer]
+        - button "Chat" [ref=f18e19] [cursor=pointer]
+        - button "Prompts" [ref=f18e22] [cursor=pointer]
+        - button "Characters" [ref=f18e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f18e31] [cursor=pointer]
+        - button "World Books" [ref=f18e35] [cursor=pointer]
+        - button "Notes" [ref=f18e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f18e42] [cursor=pointer]
+        - button "Media" [ref=f18e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f18e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f18e59] [cursor=pointer]
+        - button "Kanban" [ref=f18e65] [cursor=pointer]
+        - button "Watchlists" [ref=f18e67] [cursor=pointer]
+      - generic [ref=f18e72]:
+        - button "Open Notes Dock" [ref=f18e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f18e78] [cursor=pointer]
+        - button "Settings" [ref=f18e81] [cursor=pointer]
+    - main [ref=f18e85]:
+      - generic [ref=f18e86]:
+        - generic [ref=f18e89]:
+          - generic [ref=f18e90]:
+            - button "Expand sidebar" [ref=f18e91] [cursor=pointer]
+            - generic [ref=f18e93]:
+              - img "tldw Assistant" [ref=f18e94]
+              - generic [ref=f18e95]: tldw Assistant
+              - button "Companion Home" [ref=f18e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f18e100] [cursor=pointer]
+          - generic [ref=f18e103]:
+            - button "Search - Open command palette" [ref=f18e104] [cursor=pointer]:
+              - generic [ref=f18e108]: Search
+              - generic [ref=f18e109]: ⌘K
+            - button "Open settings" [ref=f18e110] [cursor=pointer]
+            - generic [ref=f18e122]:
+              - button "Notifications, 0 unread" [ref=f18e123] [cursor=pointer]
+              - status [ref=f18e127]: Notifications are active
+            - button "Switch to light theme" [ref=f18e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f18e135] [cursor=pointer]:
+              - generic [ref=f18e136]: "?"
+        - generic [ref=f18e138]:
+          - generic [ref=f18e140]:
+            - generic [ref=f18e142]:
+              - generic [ref=f18e143]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f18e144]
+            - navigation "Flashcards modes" [ref=f18e145]:
+              - generic [ref=f18e146]: Study
+              - generic [ref=f18e147]: Manage
+              - generic [ref=f18e148]: Import / Export
+              - generic [ref=f18e149]: Templates
+              - generic [ref=f18e150]: Scheduler
+          - generic [ref=f18e162]:
+            - tablist [ref=f18e163]:
+              - generic [ref=f18e165]:
+                - tab "Study" [ref=f18e167] [cursor=pointer]
+                - tab "Manage" [ref=f18e169] [cursor=pointer]
+                - tab "Import / Export" [selected] [ref=f18e171] [cursor=pointer]
+                - tab "Templates" [ref=f18e173] [cursor=pointer]
+                - tab "Scheduler" [ref=f18e175] [cursor=pointer]
+              - generic [ref=f18e177]:
+                - button "Test with Quiz" [disabled] [ref=f18e179]
+                - button "Keyboard Shortcuts" [ref=f18e180] [cursor=pointer]
+            - tabpanel "Import / Export" [ref=f18e187]:
+              - generic [ref=f18e188]:
+                - generic [ref=f18e189]:
+                  - generic [ref=f18e190]: Task
+                  - radiogroup "Create, import, or export task" [ref=f18e194]:
+                    - generic [ref=f18e195]:
+                      - generic [ref=f18e196] [cursor=pointer]:
+                        - radio "Create cards" [checked]
+                        - generic "Create cards" [ref=f18e197]
+                      - generic [ref=f18e198] [cursor=pointer]:
+                        - radio "Import file"
+                        - generic "Import file" [ref=f18e199]
+                      - generic [ref=f18e200] [cursor=pointer]:
+                        - radio "Export backup"
+                        - generic "Export backup" [ref=f18e201]
+                - region [ref=f18e202]:
+                  - generic [ref=f18e203]:
+                    - heading "Create and generate" [level=5] [ref=f18e204]
+                    - text: Start new study material from study packs, source text, or images.
+                  - generic [ref=f18e205]:
+                    - generic [ref=f18e206]:
+                      - generic [ref=f18e207]: Study packs
+                      - generic [ref=f18e211]:
+                        - generic [ref=f18e212]:
+                          - strong [ref=f18e214]: Turn media or notes into a review queue.
+                          - text: Create a study pack from supported sources, then review the generated deck in Flashcards.
+                        - button "Create study pack" [ref=f18e215] [cursor=pointer]
+                    - generic [ref=f18e217]:
+                      - generic [ref=f18e218]: Generate Flashcards
+                      - generic [ref=f18e222]:
+                        - generic [ref=f18e223]: Generate cards from pasted text, review/edit them, then save to a deck.
+                        - textbox "Paste transcript, notes, or study material..." [ref=f18e224]
+                        - generic [ref=f18e225]: "Tip: Longer, more detailed source text produces higher quality flashcards. Aim for at least a paragraph."
+                        - generic [ref=f18e226]:
+                          - generic [ref=f18e227]:
+                            - switch "Advanced mix" [ref=f18e228] [cursor=pointer]
+                            - generic [ref=f18e231]: Advanced mix
+                          - generic [ref=f18e233]:
+                            - generic "Number of cards" [ref=f18e235]: "Number of cards :"
+                            - spinbutton [ref=f18e239]: "10"
+                          - generic [ref=f18e241]:
+                            - generic "Card type" [ref=f18e243]: "Card type :"
+                            - generic [ref=f18e247] [cursor=pointer]:
+                              - generic [ref=f18e248]:
+                                - generic "Basic" [ref=f18e249]
+                                - combobox [ref=f18e250]
+                              - img "down" [ref=f18e252]
+                          - generic [ref=f18e256]:
+                            - generic "Difficulty" [ref=f18e258]: "Difficulty :"
+                            - generic [ref=f18e262] [cursor=pointer]:
+                              - generic [ref=f18e263]:
+                                - generic "Mixed" [ref=f18e264]
+                                - combobox [ref=f18e265]
+                              - img "down" [ref=f18e267]
+                          - generic [ref=f18e271]:
+                            - generic "Deck" [ref=f18e273]: "Deck :"
+                            - generic [ref=f18e277] [cursor=pointer]:
+                              - generic [ref=f18e278]:
+                                - generic "Create new deck" [ref=f18e279]
+                                - combobox [ref=f18e280]
+                              - img "down" [ref=f18e282]
+                          - generic [ref=f18e285]:
+                            - generic [ref=f18e286]:
+                              - strong [ref=f18e288]: New deck name
+                              - textbox "New deck name" [ref=f18e289]: Generated Flashcards
+                            - generic [ref=f18e290]:
+                              - strong [ref=f18e292]: Review prompt side
+                              - generic [ref=f18e293] [cursor=pointer]:
+                                - generic [ref=f18e294]:
+                                  - generic "Front first" [ref=f18e295]
+                                  - combobox "Review prompt side" [ref=f18e296]
+                                - img "down" [ref=f18e298]
+                            - generic [ref=f18e301]:
+                              - generic [ref=f18e302]:
+                                - strong [ref=f18e304]: Scheduler type
+                                - generic [ref=f18e305] [cursor=pointer]:
+                                  - generic [ref=f18e306]:
+                                    - generic "SM-2+" [ref=f18e307]
+                                    - combobox "Scheduler type SM-2+ down" [ref=f18e308]
+                                  - img "down" [ref=f18e310]
+                              - generic [ref=f18e313]:
+                                - strong [ref=f18e315]: Presets
+                                - generic [ref=f18e316]:
+                                  - button "Default" [ref=f18e317] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=f18e319] [cursor=pointer]
+                                  - button "Conservative review" [ref=f18e321] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=f18e323] [cursor=pointer]
+                              - generic [ref=f18e325]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=f18e327] [cursor=pointer]
+                          - generic [ref=f18e330]:
+                            - generic "Provider (optional)" [ref=f18e332]: "Provider (optional) :"
+                            - textbox [ref=f18e336]
+                          - generic [ref=f18e338]:
+                            - generic "Model (optional)" [ref=f18e340]: "Model (optional) :"
+                            - textbox [ref=f18e344]
+                        - generic [ref=f18e346]:
+                          - generic "Focus topics (comma-separated)" [ref=f18e348]: "Focus topics (comma-separated) :"
+                          - textbox "exam 1, chapter 3, formulas" [ref=f18e352]
+                        - button "Generate cards" [disabled] [ref=f18e354]
+                    - generic [ref=f18e355]:
+                      - generic [ref=f18e356]: Image Occlusion
+                      - generic [ref=f18e360]:
+                        - generic [ref=f18e361]: Upload one image, draw labeled rectangular occlusions, generate drafts, then save them in bulk.
+                        - generic [ref=f18e362]:
+                          - generic [ref=f18e364]:
+                            - generic "Deck" [ref=f18e366]: "Deck :"
+                            - generic [ref=f18e370] [cursor=pointer]:
+                              - generic [ref=f18e371]:
+                                - generic "Create new deck" [ref=f18e372]
+                                - combobox [ref=f18e373]
+                              - img "down" [ref=f18e375]
+                              - img "close-circle" [ref=f18e379]
+                          - generic [ref=f18e382]:
+                            - generic [ref=f18e383]:
+                              - strong [ref=f18e385]: New deck name
+                              - textbox "New deck name" [ref=f18e386]: Image Occlusion
+                            - generic [ref=f18e387]:
+                              - strong [ref=f18e389]: Review prompt side
+                              - generic [ref=f18e390] [cursor=pointer]:
+                                - generic [ref=f18e391]:
+                                  - generic "Front first" [ref=f18e392]
+                                  - combobox "Review prompt side" [ref=f18e393]
+                                - img "down" [ref=f18e395]
+                            - generic [ref=f18e398]:
+                              - generic [ref=f18e399]:
+                                - strong [ref=f18e401]: Scheduler type
+                                - generic [ref=f18e402] [cursor=pointer]:
+                                  - generic [ref=f18e403]:
+                                    - generic "SM-2+" [ref=f18e404]
+                                    - combobox "Scheduler type SM-2+ down" [ref=f18e405]
+                                  - img "down" [ref=f18e407]
+                              - generic [ref=f18e410]:
+                                - strong [ref=f18e412]: Presets
+                                - generic [ref=f18e413]:
+                                  - button "Default" [ref=f18e414] [cursor=pointer]
+                                  - button "Fast acquisition" [ref=f18e416] [cursor=pointer]
+                                  - button "Conservative review" [ref=f18e418] [cursor=pointer]
+                                  - button "Reset to defaults" [ref=f18e420] [cursor=pointer]
+                              - generic [ref=f18e422]: 1m,10m -> 1d / easy 4d / leech 8 / fuzz off
+                              - button "Customize scheduler" [ref=f18e424] [cursor=pointer]
+                          - generic [ref=f18e427]:
+                            - generic "Tags" [ref=f18e429]: "Tags :"
+                            - textbox "tag-1, tag-2" [ref=f18e433]
+                        - generic [ref=f18e434]:
+                          - generic [ref=f18e435]: Upload one image, drag rectangular occlusions, label each region, then generate drafts.
+                          - generic [ref=f18e436]:
+                            - generic [ref=f18e437]: Source image
+                            - button "Upload image occlusion source" [ref=f18e438]
+                          - status [ref=f18e439]:
+                            - paragraph [ref=f18e444]: Choose an image to begin authoring occlusions.
+                        - button "Generate occlusion drafts" [ref=f18e445] [cursor=pointer]
+                - region [ref=f18e447]:
+                  - generic [ref=f18e448]:
+                    - heading "Import and export" [level=5] [ref=f18e449]
+                    - text: Move cards in and out without changing the flashcards route.
+                  - generic [ref=f18e450]:
+                    - generic [ref=f18e451]: Import/export summary
+                    - generic [ref=f18e455]:
+                      - generic [ref=f18e456]:
+                        - strong [ref=f18e458]: Supported formats
+                        - text: "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
+                      - generic [ref=f18e459]:
+                        - strong [ref=f18e461]: Current import limits
+                        - text: 10,000 lines / 32,768 bytes per line / 8,192 bytes per field
+                      - generic [ref=f18e462]:
+                        - strong [ref=f18e464]: Last action
+                        - text: No import/export actions yet in this session.
+                  - text: ": : : : : :"
+  - alert [ref=f18e160]
+```

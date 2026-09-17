@@ -1,0 +1,54 @@
+[
+  {
+    "path": "apps/tldw-frontend/tsconfig.json",
+    "sha256": "5b71ff79e9d16197f41df2609b33985081fec39360b47966c19c8875202aa8bb"
+  },
+  {
+    "path": "apps/packages/ui/src/components/Option/Characters/CharacterEditorForm.tsx",
+    "sha256": "f51923ab6c385bf5fcbe86fedd4c836bd9d5ce588e518c160afa7804e2d12073"
+  },
+  {
+    "path": "apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx",
+    "sha256": "fcf0c9e164620df8391fa051faedff1e5b6b8f152887322d1dac27924a2e12ad"
+  },
+  {
+    "path": "apps/packages/ui/src/components/Option/Characters/utils.ts",
+    "sha256": "2f0070687c79cee3068df8fdb006f261910c0db6266a252d59ed070c19588e52"
+  },
+  {
+    "path": "apps/packages/ui/src/components/PersonaGarden/VoiceExamplesPanel.tsx",
+    "sha256": "f60e6a815f2cf90b13362dd3a2d8825697f2df2098a833f13d55702f528bf3de"
+  },
+  {
+    "path": "apps/packages/ui/src/services/tldw/domains/characters.ts",
+    "sha256": "178b30cbb0cd77a4a25aae51b4a37544e5193e32ba8ea572673807c455594f94"
+  },
+  {
+    "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+    "sha256": "62e82d6cf682d5aff270a38b70763632bfeb5b40c021871d4512405e19d56447"
+  },
+  {
+    "path": "apps/packages/ui/src/hooks/chat/useCharacterChatMode.ts",
+    "sha256": "743ff1f2db6cf29587eeffc347fd07269ee5c8881c650223db974a0c0000660c"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/characters_endpoint.py",
+    "sha256": "8b1bdad39df395c6f7752a1323cfbda1dd0d65761bbc75c3782bf78589f2f399"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+    "sha256": "ba4153ec740b15703cb56e88cb3ebc5f8fa55538b5c2d27b08fc9371243da394"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/chat.py",
+    "sha256": "db01e193a4dcbbc1dc760bc4bc0d756733969755001265301b3cb6bd8d057a6f"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/schemas/character_schemas.py",
+    "sha256": "ddc1ce22c55d0b323cb505ba4cd86723d242c591d7c06dd302e2531ece741dd4"
+  },
+  {
+    "path": "tldw_Server_API/app/core/Character_Chat/modules/persona_exemplar_selector.py",
+    "sha256": "d33e778e92d749d569fabbd77bb8b769036b54305d422069741a6221ede75db7"
+  }
+]
