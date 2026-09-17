@@ -4,6 +4,8 @@ Date: 2026-09-16. Design tracking: TASK-13261. Implementation tracking: TASK-132
 
 Status: focused specification following the reviewed D1–D6 decisions. This document specifies H1; it does not claim implemented parity. The [review closure](2026-09-16-chatbook-chat-parity-review-closure.md) remains the authority for the full program. The [implementation plan](../../IMPLEMENTATION_PLAN_chatbook_h1_history_selection.md) turns this specification into five deliveries.
 
+Implementation checkpoint, 2026-09-17: the shared contract, native/local owner adapters and mounted selection/review/restore UI have passed their task reviews and required fix reviews. Normal-send integration, safe fork projection, uncertain fork outcomes and final real-browser/owner qualification remain in progress or unstarted; H1 is not complete.
+
 ## 1. Outcome and scope
 
 Choosing an assistant variant must change the history used by the next normal send and by Fork. Those actions capture stable message identities, a boundary and source revisions. They cannot reconstruct ancestry from the currently rendered array, a display index, matching text or a timestamp sort.
@@ -26,6 +28,8 @@ H1 does not implement atomic native forks (H2), complete local/temporary setting
 ## 2. Source baseline and existing seams
 
 Reviewed dev pins: server `59049e094e0845a4611ea725ae19b7c1754ea709`; Chatbook `24094f23d59c7a9d3cfac964c19fd263bc0393b2`. The working checkout currently belongs to unrelated UAT work, so implementation must start in isolation and recheck dev before integration. References below describe the reviewed pin, not every unmerged checkout change. The previous temporary audit checkout has been removed; immutable Git objects remain the source of evidence.
+
+On 2026-09-17, server dev was reverified unchanged and Chatbook dev advanced to `1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6`. The [source refresh](2026-09-17-chatbook-chat-parity-source-refresh.md) records its model/settings/readiness delta. No identified H1 contract changes were introduced; the source references and original audit results below retain their historical pin.
 
 | Existing path | Evidence and implication |
 |---|---|

@@ -4,7 +4,7 @@ Date: 2026-09-16
 
 Tracking: TASK-13261
 
-Status: research and revised proposed design. The [closure addendum][closure] records current binding decisions and review-loop status; [first][review] and [second][review2] reviews retain historical findings. Application implementation has not started.
+Status: reviewed design with H1 implementation in progress under TASK-13261.1; no complete parity row is awarded. The [closure addendum][closure] records current binding decisions and review-loop status; [first][review] and [second][review2] reviews retain historical findings. The [2026-09-17 source refresh](2026-09-17-chatbook-chat-parity-source-refresh.md) adds the latest model/settings/readiness changes.
 
 Read the [call-path audit and port design][audit] for mounted flows, retained-field contracts and earlier test results, and the [closure addendum][closure] for selection, publication, local availability, sync authority and runtime decisions. E1–E12 identify the audited areas. This inventory does not claim all rows are live-qualified.
 
@@ -26,8 +26,8 @@ Parity means equivalent user-observable behavior and retained state, adapted to 
 
 | Repository | Inspected snapshot | Verification |
 |---|---|---|
-| tldw_chatbook | [`24094f23d59c7a9d3cfac964c19fd263bc0393b2`][cb-head] | Remote `dev` verified with `git ls-remote`; inspected immutable git objects. |
-| tldw_server | [`59049e094e0845a4611ea725ae19b7c1754ea709`][sv-head] | Remote `dev` verified with `git ls-remote`; inspected immutable git objects. |
+| tldw_chatbook | Historical full audit: [`24094f23d59c7a9d3cfac964c19fd263bc0393b2`][cb-head]. Latest source delta: [`1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6`](https://github.com/rmusser01/tldw_chatbook/commit/1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6). | Remote `dev` reverified on 2026-09-17; immutable delta reviewed in the [source refresh](2026-09-17-chatbook-chat-parity-source-refresh.md). Original code/test citations retain their historical pin. |
+| tldw_server | [`59049e094e0845a4611ea725ae19b7c1754ea709`][sv-head] | Remote `dev` reverified unchanged on 2026-09-17 with `git ls-remote`; inspected immutable git objects. |
 | tldw-agent integration | [`tools/tldw-agent` at the pinned server commit][agent-readme], [ACP architecture][sv-acp-guide] | Current in-repository runner and server/client integration inspected. The earlier separate January checkout is not the integration baseline for this design. |
 
 Both application working trees contain unrelated ongoing work. That work is excluded from these findings. The retired ChatWindowEnhanced behavior checklist is historical, not the current Console baseline. Re-check remote heads before implementation and record changes to this matrix instead of silently changing the baseline.
@@ -41,7 +41,7 @@ The following 90 rows inventory behavioral requirements and map existing impleme
 | Missing in mapped path | The specifically inspected implementation cannot express the required behavior. This is not proof that no other candidate implementation exists anywhere in the repository. |
 | Unverified | A source requirement is established, but the mapped destination owner is only a candidate or the production composition has not been established. |
 
-Source guides establish intended behavior; source code and tests refine it. The [call-path audit][audit] now traces mounted controls through clients, endpoints, services, and persisted state, and records focused tests against pinned source. Some tests passed; others failed or could not reach behavior assertions. No live model/device/external-host journeys or complete two-surface parity qualification have been performed. Chatbook's earlier 657f70ff baseline is superseded by 24094f23, which includes the newer backup/recovery changes.
+Source guides establish intended behavior; source code and tests refine it. The [call-path audit][audit] traces mounted controls through clients, endpoints, services, and persisted state, and records focused tests against its pinned source. Some tests passed; others failed or could not reach behavior assertions. No complete two-surface parity qualification has been performed. The historical full audit at 24094f23 superseded the earlier 657f70ff baseline and includes the backup/recovery changes. The [latest delta](2026-09-17-chatbook-chat-parity-source-refresh.md) adds required C07/C08 acceptance cases for retained settings, exact endpoint discovery, context-capacity provenance and responsive credential readiness; its source inspection does not imply new test or parity completion evidence.
 
 ## Existing ownership to preserve
 

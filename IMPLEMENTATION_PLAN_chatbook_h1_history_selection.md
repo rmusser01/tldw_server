@@ -27,6 +27,8 @@
 
 Execution started from the reviewed design commit on `codex/chatbook-h1-history-selection`; per-stage status and the execution ledger record progress. This plan is not a passing test report. The reviewed server pin is `59049e094e0845a4611ea725ae19b7c1754ea709`; Chatbook is `24094f23d59c7a9d3cfac964c19fd263bc0393b2`. Source paths below were checked against that server object. New paths are explicitly labeled Create.
 
+Fresh remote verification on 2026-09-17 found server dev unchanged and Chatbook advanced to `1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6`. The [source delta review](Docs/Design/2026-09-17-chatbook-chat-parity-source-refresh.md) records the C07/C08 settings/provider/context refinements and why they do not change the identified H1 contracts. Historical evidence retains its original pin; broader parity remains open.
+
 Execution uses the root checkout's existing virtual environment with this isolated worktree as cwd/PYTHONPATH. After a frozen Bun install, `pnpm exec` attempted dependency reconciliation; use the installed `apps/packages/ui/node_modules/.bin/vitest` from the UI package cwd for equivalent focused test commands. The shared JSON fixture is explicitly tracked despite the repository's JSON ignore rule.
 
 - [x] Read the current Backlog workflow and TASK-13261.1; set implementation status to In Progress when actual execution starts. Keep design and implementation completion separate.
@@ -362,22 +364,25 @@ Execution evidence: `f93b78c5d9` implements local/native client owners and Dexie
 - Create `apps/packages/ui/src/hooks/chat/useHistorySelection.ts` and `src/hooks/chat/__tests__/useHistorySelection.test.tsx`.
 - Create `apps/packages/ui/src/components/Common/Playground/HistorySelectionReview.tsx` and neighboring `__tests__/HistorySelectionReview.test.tsx`.
 - Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`, `Playground.tsx`, `components/Sidepanel/Chat/body.tsx` and `routes/sidepanel-chat.tsx`.
+- Place the single full-page history-selection provider above participating sidebar loaders in both actual shells: shared `components/Layouts/Layout.tsx` and `apps/tldw-frontend/components/layout/WebLayout.tsx`. Gate the provider to the actual H1 chat route and reuse it inside Playground, with a standalone fallback only when absent. Verify route entry/exit and both real layout boundaries; the shared layout intentionally bypasses its root under Next.js and cannot alone establish WebUI coverage. Passive `useMessageOption` consumers must not hydrate; explicitly retain scoped hydration in the existing non-H1 surface owners.
 - Extend `components/Sidepanel/Chat/SidepanelHeaderSimple.tsx`, `ControlRow.tsx` and their existing route/handoff tests only where necessary to route H1 expansion to the extension full page with the scoped selection reference. Keep explicit WebUI draft/page-context handoff distinct.
 - Modify `apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx`, `hooks/chat/useServerChatLoader.ts`, `store/playground-session.tsx`, `store/sidepanel-chat-tabs.tsx` and `store/option/types.ts`.
 - Extend `hooks/useLoadLocalConversation.ts` and `hooks/chat/useServerChatHistoryId.ts` at their actual hydration/mirror ownership boundaries; extend `hooks/chat/__tests__/useServerChatHistoryId.test.tsx` and add focused local-load race/selection tests. The former directly formats and installs raw history after asynchronous reads; the latter currently reuses a bare server ID and can link the current local history. H1 loads must preserve selection fences and verified ownership through these real callbacks.
 - Extend `apps/packages/ui/src/db/dexie/helpers.ts` only at the selected-history formatting boundary. The live hydration imports `formatToMessage`/`formatToChatHistory` there; avoid legacy variant collapse and timestamp sorting for an explicit selected path. Keep canonical provider roles/tool fields distinct from presentation role normalization.
-- Extend `apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx`, `useServerChatLoader.test.ts`, `useServerChatLoader.scope.test.tsx` and `src/store/__tests__/playground-session-store.test.ts`.
+- Extend `apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx`, `useServerChatLoader.scope.test.tsx` and `src/store/__tests__/playground-session-store.test.ts`; run the existing `useServerChatLoader.test.ts` regression suite unchanged. New loader scope/enablement tests belong in the mounted scope suite rather than a redundant change to the older loader suite.
 - Modify canonical `apps/packages/ui/src/assets/locale/en/playground.json`; regenerate `apps/packages/ui/src/public/_locales/en/playground.json` through the existing locale script. Use the shared Playground namespace in both shells.
 
 **Interfaces:** Consumes owner adapter snapshots/bookmarks. Produces scoped view selection, explicit stale/review states and selected rendering for every hydration/control path.
 
-- [ ] Write mounted tests that open the same conversation in A and B, choose different variants, reopen A's bookmark and deliver a result captured in B. Assert selected IDs/revisions and visible history, not only setter calls.
-- [ ] Add a legacy review test with an omitted alternative, a before-first cursor and a source mutation during confirmation. Confirming a rendered subset cannot mark the full manifest reviewed. Include keyboard selection, accessible error/focus behavior and virtualized row identity.
-- [ ] Run failing tests, then implement the hook with one per-view revision and conditional result following. Do not use the single existing `tldw-playground-session` localStorage record as global selection authority.
-- [ ] Integrate both swipe controls and all listed hydration paths. Make formatters accept a resolved selection; their legacy no-selection signature can remain for read-only callers but must not enter H1 mutation paths. A missing bookmarked ID produces a visible stale choice.
-- [ ] Integrate the shared review UI in both full-page shells and compact sidepanel. Carry scoped selection/projection references into extension full-page expansion. Do not imply D3 active stream handoff is implemented.
-- [ ] Add review/pending/stale strings to canonical `apps/packages/ui/src/assets/locale/en/playground.json`, using neighboring Playground namespaces and existing English fallback. Run `pnpm --dir apps/extension exec node scripts/sync-public-locales.js playground.json` and review generated changes; do not hand-edit public locale output or invent translations. Record any additional generated locale files in Backlog.
-- [ ] Run the mounted/hydration suites, review/type-check and commit.
+- [x] Write mounted tests that open the same conversation in A and B, choose different variants, reopen A's bookmark and deliver a result captured in B. Assert selected IDs/revisions and visible history, not only setter calls.
+- [x] Add a legacy review test with an omitted alternative, a before-first cursor and a source mutation during confirmation. Confirming a rendered subset cannot mark the full manifest reviewed. Include keyboard selection, accessible error/focus behavior and virtualized row identity.
+- [x] Run failing tests, then implement the hook with one per-view revision and conditional result following. Do not use the single existing `tldw-playground-session` localStorage record as global selection authority.
+- [x] Integrate both swipe controls and all listed hydration paths. Make formatters accept a resolved selection; their legacy no-selection signature can remain for read-only callers but must not enter H1 mutation paths. A missing bookmarked ID produces a visible stale choice.
+- [x] Integrate the shared review UI in both full-page shells and compact sidepanel. Carry scoped selection/projection references into extension full-page expansion. Do not imply D3 active stream handoff is implemented.
+- [x] Add review/pending/stale strings to canonical `apps/packages/ui/src/assets/locale/en/playground.json`, using neighboring Playground namespaces and existing English fallback. Run `node scripts/sync-public-locales.js playground.json` from `apps/extension` and review generated changes; do not hand-edit public locale output or invent translations. Direct Node avoids pnpm11's attempted dependency reconciliation in this frozen Bun environment. Record any additional generated locale files in Backlog.
+- [x] Run the mounted/hydration suites, review/type-check and commit.
+
+Execution evidence: `9a2c54ff7f` mounts independent selection, complete legacy review, scoped restore and extension expansion; `5881b02870` fixes destination URL replay, shared-session validity overriding tab ownership, and unreadable/unbindable legacy mirrors. Independent task review and scoped fix review are complete with all three P2 and both minor items addressed and no new P1/P2. The final amended scope passed64/64 tests across5files, including actual mounted Playground/session/controller/Bind compositions; earlier shared246 cases and22 WebUI boundary cases passed across recorded runs. Core TypeScript, formatting and whitespace checks pass. Expanded shared/WebUI typing retains two unchanged prompt-sync diagnostics; ordinary model-count test stdout is disclosed. Real IndexedDB/browser/visual proof and actual send/settlement remain subsequent tasks.
 
 ### Task 3.2: freeze normal request preparation and accepted settlement
 
@@ -414,6 +419,8 @@ Execution evidence: `f93b78c5d9` implements local/native client owners and Dexie
 **Status:** Not Started.
 
 ### Task 4.1: one allowlisted local copy projector
+
+Dependency closure required: the unused `types/history-selection.ts` fork result scaffold must be completed to spec section8 before live use (owner_key on all variants, child_id, committed message_map, distinct blocked state). Task4.1 owns this narrow type correction and actual handler assertions; Task4.2 consumes the completed contract. Comparison capture must use a coherent owner read and explicit model projection, retaining Task2.3's normal-send comparison gate.
 
 **Files:**
 
@@ -483,12 +490,14 @@ Execution evidence: `f93b78c5d9` implements local/native client owners and Dexie
 - [ ] Run the focused browser commands:
 
 ```bash
-pnpm --dir apps/tldw-frontend exec playwright test e2e/workflows/chat-history-selection.spec.ts --project=chromium --workers=1
-pnpm --dir apps/extension exec playwright test tests/e2e/chat-history-selection.spec.ts --project=chromium-extension --workers=1
+# cwd apps/tldw-frontend, using a dedicated H1 server URL/command
+node_modules/.bin/playwright test e2e/workflows/chat-history-selection.spec.ts --project=chromium --workers=1
+# cwd apps/extension, after building current source
+node_modules/.bin/playwright test tests/e2e/chat-history-selection.spec.ts --project=chromium-extension --workers=1
 ```
 
 - [ ] Run the new native selection/API tests plus existing continuation, multi-image, system-message and provider-call-parameter suites. Use the repository virtual environment. Confirm actual PostgreSQL execution separately from SQLite; use the existing fixture's unavailable signal only, not custom silent skips.
-- [ ] Run `source .venv/bin/activate && pnpm --dir apps/tldw-frontend run generate:api-types` for the changed API contract, followed by `pnpm --dir apps/packages/ui run verify:openapi`. Review the fingerprint and preserve ignored generated artifacts as build outputs. Then run `pnpm --dir apps/tldw-frontend run typecheck`, `pnpm --dir apps/extension run compile`, relevant shared Vitest suites and project lint checks on touched files.
+- [ ] Activate the root checkout's virtual environment, then run `node apps/tldw-frontend/scripts/generate-api-types.mjs` and `node apps/extension/scripts/verify-openapi-client-paths.mjs` from this worktree. Review the fingerprint and preserve ignored generated artifacts as build outputs. Run each app's installed `tsc` from its package cwd: frontend `NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit`; extension `node_modules/.bin/tsc --noEmit -p tsconfig.compile.json`. Run relevant shared Vitest suites and project lint checks on touched files. These equivalent script commands avoid pnpm11 dependency reconciliation in the frozen Bun environment.
 - [ ] Run touched Python security validation:
 
 ```bash
