@@ -1,0 +1,52 @@
+{
+  "files": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice223-original-review-settled.txt",
+      "sha256": "5715ea97ac5b5297fba40a67a16b796de9db35ea4774c295844f79d320838537"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice223-assistant-ready.txt",
+      "sha256": "072f7665712b4c9f71a55162d06cf38f520e85fffc8e343b5b315bd1f8c78a49"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice223-deep-dive-open.txt",
+      "sha256": "c0caee740ebae9ba66c0b2af56035c9b543467ddfedd063af2e887ea2425cf53"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice223-deep-dive-settled.txt",
+      "sha256": "4176050d541dff2ddfdaace27e11278c65098c6ea5a66a4eb740fa7057728390"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice223-deep-dive-events.txt",
+      "sha256": "88c9aa1eb89e0cf1d4f21a2f1426fe393b33e70eee246a4dca552989ad9d69fb"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-open.txt",
+      "sha256": "45c0ffc6d53d4b513fc723f79dd9b3dde6abb4b8a5e3edb6ad49257f77fa6e7f"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-settled.txt",
+      "sha256": "02a72e127282ae7c48e10a3cb6bc9fc974d3d542514874c9df9b980a21207252"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice220-deep-dive-events.txt",
+      "sha256": "12f8756c29ba31a81b9048f125b1f0aa3e722fc8a8ca260c2209be9cc6e2fd8b"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed222-before-restart.json",
+      "sha256": "9fd9f0a32b2b5681ebf7c721a4c2fee6c7238974fada92f39d04e7026712d1a1"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/reviewed222-after-health.json",
+      "sha256": "c1cd75ab02557143f5e2b566e57f516f7fdbb0dde54c18f2068c164fb18840f7"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/overlap89545-health.json",
+      "sha256": "147aaff7cbe2ecacbc2a44c097e87ad4dc99135827be5152c81d2fe976c3416d"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/study-pack-job5-reviewed222-readback-result.json",
+      "sha256": "5bc12c62b3c30760b5a701082eb3974a0ca3a576119bfabc06b50cb51d7093c1"
+    }
+  ]
+}

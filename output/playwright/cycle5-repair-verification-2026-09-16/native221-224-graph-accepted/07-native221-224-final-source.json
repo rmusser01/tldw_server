@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-17T09:17:57.275Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "sha256": "0a24a8a1de21f67511abdec257a9e2304fa2a86803b88054b4e2f341598cd573"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphWorkspace.tsx",
+      "sha256": "36b09e810ab8e0f00f2108408b822f1ec22415597c7becc34e49560d7bd01520"
+    },
+    {
+      "path": "apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "45dab4d26eef53c199a20fe525efdd0f5d4db2c28a13f7c365393ba36e645a60"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx",
+      "sha256": "3f0c0a9c1ebd6d9d0f33266219170792c88812b35fa46138d2b52f8fd065f57a"
+    },
+    {
+      "path": "apps/packages/ui/src/services/note-graph-suggestions.ts",
+      "sha256": "3d1cf6becffd0f9b29a5c4e485721b0de843524a3b411d5de7fbc39964030fa2"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/note-graph-identities.test.ts",
+      "sha256": "b2e6480a7e4859a167b5d6503aa5fa0e06afaa7bfd302fe36e8efea740feb406"
+    }
+  ]
+}

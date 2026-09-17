@@ -1,0 +1,51 @@
+{
+  "initial_causal_red": {
+    "failed": 5,
+    "passed": 4
+  },
+  "final_test_baseline_replay": {
+    "failed": 8,
+    "passed": 4,
+    "method": "Vite read-only load override; no source mutation"
+  },
+  "focused_green": 18,
+  "final_green": {
+    "passed": 95,
+    "files": 8,
+    "skipped": 0,
+    "log": "lifetime-final-green.log",
+    "duration_seconds": 4.16
+  },
+  "eslint_baseline_errors": 0,
+  "eslint_baseline_warnings": 0,
+  "eslint_final_errors": 0,
+  "eslint_final_warnings": 0,
+  "compiler": {
+    "baseline": 90,
+    "current": 90,
+    "diagnostics_equal_after_line_position_normalization": true
+  },
+  "bandit": {
+    "findings": 0,
+    "tsx_parse_errors": 3,
+    "meaningful_typescript_coverage": false
+  },
+  "whitespace": "PASS",
+  "native": "pending root denied/admin controls",
+  "reviewer_lifetime_red": {
+    "failed": 1,
+    "passed": 12,
+    "path": ".tmp/uat221-independent-20260917/late-success-full-red.log"
+  },
+  "permanent_lifetime_red": {
+    "failed": 4,
+    "passed": 13,
+    "log": "lifetime-red.log"
+  },
+  "final_tests_previous_candidate_replay": {
+    "failed": 4,
+    "passed": 14,
+    "log": "lifetime-final-baseline-red.log",
+    "method": "nonmutating Vite loader"
+  }
+}

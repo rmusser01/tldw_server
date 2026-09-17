@@ -1,0 +1,66 @@
+{
+  "task": "TASK13260.162",
+  "disposition": "clear",
+  "files": [
+    {
+      "path": ".tmp/uat224-independent-20260917/REVIEW224.md",
+      "sha256": "d6e7c4863634396a3d19a46b9a518faf2f4d09eaddab8a8259cb6e0becf04ad8",
+      "bytes": 3810
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/bandit-ts.json",
+      "sha256": "d02d926e366b655d1750926a8faba61ce08521bdcd1d109a6983cbc1fe59ec95",
+      "bytes": 1023
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/counterexamples-green.log",
+      "sha256": "597b1b2e511ee26cb25493b325ee55352accf47f3437b435d32ca572d570f24e",
+      "bytes": 525
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/counterexamples.ts.txt",
+      "sha256": "ddfcddd5bc66fc6844c695dae80de04cb683d22f999423efd1b1c482a844af3c",
+      "bytes": 1330
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/eslint.json",
+      "sha256": "e59933cd3d3e58014c8fd93b3c448082fe2808c446a145fb6f6b5380f2de213d",
+      "bytes": 583
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/eslint.stderr",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/final-compiler-comparison.json",
+      "sha256": "f5693cb021aa624b81dac569c35c7a33a0529465a9f7700f48f7a440adb982d9",
+      "bytes": 145
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/focused-green.log",
+      "sha256": "6b6db2ddf29d101ee7955a2916a83126744811d096ced1d9916e9e23ca68725e",
+      "bytes": 1379
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/probes.config.ts",
+      "sha256": "6b68baa82bbda41e01e60844a63d507bc295d9eecde6afa0f8df23f8bcc06a0a",
+      "bytes": 672
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/source-after.json",
+      "sha256": "6936754e0d1a06034fcc955902d9e1e2820e413b92c945ff3c324b4189ba71c3",
+      "bytes": 413
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/source-before.json",
+      "sha256": "6936754e0d1a06034fcc955902d9e1e2820e413b92c945ff3c324b4189ba71c3",
+      "bytes": 413
+    },
+    {
+      "path": ".tmp/uat224-independent-20260917/tsc-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "bytes": 24428
+    }
+  ]
+}

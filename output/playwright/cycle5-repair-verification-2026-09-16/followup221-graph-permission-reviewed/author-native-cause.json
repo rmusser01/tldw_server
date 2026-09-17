@@ -1,0 +1,25 @@
+{
+  "source_files": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice209-210-graph-events.txt",
+      "sha256": "6997b868df1cfc2663fb4e6ee95270f450b923bd93026219351e2dd9f31a6b8d"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice210-graph-settled.txt",
+      "sha256": "be15f0ffba17a5e5da2f704bf2b60540a6753199caba99133aaf6795b70f209c"
+    }
+  ],
+  "responses": [
+    {
+      "event": "response",
+      "at": "2026-09-17T08:21:15.186Z",
+      "bodyReadAt": "2026-09-17T08:21:15.188Z",
+      "url": "http://127.0.0.1:18583/api/v1/notes/graph?center_note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8&radius=1&max_nodes=120&max_edges=480",
+      "status": 403,
+      "body": "{\"detail\":\"Permission denied: missing notes.graph.read\"}"
+    }
+  ],
+  "snapshot_excerpt": [
+    "- alert [ref=f43e526]: Could not load the notes graph."
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "at": "2026-09-17T09:32:01.517Z",
+  "files": [
+    {
+      "file": "ACCEPTANCE222.md",
+      "source": ".tmp/uat222-223-native-audit-20260917/ACCEPTANCE222.md",
+      "original_sha256": "9c2f3cf58a6880d25b3b8c970373cdd8b090ae0bbaede2022f69a9b3b85607af",
+      "retained_sha256": "9c2f3cf58a6880d25b3b8c970373cdd8b090ae0bbaede2022f69a9b3b85607af",
+      "normalization": "none"
+    },
+    {
+      "file": "ACCEPTANCE223.md",
+      "source": ".tmp/uat222-223-native-audit-20260917/ACCEPTANCE223.md",
+      "original_sha256": "69d6cff9ff436f7e3e112b7750c66a04116b684302261bebd7b3a6b617e0dfbb",
+      "retained_sha256": "69d6cff9ff436f7e3e112b7750c66a04116b684302261bebd7b3a6b617e0dfbb",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest222.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/audit-manifest222.json",
+      "original_sha256": "e1c952b83888e05c8833744bc2b3ae824540dbc09a676b5d1e1bd6ab9f6f034e",
+      "retained_sha256": "e1c952b83888e05c8833744bc2b3ae824540dbc09a676b5d1e1bd6ab9f6f034e",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest223.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/audit-manifest223.json",
+      "original_sha256": "035ad81183c88d51c478c0b76dfd6661345ce26c6edc2d886ee538e97ab2a94d",
+      "retained_sha256": "035ad81183c88d51c478c0b76dfd6661345ce26c6edc2d886ee538e97ab2a94d",
+      "normalization": "none"
+    },
+    {
+      "file": "compact-native223-events.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/compact-native223-events.json",
+      "original_sha256": "e038c1db6726d66c30edb1a0ec7ea468d8d4fd7c6c6c1e5f26fc235fb3b63575",
+      "retained_sha256": "e038c1db6726d66c30edb1a0ec7ea468d8d4fd7c6c6c1e5f26fc235fb3b63575",
+      "normalization": "none"
+    },
+    {
+      "file": "compact-native223-ui.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/compact-native223-ui.json",
+      "original_sha256": "223854c6a2a79cd085ac6fbb582a9f8a25a108c5302290ba2e5aff52667d3270",
+      "retained_sha256": "223854c6a2a79cd085ac6fbb582a9f8a25a108c5302290ba2e5aff52667d3270",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest222.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/input-manifest222.json",
+      "original_sha256": "6ff4f1d47010bc000d140062fbf034618857cad02f24462b5d17b082e38c3ba0",
+      "retained_sha256": "6ff4f1d47010bc000d140062fbf034618857cad02f24462b5d17b082e38c3ba0",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest223.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/input-manifest223.json",
+      "original_sha256": "13d12549b119fd24d064a11c9db9565637ae03976b8b50f36a08b795ee85151b",
+      "retained_sha256": "13d12549b119fd24d064a11c9db9565637ae03976b8b50f36a08b795ee85151b",
+      "normalization": "none"
+    },
+    {
+      "file": "receipt222.json",
+      "source": ".tmp/uat222-223-native-audit-20260917/receipt222.json",
+      "original_sha256": "7c8a31d7e018941d126b556f18891b4f363674ef715478ff96b98710625f8dfb",
+      "retained_sha256": "7c8a31d7e018941d126b556f18891b4f363674ef715478ff96b98710625f8dfb",
+      "normalization": "none"
+    },
+    {
+      "file": "task222.txt",
+      "source": ".tmp/uat222-223-native-audit-20260917/task222.txt",
+      "original_sha256": "ca04a22d6e2ee583683ba07f8a5124ef5d97b978230ea8233ed10f4dab3cfeed",
+      "retained_sha256": "fcbffe6cba5a032015800336358f491aaee73217e4f71c68991812a868408531",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "task223.txt",
+      "source": ".tmp/uat222-223-native-audit-20260917/task223.txt",
+      "original_sha256": "0d54f93224d8ab4159fcdcfee97c5f14c39fefcc536812764e48a14d3a981ed1",
+      "retained_sha256": "f966572ee99de0319d1cb974f51f83d38058c96f8b94fb94ec74fbbeee6e48a0",
+      "normalization": "trailing text whitespace and final newline"
+    }
+  ]
+}

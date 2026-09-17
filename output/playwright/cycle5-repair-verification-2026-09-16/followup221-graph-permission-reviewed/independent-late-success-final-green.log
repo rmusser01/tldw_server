@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:88905) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx (19 tests) 1502ms
+
+ Test Files  1 passed (1)
+      Tests  19 passed (19)
+   Start at  02:16:47
+   Duration  3.07s (transform 252ms, setup 108ms, import 1.10s, tests 1.50s, environment 277ms)

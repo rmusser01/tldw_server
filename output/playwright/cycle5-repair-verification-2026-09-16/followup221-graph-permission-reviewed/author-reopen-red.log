@@ -1,0 +1,74 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:83346) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx (12 tests | 2 failed) 562ms
+     ✓ explains the actual service403 without claiming an empty graph or rendering server diagnostics 96ms
+     ✓ does not automatically request a denied graph again on reconnect 51ms
+     ✓ lets an explicit refresh recover after permission changes 61ms
+     ✓ removes cached graph data, search and inspector after a refresh403 45ms
+     ✓ does not carry Alice's denial into a replacement authority 20ms
+     ✓ withdraws cached pages when the explicit cursor request receives403 57ms
+     ✓ keeps the current denial when a previous authority's request rejects late 48ms
+     × does not redisplay denied cached pages when reopening after refresh 59ms
+     × does not redisplay denied cached pages when reopening after expand 56ms
+     ✓ keeps an ordinary500 retryable with the existing load-error message 33ms
+     ✓ retains the existing graph on transient refresh failure and offline transition 30ms
+     ✓ preserves the genuine loading state before a response 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > does not redisplay denied cached pages when reopening after refresh
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > does not redisplay denied cached pages when reopening after expand
+AssertionError: expected { …(12) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "active_note_count": 1,
+  "all_notes_eligible": true,
+  "all_notes_note_cap": 100,
+  "cursor": "next-page",
+  "edges": [],
+  "has_more": true,
+  "limits": {
+    "max_degree": 40,
+    "max_edges": 480,
+    "max_nodes": 120,
+  },
+  "nodes": [
+    {
+      "created_at": null,
+      "degree": 0,
+      "deleted": false,
+      "id": "note:a",
+      "label": "Private Alpha note",
+      "primary_source_id": null,
+      "tag_count": 0,
+      "type": "note",
+    },
+  ],
+  "radius_cap_applied": false,
+  "suggestions_authorized": false,
+  "truncated": false,
+  "truncated_by": [],
+}
+
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:157:43
+    155|     first.unmount()
+    156|     const reopened = renderHook(useGraph, { wrapper })
+    157|     expect(reopened.result.current.graph).toBeNull()
+       |                                           ^
+    158|     await waitFor(() => expect(reopened.result.current.isPermissionDen…
+    159|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 10 passed (12)
+   Start at  01:44:48
+   Duration  1.66s (transform 196ms, setup 79ms, import 736ms, tests 562ms, environment 200ms)

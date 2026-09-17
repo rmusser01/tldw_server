@@ -1,6 +1,14 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint: 224 unique findings — 218 verified, 3 awaiting targeted acceptance (181, 205, 223), 3 unresolved (221, 222, 224).** Independent native audit accepts171 Notes restart recovery and213/214 Character context reads.181 retains its specific Flashcards-before-restart gap. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-224-context-accepted.json). Full fresh matrix has not restarted.
+- **Latest checkpoint: 225 unique findings — 224 verified, 1 unresolved (225).** Independent native acceptance closes205: one submission, queued/running feedback, completed job6 and correct deck navigation/reload.225 now reproduces on both SQLite and PostgreSQL; read-only native metadata confirms no Sync storage or dataset authority for the original administrator. The repair design is under review. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-225-progress-accepted.json). Full fresh matrix has not restarted.
+
+- **Prior checkpoint: 225 unique findings — 223 verified, 1 awaiting acceptance audit (205), 1 unresolved (225).** Independent native audits accept181 warmed restart and221–224 Graph, private-pack and citation-link criteria. New job6 completes and opens its two-card deck;205 audit is underway. Graph suggestion503 diagnosis remains open. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-225-bounded-native-accepted.json). Full fresh matrix has not restarted.
+
+- **Prior checkpoint: 225 unique findings — 218 verified, 6 awaiting acceptance reconciliation, 1 unresolved (225).** The actual administrator Graph suggestion capability/list reads return503; diagnosis is underway underTASK13260.163. Warmed restart, pack ownership, citation navigation and Graph acceptance audits are finishing. New ordinary UI Study Pack progress acceptance is running. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-225-suggestion-read-open.json). Full fresh matrix has not restarted.
+
+- **Prior checkpoint: 224 unique findings — 218 verified, 6 awaiting targeted acceptance (181, 205, 221–224), no unresolved implementation.** All current repairs are independently reviewed and committed. Replacement API89545 loads598d377df2 and reaches health200 while old82583 drains. Original job5 Alice/Bob readback now passes20requests, including foreign pack404; native audits continue. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-224-repairs-reviewed.json). Full fresh matrix has not restarted.
+
+- **Prior checkpoint: 224 unique findings — 218 verified, 3 awaiting targeted acceptance (181, 205, 223), 3 unresolved (221, 222, 224).** Independent native audit accepts171 Notes restart recovery and213/214 Character context reads.181 retains its specific Flashcards-before-restart gap. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-224-context-accepted.json). Full fresh matrix has not restarted.
 
 - **Prior checkpoint: 224 unique findings — 215 verified, 6 awaiting targeted acceptance, 3 unresolved (221, 222, 224).** Note citation route223 is reviewed and committed. Graph permission review found a late-request cache race; native administrator Graph also exposes a separate note-identity mismatch that hides focused relationships. The broader restart criterion181 remains open because Flashcards reads occurred after the prior restart. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-224-graph-identity-open.json). Full fresh matrix has not restarted.
 
@@ -2352,7 +2360,7 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - TASK13260.158 tracks an actual official-fixture assistant GET with persisted citation: PostgreSQL fails four timestamp validations in citations and primary_citation; SQLite passes. Separate from219 pack summary. Minimal datetime-only schema normalization approved; preserve ownership, stored data, strings/null and strict invalid-type handling. Evidence: `.tmp/uat219-repair-20260917/IMPLEMENTATION219.md`.
 
-## UAT-221 — P3, unresolved — Notes Graph hides permission denial behind generic failure
+## UAT-221 — P3, verified — Notes Graph hides permission denial behind generic failure
 
 - TASK13260.159 tracks the explicit Alice Graph request at08:21:15UTC:403 missing notes.graph.read, while UI only says Could not load the notes graph. Authorization is intentional and remains unchanged. Separate from019 Connections and210 backend mapping. Administrator focused graph returned200 with the synthetic own note and tag; whole-library graph also200. Initial harness expected frontend-prefixed IDs from raw API and failed; corrected read-only continuation passes without changing product or recreating the note. Evidence: `.tmp/uat198-181-native-20260917/alice209-210-graph-events.txt`, `graph210-admin-native-api-result.json`, `graph210-admin-native-continuation-result.json`.
 
@@ -2360,11 +2368,11 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - UAT206 and215 verified by independent native audit. Default worker76778 processes ordinary UI-origin job5 to completed; original job2 now reports failed with safe error through detail/catalogue. Separate219 result-display500 remains. No native failed-job drawer recovery claim. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native206-215-worker-terminal-accepted/README.md).
 
-## UAT-222 — P1, unresolved — Foreign Study Pack metadata exposes private source evidence
+## UAT-222 — P1, verified — Foreign Study Pack metadata exposes private source evidence
 
 - TASK13260.160 precedes repair. On reviewed nativeAPI82583, Alice2 originaljob5 completed pack2/deck10 and three cited cards read200. Bob3 job5 returns404, but direct pack2 GET returns200 with Alice private source evidence_text. Separate deck/card/assistant negatives pass. No native foreign mutation or regeneration was performed. Service role remains the previously qualified privileged/BYPASSRLS setup; restricted-role controls are separate. Evidence: `.tmp/uat198-181-native-20260917/study-pack-job5-complete-readback-result.json`; read-only bounded continuation explicitly excludes this defect while checking originalSourcev1/cardv2unchanged.
 
-## UAT-223 — P2, implemented; awaiting native acceptance — Note citation deep-dive navigates to an unsupported route
+## UAT-223 — P2, verified — Note citation deep-dive navigates to an unsupported route
 
 - TASK13260.161 tracks the actual click from original pack2/deck10 carda33c73dc after citation rendering succeeds. The backend emits `/notes/<id>?note_id=<id>`; WebUI returns404. The registered Notes route reads `source_ref_id` on `/notes`. Bounded repair preserves locator values and authoritative source identity with encoded query parameters. Twelve causal cases fail on prior source; adjacent actual PostgreSQL/SQLite verification is running. Source text-anchor scrolling is not claimed; acceptance requires opening the correct unchanged original note.
 
@@ -2372,10 +2380,18 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - UAT197/204/216/219/220 verified after independent native audit. Original job5 remains pack2/deck10 with three owner2 cards and citations; UI opens Review3 and displays the supporting quote. Native source note remainsv1 and original Citrine cardv2/rep1. GET assistant creates empty threads; no regenerated job or changed original card/source. Separate222 foreign metadata disclosure and223 source-link404 remain unresolved. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native197-204-216-219-220-study-pack-accepted/README.md).
 
-## UAT-224 — P2, unresolved — Graph note identities hide focused relationships
+## UAT-224 — P2, verified — Graph note identities hide focused relationships
 
 - TASK13260.162 precedes edits. Native administrator graph200 contains note11c86b62-d045-4836-9e2b-f9b68b14650f and its tag edge, but frontend selection/canvas expect note: prefixed IDs. Relationships reports “No relationships are visible in this loaded graph.” The service validates raw IDs without normalization. Repair is confined to that service boundary and tests; backend API, permission handling and graph data stay separate. Original screenshot and API/UI receipts are in `.tmp/uat198-181-native-20260917/admin221-graph.png`, `admin221-graph-events.txt`, and `admin224-relationships-open.txt`.
 
 ### 09:18 UTC Notes and Character acceptance
 
 - UAT171/213/214 meet their bounded native criteria after independent audit; all three tasks closed. API source captures match3668files per runtime; Character user201/completion200/persistence200 and canonical parent linkage pass. Startup research polling500 before readiness is preserved. UAT181 remains open because direct Flashcards/deck reads were first retained after replacement. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native171-213-214-accepted-181-gap/README.md).
+
+## UAT-225 — P2, unresolved — Graph suggestion reads are unavailable on PostgreSQL
+
+- TASK13260.163 precedes test/repair edits. Actual administrator graph200 advertises suggestions_authorized=true; automatic capabilities and pending-suggestions GETs both return503 notes_graph_suggestions_unavailable at09:16:33.010/.012UTC. Both safe responses are retained in `.tmp/uat198-181-native-20260917/admin224-relationships-events.txt`. This is separate from224 focus/relationship identity and221 intentional permission denial. Diagnose configuration/worker/provider versus storage before choosing any production change; no native suggestion generation was attempted.
+
+### 09:32 UTC bounded native acceptance
+
+- UAT181 warmed Flashcards/deck/Notes followed by overlapping API replacement and actual Notesbootstrap200 passes independent audit with zero retained locks in three snapshots. UAT221 denied Graph guidance/manual Refresh,224 administrator focus/tag relationship,222 original private-pack isolation and223 exactsamecard source navigation also pass their independent native audits. Tasks13260.118/159/160/161/162 closed.205newjob6 completes aspack3/deck11/twocards with originaljob5unchanged; its audit remains pending.225suggestioncapability/list503 staysopen. Evidence packages: native181-warmed-restart-accepted, native221-224-graph-accepted, native222-223-private-pack-and-source-accepted.

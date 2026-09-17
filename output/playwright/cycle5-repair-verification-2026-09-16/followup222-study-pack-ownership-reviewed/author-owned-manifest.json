@@ -1,0 +1,15 @@
+{
+  "task": "TASK13260.160",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "63b3ccd15b9ce19bd1d964821eb0d33b4f191ff1a329cd83356e8481a6423d97",
+      "snapshot": ".tmp/uat222-diagnosis-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/StudyPacks/test_study_pack_owner_contract.py",
+      "sha256": "4182f5357e4e591c5176fb054043268ea8b6ac9ccc5819ce9dab26bb5837f5ff",
+      "snapshot": ".tmp/uat222-diagnosis-20260917/review-snapshot/tldw_Server_API/tests/StudyPacks/test_study_pack_owner_contract.py"
+    }
+  ]
+}

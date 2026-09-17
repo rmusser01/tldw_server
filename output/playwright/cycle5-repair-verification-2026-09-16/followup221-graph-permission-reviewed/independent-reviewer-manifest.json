@@ -1,0 +1,146 @@
+{
+  "task": "TASK13260.159",
+  "disposition": "clear after resolved independent cache race",
+  "files": [
+    {
+      "path": ".tmp/uat221-independent-20260917/FINDING221.md",
+      "sha256": "228e395f95b4e789358f86eb431675813de110e229f03d3b3546dc70c5f24fb1",
+      "bytes": 1638
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/REVIEW221.md",
+      "sha256": "f1fde1a4456358272510f8bcfff7bc82420308e41dadf2f8dc1532a4a0833434",
+      "bytes": 6090
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/bandit-tsx.json",
+      "sha256": "5f8dc2293e3ac6a89b8b659279b5d4c5cf8e798fa10a2ddcf52541687b81718f",
+      "bytes": 1376
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/eslint.json",
+      "sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "bytes": 898
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/eslint.stderr",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-bandit-tsx.json",
+      "sha256": "82581e9960a611374bac20d5c78c3ef59173fe9669f0cba5cd10337934789f90",
+      "bytes": 1376
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-compiler-comparison.json",
+      "sha256": "f5693cb021aa624b81dac569c35c7a33a0529465a9f7700f48f7a440adb982d9",
+      "bytes": 145
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-eslint.json",
+      "sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "bytes": 898
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-eslint.stderr",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-green.log",
+      "sha256": "6dbe4e569ad9ca280f19e58584a921acdab7c28dce2872d1fa432ecd5b29e8e2",
+      "bytes": 2744
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-source-after.json",
+      "sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "bytes": 2061
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-source-before.json",
+      "sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "bytes": 2061
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-tsc-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "bytes": 24428
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/final-verification.json",
+      "sha256": "a0f857a39622465d227dd0c67b48b157e93a9709fc68c6cbd822e9d2c07d479b",
+      "bytes": 620
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/first-release-source-after.json",
+      "sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "bytes": 2061
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/first-release-static-verification.json",
+      "sha256": "3dfa7032b00b74236ac38733c845121bd0f08450d5ea28f90119b37111fa107c",
+      "bytes": 241
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/focused-green.log",
+      "sha256": "fa0d0eb61751d3b1f89b260b2ba298f9e56efe8ef59a9d88af5957dc57e94671",
+      "bytes": 2743
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/initial-snapshot/apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "45dab4d26eef53c199a20fe525efdd0f5d4db2c28a13f7c365393ba36e645a60",
+      "bytes": 117712
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/initial-snapshot/apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "sha256": "0a24a8a1de21f67511abdec257a9e2304fa2a86803b88054b4e2f341598cd573",
+      "bytes": 17307
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/initial-snapshot/apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx",
+      "sha256": "aa60f1ed5f45ed753fb97220baa4ea4ebd80e4f3384c4997e3ce21230af4931f",
+      "bytes": 11996
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/initial-snapshot/apps/packages/ui/src/components/Notes/hooks/useNotesGraphWorkspace.tsx",
+      "sha256": "9f6b29dca33dc7e4c18988587b2ef11e68179528da45608f2d4c6a5eac6aaa7f",
+      "bytes": 13837
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/late-success-final-green.log",
+      "sha256": "35a775f25fc0dd822218fbcf57ecb845906f229318e08ec301bd1a1b765cb12c",
+      "bytes": 549
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/late-success-full-red.log",
+      "sha256": "fb42ec269093ee2dfd691a8b925f4560ab8f060d95950ad7eb7f95d6c93f2e25",
+      "bytes": 2868
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/late-success-probe.log",
+      "sha256": "b0bb68ff579d28072e2c130764b923b5dd92e7924d6a76ee33e5f6084cbb6b66",
+      "bytes": 2822
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/late-success-probe.tsx.txt",
+      "sha256": "f3b5b69178e12508d66e4edc315ec34c598547d75b01b047df707fa82c467600",
+      "bytes": 1412
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/probes.config.ts",
+      "sha256": "aa241b83628a983310d461cfd4d1355f7c670a600d2e625f46ab983d78703bf9",
+      "bytes": 724
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/source-before.json",
+      "sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "bytes": 2061
+    },
+    {
+      "path": ".tmp/uat221-independent-20260917/tsc-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "bytes": 24428
+    }
+  ]
+}

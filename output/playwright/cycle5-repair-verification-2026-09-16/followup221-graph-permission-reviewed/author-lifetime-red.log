@@ -1,0 +1,122 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:88054) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx (17 tests | 4 failed) 2151ms
+     ✓ explains the actual service403 without claiming an empty graph or rendering server diagnostics 77ms
+     ✓ does not automatically request a denied graph again on reconnect 51ms
+     ✓ lets an explicit refresh recover after permission changes 61ms
+     ✓ removes cached graph data, search and inspector after a refresh403 52ms
+     ✓ does not carry Alice's denial into a replacement authority 16ms
+     ✓ withdraws cached pages when the explicit cursor request receives403 57ms
+     ✓ keeps the current denial when a previous authority's request rejects late 49ms
+     ✓ does not redisplay denied cached pages when reopening after refresh 109ms
+     ✓ does not redisplay denied cached pages when reopening after expand 109ms
+     × prevents a late base success from restoring denied data on reopen (old observer retained: false) 89ms
+     × prevents a late base success from restoring denied data on reopen (old observer retained: true) 90ms
+     × settles a revoked cursor command without letting its late success restore pages 1112ms
+     × ignores a canceled request's late403 after explicit permission recovery 89ms
+     ✓ leaves another authority's pending query and cached result available 108ms
+     ✓ keeps an ordinary500 retryable with the existing load-error message 30ms
+     ✓ retains the existing graph on transient refresh failure and offline transition 45ms
+     ✓ preserves the genuine loading state before a response 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > prevents a late base success from restoring denied data on reopen (old observer retained: false)
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > prevents a late base success from restoring denied data on reopen (old observer retained: true)
+AssertionError: expected { …(12) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "active_note_count": 1,
+  "all_notes_eligible": true,
+  "all_notes_note_cap": 100,
+  "cursor": null,
+  "edges": [],
+  "has_more": false,
+  "limits": {
+    "max_degree": 40,
+    "max_edges": 480,
+    "max_nodes": 120,
+  },
+  "nodes": [
+    {
+      "created_at": null,
+      "degree": 0,
+      "deleted": false,
+      "id": "note:a",
+      "label": "Private Alpha note",
+      "primary_source_id": null,
+      "tag_count": 0,
+      "type": "note",
+    },
+  ],
+  "radius_cap_applied": false,
+  "suggestions_authorized": false,
+  "truncated": false,
+  "truncated_by": [],
+}
+
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:346:45
+    344|       if (keepOldObserver) denied.unmount()
+    345|       const reopened = renderHook(useGraph, { wrapper, initialProps: {…
+    346|       expect(reopened.result.current.graph).toBeNull()
+       |                                             ^
+    347|       await waitFor(() => expect(reopened.result.current.isPermissionD…
+    348|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > settles a revoked cursor command without letting its late success restore pages
+AssertionError: expected false to be true // Object.is equality
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:371:41
+    369|     const denied = renderHook(useGraph, { wrapper, initialProps: { rad…
+    370|     await waitFor(() => expect(denied.result.current.isPermissionDenie…
+    371|     await waitFor(() => expect(settled).toBe(true))
+       |                                         ^
+    372|     expect(cursorResult).toBeNull()
+    373|     await act(async () => {
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > ignores a canceled request's late403 after explicit permission recovery
+AssertionError: Target cannot be null or undefined.
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:401:49
+    399|       await new Promise((resolve) => setTimeout(resolve, 30))
+    400|     })
+    401|     expect(current.result.current.graph?.nodes).toHaveLength(1)
+       |                                                 ^
+    402|     expect(current.result.current.isPermissionDenied).toBe(false)
+    403|     expect(request).toHaveBeenCalledTimes(3)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 13 passed (17)
+   Start at  02:11:06
+   Duration  3.27s (transform 196ms, setup 79ms, import 765ms, tests 2.15s, environment 193ms)

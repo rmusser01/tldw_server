@@ -1,0 +1,439 @@
+{
+  "at": "2026-09-17T09:20:51.572Z",
+  "files": [
+    {
+      "file": "author-DESIGN221.md",
+      "source": ".tmp/uat221-repair-20260917/DESIGN221.md",
+      "original_sha256": "33becc3cf411b2e76801968505e67d1a470b22a438da565727c8b1f89ef416a6",
+      "retained_sha256": "33becc3cf411b2e76801968505e67d1a470b22a438da565727c8b1f89ef416a6",
+      "normalization": "none"
+    },
+    {
+      "file": "author-IMPLEMENTATION221.md",
+      "source": ".tmp/uat221-repair-20260917/IMPLEMENTATION221.md",
+      "original_sha256": "7382c2315b187512bf571d088a3699bb7157d8c00a750489b9bff6384bbf7dff",
+      "retained_sha256": "7382c2315b187512bf571d088a3699bb7157d8c00a750489b9bff6384bbf7dff",
+      "normalization": "none"
+    },
+    {
+      "file": "author-adjacent-green.log",
+      "source": ".tmp/uat221-repair-20260917/adjacent-green.log",
+      "original_sha256": "688a9df2427aaa8d27b66edb809759289a77ec6d5ff2e0274e86fb2b5e53a6cc",
+      "retained_sha256": "e66408b9b0c339adb7d5f17f549e790cb2c7c6b74d89b56605dbb84c74f28e08",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-bandit-lifetime.json",
+      "source": ".tmp/uat221-repair-20260917/bandit-lifetime.json",
+      "original_sha256": "5ab45cbd48272d804c638747cfbae65f643cf13b96f7d831bca919e2244bcf67",
+      "retained_sha256": "04cae6478f8d042dbd801373c27ecfbb1f9fefdf51f6bb1591a4592125474689",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-bandit.json",
+      "source": ".tmp/uat221-repair-20260917/bandit.json",
+      "original_sha256": "c9996c2d5811519958b2ab6a40d991ea6a037de5fc0126bd64100dc0aef02663",
+      "retained_sha256": "6a422532da5014df5041f4d54943b9edf7bee601b0549d72f75fb37cc95f0303",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-eslint-baseline-hook.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-baseline-hook.json",
+      "original_sha256": "e594a68821519c57ddd5a712352d5ae912cbc9102848477fb96e83437d346ad2",
+      "retained_sha256": "e594a68821519c57ddd5a712352d5ae912cbc9102848477fb96e83437d346ad2",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-baseline-workspace.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-baseline-workspace.json",
+      "original_sha256": "7d86c5d33e684a9b6ad6375c1355bb549335678a4df004ae34ef9b54817b4aef",
+      "retained_sha256": "7d86c5d33e684a9b6ad6375c1355bb549335678a4df004ae34ef9b54817b4aef",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-baseline.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-baseline.json",
+      "original_sha256": "daffa034db85977d0fcd13e4322f76d73078858301b5c910ac25308128ce3ee5",
+      "retained_sha256": "daffa034db85977d0fcd13e4322f76d73078858301b5c910ac25308128ce3ee5",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-current-scoped.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-current-scoped.json",
+      "original_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "retained_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-current.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-current.json",
+      "original_sha256": "c7ab5441dd4eccaa420366eda2fee274378a490ae818f443bdf65f3b2d929cf6",
+      "retained_sha256": "c7ab5441dd4eccaa420366eda2fee274378a490ae818f443bdf65f3b2d929cf6",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-final-scoped.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-final-scoped.json",
+      "original_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "retained_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "normalization": "none"
+    },
+    {
+      "file": "author-eslint-lifetime-scoped.json",
+      "source": ".tmp/uat221-repair-20260917/eslint-lifetime-scoped.json",
+      "original_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "retained_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "normalization": "none"
+    },
+    {
+      "file": "author-final-green.log",
+      "source": ".tmp/uat221-repair-20260917/final-green.log",
+      "original_sha256": "bd10d9d4e7e5b7e8ed87882b4f1e2264163b218b0d67be90d9ddc3298a8dc8a0",
+      "retained_sha256": "91cb272c74055d8f277d3e63675b69b819b5ce43c2452d5e89e9f550d23f680f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-final-tests-baseline-red.log",
+      "source": ".tmp/uat221-repair-20260917/final-tests-baseline-red.log",
+      "original_sha256": "e0d2a8e38a50411cf70367507b841443da799eb1af960ede2aefdd69353287b1",
+      "retained_sha256": "208ea26ce0ed95c6b752a50c8cd31bb366f272b62a098cbaeff5256f7743ce22",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-format.log",
+      "source": ".tmp/uat221-repair-20260917/format.log",
+      "original_sha256": "e6485d155273426b9068eee45e202caf58cbed6f84a9629bf5200b3ed8337e6f",
+      "retained_sha256": "e6485d155273426b9068eee45e202caf58cbed6f84a9629bf5200b3ed8337e6f",
+      "normalization": "none"
+    },
+    {
+      "file": "author-green-initial.log",
+      "source": ".tmp/uat221-repair-20260917/green-initial.log",
+      "original_sha256": "b358abb07178957fe9f2b62ba3d4a1527a294cf370a2c7c59e85fa93848f7ef4",
+      "retained_sha256": "646b48285952abaed8801ae2260edb0d17f4e266fa83300fe797f2afa31a005c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-green.log",
+      "source": ".tmp/uat221-repair-20260917/green.log",
+      "original_sha256": "a08b5265ada53f49172b9fa3543dffcb4f11e97bace01306cd4748e4a6f21ac5",
+      "retained_sha256": "c1110c2efdcd1074fdb0b6300107111ea68f40dcccf77442f4139dcc4f2d600f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-initial-red-with-search-role-harness-error.log",
+      "source": ".tmp/uat221-repair-20260917/initial-red-with-search-role-harness-error.log",
+      "original_sha256": "d75cce4d7b485f55a351873b3bcc6d073a268230e1215c0e1c3bacbaaca6c5bd",
+      "retained_sha256": "7346596d3b792950d25800d1cea9978de562a86041809ed9a1696fecbf8f0f05",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-lifetime-adjacent-green.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-adjacent-green.log",
+      "original_sha256": "e718547b1c4b7040f54eb705d276f472064b9dbd33c8d07f3c78ad27f7b45222",
+      "retained_sha256": "876c28901258e97258de1e6e8e84c301be0b440a292bcdc9f76a4ed468f73099",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-lifetime-final-baseline-red.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-final-baseline-red.log",
+      "original_sha256": "93896c4e62ee6c105fc7e6b0217cdf072eb7c22df944b7d59b49ae52070ebc95",
+      "retained_sha256": "e30bd406364dea3ab737ddcfe3dd433b0f0c9a7b74c3f150738b02d7d7ad2b09",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-lifetime-final-green.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-final-green.log",
+      "original_sha256": "de41f0bf841993d0c8882f3e07c09768861a224505cffa5425e267cf1fad3bed",
+      "retained_sha256": "e3c836e57e0a7e8c78712ed1860a7478fd3e0c8f883b8a289d082b798b29b499",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-lifetime-format.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-format.log",
+      "original_sha256": "1c9a128b7bcab8524f5020c1bc663e15b6818c0af848357d84aac57eb2c7844e",
+      "retained_sha256": "1c9a128b7bcab8524f5020c1bc663e15b6818c0af848357d84aac57eb2c7844e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-lifetime-green.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-green.log",
+      "original_sha256": "e0bb3864d9c085196e3a5a0e87edd6f3ebf2ed609f397c5cfc18a8c57b978170",
+      "retained_sha256": "a8828622945a37dfc24b952f279e156f0ef7d38dbfec2fe96f00bcaf3e2c383f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-lifetime-red.log",
+      "source": ".tmp/uat221-repair-20260917/lifetime-red.log",
+      "original_sha256": "e383b2ca4febe7aa8f547e6186ff66bc90c7e607a79ef9b4adb3017afda7a005",
+      "retained_sha256": "5d4229753d958108ce6a56bd09319dba7e67364a8b7f54dee051bc81a01acaeb",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-native-cause.json",
+      "source": ".tmp/uat221-repair-20260917/native-cause.json",
+      "original_sha256": "8db9e0c7a04f7887048ae36b1e21e3e9014d275feb8752d98ac21f11db2db0a7",
+      "retained_sha256": "8db9e0c7a04f7887048ae36b1e21e3e9014d275feb8752d98ac21f11db2db0a7",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned-manifest.json",
+      "source": ".tmp/uat221-repair-20260917/owned-manifest.json",
+      "original_sha256": "8f4fc9b7579227ce7a509c9f46374e047b878c43fe5866b83bc43a0fbda657df",
+      "retained_sha256": "8f4fc9b7579227ce7a509c9f46374e047b878c43fe5866b83bc43a0fbda657df",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned-paths.json",
+      "source": ".tmp/uat221-repair-20260917/owned-paths.json",
+      "original_sha256": "5ff83e2d7300599c8642642654d35b5e9d1eca7f06e9fbe4650f58f902d3b7aa",
+      "retained_sha256": "5ff83e2d7300599c8642642654d35b5e9d1eca7f06e9fbe4650f58f902d3b7aa",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned.patch",
+      "source": ".tmp/uat221-repair-20260917/owned.patch",
+      "original_sha256": "6d7e08e8109ecf030f000eb861d805a3636784dc5185aa540a0fab10df13942b",
+      "retained_sha256": "7862d6ccd2c15b78fc266d3b1a7f11d4af278d23a81eb3b27e2ca17cacd56623",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-recovery-race-controls.log",
+      "source": ".tmp/uat221-repair-20260917/recovery-race-controls.log",
+      "original_sha256": "a92be5b0ef88770e7025d0f109b959e2e870fda57a29ff815394f6ec240df4a4",
+      "retained_sha256": "060640998a2d7ed9b0e1cb178e78b653677b9422e90c5c215520d52a55376185",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-red.log",
+      "source": ".tmp/uat221-repair-20260917/red.log",
+      "original_sha256": "712044b4b0943b856a9c8d4bf886cc87a48f1406a1606df4c7278ab08d1ef1c4",
+      "retained_sha256": "2b9c2f8d5059299c59722c4a33cde3f077577954e750ad5528358002ab578508",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-reopen-red.log",
+      "source": ".tmp/uat221-repair-20260917/reopen-red.log",
+      "original_sha256": "279c43f1f7cddce449175a320eb46d0b878895212258266e8bf6f0c481bcf927",
+      "retained_sha256": "2e341e2e63dc779472aa01efce58c57948caad86d378e62d7f55bd62fb0a7d8c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-task221.txt",
+      "source": ".tmp/uat221-repair-20260917/task221.txt",
+      "original_sha256": "aebe778b02db7b09f1e6dc32d1805d817dcaec87d453b2527e4905fc806ca323",
+      "retained_sha256": "64fa1b6fd86210d40a0c6ac0a2a32105eea74fa2def5f1cdc45589a972831450",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-tsc-baseline.log",
+      "source": ".tmp/uat221-repair-20260917/tsc-baseline.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "retained_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-tsc-current.log",
+      "source": ".tmp/uat221-repair-20260917/tsc-current.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "retained_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-tsc-lifetime.log",
+      "source": ".tmp/uat221-repair-20260917/tsc-lifetime.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "retained_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-verification-manifest.json",
+      "source": ".tmp/uat221-repair-20260917/verification-manifest.json",
+      "original_sha256": "fb1301741e56dbc9267f3539496e4b8c5f2700067ec16f74790475b8bcfa5f6e",
+      "retained_sha256": "fb1301741e56dbc9267f3539496e4b8c5f2700067ec16f74790475b8bcfa5f6e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-verification.json",
+      "source": ".tmp/uat221-repair-20260917/verification.json",
+      "original_sha256": "4f1ce564c1fa91335602de47dd74de0df6bc6f8db02409c85544d0ca05f4b356",
+      "retained_sha256": "4f1ce564c1fa91335602de47dd74de0df6bc6f8db02409c85544d0ca05f4b356",
+      "normalization": "none"
+    },
+    {
+      "file": "author-vitest.baseline.config.ts",
+      "source": ".tmp/uat221-repair-20260917/vitest.baseline.config.ts",
+      "original_sha256": "bb47a3011bc92aa3f0a6e97b8cea580b6015451d36af5d2f256798755f3721a9",
+      "retained_sha256": "bb47a3011bc92aa3f0a6e97b8cea580b6015451d36af5d2f256798755f3721a9",
+      "normalization": "none"
+    },
+    {
+      "file": "author-vitest.pre-lifetime.config.ts",
+      "source": ".tmp/uat221-repair-20260917/vitest.pre-lifetime.config.ts",
+      "original_sha256": "158c48706d8ed989045d92bea73cfe45c076b57937a43326c5e19ce7337b60cc",
+      "retained_sha256": "158c48706d8ed989045d92bea73cfe45c076b57937a43326c5e19ce7337b60cc",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-FINDING221.md",
+      "source": ".tmp/uat221-independent-20260917/FINDING221.md",
+      "original_sha256": "228e395f95b4e789358f86eb431675813de110e229f03d3b3546dc70c5f24fb1",
+      "retained_sha256": "228e395f95b4e789358f86eb431675813de110e229f03d3b3546dc70c5f24fb1",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-REVIEW221.md",
+      "source": ".tmp/uat221-independent-20260917/REVIEW221.md",
+      "original_sha256": "f1fde1a4456358272510f8bcfff7bc82420308e41dadf2f8dc1532a4a0833434",
+      "retained_sha256": "f1fde1a4456358272510f8bcfff7bc82420308e41dadf2f8dc1532a4a0833434",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-bandit-tsx.json",
+      "source": ".tmp/uat221-independent-20260917/bandit-tsx.json",
+      "original_sha256": "5f8dc2293e3ac6a89b8b659279b5d4c5cf8e798fa10a2ddcf52541687b81718f",
+      "retained_sha256": "262d81fc77e5c12eb7ade35cbccbf7ec91d5bb1923dfe0ca668dd9cde86180be",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-eslint.json",
+      "source": ".tmp/uat221-independent-20260917/eslint.json",
+      "original_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "retained_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-bandit-tsx.json",
+      "source": ".tmp/uat221-independent-20260917/final-bandit-tsx.json",
+      "original_sha256": "82581e9960a611374bac20d5c78c3ef59173fe9669f0cba5cd10337934789f90",
+      "retained_sha256": "fd8d76b36c5c131abd8f29cc11a5e843723e588a4eff78a6b89d180bceaf2167",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-final-compiler-comparison.json",
+      "source": ".tmp/uat221-independent-20260917/final-compiler-comparison.json",
+      "original_sha256": "f5693cb021aa624b81dac569c35c7a33a0529465a9f7700f48f7a440adb982d9",
+      "retained_sha256": "f5693cb021aa624b81dac569c35c7a33a0529465a9f7700f48f7a440adb982d9",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-eslint.json",
+      "source": ".tmp/uat221-independent-20260917/final-eslint.json",
+      "original_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "retained_sha256": "fbd975e7f06c4189624ea1543e4111b935704137cf85fc3a578d6c71a4957642",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-green.log",
+      "source": ".tmp/uat221-independent-20260917/final-green.log",
+      "original_sha256": "6dbe4e569ad9ca280f19e58584a921acdab7c28dce2872d1fa432ecd5b29e8e2",
+      "retained_sha256": "a1936971461fb25112b790c374954d00d17c090a8979befd18aebcd2168e3586",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-final-source-after.json",
+      "source": ".tmp/uat221-independent-20260917/final-source-after.json",
+      "original_sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "retained_sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-source-before.json",
+      "source": ".tmp/uat221-independent-20260917/final-source-before.json",
+      "original_sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "retained_sha256": "1859e3a2896ca64127185ca0d03188ad30c82ebd85be196899919a4588f9d8e0",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-tsc-current.log",
+      "source": ".tmp/uat221-independent-20260917/final-tsc-current.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "retained_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-final-verification.json",
+      "source": ".tmp/uat221-independent-20260917/final-verification.json",
+      "original_sha256": "a0f857a39622465d227dd0c67b48b157e93a9709fc68c6cbd822e9d2c07d479b",
+      "retained_sha256": "a0f857a39622465d227dd0c67b48b157e93a9709fc68c6cbd822e9d2c07d479b",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-first-release-source-after.json",
+      "source": ".tmp/uat221-independent-20260917/first-release-source-after.json",
+      "original_sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "retained_sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-first-release-static-verification.json",
+      "source": ".tmp/uat221-independent-20260917/first-release-static-verification.json",
+      "original_sha256": "3dfa7032b00b74236ac38733c845121bd0f08450d5ea28f90119b37111fa107c",
+      "retained_sha256": "3dfa7032b00b74236ac38733c845121bd0f08450d5ea28f90119b37111fa107c",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-focused-green.log",
+      "source": ".tmp/uat221-independent-20260917/focused-green.log",
+      "original_sha256": "fa0d0eb61751d3b1f89b260b2ba298f9e56efe8ef59a9d88af5957dc57e94671",
+      "retained_sha256": "11d055e64ac902f8c28947a823197434c490819dae3b162ef824a96587ba171c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-late-success-final-green.log",
+      "source": ".tmp/uat221-independent-20260917/late-success-final-green.log",
+      "original_sha256": "35a775f25fc0dd822218fbcf57ecb845906f229318e08ec301bd1a1b765cb12c",
+      "retained_sha256": "11790efdbe677ab8353a0bfa98fd3409249a04caf0e63c905a152466c063033b",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-late-success-full-red.log",
+      "source": ".tmp/uat221-independent-20260917/late-success-full-red.log",
+      "original_sha256": "fb42ec269093ee2dfd691a8b925f4560ab8f060d95950ad7eb7f95d6c93f2e25",
+      "retained_sha256": "e64805822dc6535532d8380a5e9d88106a63db1f111681ae09ec421cf4f6fbf4",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-late-success-probe.log",
+      "source": ".tmp/uat221-independent-20260917/late-success-probe.log",
+      "original_sha256": "b0bb68ff579d28072e2c130764b923b5dd92e7924d6a76ee33e5f6084cbb6b66",
+      "retained_sha256": "43600826a61758dd721396a2883619ed51f7d63aada92a08e6e457451621b37d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-late-success-probe.tsx.txt",
+      "source": ".tmp/uat221-independent-20260917/late-success-probe.tsx.txt",
+      "original_sha256": "f3b5b69178e12508d66e4edc315ec34c598547d75b01b047df707fa82c467600",
+      "retained_sha256": "f3b5b69178e12508d66e4edc315ec34c598547d75b01b047df707fa82c467600",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-probes.config.ts",
+      "source": ".tmp/uat221-independent-20260917/probes.config.ts",
+      "original_sha256": "aa241b83628a983310d461cfd4d1355f7c670a600d2e625f46ab983d78703bf9",
+      "retained_sha256": "aa241b83628a983310d461cfd4d1355f7c670a600d2e625f46ab983d78703bf9",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-reviewer-manifest.json",
+      "source": ".tmp/uat221-independent-20260917/reviewer-manifest.json",
+      "original_sha256": "fb416e30d01ee8e01d3740e3994b91b4c29e6244bed2650287f8481676e5fd1f",
+      "retained_sha256": "fb416e30d01ee8e01d3740e3994b91b4c29e6244bed2650287f8481676e5fd1f",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-source-before.json",
+      "source": ".tmp/uat221-independent-20260917/source-before.json",
+      "original_sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "retained_sha256": "bea6047f661a47379dfd99da2454a2c1e16a3f8b2b8b94501483a14e731fd3d2",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-tsc-current.log",
+      "source": ".tmp/uat221-independent-20260917/tsc-current.log",
+      "original_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "retained_sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "normalization": "none"
+    }
+  ]
+}

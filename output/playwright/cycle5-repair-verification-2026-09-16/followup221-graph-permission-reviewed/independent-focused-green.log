@@ -1,0 +1,34 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:86361) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86359) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86355) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86357) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86354) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86362) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86356) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:86360) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Notes/__tests__/useNotesGraphWorkspace.test.tsx (18 tests) 63ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.axe.test.tsx (2 tests) 121ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/useNotesGraphAuthorityScope.test.tsx (20 tests) 960ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.loading-i18n.test.tsx (1 test) 78ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.responsive.test.tsx (1 test) 129ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx (12 tests) 681ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.view-mode.test.tsx (28 tests) 1062ms
+ ✓ ../packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage27.source-links.test.tsx (7 tests) 1723ms
+     ✓ opens and edits an ordinary note without requesting graph data  360ms
+     ✓ discards a graph response after authority changes and requires a new explicit request  359ms
+
+ Test Files  8 passed (8)
+      Tests  89 passed (89)
+   Start at  02:02:24
+   Duration  4.02s (transform 2.04s, setup 1.15s, import 7.00s, tests 4.82s, environment 2.72s)

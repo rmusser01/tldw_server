@@ -1,0 +1,22 @@
+{
+  "baseline_sha256": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c",
+  "source_sha256": "63b3ccd15b9ce19bd1d964821eb0d33b4f191ff1a329cd83356e8481a6423d97",
+  "changed_methods": [
+    "_require_selected_owner_row",
+    "create_study_pack",
+    "get_study_pack",
+    "add_study_pack_cards",
+    "list_study_pack_cards",
+    "add_flashcard_citations",
+    "replace_flashcard_citations",
+    "replace_flashcard_citations_and_source_reference_summary",
+    "list_flashcard_citations",
+    "set_flashcard_source_reference_summary",
+    "get_study_pack_for_flashcard",
+    "soft_delete_study_pack",
+    "supersede_study_pack"
+  ],
+  "all_other_ast_equal": true,
+  "unowned_provenance_sha256": "a7f6fbd65cecec7361f76725ac78fd27208ccc2d57f8cec1985af77651f2f745",
+  "unowned_note": "Parent-owned UAT223 note route change is present; this unit makes no provenance.py edit."
+}

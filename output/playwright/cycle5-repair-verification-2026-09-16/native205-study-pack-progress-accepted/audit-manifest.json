@@ -1,0 +1,41 @@
+{
+  "task": "TASK13260.143",
+  "scope": "Independent native UI evidence audit only",
+  "files": [
+    {
+      "path": ".tmp/uat205-native-audit-20260917/ACCEPTANCE205.md",
+      "sha256": "d0ce4b6c4ea08a4ce49c6041ac30c5bed02f6f0a6878956333eea54866736c6f",
+      "bytes": 5740
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/audit.py",
+      "sha256": "fb835997d9fc79d28041555195b6e38320c10c3c2a9b525d09002363142b4d3f",
+      "bytes": 10387
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/bandit-audit-scripts.json",
+      "sha256": "063c204ae5d8d904da529a928c9e41dc97bb162b0f8b9fcb02b7a13d69b8bb01",
+      "bytes": 1115
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/bandit-audit-scripts.stderr",
+      "sha256": "45048a98e1770f9f0453dff1d5ae524bfa758dda9156c2fe842815dca4c1399a",
+      "bytes": 253
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/evidence-window-excerpts.json",
+      "sha256": "ca6d15ed58bbb5bfadaa878073ea1bbacfadce17c4cd0377897ddd0a8c241fd8",
+      "bytes": 7821
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/input-manifest.json",
+      "sha256": "f3fc2703bf1eb828ff6069ea1b8dfdebc229349b4516053ff8cde93e3f257733",
+      "bytes": 4094
+    },
+    {
+      "path": ".tmp/uat205-native-audit-20260917/verification.json",
+      "sha256": "07f5227ac726d3c7a37cda3d2d2bc31bb459fc4a94da188bf6f61fccd96358bc",
+      "bytes": 2468
+    }
+  ]
+}

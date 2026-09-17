@@ -1,0 +1,6 @@
+[
+  "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+  "apps/packages/ui/src/components/Notes/hooks/useNotesGraphWorkspace.tsx",
+  "apps/packages/ui/src/assets/locale/en/option.json",
+  "apps/packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx"
+]

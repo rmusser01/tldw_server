@@ -1,0 +1,61 @@
+{
+  "at": "2026-09-17T09:42:03.760Z",
+  "files": [
+    {
+      "file": "ACCEPTANCE205.md",
+      "source": ".tmp/uat205-native-audit-20260917/ACCEPTANCE205.md",
+      "original_sha256": "d0ce4b6c4ea08a4ce49c6041ac30c5bed02f6f0a6878956333eea54866736c6f",
+      "retained_sha256": "d0ce4b6c4ea08a4ce49c6041ac30c5bed02f6f0a6878956333eea54866736c6f",
+      "normalization": "none"
+    },
+    {
+      "file": "audit.py",
+      "source": ".tmp/uat205-native-audit-20260917/audit.py",
+      "original_sha256": "fb835997d9fc79d28041555195b6e38320c10c3c2a9b525d09002363142b4d3f",
+      "retained_sha256": "fb835997d9fc79d28041555195b6e38320c10c3c2a9b525d09002363142b4d3f",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest.json",
+      "source": ".tmp/uat205-native-audit-20260917/audit-manifest.json",
+      "original_sha256": "6ae041c67406c681e381077b8775c985d2247056181fc196f74e1afd350b7c91",
+      "retained_sha256": "6ae041c67406c681e381077b8775c985d2247056181fc196f74e1afd350b7c91",
+      "normalization": "none"
+    },
+    {
+      "file": "bandit-audit-scripts.json",
+      "source": ".tmp/uat205-native-audit-20260917/bandit-audit-scripts.json",
+      "original_sha256": "063c204ae5d8d904da529a928c9e41dc97bb162b0f8b9fcb02b7a13d69b8bb01",
+      "retained_sha256": "002589569761ddd8d21a226915eac5628260be692fad5ca30a0b3acfa6f2b9b4",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "bandit-audit-scripts.stderr",
+      "source": ".tmp/uat205-native-audit-20260917/bandit-audit-scripts.stderr",
+      "original_sha256": "45048a98e1770f9f0453dff1d5ae524bfa758dda9156c2fe842815dca4c1399a",
+      "retained_sha256": "45048a98e1770f9f0453dff1d5ae524bfa758dda9156c2fe842815dca4c1399a",
+      "normalization": "none"
+    },
+    {
+      "file": "evidence-window-excerpts.json",
+      "source": ".tmp/uat205-native-audit-20260917/evidence-window-excerpts.json",
+      "original_sha256": "ca6d15ed58bbb5bfadaa878073ea1bbacfadce17c4cd0377897ddd0a8c241fd8",
+      "retained_sha256": "ca6d15ed58bbb5bfadaa878073ea1bbacfadce17c4cd0377897ddd0a8c241fd8",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest.json",
+      "source": ".tmp/uat205-native-audit-20260917/input-manifest.json",
+      "original_sha256": "f3fc2703bf1eb828ff6069ea1b8dfdebc229349b4516053ff8cde93e3f257733",
+      "retained_sha256": "f3fc2703bf1eb828ff6069ea1b8dfdebc229349b4516053ff8cde93e3f257733",
+      "normalization": "none"
+    },
+    {
+      "file": "verification.json",
+      "source": ".tmp/uat205-native-audit-20260917/verification.json",
+      "original_sha256": "07f5227ac726d3c7a37cda3d2d2bc31bb459fc4a94da188bf6f61fccd96358bc",
+      "retained_sha256": "07f5227ac726d3c7a37cda3d2d2bc31bb459fc4a94da188bf6f61fccd96358bc",
+      "normalization": "none"
+    }
+  ]
+}

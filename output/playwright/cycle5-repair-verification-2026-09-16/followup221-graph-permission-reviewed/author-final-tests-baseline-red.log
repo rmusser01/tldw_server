@@ -1,0 +1,510 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:84067) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx (12 tests | 8 failed) 4489ms
+     × explains the actual service403 without claiming an empty graph or rendering server diagnostics 81ms
+     × does not automatically request a denied graph again on reconnect 55ms
+     × lets an explicit refresh recover after permission changes 16ms
+     × removes cached graph data, search and inspector after a refresh403 1064ms
+     ✓ does not carry Alice's denial into a replacement authority 18ms
+     × withdraws cached pages when the explicit cursor request receives403 1058ms
+     × keeps the current denial when a previous authority's request rejects late 15ms
+     × does not redisplay denied cached pages when reopening after refresh 1055ms
+     × does not redisplay denied cached pages when reopening after expand 1056ms
+     ✓ keeps an ordinary500 retryable with the existing load-error message 34ms
+     ✓ retains the existing graph on transient refresh failure and offline transition 30ms
+     ✓ preserves the genuine loading state before a response 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > explains the actual service403 without claiming an empty graph or rendering server diagnostics
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Notes graph is unavailable for this account. Ask an administrator for access.
+Received:
+  Could not load the notes graph.
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:117:46
+    115|     request.mockRejectedValue(failure(403))
+    116|     await setup()
+    117|     expect(await screen.findByRole("alert")).toHaveTextContent(permiss…
+       |                                              ^
+    118|     expect(
+    119|       screen.queryByText("Could not load the notes graph.")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > does not automatically request a denied graph again on reconnect
+AssertionError: expected "vi.fn()" to be called 1 times, but got 2 times
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:144:21
+    142|       await new Promise((resolve) => setTimeout(resolve, 30))
+    143|     })
+    144|     expect(request).toHaveBeenCalledTimes(1)
+       |                     ^
+    145|     expect(screen.getByRole("alert")).toHaveTextContent(permissionText)
+    146|     expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > lets an explicit refresh recover after permission changes
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Notes graph is unavailable for this account. Ask an administrator for access.
+Received:
+  Could not load the notes graph.
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:154:46
+    152|     request.mockRejectedValueOnce(failure(403)).mockResolvedValue(grap…
+    153|     await setup()
+    154|     expect(await screen.findByRole("alert")).toHaveTextContent(permiss…
+       |                                              ^
+    155|     fireEvent.click(screen.getByRole("button", { name: "Refresh graph"…
+    156|     expect(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > removes cached graph data, search and inspector after a refresh403
+TestingLibraryElementError: Unable to find role="alert"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Notes graph"[39m
+      [33mclass[39m=[32m"ml-4 flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-bg focus:outline-none focus:ring-2 focus:ring-focus"[39m
+      [33mdata-testid[39m=[32m"notes-graph-workspace"[39m
+      [33mid[39m=[32m"notes-editor-region"[39m
+      [33mrole[39m=[32m"region"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"border-b border-border bg-surface px-3 py-2"[39m
+        [33mdata-testid[39m=[32m"notes-graph-toolbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-end gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"Graph view"[39m
+            [33mclass[39m=[32m"inline-flex h-11 flex-none border border-border"[39m
+            [33mrole[39m=[32m"group"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-pressed[39m=[32m"true"[39m
+              [33mclass[39m=[32m"inline-flex min-w-[112px] items-center justify-center gap-2 px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-primary-foreground"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-network"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"16"[39m
+                  [33my[39m=[32m"16"[39m
+                [36m/>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"2"[39m
+                  [33my[39m=[32m"16"[39m
+                [36m/>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"9"[39m
+                  [33my[39m=[32m"2"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 12V8"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [0mCanvas[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"inline-flex min-w-[132px] items-center justify-center gap-2 border-l border-border px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-surface text-text"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-list-tree"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M8 5h13"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M13 12h8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M13 19h8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 0 2 2h3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 5v12a2 2 0 0 0 2 2h3"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [0mRelationships[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"relative w-[180px] flex-none sm:w-[200px] 2xl:w-[280px]"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"sr-only"[39m
+              [33mfor[39m=[32m"notes-graph-search"[39m
+            [36m>[39m
+              [0mSearch loaded nodes[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Search loaded nodes"[39m
+              [33mclass[39m=[32m"h-9 w-full border border-border bg-bg px-3 text-sm text-text outline-none placeholder:text-text-muted focus:ring-2 focus:ring-focus"[39m
+              [33mid[39m=[32m"notes-graph-search"[39m
+              [33mplaceholder[39m=[32m"Search loaded nodes"[39m
+              [33mrole[39m=[32m"searchbox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m"Private"[39m
+            [36m/>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"absolute left-0 top-10 z-20 max-h-48 w-full overflow-auto border border-border bg-elevated shadow-lg"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"block w-full px-3 py-2 text-left text-sm text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mPrivate Alpha note[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<label[39m
+            [33mclass[39m=[32m"flex flex-col gap-1 text-xs text-text-muted"[39m
+          [36m>[39m
+            [0mRadius[0m
+            [36m<select[39m
+              [33maria-label[39m=[32m"Graph radius"[39m
+              [33mc...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Notes graph"[39m
+      [33mclass[39m=[32m"ml-4 flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-bg focus:outline-none focus:ring-2 focus:ring-focus"[39m
+      [33mdata-testid[39m=[32m"notes-graph-workspace"[39m
+      [33mid[39m=[32m"notes-editor-region"[39m
+      [33mrole[39m=[32m"region"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"border-b border-border bg-surface px-3 py-2"[39m
+        [33mdata-testid[39m=[32m"notes-graph-toolbar"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-end gap-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-label[39m=[32m"Graph view"[39m
+            [33mclass[39m=[32m"inline-flex h-11 flex-none border border-border"[39m
+            [33mrole[39m=[32m"group"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-pressed[39m=[32m"true"[39m
+              [33mclass[39m=[32m"inline-flex min-w-[112px] items-center justify-center gap-2 px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-primary text-primary-foreground"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-network"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"16"[39m
+                  [33my[39m=[32m"16"[39m
+                [36m/>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"2"[39m
+                  [33my[39m=[32m"16"[39m
+                [36m/>[39m
+                [36m<rect[39m
+                  [33mheight[39m=[32m"6"[39m
+                  [33mrx[39m=[32m"1"[39m
+                  [33mwidth[39m=[32m"6"[39m
+                  [33mx[39m=[32m"9"[39m
+                  [33my[39m=[32m"2"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M12 12V8"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [0mCanvas[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33maria-pressed[39m=[32m"false"[39m
+              [33mclass[39m=[32m"inline-flex min-w-[132px] items-center justify-center gap-2 border-l border-border px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus bg-surface text-text"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-list-tree"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M8 5h13"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M13 12h8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M13 19h8"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 10a2 2 0 0 0 2 2h3"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M3 5v12a2 2 0 0 0 2 2h3"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+              [0mRelationships[0m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"relative w-[180px] flex-none sm:w-[200px] 2xl:w-[280px]"[39m
+          [36m>[39m
+            [36m<label[39m
+              [33mclass[39m=[32m"sr-only"[39m
+              [33mfor[39m=[32m"notes-graph-search"[39m
+            [36m>[39m
+              [0mSearch loaded nodes[0m
+            [36m</label>[39m
+            [36m<input[39m
+              [33maria-label[39m=[32m"Search loaded nodes"[39m
+              [33mclass[39m=[32m"h-9 w-full border border-border bg-bg px-3 text-sm text-text outline-none placeholder:text-text-muted focus:ring-2 focus:ring-focus"[39m
+              [33mid[39m=[32m"notes-graph-search"[39m
+              [33mplaceholder[39m=[32m"Search loaded nodes"[39m
+              [33mrole[39m=[32m"searchbox"[39m
+              [33mtype[39m=[32m"search"[39m
+              [33mvalue[39m=[32m"Private"[39m
+            [36m/>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"absolute left-0 top-10 z-20 max-h-48 w-full overflow-auto border border-border bg-elevated shadow-lg"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"block w-full px-3 py-2 text-left text-sm text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mPrivate Alpha note[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<label[39m
+            [33mclass[39m=[32m"flex flex-col gap-1 text-xs text-text-muted"[39m
+          [36m>[39m
+            [0mRadius[0m
+            [36m<select[39m
+              [33maria-label[39m=[32m"Graph radius"[39m
+              [33mc...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:179:25
+    177|     expect(screen.getAllByText("Private Alpha note").length).toBeGreat…
+    178|     fireEvent.click(screen.getByRole("button", { name: "Refresh graph"…
+    179|     expect(await screen.findByRole("alert")).toHaveTextContent(permiss…
+       |                         ^
+    180|     expect(
+    181|       screen.queryByTestId("notes-graph-primary-view")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > withdraws cached pages when the explicit cursor request receives403
+AssertionError: expected { …(12) } to be null
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected:
+null
+
++ Received:
+{
+  "active_note_count": 1,
+  "all_notes_eligible": true,
+  "all_notes_note_cap": 100,
+  "cursor": "next-page",
+  "edges": [],
+  "has_more": true,
+  "limits": {
+    "max_degree": 40,
+    "max_edges": 480,
+    "max_nodes": 120,
+  },
+  "nodes": [
+    {
+      "created_at": null,
+      "degree": 0,
+      "deleted": false,
+      "id": "note:a",
+      "label": "Private Alpha note",
+      "primary_source_id": null,
+      "tag_count": 0,
+      "type": "note",
+    },
+  ],
+  "radius_cap_applied": false,
+  "suggestions_authorized": false,
+  "truncated": false,
+  "truncated_by": [],
+}
+
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:231:54
+    229|       await result.current.expand().catch(() => null)
+    230|     })
+    231|     await waitFor(() => expect(result.current.graph).toBeNull())
+       |                                                      ^
+    232|     expect(result.current.searchResults).toEqual([])
+    233|     expect(result.current.canExpand).toBe(false)
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > keeps the current denial when a previous authority's request rejects late
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  Notes graph is unavailable for this account. Ask an administrator for access.
+Received:
+  Could not load the notes graph.
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:248:46
+    246|     const view = await setup()
+    247|     view.rerender(<NotesGraphWorkspace {...props} authorityScope="bob"…
+    248|     expect(await screen.findByRole("alert")).toHaveTextContent(permiss…
+       |                                              ^
+    249|     await act(async () => {
+    250|       rejectAlice(failure(403))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > does not redisplay denied cached pages when reopening after refresh
+ FAIL  ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx > Notes Graph permission boundary > does not redisplay denied cached pages when reopening after expand
+AssertionError: expected { …(12) } to be null
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+  [36m</body>[39m
+[36m</html>[39m
+
+- Expected:
+null
+
++ Received:
+{
+  "active_note_count": 1,
+  "all_notes_eligible": true,
+  "all_notes_note_cap": 100,
+  "cursor": "next-page",
+  "edges": [],
+  "has_more": true,
+  "limits": {
+    "max_degree": 40,
+    "max_edges": 480,
+    "max_nodes": 120,
+  },
+  "nodes": [
+    {
+      "created_at": null,
+      "degree": 0,
+      "deleted": false,
+      "id": "note:a",
+      "label": "Private Alpha note",
+      "primary_source_id": null,
+      "tag_count": 0,
+      "type": "note",
+    },
+  ],
+  "radius_cap_applied": false,
+  "suggestions_authorized": false,
+  "truncated": false,
+  "truncated_by": [],
+}
+
+ ❯ ../packages/ui/src/components/Notes/__tests__/NotesGraphWorkspace.permission.test.tsx:285:62
+    283|         await first.result.current[command]().catch(() => null)
+    284|       })
+    285|       await waitFor(() => expect(first.result.current.graph).toBeNull(…
+       |                                                              ^
+    286|       first.unmount()
+    287|       const reopened = renderHook(useGraph, { wrapper })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  8 failed | 4 passed (12)
+   Start at  01:47:41
+   Duration  5.58s (transform 202ms, setup 85ms, import 738ms, tests 4.49s, environment 189ms)

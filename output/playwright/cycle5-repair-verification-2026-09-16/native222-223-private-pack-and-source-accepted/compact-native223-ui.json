@@ -1,0 +1,238 @@
+[
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice223-original-review-settled.txt",
+    "source_sha256": "5715ea97ac5b5297fba40a67a16b796de9db35ea4774c295844f79d320838537",
+    "lines": [
+      {
+        "line": 16,
+        "text": "- Page URL: http://127.0.0.1:18583/flashcards"
+      },
+      {
+        "line": 167,
+        "text": "                      - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 172,
+        "text": "                    - paragraph [ref=f62e635]: What color is the Citrine study marker?"
+      }
+    ]
+  },
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice223-assistant-ready.txt",
+    "source_sha256": "072f7665712b4c9f71a55162d06cf38f520e85fffc8e343b5b315bd1f8c78a49",
+    "lines": [
+      {
+        "line": 16,
+        "text": "- Page URL: http://127.0.0.1:18583/flashcards"
+      },
+      {
+        "line": 167,
+        "text": "                      - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 172,
+        "text": "                    - paragraph [ref=f62e674]: What color is the Citrine study marker?"
+      },
+      {
+        "line": 192,
+        "text": "                            - generic [ref=f62e706]: Supporting quote"
+      },
+      {
+        "line": 193,
+        "text": "                            - generic [ref=f62e707]: \u201cThe Citrine study marker is amber.\u201d"
+      },
+      {
+        "line": 194,
+        "text": "                          - link \"Deep dive to source\" [ref=f62e709] [cursor=pointer]:"
+      },
+      {
+        "line": 195,
+        "text": "                            - /url: /notes?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8&source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      }
+    ]
+  },
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice223-deep-dive-open.txt",
+    "source_sha256": "c0caee740ebae9ba66c0b2af56035c9b543467ddfedd063af2e887ea2425cf53",
+    "lines": [
+      {
+        "line": 3,
+        "text": "await page.getByRole('link', { name: 'Deep dive to source' }).click();"
+      },
+      {
+        "line": 20,
+        "text": "- Page URL: http://127.0.0.1:18583/notes?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8&source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 131,
+        "text": "                      - button \"Alice UAT151 Citrine study\" [ref=f62e832] [cursor=pointer]"
+      },
+      {
+        "line": 172,
+        "text": "                      - checkbox \"Select note Alice UAT151 Citrine study for bulk actions\" [ref=f62e906]"
+      },
+      {
+        "line": 173,
+        "text": "                      - button \"Pin note Alice UAT151 Citrine study\" [ref=f62e907] [cursor=pointer]"
+      },
+      {
+        "line": 174,
+        "text": "                      - button \"Open note Alice UAT151 Citrine study\" [ref=f62e910] [cursor=pointer]:"
+      },
+      {
+        "line": 176,
+        "text": "                          - generic [ref=f62e912]: Alice UAT151 Citrine study"
+      },
+      {
+        "line": 177,
+        "text": "                          - generic [ref=f62e918]: This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00."
+      },
+      {
+        "line": 196,
+        "text": "          - region \"Note editor\" [ref=f62e949]:"
+      },
+      {
+        "line": 199,
+        "text": "                - heading \"Alice UAT151 Citrine study\" [level=5] [ref=f62e953]"
+      },
+      {
+        "line": 201,
+        "text": "                  - generic [ref=f62e956]: Saved"
+      },
+      {
+        "line": 215,
+        "text": "                - textbox \"Note title\" [ref=f62e998]:"
+      },
+      {
+        "line": 217,
+        "text": "                  - text: Alice UAT151 Citrine study"
+      },
+      {
+        "line": 227,
+        "text": "                - status \"Note save status\" [ref=f62e1016]: All changes saved"
+      },
+      {
+        "line": 249,
+        "text": "                - textbox \"Note content\" [ref=f62e1089]:"
+      },
+      {
+        "line": 251,
+        "text": "                  - text: This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00."
+      },
+      {
+        "line": 255,
+        "text": "                - generic [ref=f62e1092]: Version 1 \u00b7 Last saved 9/16/2026, 3:24:06 PM"
+      }
+    ]
+  },
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice223-deep-dive-settled.txt",
+    "source_sha256": "4176050d541dff2ddfdaace27e11278c65098c6ea5a66a4eb740fa7057728390",
+    "lines": [
+      {
+        "line": 16,
+        "text": "- Page URL: http://127.0.0.1:18583/notes?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8&source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 126,
+        "text": "                      - button \"Alice UAT151 Citrine study\" [ref=f62e832] [cursor=pointer]"
+      },
+      {
+        "line": 167,
+        "text": "                      - checkbox \"Select note Alice UAT151 Citrine study for bulk actions\" [ref=f62e906]"
+      },
+      {
+        "line": 168,
+        "text": "                      - button \"Pin note Alice UAT151 Citrine study\" [ref=f62e907] [cursor=pointer]"
+      },
+      {
+        "line": 169,
+        "text": "                      - button \"Open note Alice UAT151 Citrine study\" [ref=f62e910] [cursor=pointer]:"
+      },
+      {
+        "line": 171,
+        "text": "                          - generic [ref=f62e912]: Alice UAT151 Citrine study"
+      },
+      {
+        "line": 172,
+        "text": "                          - generic [ref=f62e918]: This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00."
+      },
+      {
+        "line": 191,
+        "text": "          - region \"Note editor\" [ref=f62e949]:"
+      },
+      {
+        "line": 194,
+        "text": "                - heading \"Alice UAT151 Citrine study\" [level=5] [ref=f62e953]"
+      },
+      {
+        "line": 196,
+        "text": "                  - generic [ref=f62e956]: Saved"
+      },
+      {
+        "line": 210,
+        "text": "                - textbox \"Note title\" [ref=f62e998]:"
+      },
+      {
+        "line": 212,
+        "text": "                  - text: Alice UAT151 Citrine study"
+      },
+      {
+        "line": 222,
+        "text": "                - status \"Note save status\" [ref=f62e1016]: All changes saved"
+      },
+      {
+        "line": 244,
+        "text": "                - textbox \"Note content\" [ref=f62e1089]:"
+      },
+      {
+        "line": 246,
+        "text": "                  - text: This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00."
+      },
+      {
+        "line": 250,
+        "text": "                - generic [ref=f62e1092]: Version 1 \u00b7 Last saved 9/16/2026, 3:24:06 PM"
+      }
+    ]
+  },
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice220-deep-dive-open.txt",
+    "source_sha256": "45c0ffc6d53d4b513fc723f79dd9b3dde6abb4b8a5e3edb6ad49257f77fa6e7f",
+    "lines": [
+      {
+        "line": 3,
+        "text": "await page.getByRole('link', { name: 'Deep dive to source' }).click();"
+      },
+      {
+        "line": 20,
+        "text": "- Page URL: http://127.0.0.1:18583/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 21,
+        "text": "- HTTP status: 404 Not Found"
+      },
+      {
+        "line": 75,
+        "text": "          - paragraph [ref=f54e140]: \"404\""
+      }
+    ]
+  },
+  {
+    "source": ".tmp/uat198-181-native-20260917/alice220-deep-dive-settled.txt",
+    "source_sha256": "02a72e127282ae7c48e10a3cb6bc9fc974d3d542514874c9df9b980a21207252",
+    "lines": [
+      {
+        "line": 16,
+        "text": "- Page URL: http://127.0.0.1:18583/notes/b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8?note_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8"
+      },
+      {
+        "line": 17,
+        "text": "- HTTP status: 404 Not Found"
+      },
+      {
+        "line": 68,
+        "text": "          - paragraph [ref=f54e140]: \"404\""
+      }
+    ]
+  }
+]

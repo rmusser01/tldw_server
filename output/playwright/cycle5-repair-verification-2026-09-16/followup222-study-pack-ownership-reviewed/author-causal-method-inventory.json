@@ -1,0 +1,98 @@
+{
+  "production_unchanged": true,
+  "production_sha256": "0bbf4442fa4f41d53ff61c3261b480387bcbdc866e1f15785244fbdb6065513c",
+  "test_sha256": "0ae70171c9c830b663df5e483bee03b80ded862ed0b2768f42ba8d518a6c2380",
+  "methods": [
+    {
+      "method": "_require_selected_owner_row",
+      "line": 32542,
+      "end_line": 32573,
+      "sha256": "cffc0c0ae8df7611c9e67a36866391a1f9050c437849e81d37184bfed2dd6ea1"
+    },
+    {
+      "method": "create_study_pack",
+      "line": 38472,
+      "end_line": 38541,
+      "sha256": "6a51d03d4783b39ba467c7dee88ac8e2e5bbbb002a7fda3a45bc523ff0978006"
+    },
+    {
+      "method": "get_study_pack",
+      "line": 39195,
+      "end_line": 39208,
+      "sha256": "d1532a9a3212bff9aeecf7723870440c5a68ab1141698036aa2e1964ce4e18f9"
+    },
+    {
+      "method": "add_study_pack_cards",
+      "line": 39210,
+      "end_line": 39251,
+      "sha256": "8736a8a0b96c091cb281f6ab4d70f07a5f0279270671a96938ee17b6322c0a77"
+    },
+    {
+      "method": "list_study_pack_cards",
+      "line": 39253,
+      "end_line": 39268,
+      "sha256": "5e17367f6776d1d3d6da7b027044f502e33526138c60eeeb4dbaaeecb5e064fe"
+    },
+    {
+      "method": "add_flashcard_citations",
+      "line": 39270,
+      "end_line": 39326,
+      "sha256": "0d1287e443544c600ab5cafcd8f64acb5fdab2ff9eb03ca6a62c9ad6eadb61fc"
+    },
+    {
+      "method": "replace_flashcard_citations",
+      "line": 39328,
+      "end_line": 39390,
+      "sha256": "80d49664d06df1c4b8416ac2ed6f06622cd73f2171398a5c96f555739ba30a1c"
+    },
+    {
+      "method": "replace_flashcard_citations_and_source_reference_summary",
+      "line": 39392,
+      "end_line": 39493,
+      "sha256": "bb27c8b5357c89a85dfd8a4edb341a7142a41e26d3190c9e800fd3714556e03f"
+    },
+    {
+      "method": "list_flashcard_citations",
+      "line": 39495,
+      "end_line": 39509,
+      "sha256": "46a502abecbb686f750d240cf3be2df730db1823b5a71e4c43b9d62e1daa959b"
+    },
+    {
+      "method": "set_flashcard_source_reference_summary",
+      "line": 39511,
+      "end_line": 39554,
+      "sha256": "d09ac1aca1e29bbdf63feecf585cd225d6dae90447c7ec41f434a16a7d2f1c91"
+    },
+    {
+      "method": "get_study_pack_for_flashcard",
+      "line": 39556,
+      "end_line": 39572,
+      "sha256": "86e49442340ab854e8a12157473a7e2ea1ac9f1d4957f8548842db1da46fa949"
+    },
+    {
+      "method": "soft_delete_study_pack",
+      "line": 39574,
+      "end_line": 39616,
+      "sha256": "8ece64e7c6882b154bae0eb42cb28560c92e9ab70c8c12bcdec78a6313dfbe51"
+    },
+    {
+      "method": "supersede_study_pack",
+      "line": 39618,
+      "end_line": 39698,
+      "sha256": "09f4ea461a0eaf8899e5708290292caf041ac74054d74bbb34a85d81c50f8d9f"
+    }
+  ],
+  "read_run": {
+    "failed_postgres": 8,
+    "passed": 9,
+    "skipped": 0,
+    "seconds": 22.86
+  },
+  "write_run": {
+    "failed_postgres": 10,
+    "passed_sqlite": 10,
+    "skipped": 0,
+    "deselected_prior_cases": 17,
+    "seconds": 28.93
+  }
+}

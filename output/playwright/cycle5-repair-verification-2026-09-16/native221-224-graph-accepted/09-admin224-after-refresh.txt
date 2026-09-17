@@ -1,0 +1,215 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Notes | tldw](http://127.0.0.1:18583/notes)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/notes
+- Page Title: Notes | tldw
+- Console: 4 errors, 4 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f57e11]:
+  - generic [ref=f57e14]:
+    - link "Skip to main content" [ref=f57e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f57e16]:
+      - button "Expand sidebar" [ref=f57e17] [cursor=pointer]
+      - button "New Chat" [ref=f57e21] [cursor=pointer]
+      - generic [ref=f57e24]:
+        - button "Quick Ingest" [ref=f57e25] [cursor=pointer]
+        - button "Chat" [ref=f57e29] [cursor=pointer]
+        - button "Prompts" [ref=f57e32] [cursor=pointer]
+        - button "Characters" [ref=f57e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f57e41] [cursor=pointer]
+        - button "World Books" [ref=f57e45] [cursor=pointer]
+        - button "Notes" [ref=f57e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f57e52] [cursor=pointer]
+        - button "Media" [ref=f57e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f57e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f57e69] [cursor=pointer]
+        - button "Kanban" [ref=f57e75] [cursor=pointer]
+        - button "Watchlists" [ref=f57e77] [cursor=pointer]
+      - generic [ref=f57e82]:
+        - button "Open Notes Dock" [ref=f57e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f57e88] [cursor=pointer]
+        - button "Settings" [ref=f57e91] [cursor=pointer]
+    - main [ref=f57e95]:
+      - generic [ref=f57e96]:
+        - generic [ref=f57e99]:
+          - generic [ref=f57e100]:
+            - button "Expand sidebar" [ref=f57e101] [cursor=pointer]
+            - generic [ref=f57e103]:
+              - img "tldw Assistant" [ref=f57e104]
+              - generic [ref=f57e105]: tldw Assistant
+              - button "Companion Home" [ref=f57e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f57e110] [cursor=pointer]
+          - generic [ref=f57e113]:
+            - button "Search - Open command palette" [ref=f57e114] [cursor=pointer]:
+              - generic [ref=f57e118]: Search
+              - generic [ref=f57e119]: ⌘K
+            - button "Open settings" [ref=f57e120] [cursor=pointer]
+            - generic [ref=f57e132]:
+              - button "Notifications, 0 unread" [ref=f57e133] [cursor=pointer]
+              - status [ref=f57e137]: Notifications are active
+            - button "Switch to light theme" [ref=f57e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f57e145] [cursor=pointer]:
+              - generic [ref=f57e146]: "?"
+        - generic [ref=f57e148]:
+          - link "Skip to notes list" [ref=f57e149] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f57e150] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f57e151]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f57e152]:
+            - generic [ref=f57e153]:
+              - generic [ref=f57e154]:
+                - generic [ref=f57e155]:
+                  - generic [ref=f57e156]:
+                    - generic [ref=f57e157]: Notes
+                    - generic [ref=f57e158]: 1 total
+                  - button "New note" [ref=f57e159] [cursor=pointer]
+                - generic [ref=f57e162]:
+                  - generic [ref=f57e163]:
+                    - button "Views" [expanded] [ref=f57e165] [cursor=pointer]
+                    - generic [ref=f57e170]:
+                      - generic [ref=f57e171]:
+                        - button "Notes" [ref=f57e172] [cursor=pointer]
+                        - button "Trash" [ref=f57e174] [cursor=pointer]
+                      - generic [ref=f57e176]:
+                        - button "List" [ref=f57e177] [cursor=pointer]
+                        - button "Timeline" [ref=f57e179] [cursor=pointer]
+                        - button "Inbox" [ref=f57e181] [cursor=pointer]
+                        - button "Collection" [ref=f57e183] [cursor=pointer]
+                        - button "Graph" [ref=f57e185] [cursor=pointer]
+                      - generic [ref=f57e194]:
+                        - button "Organize" [ref=f57e195] [cursor=pointer]
+                        - button "Organize help" [ref=f57e201] [cursor=pointer]:
+                          - img "question-circle" [ref=f57e202]
+                  - generic [ref=f57e206]:
+                    - textbox "Search notes" [ref=f57e213]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f57e215] [cursor=pointer]:
+                      - generic [ref=f57e216]:
+                        - generic "Date modified (newest first)" [ref=f57e217]
+                        - combobox "Sort notes" [ref=f57e218]
+                      - img "down" [ref=f57e220]
+                  - generic [ref=f57e223]:
+                    - button "Filters" [expanded] [ref=f57e225] [cursor=pointer]
+                    - generic [ref=f57e230]:
+                      - generic [ref=f57e231]:
+                        - button "Captured" [ref=f57e232] [cursor=pointer]
+                        - button "Search tips" [ref=f57e234] [cursor=pointer]
+                      - generic [ref=f57e236]:
+                        - generic [ref=f57e237]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f57e239]
+                        - img "down" [ref=f57e241]
+                      - generic [ref=f57e244]:
+                        - generic [ref=f57e245]:
+                          - button "Browse tags" [ref=f57e246] [cursor=pointer]
+                          - button "Tags help" [ref=f57e248] [cursor=pointer]:
+                            - img "question-circle" [ref=f57e249]
+                        - generic [ref=f57e253]: 1 available
+                      - generic [ref=f57e254]: For in-note search, use browser Ctrl/Cmd+F.
+              - generic [ref=f57e256]:
+                - generic [ref=f57e258]:
+                  - generic [ref=f57e259]: Results
+                  - generic [ref=f57e260]:
+                    - button "Import" [ref=f57e261] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f57e263]
+                    - button "Export" [ref=f57e265] [cursor=pointer]
+                - list "Notes" [ref=f57e268]:
+                  - listitem [ref=f57e269]:
+                    - generic [ref=f57e270]:
+                      - checkbox "Select note UAT210 admin graph 20260917 for bulk actions" [ref=f57e271]
+                      - button "Pin note UAT210 admin graph 20260917" [ref=f57e272] [cursor=pointer]
+                      - button "Open note UAT210 admin graph 20260917" [ref=f57e275] [cursor=pointer]:
+                        - generic [ref=f57e276]:
+                          - generic [ref=f57e277]: UAT210 admin graph 20260917
+                          - generic [ref=f57e283]: Synthetic graph seed for mapping validation.
+                          - generic [ref=f57e284]: 9/17/2026, 1:31:04 AM
+                - generic [ref=f57e286]:
+                  - generic [ref=f57e287]: Showing 1-1 of 1
+                  - list [ref=f57e288]:
+                    - listitem "Previous Page" [ref=f57e289]:
+                      - button [disabled] [ref=f57e290]:
+                        - img "left" [ref=f57e291]
+                    - listitem "1" [ref=f57e294] [cursor=pointer]
+                    - listitem "Next Page" [ref=f57e296]:
+                      - button [disabled] [ref=f57e297]:
+                        - img "right" [ref=f57e298]
+                    - listitem [ref=f57e301]:
+                      - generic [ref=f57e302]:
+                        - generic [ref=f57e303]:
+                          - generic "20 / page" [ref=f57e304]
+                          - combobox "Page Size" [ref=f57e305]
+                        - img "down" [ref=f57e307]
+          - button "Collapse sidebar" [ref=f57e310] [cursor=pointer]
+          - region "Notes graph" [ref=f57e417]:
+            - generic [ref=f57e419]:
+              - group "Graph view" [ref=f57e420]:
+                - button "Canvas" [ref=f57e421] [cursor=pointer]
+                - button "Relationships" [pressed] [ref=f57e427] [cursor=pointer]
+              - generic [ref=f57e431]:
+                - generic [ref=f57e432]: Search loaded nodes
+                - searchbox "Search loaded nodes" [ref=f57e433]
+              - generic [ref=f57e434]:
+                - text: Radius
+                - combobox "Graph radius" [ref=f57e435]:
+                  - option "1" [selected]
+                  - option "2"
+              - generic [ref=f57e436]:
+                - text: Max nodes
+                - spinbutton "Maximum graph nodes" [ref=f57e437]: "120"
+              - generic [ref=f57e438]:
+                - text: Layout
+                - combobox "Graph layout" [ref=f57e439]:
+                  - option "Dagre" [selected]
+                  - option "Circle"
+                  - option "Grid"
+                  - option "Concentric"
+              - group "Graph scope" [ref=f57e440]:
+                - button "Focused" [pressed] [ref=f57e441] [cursor=pointer]
+                - button "All notes" [ref=f57e442] [cursor=pointer]
+              - button "Focus current note" [ref=f57e443] [cursor=pointer]
+              - button "Expand graph" [disabled] [ref=f57e450]
+              - button "Refresh graph" [ref=f57e452] [cursor=pointer]
+              - button "Zoom in" [disabled] [ref=f57e458]
+              - button "Zoom out" [disabled] [ref=f57e462]
+              - button "Fit graph to view" [disabled] [ref=f57e466]
+              - button "Edge visibility" [ref=f57e473] [cursor=pointer]
+            - generic [ref=f57e475]:
+              - region "Relationships" [ref=f57e490]:
+                - generic [ref=f57e493]:
+                  - heading "Connected" [level=2] [ref=f57e494]
+                  - list "Connected" [ref=f57e495]:
+                    - listitem [ref=f57e496]:
+                      - button "uat210-admin+tag" [ref=f57e497] [cursor=pointer]
+              - complementary "Graph inspector" [ref=f57e484]:
+                - tablist "Graph inspector views" [ref=f57e485]:
+                  - tab "Details" [selected] [ref=f57e486] [cursor=pointer]
+                  - tab "Suggestions" [ref=f57e498] [cursor=pointer]
+                - tabpanel "Details" [ref=f57e487]:
+                  - heading "UAT210 admin graph 20260917" [level=2] [ref=f57e499]
+                  - paragraph [ref=f57e500]: Note
+                  - generic [ref=f57e501]:
+                    - heading "Tags" [level=3] [ref=f57e502]
+                    - paragraph [ref=f57e503]: uat210-admin+tag
+                  - generic [ref=f57e504]:
+                    - heading "Relationships" [level=3] [ref=f57e505]
+                    - generic [ref=f57e506]:
+                      - heading "Connected" [level=4] [ref=f57e507]
+                      - button "uat210-admin+tag" [ref=f57e508] [cursor=pointer]
+            - paragraph [ref=f57e489]
+  - alert [ref=f57e10]
+```

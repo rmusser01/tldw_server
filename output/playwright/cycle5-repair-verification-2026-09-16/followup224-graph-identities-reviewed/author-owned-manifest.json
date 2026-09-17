@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-17T09:13:20.008Z",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/services/note-graph-suggestions.ts",
+      "sha256": "3d1cf6becffd0f9b29a5c4e485721b0de843524a3b411d5de7fbc39964030fa2"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/note-graph-identities.test.ts",
+      "sha256": "b2e6480a7e4859a167b5d6503aa5fa0e06afaa7bfd302fe36e8efea740feb406"
+    }
+  ]
+}

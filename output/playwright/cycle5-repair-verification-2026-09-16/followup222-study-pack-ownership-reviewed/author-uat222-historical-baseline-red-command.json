@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T09:13:32.189Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "uat222_baseline_replay",
+    "tldw_Server_API/tests/StudyPacks/test_study_pack_owner_contract.py",
+    "-q",
+    "--tb=short",
+    "-k",
+    "replacing_owned or sqlite_same_file"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
