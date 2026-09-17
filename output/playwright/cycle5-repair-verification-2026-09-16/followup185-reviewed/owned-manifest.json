@@ -1,0 +1,39 @@
+{
+  "task": "TASK13260.122",
+  "baseline_head": "a647f5cd890e980dd79027ead3452486ad2b2a47",
+  "current_head": "a647f5cd890e980dd79027ead3452486ad2b2a47",
+  "files": {
+    "tldw_Server_API/app/core/Flashcards/study_assistant.py": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660",
+    "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
+    "tldw_Server_API/app/api/v1/endpoints/quizzes.py": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef",
+    "tldw_Server_API/tests/Flashcards/test_study_assistant_adapter_contract.py": "e8ee9e8b559f05fbeef12282ade5951e2fb7e4f8775ca110cefbd180cf2475cb",
+    "tldw_Server_API/tests/Flashcards/test_study_assistant_service_prompts.py": "ed9c42d1d088afd2c7c78c176d5bfaa7b52700ae539307142dd6a30b4fc5f770"
+  },
+  "results": {
+    "combined": {
+      "passed": 159,
+      "skipped": 0,
+      "seconds": 129.18
+    },
+    "endpoint_guards": {
+      "passed": 21,
+      "deselected": 234,
+      "skipped": 0,
+      "seconds": 38.3
+    },
+    "ruff_findings": 0,
+    "production_bandit_findings": 0,
+    "production_bandit_errors": 0,
+    "test_bandit_baseline_findings": 1,
+    "test_bandit_current_findings": 1,
+    "test_bandit_added_findings": 0
+  },
+  "artifacts": {
+    "IMPLEMENTATION.md": "c8d0b968406620a6933a3acb5160fb4e5f6265d7b0de33991104c680055395e1",
+    "owned.patch": "5c16f991535aa31596e7191e4ab634678533669635935d9b9b1056fae1a35144",
+    "source-freeze-manifest.json": "cd320cb4d7c64be415a917c9b6ffbbdff820453ca5e55b3437a9a15519eb8fbe",
+    "assertion-security-check.json": "efd387324b6a61f57fbb1118050ff6243762c01f80338a6e409fa202dfb41629",
+    "uat185-final-combined-green.redacted.log": "2805489674db19bb8e0ac57a0917ff1c0ac222b7c12b089b921f97ce41c0b3a4",
+    "uat185-final-endpoint-guards.redacted.log": "80856216f06e49f67768c768e4b71cf9fbf7f4987bc7ac262b2f12c5131ef24c"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/Flashcards/study_assistant.py",
+      "sha256": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660",
+      "expected": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660",
+      "matches_expected": true,
+      "matches_snapshot": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+      "sha256": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
+      "expected": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
+      "matches_expected": true,
+      "matches_snapshot": true
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/quizzes.py",
+      "sha256": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef",
+      "expected": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef",
+      "matches_expected": true,
+      "matches_snapshot": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Flashcards/test_study_assistant_adapter_contract.py",
+      "sha256": "e8ee9e8b559f05fbeef12282ade5951e2fb7e4f8775ca110cefbd180cf2475cb",
+      "expected": "e8ee9e8b559f05fbeef12282ade5951e2fb7e4f8775ca110cefbd180cf2475cb",
+      "matches_expected": true,
+      "matches_snapshot": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Flashcards/test_study_assistant_service_prompts.py",
+      "sha256": "ed9c42d1d088afd2c7c78c176d5bfaa7b52700ae539307142dd6a30b4fc5f770",
+      "expected": "ed9c42d1d088afd2c7c78c176d5bfaa7b52700ae539307142dd6a30b4fc5f770",
+      "matches_expected": true,
+      "matches_snapshot": true
+    }
+  ],
+  "owner_assertions_baseline": 36,
+  "owner_assertions_current": 36,
+  "owner_assertions_equal": true,
+  "owned_manifest_sha256": "7644157f39d4236736d4538f1bd36fa30c772c7c5f502afaeef5c8059e49fa82",
+  "owned_patch_sha256": "5c16f991535aa31596e7191e4ab634678533669635935d9b9b1056fae1a35144"
+}

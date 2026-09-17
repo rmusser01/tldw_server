@@ -1,0 +1,16 @@
+{
+  "owner_guidance_assertions_unchanged": true,
+  "assertion_count": 36,
+  "bandit_test_baseline": [
+    [
+      "B106",
+      "Possible hardcoded password: 'access'"
+    ]
+  ],
+  "bandit_test_current": [
+    [
+      "B106",
+      "Possible hardcoded password: 'access'"
+    ]
+  ]
+}
