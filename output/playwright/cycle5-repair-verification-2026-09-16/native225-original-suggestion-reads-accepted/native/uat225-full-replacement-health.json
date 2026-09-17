@@ -1,0 +1,49 @@
+{
+  "oldPid": 89545,
+  "newPid": 10113,
+  "startedAt": "2026-09-17T11:32:22.589Z",
+  "rows": [
+    {
+      "at": "2026-09-17T11:32:26.154Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:27.158Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:28.160Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:29.162Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:30.164Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:31.165Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": "unavailable"
+    },
+    {
+      "at": "2026-09-17T11:32:32.189Z",
+      "oldAlive": true,
+      "newAlive": true,
+      "status": 200
+    }
+  ]
+}

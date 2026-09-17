@@ -1,0 +1,56 @@
+{
+  "auditedAt": "2026-09-17T11:45:47.864711+00:00",
+  "nativeManifestSha256": "3a72371556468f684613dd6b77e2308b30e7775d6981bd4373fe4e8f044e1810",
+  "manifestFilesVerified": 36,
+  "backendBeforeAfter": {
+    "count": 3669,
+    "revision": "e1ccad4be7cf5b5c1b4c1e3b7405741a3ad19f0d",
+    "equal": true,
+    "before": "2026-09-17T11:32:05.953Z",
+    "after": "2026-09-17T11:40:29.694Z"
+  },
+  "safeEventCounts": {
+    "identity": 14,
+    "request": 19,
+    "response": 19
+  },
+  "observedRequestsAllGET": true,
+  "noteReadbacks": {
+    "count": 7,
+    "first": "2026-09-17T11:37:00.215Z",
+    "last": "2026-09-17T11:39:54.173Z",
+    "decodedBodiesEqual": true,
+    "note": {
+      "title": "UAT210 admin graph 20260917",
+      "content": "Synthetic graph seed for mapping validation.",
+      "conversation_id": null,
+      "message_id": null,
+      "id": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+      "created_at": "2026-09-17T08:31:04.233000Z",
+      "last_modified": "2026-09-17T08:31:04.233000Z",
+      "version": 1,
+      "client_id": "1",
+      "deleted": false,
+      "studio": null,
+      "keywords": [
+        {
+          "keyword": "uat210-admin+tag",
+          "id": 14,
+          "sync_id": "add8b099-d2e8-47a8-ba01-22e0561b6e39",
+          "created_at": "2026-09-17T08:31:04.238000Z",
+          "last_modified": "2026-09-17T08:31:04.238000Z",
+          "version": 1,
+          "client_id": "1",
+          "deleted": false,
+          "note_count": null
+        }
+      ],
+      "folders": [],
+      "keyword_sync": null
+    }
+  },
+  "endpointExtractMatchesRawSafeEvents": true,
+  "observedResponseErrors": 0,
+  "imagesByteEqual": true,
+  "screenshotViewed": "reload-suggestions.png"
+}

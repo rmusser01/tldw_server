@@ -1,0 +1,33 @@
+### Ran Playwright code
+```js
+await page.reload();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [](http://127.0.0.1:18583/notes)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/notes
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T11-38-30-167Z.yml)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T09-24-02-536Z.log#L52-L53
+
+- generic [active]:
+  - dialog [ref=f65e1]:
+    - generic [ref=f65e2]:
+      - progressbar [ref=f65e3]
+      - status [ref=f65e7]: Loading...
+      - paragraph [ref=f65e8]: Please wait while we get things ready.
+      - generic [ref=f65e9]: Loading...
+  - alert [ref=f65e10]

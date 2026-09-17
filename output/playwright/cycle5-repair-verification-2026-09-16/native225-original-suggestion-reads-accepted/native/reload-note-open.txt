@@ -1,0 +1,229 @@
+### Ran Playwright code
+```js
+await page.getByTestId('notes-open-button-11c86b62-d045-4836-9e2b-f9b68b14650f').click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Notes | tldw](http://127.0.0.1:18583/notes)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/notes
+- Page Title: Notes | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T11-39-25-097Z.yml)
+
+- generic [ref=f65e11]:
+  - generic [ref=f65e14]:
+    - link "Skip to main content" [ref=f65e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f65e16]:
+      - button "Expand sidebar" [ref=f65e17] [cursor=pointer]
+      - button "New Chat" [ref=f65e21] [cursor=pointer]
+      - generic [ref=f65e24]:
+        - button "Quick Ingest" [ref=f65e25] [cursor=pointer]
+        - button "Chat" [ref=f65e29] [cursor=pointer]
+        - button "Prompts" [ref=f65e32] [cursor=pointer]
+        - button "Characters" [ref=f65e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f65e41] [cursor=pointer]
+        - button "World Books" [ref=f65e45] [cursor=pointer]
+        - button "Notes" [ref=f65e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f65e52] [cursor=pointer]
+        - button "Media" [ref=f65e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f65e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f65e69] [cursor=pointer]
+        - button "Kanban" [ref=f65e75] [cursor=pointer]
+        - button "Watchlists" [ref=f65e77] [cursor=pointer]
+      - generic [ref=f65e82]:
+        - button "Open Notes Dock" [ref=f65e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f65e88] [cursor=pointer]
+        - button "Settings" [ref=f65e91] [cursor=pointer]
+    - main [ref=f65e95]:
+      - generic [ref=f65e96]:
+        - generic [ref=f65e99]:
+          - generic [ref=f65e100]:
+            - button "Expand sidebar" [ref=f65e101] [cursor=pointer]
+            - generic [ref=f65e103]:
+              - img "tldw Assistant" [ref=f65e104]
+              - generic [ref=f65e105]: tldw Assistant
+              - button "Companion Home" [ref=f65e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f65e110] [cursor=pointer]
+          - generic [ref=f65e113]:
+            - button "Search - Open command palette" [ref=f65e114] [cursor=pointer]:
+              - generic [ref=f65e118]: Search
+              - generic [ref=f65e119]: ⌘K
+            - button "Open settings" [ref=f65e120] [cursor=pointer]
+            - generic [ref=f65e132]:
+              - button "Notifications, 0 unread" [ref=f65e133] [cursor=pointer]
+              - status [ref=f65e137]: Notifications are active
+            - button "Switch to light theme" [ref=f65e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f65e145] [cursor=pointer]:
+              - generic [ref=f65e146]: "?"
+        - generic [ref=f65e148]:
+          - link "Skip to notes list" [ref=f65e149] [cursor=pointer]:
+            - /url: "#notes-list-region"
+          - link "Skip to editor" [ref=f65e150] [cursor=pointer]:
+            - /url: "#notes-editor-region"
+          - paragraph [ref=f65e151]: "Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs."
+          - region "Notes list" [ref=f65e152]:
+            - generic [ref=f65e153]:
+              - generic [ref=f65e154]:
+                - generic [ref=f65e155]:
+                  - generic [ref=f65e156]:
+                    - generic [ref=f65e157]: Notes
+                    - generic [ref=f65e158]: 1 total
+                  - button "New note" [ref=f65e159] [cursor=pointer]
+                - generic [ref=f65e162]:
+                  - generic [ref=f65e163]:
+                    - button "Views" [expanded] [ref=f65e165] [cursor=pointer]
+                    - generic [ref=f65e170]:
+                      - generic [ref=f65e171]:
+                        - button "Notes" [ref=f65e172] [cursor=pointer]
+                        - button "Trash" [ref=f65e174] [cursor=pointer]
+                      - generic [ref=f65e176]:
+                        - button "List" [ref=f65e177] [cursor=pointer]
+                        - button "Timeline" [ref=f65e179] [cursor=pointer]
+                        - button "Inbox" [ref=f65e181] [cursor=pointer]
+                        - button "Collection" [ref=f65e183] [cursor=pointer]
+                        - button "Graph" [ref=f65e185] [cursor=pointer]
+                      - generic [ref=f65e194]:
+                        - button "Organize" [ref=f65e195] [cursor=pointer]
+                        - button "Organize help" [ref=f65e201] [cursor=pointer]:
+                          - img "question-circle" [ref=f65e202]
+                  - generic [ref=f65e206]:
+                    - textbox "Search notes" [ref=f65e213]:
+                      - /placeholder: Search titles and contents
+                    - generic [ref=f65e215] [cursor=pointer]:
+                      - generic [ref=f65e216]:
+                        - generic "Date modified (newest first)" [ref=f65e217]
+                        - combobox "Sort notes" [ref=f65e218]
+                      - img "down" [ref=f65e220]
+                  - generic [ref=f65e223]:
+                    - button "Filters" [expanded] [ref=f65e225] [cursor=pointer]
+                    - generic [ref=f65e230]:
+                      - generic [ref=f65e231]:
+                        - button "Captured" [ref=f65e232] [cursor=pointer]
+                        - button "Search tips" [ref=f65e234] [cursor=pointer]
+                      - generic [ref=f65e236]:
+                        - generic [ref=f65e237]:
+                          - generic: Filter by tag
+                          - combobox "Filter by tag" [ref=f65e239]
+                        - img "down" [ref=f65e241]
+                      - generic [ref=f65e244]:
+                        - generic [ref=f65e245]:
+                          - button "Browse tags" [ref=f65e246] [cursor=pointer]
+                          - button "Tags help" [ref=f65e248] [cursor=pointer]:
+                            - img "question-circle" [ref=f65e249]
+                        - generic [ref=f65e253]: 1 available
+                      - generic [ref=f65e254]: For in-note search, use browser Ctrl/Cmd+F.
+                  - generic [ref=f65e255]:
+                    - generic [ref=f65e256]: Recent notes
+                    - button "UAT210 admin graph 20260917" [ref=f65e258] [cursor=pointer]
+              - generic [ref=f65e260]:
+                - generic [ref=f65e262]:
+                  - generic [ref=f65e263]: Results
+                  - generic [ref=f65e264]:
+                    - button "Import" [ref=f65e265] [cursor=pointer]
+                    - button "Sync folder" [disabled] [ref=f65e267]
+                    - button "Export" [ref=f65e269] [cursor=pointer]
+                - list "Notes" [ref=f65e272]:
+                  - listitem [ref=f65e273]:
+                    - generic [ref=f65e274]:
+                      - checkbox "Select note UAT210 admin graph 20260917 for bulk actions" [ref=f65e275]
+                      - button "Pin note UAT210 admin graph 20260917" [ref=f65e276] [cursor=pointer]
+                      - button "Open note UAT210 admin graph 20260917" [active] [ref=f65e279] [cursor=pointer]:
+                        - generic [ref=f65e280]:
+                          - generic [ref=f65e281]: UAT210 admin graph 20260917
+                          - generic [ref=f65e287]: Synthetic graph seed for mapping validation.
+                          - generic [ref=f65e288]: 9/17/2026, 1:31:04 AM
+                - generic [ref=f65e290]:
+                  - generic [ref=f65e291]: Showing 1-1 of 1
+                  - list [ref=f65e292]:
+                    - listitem "Previous Page" [ref=f65e293]:
+                      - button [disabled] [ref=f65e294]:
+                        - img "left" [ref=f65e295]
+                    - listitem "1" [ref=f65e298] [cursor=pointer]
+                    - listitem "Next Page" [ref=f65e300]:
+                      - button [disabled] [ref=f65e301]:
+                        - img "right" [ref=f65e302]
+                    - listitem [ref=f65e305]:
+                      - generic [ref=f65e306]:
+                        - generic [ref=f65e307]:
+                          - generic "20 / page" [ref=f65e308]
+                          - combobox "Page Size" [ref=f65e309]
+                        - img "down" [ref=f65e311]
+          - button "Collapse sidebar" [ref=f65e314] [cursor=pointer]
+          - region "Note editor" [ref=f65e318]:
+            - generic [ref=f65e319]:
+              - generic [ref=f65e321]:
+                - heading "UAT210 admin graph 20260917" [level=5] [ref=f65e421]
+                - status [ref=f65e323]:
+                  - generic [ref=f65e423]: Saved
+              - generic [ref=f65e324]:
+                - button "Save note" [ref=f65e325] [cursor=pointer]:
+                  - generic [ref=f65e429]: Save
+                - button "Save and start another note" [ref=f65e326] [cursor=pointer]:
+                  - generic [ref=f65e434]: Save & new
+                - group "Editor mode" [ref=f65e327]:
+                  - button "Edit" [pressed] [ref=f65e328] [cursor=pointer]
+                  - button "Split" [ref=f65e333] [cursor=pointer]
+                  - button "Preview" [ref=f65e338] [cursor=pointer]
+                - button "Create study pack" [ref=f65e344] [cursor=pointer]
+                - button "More actions" [ref=f65e345] [cursor=pointer]
+            - generic [ref=f65e351]:
+              - generic [ref=f65e358]:
+                - textbox "Note title" [ref=f65e359]:
+                  - /placeholder: Title
+                  - text: UAT210 admin graph 20260917
+                - button "Generate title from content" [ref=f65e360] [cursor=pointer]:
+                  - generic [ref=f65e440]: Generate title
+                - button "Keyboard shortcuts" [ref=f65e361] [cursor=pointer]
+              - generic [ref=f65e363]:
+                - generic [ref=f65e364]:
+                  - generic [ref=f65e365]:
+                    - generic [ref=f65e442]:
+                      - generic [ref=f65e443]: uat210-admin+tag (1)
+                      - generic [aria-hidden] [ref=f65e447] [cursor=pointer]
+                    - combobox "Note tags" [ref=f65e367]
+                  - img "down" [ref=f65e369]
+                  - img "close-circle" [ref=f65e452] [cursor=pointer]
+                - status "Note save status" [ref=f65e455]: All changes saved
+              - generic [ref=f65e457]:
+                - button "Connections" [ref=f65e458] [cursor=pointer]
+                - button "Connections help" [ref=f65e464] [cursor=pointer]:
+                  - img "question-circle" [ref=f65e465]
+              - generic [ref=f65e372]:
+                - group "Input mode" [ref=f65e373]:
+                  - button "Markdown" [ref=f65e374] [cursor=pointer]
+                  - button "WYSIWYG" [ref=f65e376] [cursor=pointer]
+                - generic [ref=f65e378]: Formatting
+                - button "Bold" [ref=f65e379] [cursor=pointer]
+                - button "Italic" [ref=f65e383] [cursor=pointer]
+                - button "Heading" [ref=f65e387] [cursor=pointer]
+                - button "List" [ref=f65e391] [cursor=pointer]
+                - button "Link" [ref=f65e394] [cursor=pointer]
+                - button "Attachment" [ref=f65e399] [cursor=pointer]
+                - button "Code" [ref=f65e403] [cursor=pointer]
+                - generic [ref=f65e410]: Assist
+                - button "Summarize" [ref=f65e411] [cursor=pointer]
+                - button "Expand outline" [ref=f65e412] [cursor=pointer]
+                - button "Suggest tags" [ref=f65e413] [cursor=pointer]
+              - generic [ref=f65e415]:
+                - textbox "Note content" [ref=f65e416]:
+                  - /placeholder: Write your note here... (Markdown supported)
+                  - text: Synthetic graph seed for mapping validation.
+                - generic [ref=f65e417]: Markdown + LaTeX supported
+              - generic [ref=f65e418]:
+                - text: 6 words · 44 chars · 1 min read
+                - generic [ref=f65e419]: Version 1 · Last saved 9/17/2026, 1:31:04 AM
+                - generic [ref=f65e420]: "Origin: Typed manually"
+  - alert [ref=f65e10]

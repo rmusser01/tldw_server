@@ -1,0 +1,267 @@
+{
+  "at": "2026-09-17T11:43:28.941Z",
+  "revision": "e1ccad4be7cf5b5c1b4c1e3b7405741a3ad19f0d",
+  "backendFileCount": 3669,
+  "backendHashesUnchanged": true,
+  "administrator": {
+    "id": 1,
+    "username": "uat_admin"
+  },
+  "note": {
+    "id": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+    "version": 1,
+    "tagId": 14,
+    "tagVersion": 1,
+    "readbacks": 7
+  },
+  "summaries": [
+    {
+      "label": "initial",
+      "responses": [
+        {
+          "at": "2026-09-17T11:37:16.736Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/graph?center_note_id=11c86b62-d045-4836-9e2b-f9b68b14650f&radius=1&max_nodes=120&max_edges=480",
+          "status": 200,
+          "body": {
+            "nodes": [
+              {
+                "id": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+                "type": "note",
+                "label": "UAT210 admin graph 20260917",
+                "created_at": "2026-09-17T08:31:04.233000Z",
+                "deleted": false,
+                "degree": 1,
+                "tag_count": 1,
+                "primary_source_id": null
+              },
+              {
+                "id": "tag:uat210-admin+tag",
+                "type": "tag",
+                "label": "uat210-admin+tag",
+                "created_at": null,
+                "deleted": null,
+                "degree": 1,
+                "tag_count": null,
+                "primary_source_id": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "tm:11c86b62:14",
+                "source": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+                "target": "tag:uat210-admin+tag",
+                "type": "tag_membership",
+                "directed": false,
+                "weight": 1,
+                "label": null
+              }
+            ],
+            "truncated": false,
+            "truncated_by": [],
+            "has_more": false,
+            "cursor": null,
+            "limits": {
+              "max_nodes": 120,
+              "max_edges": 480,
+              "max_degree": 40
+            },
+            "radius_cap_applied": false,
+            "active_note_count": 1,
+            "all_notes_note_cap": 100,
+            "all_notes_eligible": true,
+            "suggestions_authorized": true
+          }
+        },
+        {
+          "at": "2026-09-17T11:37:16.811Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions?state=pending%2Caccepting&limit=100",
+          "status": 200,
+          "body": {
+            "items": [],
+            "next_cursor": null,
+            "current_source_fingerprint": "sha256:6b15a68b4a9dc220c9cbc5db93a3a3f42170f19445e4fbae98c6bc4e8f676a6d",
+            "rejection_set_revision": 0,
+            "rejection_count": 0
+          }
+        },
+        {
+          "at": "2026-09-17T11:37:16.816Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions/capabilities",
+          "status": 200,
+          "body": {
+            "provider": "llama.cpp",
+            "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+            "endpoint_origin_revision": "sha256:8dbf6f3b72beaa3b12e0aeb528336006b9ea85e1bd7fd8ec51e738cd00cf378c",
+            "data_boundary": "remote",
+            "disclosure_external": true,
+            "outbound_data_categories": [
+              "selected_note_title",
+              "selected_note_excerpts",
+              "candidate_note_titles",
+              "candidate_note_excerpts",
+              "existing_tag_labels"
+            ],
+            "generation_available": false,
+            "unavailable_reason": "notes_graph_suggestions_worker_unavailable",
+            "limits": {
+              "max_candidates": 30,
+              "max_relationships": 5,
+              "max_tags": 5,
+              "max_new_tags": 2,
+              "max_tag_catalog": 100,
+              "max_estimated_input_tokens": 24000,
+              "max_output_tokens": 2000,
+              "provider_timeout_seconds": 120,
+              "response_candidates": 1
+            },
+            "allowed_actions": [
+              "generate",
+              "cancel",
+              "accept",
+              "reject",
+              "reset_rejections"
+            ],
+            "revision": "sha256:57e66de817360dbf938b7e487ec7d8f6fbaf3d95f488cb8c4fafaeff9dd5dbb9"
+          }
+        },
+        {
+          "at": "2026-09-17T11:37:16.849Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions/runs?state=admitting%2Cqueued%2Crunning%2Ccancelling%2Cpublishing&limit=100",
+          "status": 200,
+          "body": {
+            "items": [],
+            "next_cursor": null
+          }
+        }
+      ]
+    },
+    {
+      "label": "after_reload_reopen",
+      "responses": [
+        {
+          "at": "2026-09-17T11:39:34.610Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/graph?center_note_id=11c86b62-d045-4836-9e2b-f9b68b14650f&radius=1&max_nodes=120&max_edges=480",
+          "status": 200,
+          "body": {
+            "nodes": [
+              {
+                "id": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+                "type": "note",
+                "label": "UAT210 admin graph 20260917",
+                "created_at": "2026-09-17T08:31:04.233000Z",
+                "deleted": false,
+                "degree": 1,
+                "tag_count": 1,
+                "primary_source_id": null
+              },
+              {
+                "id": "tag:uat210-admin+tag",
+                "type": "tag",
+                "label": "uat210-admin+tag",
+                "created_at": null,
+                "deleted": null,
+                "degree": 1,
+                "tag_count": null,
+                "primary_source_id": null
+              }
+            ],
+            "edges": [
+              {
+                "id": "tm:11c86b62:14",
+                "source": "11c86b62-d045-4836-9e2b-f9b68b14650f",
+                "target": "tag:uat210-admin+tag",
+                "type": "tag_membership",
+                "directed": false,
+                "weight": 1,
+                "label": null
+              }
+            ],
+            "truncated": false,
+            "truncated_by": [],
+            "has_more": false,
+            "cursor": null,
+            "limits": {
+              "max_nodes": 120,
+              "max_edges": 480,
+              "max_degree": 40
+            },
+            "radius_cap_applied": false,
+            "active_note_count": 1,
+            "all_notes_note_cap": 100,
+            "all_notes_eligible": true,
+            "suggestions_authorized": true
+          }
+        },
+        {
+          "at": "2026-09-17T11:39:34.662Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions?state=pending%2Caccepting&limit=100",
+          "status": 200,
+          "body": {
+            "items": [],
+            "next_cursor": null,
+            "current_source_fingerprint": "sha256:6b15a68b4a9dc220c9cbc5db93a3a3f42170f19445e4fbae98c6bc4e8f676a6d",
+            "rejection_set_revision": 0,
+            "rejection_count": 0
+          }
+        },
+        {
+          "at": "2026-09-17T11:39:34.666Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions/capabilities",
+          "status": 200,
+          "body": {
+            "provider": "llama.cpp",
+            "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+            "endpoint_origin_revision": "sha256:8dbf6f3b72beaa3b12e0aeb528336006b9ea85e1bd7fd8ec51e738cd00cf378c",
+            "data_boundary": "remote",
+            "disclosure_external": true,
+            "outbound_data_categories": [
+              "selected_note_title",
+              "selected_note_excerpts",
+              "candidate_note_titles",
+              "candidate_note_excerpts",
+              "existing_tag_labels"
+            ],
+            "generation_available": false,
+            "unavailable_reason": "notes_graph_suggestions_worker_unavailable",
+            "limits": {
+              "max_candidates": 30,
+              "max_relationships": 5,
+              "max_tags": 5,
+              "max_new_tags": 2,
+              "max_tag_catalog": 100,
+              "max_estimated_input_tokens": 24000,
+              "max_output_tokens": 2000,
+              "provider_timeout_seconds": 120,
+              "response_candidates": 1
+            },
+            "allowed_actions": [
+              "generate",
+              "cancel",
+              "accept",
+              "reject",
+              "reset_rejections"
+            ],
+            "revision": "sha256:57e66de817360dbf938b7e487ec7d8f6fbaf3d95f488cb8c4fafaeff9dd5dbb9"
+          }
+        },
+        {
+          "at": "2026-09-17T11:39:34.705Z",
+          "url": "http://127.0.0.1:18583/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions/runs?state=admitting%2Cqueued%2Crunning%2Ccancelling%2Cpublishing&limit=100",
+          "status": 200,
+          "body": {
+            "items": [],
+            "next_cursor": null
+          }
+        }
+      ]
+    }
+  ],
+  "observedPageErrors": [],
+  "observedDomainFailures": [],
+  "limits": [
+    "Existing reused privileged PostgreSQL profile; not fresh matrix or restricted-role runtime acceptance.",
+    "Generation unavailable: notes_graph_suggestions_worker_unavailable; Generate remains disabled. No generation/model call or product decision performed.",
+    "Normal reload returned the Notes list; same note and Graph were reopened through visible UI to produce fresh requests.",
+    "Separate Settings openapi.json404 console entries are under read-only triage; no Graph read failure."
+  ]
+}

@@ -1,5 +1,7 @@
 # Cycle 5 repair and verification plan
 
+Latest checkpoint 2026-09-17 11:52UTC:230findings,229verified/1unresolved230. UAT225 original administrator native reads independently pass on e1ccad4be7, including normal reload/reopen; tasks163/164 are Done. TASK13260.171 repairs separate Settings OpenAPI404 requests. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-settings-open.json. Stage3 remains active and Stage4 Not Started.
+
 Current Stage3 checkpoint (2026-09-17): 229 unique findings — 228 verified, 1 awaiting native acceptance (225), 0 unresolved implementations. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-all-repairs-reviewed.json. Complete225B independently passes173focused+200adjacent tests with zero skips and static/hash checks clear. Task168 is Done. Original administrator native reads on the committed repair remain the final acceptance gate. Stage4 full matrix remains Not Started; harness166 is reviewed.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).

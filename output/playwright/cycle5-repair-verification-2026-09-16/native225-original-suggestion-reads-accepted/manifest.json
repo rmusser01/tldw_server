@@ -1,0 +1,349 @@
+{
+  "at": "2026-09-17T11:50:20.286Z",
+  "files": [
+    {
+      "file": "native/ACCEPTANCE-PLAN225.md",
+      "source": ".tmp/uat225-native-20260917/ACCEPTANCE-PLAN225.md",
+      "original_sha256": "d5b0165f5bc1f6ac28585dee2c4790d6c187cf88dd963ece0644d26d626e621d",
+      "sha256": "d5b0165f5bc1f6ac28585dee2c4790d6c187cf88dd963ece0644d26d626e621d",
+      "bytes": 2846,
+      "normalization": "none"
+    },
+    {
+      "file": "native/NATIVE-REPORT225.md",
+      "source": ".tmp/uat225-native-20260917/NATIVE-REPORT225.md",
+      "original_sha256": "cbe24f39bd8cd528bf433b18a5282e2040dc3b503fdfbfa9a9a89a243a9ea8fb",
+      "sha256": "cbe24f39bd8cd528bf433b18a5282e2040dc3b503fdfbfa9a9a89a243a9ea8fb",
+      "bytes": 2823,
+      "normalization": "none"
+    },
+    {
+      "file": "native/acceptance-result.json",
+      "source": ".tmp/uat225-native-20260917/acceptance-result.json",
+      "original_sha256": "1a1cd204a9bc00e7c5ca9801acd3ac6040ff18fc3c27e726d5a539be392db1e7",
+      "sha256": "1a1cd204a9bc00e7c5ca9801acd3ac6040ff18fc3c27e726d5a539be392db1e7",
+      "bytes": 9857,
+      "normalization": "none"
+    },
+    {
+      "file": "native/admin-after-login.txt",
+      "source": ".tmp/uat225-native-20260917/admin-after-login.txt",
+      "original_sha256": "673a97c96c54a7f00d0cd2bebf0aa59616fb19a1e627d66824c45f8949295307",
+      "sha256": "3443664511ababc26636a1be002272285d46f938674537f209ad157d4f5f1245",
+      "bytes": 10481,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/admin-login-events.txt",
+      "source": ".tmp/uat225-native-20260917/admin-login-events.txt",
+      "original_sha256": "5ca3671c8125485dea61f6f6578b9517bdc3dc93a4bcc7c23f731f4ba5f0119f",
+      "sha256": "2678ee8e6a378353824fd5691e54e76ff23b461f8e6983de666b28c036a9bea0",
+      "bytes": 2694,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/admin-login-settled.txt",
+      "source": ".tmp/uat225-native-20260917/admin-login-settled.txt",
+      "original_sha256": "9fadc5b21607a38b4d13aeef0e383b3640b6063db0f1536632079fb7c4ef869a",
+      "sha256": "c7091a3f70f2dca19669ae73c6e9a872793549ba7f16146c0fac34e7107bc2cd",
+      "bytes": 12635,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/admin-scope-metadata.json",
+      "source": ".tmp/uat225-native-20260917/admin-scope-metadata.json",
+      "original_sha256": "2373d4b1536e235004a2dee760f0c01f65ece26426f003981885e6ae1f1d0aa5",
+      "sha256": "2373d4b1536e235004a2dee760f0c01f65ece26426f003981885e6ae1f1d0aa5",
+      "bytes": 407,
+      "normalization": "none"
+    },
+    {
+      "file": "native/bandit-metadata-helper.json",
+      "source": ".tmp/uat225-native-20260917/bandit-metadata-helper.json",
+      "original_sha256": "59367f034c67913ea6fc9ccd1426849ef8b0581b5c88146cd901a2f8071d274f",
+      "sha256": "03f6c47896c1cdaeadee185a5d92f8271e08985c739a353a5d266a2ddfb6023e",
+      "bytes": 766,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/close-settings.txt",
+      "source": ".tmp/uat225-native-20260917/close-settings.txt",
+      "original_sha256": "c5d1ff7386d08f0c6910cdfffd6f8c75f0f3a72b0288e9620cc27314dca2085b",
+      "sha256": "c5d1ff7386d08f0c6910cdfffd6f8c75f0f3a72b0288e9620cc27314dca2085b",
+      "bytes": 7348,
+      "normalization": "none"
+    },
+    {
+      "file": "native/console-from-line43.redacted.txt",
+      "source": ".tmp/uat225-native-20260917/console-from-line43.redacted.txt",
+      "original_sha256": "7d6deefdccb26753a2a6b90057a015be738a6f1bf1bc4865c5f55df94297a68e",
+      "sha256": "7d6deefdccb26753a2a6b90057a015be738a6f1bf1bc4865c5f55df94297a68e",
+      "bytes": 3660,
+      "normalization": "none"
+    },
+    {
+      "file": "native/login-attempt-events.txt",
+      "source": ".tmp/uat225-native-20260917/login-attempt-events.txt",
+      "original_sha256": "83d3434253ec8a6e496e1da541c47f9e1b9ec52930afa9d13bd0a3bcaf0b68bf",
+      "sha256": "ab30cfde868d60a70c2bcbb37447300e9a89b73e1a3c8c3806afb516a6c9a785",
+      "bytes": 1804,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/login-harness-note.json",
+      "source": ".tmp/uat225-native-20260917/login-harness-note.json",
+      "original_sha256": "aec72857a23f7889e00ec5cd64f43d621e359780d2467cace1ec1abac8a2ad7a",
+      "sha256": "aec72857a23f7889e00ec5cd64f43d621e359780d2467cace1ec1abac8a2ad7a",
+      "bytes": 437,
+      "normalization": "none"
+    },
+    {
+      "file": "native/logout.txt",
+      "source": ".tmp/uat225-native-20260917/logout.txt",
+      "original_sha256": "f1d5906fb14327734dd0d1e8391b473fd6fe6e74982dda85389e9410c090cce2",
+      "sha256": "f1d5906fb14327734dd0d1e8391b473fd6fe6e74982dda85389e9410c090cce2",
+      "bytes": 13057,
+      "normalization": "none"
+    },
+    {
+      "file": "native/notes-open.txt",
+      "source": ".tmp/uat225-native-20260917/notes-open.txt",
+      "original_sha256": "4563976e0ff091fa496e4444db21e5486423f542ae13c6eea318b4b9892e1ca0",
+      "sha256": "4563976e0ff091fa496e4444db21e5486423f542ae13c6eea318b4b9892e1ca0",
+      "bytes": 12990,
+      "normalization": "none"
+    },
+    {
+      "file": "native/open-settings.txt",
+      "source": ".tmp/uat225-native-20260917/open-settings.txt",
+      "original_sha256": "a531769c030b9ba2666a73b48c36cfaf923b142706f9232f4f3759460962c448",
+      "sha256": "a531769c030b9ba2666a73b48c36cfaf923b142706f9232f4f3759460962c448",
+      "bytes": 9224,
+      "normalization": "none"
+    },
+    {
+      "file": "native/original-graph-events.txt",
+      "source": ".tmp/uat225-native-20260917/original-graph-events.txt",
+      "original_sha256": "321402cc4f32771259e6036124a96c76defcd7ce89b4bfdb0470fe4b9435e25d",
+      "sha256": "4083b7793e880a076a5e697fdf417772a10a712f76a8687979b9b2afb468a9ae",
+      "bytes": 23505,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/original-graph-open.txt",
+      "source": ".tmp/uat225-native-20260917/original-graph-open.txt",
+      "original_sha256": "024d97577dec604a899b619e8a2070464d6dd76560910b403f840941d2e9968a",
+      "sha256": "024d97577dec604a899b619e8a2070464d6dd76560910b403f840941d2e9968a",
+      "bytes": 12348,
+      "normalization": "none"
+    },
+    {
+      "file": "native/original-note-open.txt",
+      "source": ".tmp/uat225-native-20260917/original-note-open.txt",
+      "original_sha256": "fbdb0f0e3d6b7bbeac52ac207979942e993bda9cf8f92d23dc5ddc566818388e",
+      "sha256": "fbdb0f0e3d6b7bbeac52ac207979942e993bda9cf8f92d23dc5ddc566818388e",
+      "bytes": 13243,
+      "normalization": "none"
+    },
+    {
+      "file": "native/original-read-failure.json",
+      "source": ".tmp/uat225-native-20260917/original-read-failure.json",
+      "original_sha256": "ea4f6c1d5b988bc6cf4243acb3d7c9330ea2d4e28f2d47db5d17c20c38f30799",
+      "sha256": "ea4f6c1d5b988bc6cf4243acb3d7c9330ea2d4e28f2d47db5d17c20c38f30799",
+      "bytes": 1146,
+      "normalization": "none"
+    },
+    {
+      "file": "native/original-suggestions-open.txt",
+      "source": ".tmp/uat225-native-20260917/original-suggestions-open.txt",
+      "original_sha256": "b3f6e6bb8178ee1fe98e04642d1f2c68b7f7b003dd3874b5e6a4db0771863f7d",
+      "sha256": "b3f6e6bb8178ee1fe98e04642d1f2c68b7f7b003dd3874b5e6a4db0771863f7d",
+      "bytes": 13148,
+      "normalization": "none"
+    },
+    {
+      "file": "native/original-suggestions.png",
+      "source": ".tmp/uat225-native-20260917/original-suggestions.png",
+      "original_sha256": "7b060c8093c2186f7ac4e87786973c7399f46b7f3c217ac28892a84722d60245",
+      "sha256": "7b060c8093c2186f7ac4e87786973c7399f46b7f3c217ac28892a84722d60245",
+      "bytes": 122310,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload-events.txt",
+      "source": ".tmp/uat225-native-20260917/reload-events.txt",
+      "original_sha256": "a37a514b8912831a99ad87e85348a3f92ebea2e6d86661fa51f44ef21d91f1e8",
+      "sha256": "b8bfa776eb8151e4999b2acafd08a020a4cfea1eb60e3d0607dcc870ca84adb0",
+      "bytes": 32114,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/reload-graph-events.txt",
+      "source": ".tmp/uat225-native-20260917/reload-graph-events.txt",
+      "original_sha256": "72bf37168a457f3f02b2ee6f0f519112660fca05b21e1e281744b2da4dea21c1",
+      "sha256": "1bf3fcfa4e0081436000c521a55b0a8c2d82fc8b376bbfd327dd25cbb34d2018",
+      "bytes": 39112,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/reload-graph-open.txt",
+      "source": ".tmp/uat225-native-20260917/reload-graph-open.txt",
+      "original_sha256": "f8f62f18b01dd695c58d6ea82b9bc3698ea13a1fa7e9287e6869a4c6590e58a3",
+      "sha256": "f8f62f18b01dd695c58d6ea82b9bc3698ea13a1fa7e9287e6869a4c6590e58a3",
+      "bytes": 12344,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload-note-open.txt",
+      "source": ".tmp/uat225-native-20260917/reload-note-open.txt",
+      "original_sha256": "deb707078d095d0fd3f96025f53788da0cfed14bf2927087a189e16e585bf462",
+      "sha256": "deb707078d095d0fd3f96025f53788da0cfed14bf2927087a189e16e585bf462",
+      "bytes": 13239,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload-settled.txt",
+      "source": ".tmp/uat225-native-20260917/reload-settled.txt",
+      "original_sha256": "51b45b64805bfb4f6c872bdded006457c2b6521280a40bc7a880ef68304629e9",
+      "sha256": "78efc336842679b0d6dce160e51e0ed78f99bde8da32c5e8ca8180378a55cbeb",
+      "bytes": 12580,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "native/reload-start.json",
+      "source": ".tmp/uat225-native-20260917/reload-start.json",
+      "original_sha256": "cdc07d66f8c7600e12ed9e1a437f2d9a60c323ada2aee7483c257f4fff44d432",
+      "sha256": "cdc07d66f8c7600e12ed9e1a437f2d9a60c323ada2aee7483c257f4fff44d432",
+      "bytes": 184,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload-suggestions-open.txt",
+      "source": ".tmp/uat225-native-20260917/reload-suggestions-open.txt",
+      "original_sha256": "6183042a36e947ceae466b2889760868e344246f427208a8472c6501f91adc91",
+      "sha256": "6183042a36e947ceae466b2889760868e344246f427208a8472c6501f91adc91",
+      "bytes": 13144,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload-suggestions.png",
+      "source": ".tmp/uat225-native-20260917/reload-suggestions.png",
+      "original_sha256": "7b060c8093c2186f7ac4e87786973c7399f46b7f3c217ac28892a84722d60245",
+      "sha256": "7b060c8093c2186f7ac4e87786973c7399f46b7f3c217ac28892a84722d60245",
+      "bytes": 122310,
+      "normalization": "none"
+    },
+    {
+      "file": "native/reload.txt",
+      "source": ".tmp/uat225-native-20260917/reload.txt",
+      "original_sha256": "87a2bd79244cb09e3937f9f68bf554df0b4f53696b17aecac8446b51cb5e21ab",
+      "sha256": "87a2bd79244cb09e3937f9f68bf554df0b4f53696b17aecac8446b51cb5e21ab",
+      "bytes": 1500,
+      "normalization": "none"
+    },
+    {
+      "file": "native/safe-events.json",
+      "source": ".tmp/uat225-native-20260917/safe-events.json",
+      "original_sha256": "5c73072062a166dbe26c974634df35d35285b26f84fc29c6d4bb2916cd1b4b87",
+      "sha256": "5c73072062a166dbe26c974634df35d35285b26f84fc29c6d4bb2916cd1b4b87",
+      "bytes": 22173,
+      "normalization": "none"
+    },
+    {
+      "file": "native/server-settings.txt",
+      "source": ".tmp/uat225-native-20260917/server-settings.txt",
+      "original_sha256": "f6f5a5959961270608cbbd4bce489fc6fe88263ea18b813df950b2852e6fdafa",
+      "sha256": "f6f5a5959961270608cbbd4bce489fc6fe88263ea18b813df950b2852e6fdafa",
+      "bytes": 12724,
+      "normalization": "none"
+    },
+    {
+      "file": "native/uat225-full-after-native.json",
+      "source": ".tmp/uat225-native-20260917/uat225-full-after-native.json",
+      "original_sha256": "0a65636850d8fae5f350b6f11091f0bef6917565fa558f5d85bfb387bbd52ce9",
+      "sha256": "0a65636850d8fae5f350b6f11091f0bef6917565fa558f5d85bfb387bbd52ce9",
+      "bytes": 640348,
+      "normalization": "none"
+    },
+    {
+      "file": "native/uat225-full-before-restart.json",
+      "source": ".tmp/uat225-native-20260917/uat225-full-before-restart.json",
+      "original_sha256": "4af7d7b723c56fbeeba0d47ce1b006cc7777c11d157210791a18082a86d7f7c6",
+      "sha256": "4af7d7b723c56fbeeba0d47ce1b006cc7777c11d157210791a18082a86d7f7c6",
+      "bytes": 640348,
+      "normalization": "none"
+    },
+    {
+      "file": "native/uat225-full-replacement-health.json",
+      "source": ".tmp/uat225-native-20260917/uat225-full-replacement-health.json",
+      "original_sha256": "3544364ee58ca86ba8d98e5b2e1ebd4eb69ae5860b0b3c2a165addc4b6da3227",
+      "sha256": "3544364ee58ca86ba8d98e5b2e1ebd4eb69ae5860b0b3c2a165addc4b6da3227",
+      "bytes": 1007,
+      "normalization": "none"
+    },
+    {
+      "file": "native/uat225-full-stop-original.json",
+      "source": ".tmp/uat225-native-20260917/uat225-full-stop-original.json",
+      "original_sha256": "091facb885413a2b30d82ddd6d3acd7f5e999e8f9c4e0edb5869070ef5ed4cc9",
+      "sha256": "091facb885413a2b30d82ddd6d3acd7f5e999e8f9c4e0edb5869070ef5ed4cc9",
+      "bytes": 354,
+      "normalization": "none"
+    },
+    {
+      "file": "native/native-manifest.json",
+      "source": ".tmp/uat225-native-20260917/native-manifest.json",
+      "original_sha256": "3a72371556468f684613dd6b77e2308b30e7775d6981bd4373fe4e8f044e1810",
+      "sha256": "3a72371556468f684613dd6b77e2308b30e7775d6981bd4373fe4e8f044e1810",
+      "bytes": 5970,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/REVIEW225-NATIVE.md",
+      "source": ".tmp/uat225-native-20260917/independent-audit/REVIEW225-NATIVE.md",
+      "original_sha256": "887428a10f5dd640f878e4b5aa97ce45acdfeac32fc7b9ef56724ce8748ca848",
+      "sha256": "887428a10f5dd640f878e4b5aa97ce45acdfeac32fc7b9ef56724ce8748ca848",
+      "bytes": 5692,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/input-manifest.json",
+      "source": ".tmp/uat225-native-20260917/independent-audit/input-manifest.json",
+      "original_sha256": "16a735ae7c8289d4c27a0301b1fffe894f02426a121674b0eb8568c4b4e3e82e",
+      "sha256": "16a735ae7c8289d4c27a0301b1fffe894f02426a121674b0eb8568c4b4e3e82e",
+      "bytes": 6096,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/task-13260.163-criteria.txt",
+      "source": ".tmp/uat225-native-20260917/independent-audit/task-13260.163-criteria.txt",
+      "original_sha256": "1f313a18a5078e2994d9df5da557750ae4e1b3df1eed4cf2253989bd96c4cb71",
+      "sha256": "1a2c06bd62cca9c6b1c915c86ef847ee338c587bc6f2805f7dcc35b5b7baa411",
+      "bytes": 4214,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/task-13260.164-criteria.txt",
+      "source": ".tmp/uat225-native-20260917/independent-audit/task-13260.164-criteria.txt",
+      "original_sha256": "e2bed6572acee16dab070ab9fd07871a0acebce64e52be1cc158483a317a31bb",
+      "sha256": "19de76fb729c28e1aa6c04510ab347ee702663376bd4aebd13ff676c1b67eb07",
+      "bytes": 6963,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/verification.json",
+      "source": ".tmp/uat225-native-20260917/independent-audit/verification.json",
+      "original_sha256": "b281531928fb62615cb3bde3763902039a4f8515168c6627a9093b463af8fcea",
+      "sha256": "b281531928fb62615cb3bde3763902039a4f8515168c6627a9093b463af8fcea",
+      "bytes": 1694,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/audit-manifest.json",
+      "source": ".tmp/uat225-native-20260917/independent-audit/audit-manifest.json",
+      "original_sha256": "5fd37a766a72ee89cb0f8a27a6c3f7d929ee149ed41b0e1218b5100151739284",
+      "sha256": "5fd37a766a72ee89cb0f8a27a6c3f7d929ee149ed41b0e1218b5100151739284",
+      "bytes": 970,
+      "normalization": "none"
+    }
+  ]
+}

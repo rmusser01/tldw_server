@@ -1,0 +1,31 @@
+{
+  "source": ".tmp/uat198-181-native-20260917/admin224-relationships-events.txt",
+  "sourceSha256": "b4365c95d602c6774785a7219197a226752768f014c0bd3cb7e1ceb655167550",
+  "events": [
+    {
+      "at": "2026-09-17T09:16:33.010Z",
+      "path": "/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions/capabilities",
+      "query": "",
+      "status": 503,
+      "body": {
+        "detail": {
+          "error_code": "notes_graph_suggestions_unavailable",
+          "message": "Notes graph suggestions are temporarily unavailable."
+        }
+      }
+    },
+    {
+      "at": "2026-09-17T09:16:33.012Z",
+      "path": "/api/v1/notes/11c86b62-d045-4836-9e2b-f9b68b14650f/graph/suggestions",
+      "query": "?state=pending%2Caccepting&limit=100",
+      "status": 503,
+      "body": {
+        "detail": {
+          "error_code": "notes_graph_suggestions_unavailable",
+          "message": "Notes graph suggestions are temporarily unavailable."
+        }
+      }
+    }
+  ],
+  "limits": "Original two native GET failures. The separate scope metadata receipt was collected later on the same preserved profile; no interpreter-memory claim."
+}

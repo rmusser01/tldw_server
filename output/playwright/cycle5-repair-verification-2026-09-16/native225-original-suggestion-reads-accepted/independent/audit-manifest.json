@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-17T11:46:39.775075+00:00",
+  "disposition": "PASS: TASK13260.163 AC3 and TASK13260.164 AC4 native portion; no real generation or full-matrix claim",
+  "files": [
+    {
+      "path": "REVIEW225-NATIVE.md",
+      "sha256": "887428a10f5dd640f878e4b5aa97ce45acdfeac32fc7b9ef56724ce8748ca848",
+      "bytes": 5692
+    },
+    {
+      "path": "input-manifest.json",
+      "sha256": "16a735ae7c8289d4c27a0301b1fffe894f02426a121674b0eb8568c4b4e3e82e",
+      "bytes": 6096
+    },
+    {
+      "path": "task-13260.163-criteria.txt",
+      "sha256": "1f313a18a5078e2994d9df5da557750ae4e1b3df1eed4cf2253989bd96c4cb71",
+      "bytes": 4215
+    },
+    {
+      "path": "task-13260.164-criteria.txt",
+      "sha256": "e2bed6572acee16dab070ab9fd07871a0acebce64e52be1cc158483a317a31bb",
+      "bytes": 6964
+    },
+    {
+      "path": "verification.json",
+      "sha256": "b281531928fb62615cb3bde3763902039a4f8515168c6627a9093b463af8fcea",
+      "bytes": 1694
+    }
+  ]
+}

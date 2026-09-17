@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 04:02'
+updated_date: '2026-09-17 11:51'
 labels:
   - uat
   - testing
@@ -186,6 +186,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 2026-09-17 latest targeted checkpoint:192 product findings;176 native-verified. Reviewed189/190 commit2274e64ff9,192 tag fix26c8aab045 and191 scheduler-previewbd8a7ef1c7 await native acceptance.181 request-ownership implementation remains under validation; no full fresh matrix has run. Usage-limit automatic-review interruption resolved by fresh ordinaryUsageAllowed check after user continue; no reset credit used. Existing branch remains codex/fresh-install-uat-fixes, with initial non-latest-dev ancestry limitation documented.
 
 2026-09-17 checkpoint:197unique findings,181verified/10awaitingnative/6unresolved181,193–197. Retained native166/172 and167/174/175 now pass. HTTP ownership repair07e0abf1c4 independently passes77tests plus4counterexamples; author164 pass, zero skips. Worker181 adoption and197countread repair proceed;193/194role-qualified ownership/name migration and195exemplar42P18 underactualPGverification.196FEduplicateguidance29passes,independentreviewpending. Harness125reopened fordirectnonbypassPGloginrole; nofinalfreshmatrixcellsstarted. CurrentnativeAPI63046oldsource/nohotreload; branch remainscodex/fresh-install-uat-fixes. Initialbranchwasnotlatestdev; latestrecordeddev59049includedlater.
+
+11:52UTC checkpoint:230 findings,229verified/1unresolved230. Independent original Graph225 native acceptance closes163/164; committed backend e1ccad4be7 stable3669hashes, two successful read rounds after normal reload. Worker unavailable and privileged targeted profile limits explicit. TASK13260.171 owns separate Settings OpenAPI404. Fresh matrix still Not Started; tracker/230-row ledger current.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
