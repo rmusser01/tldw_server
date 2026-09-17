@@ -1,0 +1,215 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:90422) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ × ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > refreshes the actual catalogue for current wizard completion (before mount=false) 1089ms
+   → expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  New Cedar source / 1
+Received:
+  / 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mdata-testid[39m=[32m"actual-catalogue"[39m
+      [36m>[39m
+        [0m / [0m
+        [0m0[0m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"quick-ingest-modal quick-ingest-wizard-modal"[39m
+        [33mrole[39m=[32m"dialog"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-modal-content"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0mQuick Ingest[0m
+          [36m</h2>[39m
+          [36m<button>[39m
+            [0mClose[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mdata-testid[39m=[32m"wizard-stepper"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-[300px]"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mdata-testid[39m=[32m"wizard-results"[39m
+            [36m>[39m
+              [0mcomplete[0m
+              [0m:[0m
+              [0m1[0m
+              [36m<div[39m
+                [33mdata-testid[39m=[32m"wizard-result-cedar"[39m
+              [36m>[39m
+                [0mcedar[0m
+                [0m:[0m
+                [0mprocessed[0m
+                [0m:[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mOpen collection[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mStart over[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > refreshes the actual catalogue for current wizard completion (before mount=true) 114ms
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > masks Bob's completed result on logout before a replacement account can act
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual direct upload, session state, and results UI
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual reattach, session state, and results UI
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual StrictMode reattach, session state, and results UI
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores the cancelled StrictMode poll after its replacement accepts terminal results
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > minimizes the actual processing view through processing button and resumes the same job
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > minimizes the actual processing view through close confirmation and resumes the same job
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > leaves pending stages and percentages unchanged as elapsed time passes, then accepts a terminal result
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > submits the queued wizard batch through the authenticated quick-ingest transport
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps AntD modal portal props stable while results land
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > starts Ingest More in a new persisted session
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > processes the configured standard preset with its analysis provider
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > processes the configured deep preset with its analysis provider
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes the standard preset to Configure when analysis needs a provider
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes the deep preset to Configure when analysis needs a provider
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not enter processing when auto-process lacks an analysis provider
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes an auto-process provider warning from persisted step 2 to Configure
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes an auto-process provider warning from persisted step 3 to Configure
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > retries auto-process after closing and reopening a provider-blocked draft
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > waits for an in-flight connection check before consuming auto-process
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restores a hidden processing session when the late analysis provider guard blocks startRun
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > preserves first-source open detail while syncing wizard state
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > syncs cleared first-source add mode from wizard reset
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > submits conference batch metadata and item overrides through the session payload
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not pre-seed direct tracking item identities before backend submissions are acknowledged
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > starts persisted direct-job reattach when tracking metadata arrives after the run begins
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps cancellation terminal when runtime completion arrives in the cancel click
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores runtime progress emitted in the cancel click
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > cancels an extension session acknowledged after cancellation
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not submit a direct session acknowledged after cancellation
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not start a session when setup resumes after cancellation
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps cancellation terminal when start acknowledgement rejects
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > uses runtime completion events for extension-backed sessions instead of calling the broken SSE path
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > normalizes runtime duplicate results from db_message into skipped items
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > normalizes runtime ok results with error payloads into failed items
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > rehydrates a hidden processing session when the modal is reopened
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > rehydrates a completed session with results after a remount
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restores persisted file stubs with a reattach-required warning
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > reattaches persisted direct-ingest jobs after refresh
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > maps refreshed file-backed reattach results back to the original queued item id
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not run persisted direct-job reattach for extension runtime sessions
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restarts direct processing after refresh when tracking exists without persisted job ids
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > cancels a refreshed direct session using persisted tracking metadata
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores late persisted reattach processing after cancellation
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores late persisted reattach completion after cancellation
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > reruns persisted direct-session reattach when item mapping metadata arrives later
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > preserves already completed item results when cancellation finalizes pending items
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > opens durable conference collections from terminal results
+ ↓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps polling persisted direct-job reattach until the resumed session reaches a terminal state
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > refreshes the actual catalogue for current wizard completion (before mount=false)
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  New Cedar source / 1
+Received:
+  / 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mdata-testid[39m=[32m"actual-catalogue"[39m
+      [36m>[39m
+        [0m / [0m
+        [0m0[0m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"quick-ingest-modal quick-ingest-wizard-modal"[39m
+        [33mrole[39m=[32m"dialog"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-modal-content"[39m
+        [36m>[39m
+          [36m<h2>[39m
+            [0mQuick Ingest[0m
+          [36m</h2>[39m
+          [36m<button>[39m
+            [0mClose[0m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mdata-testid[39m=[32m"wizard-stepper"[39m
+          [36m/>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-[300px]"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mdata-testid[39m=[32m"wizard-results"[39m
+            [36m>[39m
+              [0mcomplete[0m
+              [0m:[0m
+              [0m1[0m
+              [36m<div[39m
+                [33mdata-testid[39m=[32m"wizard-result-cedar"[39m
+              [36m>[39m
+                [0mcedar[0m
+                [0m:[0m
+                [0mprocessed[0m
+                [0m:[0m
+              [36m</div>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mOpen collection[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mStart over[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+[36m</html>[39m
+ ❯ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx:494:72
+    492|     await screen.findByTestId('wizard-result-cedar')
+    493|     if (beforeMount) view.rerender(<QueryClientProvider client={client…
+    494|     await waitFor(() => expect(screen.getByTestId('actual-catalogue'))…
+       |                                                                        ^
+    495|   })
+    496| 
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 49 skipped (51)
+   Start at  11:47:38
+   Duration  2.24s (transform 494ms, setup 86ms, import 617ms, tests 1.20s, environment 236ms)
+

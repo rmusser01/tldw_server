@@ -1045,6 +1045,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     if (state.currentStep !== 5) { recordedIngestRef.current = false; return }
     if (recordedIngestRef.current) return
     recordedIngestRef.current = true
+    const savedMediaIds = state.results.filter(item => item.status === "ok" && item.mediaId != null)
+      .map(item => Number(item.mediaId)).filter(id => Number.isFinite(id) && id > 0)
+    if (savedMediaIds.length > 0) {
+      window.dispatchEvent(new CustomEvent("tldw:quick-ingest-complete", { detail: {
+        mediaIds: [...new Set(savedMediaIds)], authorityKey: operation.authorityKey,
+        isCurrent: operation.isCurrent
+      } }))
+    }
     const newDocs = state.results
       .filter(
         (item) =>

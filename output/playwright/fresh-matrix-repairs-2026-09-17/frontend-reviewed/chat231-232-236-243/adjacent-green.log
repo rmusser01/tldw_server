@@ -1,0 +1,62 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.service-prompts.test.tsx (28 tests) 35ms
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx (15 tests) 72ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts (34 tests) 8ms
+ ✓ ../packages/ui/src/components/Media/__tests__/AnalysisModal.model-owner.test.tsx (11 tests) 319ms
+ ✓ ../packages/ui/src/hooks/playground/__tests__/modelSelectorUtils.test.ts (7 tests) 7ms
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.overlay.integration.test.tsx (2 tests) 10ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/model-normalization.test.ts (4 tests) 2ms
+stderr | ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > uses a generous default timeout so long synthesis is not aborted
+tldw server is not configured. Open Settings → tldw server and set the server URL and API key.
+
+stderr | ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > lets callers override the timeout
+tldw server is not configured. Open Settings → tldw server and set the server URL and API key.
+
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts (4 tests | 2 failed) 8ms
+     ✓ returns successful completion content verbatim even when it looks like an error 1ms
+     ✓ preserves error-shaped keys inside successful assistant content 0ms
+     × uses a generous default timeout so long synthesis is not aborted 5ms
+     × lets callers override the timeout 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > uses a generous default timeout so long synthesis is not aborted
+Error: tldw server is not configured. Open Settings → tldw server and set the server URL and API key.
+ ❯ TldwApiClient.ensureConfigForRequest ../packages/ui/src/services/tldw/TldwApiClient.ts:1851:13
+    1849|       // eslint-disable-next-line no-console
+    1850|       console.warn(msg)
+    1851|       throw new Error(msg)
+       |             ^
+    1852|     }
+    1853| 
+ ❯ TldwApiClient.requestWithCurrentConfig ../packages/ui/src/services/tldw/TldwApiClient.ts:1927:17
+ ❯ TldwApiClient.synthesizeSpeechDetailed ../packages/ui/src/services/tldw/domains/models-audio.ts:1167:22
+ ❯ TldwApiClient.synthesizeSpeech ../packages/ui/src/services/tldw/domains/models-audio.ts:1115:20
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts:114:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > lets callers override the timeout
+Error: tldw server is not configured. Open Settings → tldw server and set the server URL and API key.
+ ❯ TldwApiClient.ensureConfigForRequest ../packages/ui/src/services/tldw/TldwApiClient.ts:1851:13
+    1849|       // eslint-disable-next-line no-console
+    1850|       console.warn(msg)
+    1851|       throw new Error(msg)
+       |             ^
+    1852|     }
+    1853| 
+ ❯ TldwApiClient.requestWithCurrentConfig ../packages/ui/src/services/tldw/TldwApiClient.ts:1927:17
+ ❯ TldwApiClient.synthesizeSpeechDetailed ../packages/ui/src/services/tldw/domains/models-audio.ts:1167:22
+ ❯ TldwApiClient.synthesizeSpeech ../packages/ui/src/services/tldw/domains/models-audio.ts:1115:20
+ ❯ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts:126:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 7 passed (8)
+      Tests  2 failed | 103 passed (105)
+   Start at  12:01:37
+   Duration  5.38s (transform 735ms, setup 466ms, import 2.49s, tests 461ms, environment 1.55s)
+

@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef, useId } from 'react'
+import { useConnectionStore } from '@/store/connection'
 import { useQuery } from '@tanstack/react-query'
 import { Storage } from '@plasmohq/storage'
 import { safeStorageSerde } from '@/utils/safe-storage'
@@ -221,6 +222,22 @@ export const getErrorStatusCode = (error: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+/** Media callbacks retire synchronously at the existing connection authority boundary. */
+export function useMediaRequestLifetime() {
+  const lifetime = useRef(new AbortController())
+  useEffect(() => {
+    const controller = new AbortController()
+    lifetime.current = controller
+    const unsubscribe = useConnectionStore.subscribe((next, previous) => {
+      if (!next.state.isConnected || next.state.serverUrl !== previous.state.serverUrl) {
+        controller.abort()
+      }
+    })
+    return () => { controller.abort(); unsubscribe() }
+  }, [])
+  return lifetime
+}
+
 export interface UseMediaSearchDeps {
   t: (key: string, opts?: Record<string, any>) => string
   message: { error: (msg: string) => void; warning: (msg: string) => void }
@@ -228,6 +245,17 @@ export interface UseMediaSearchDeps {
 
 export function useMediaSearch(deps: UseMediaSearchDeps) {
   const { t, message } = deps
+  const lifetime = useMediaRequestLifetime()
+  const lifetimeKey = useId()
+  const scopedRequest = useCallback(async <T,>(init: Parameters<typeof bgRequest<T>>[0]): Promise<T> => {
+    const signal = init.abortSignal
+      ? AbortSignal.any([init.abortSignal, lifetime.current.signal])
+      : lifetime.current.signal
+    signal.throwIfAborted()
+    const result = await bgRequest<T>({ ...init, abortSignal: signal })
+    signal.throwIfAborted()
+    return result
+  }, [lifetime])
 
   const [searchMode, setSearchMode] = useState<MediaSearchMode>('full_text')
   const [query, setQuery] = useState<string>('')
@@ -296,7 +324,10 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     )
   }, [message, t])
 
-  const runSearch = useCallback(async (): Promise<MediaResultItem[]> => {
+  const runSearch = useCallback(async ({ signal: querySignal }: { signal: AbortSignal }): Promise<MediaResultItem[]> => {
+    const signal = AbortSignal.any([querySignal, lifetime.current.signal])
+    signal.throwIfAborted()
+    const request = <T,>(init: Parameters<typeof bgRequest<T>>[0]) => scopedRequest<T>({ ...init, abortSignal: signal })
     const results: MediaResultItem[] = []
     const hasTextQuery = query.trim().length > 0
     const hasQuery =
@@ -338,7 +369,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
               dateRange,
               sortBy
             })
-            const metadataResp = await bgRequest<any>({
+            const metadataResp = await request<any>({
               path: path as any,
               method: 'GET' as any
             })
@@ -402,7 +433,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
             actualMediaCount = serverTotal
           }
         } else if (!hasQuery && !hasMediaFilters) {
-          const listing = await bgRequest<any>({
+          const listing = await request<any>({
             path: `/api/v1/media/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
             method: 'GET' as any
           })
@@ -444,7 +475,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
             fields: searchFields,
             boostFields: enableBoostFields ? boostFields : undefined
           })
-          const mediaResp = await bgRequest<any>({
+          const mediaResp = await request<any>({
             path: `/api/v1/media/search?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
             method: 'POST' as any,
             headers: { 'Content-Type': 'application/json' },
@@ -482,6 +513,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           }
         }
       } catch (err) {
+        if (signal.aborted) throw err
         if (isMediaEndpointMissingError(err)) {
           markMediaApiUnavailable(err)
           actualMediaCount = 0
@@ -535,15 +567,16 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
               body.must_have = keywordTokens
               usedKeywordServerFilter = true
             }
-            notesResp = await bgRequest<any>({
+            notesResp = await request<any>({
               path: `/api/v1/notes/search/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
               method: 'POST' as any,
               headers: { 'Content-Type': 'application/json' },
               body
             })
           } catch {
+            signal.throwIfAborted()
             usedKeywordServerFilter = false
-            notesResp = await bgRequest<any>({
+            notesResp = await request<any>({
               path: `/api/v1/notes/search/?query=${encodeURIComponent(
                 query
               )}&page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
@@ -590,7 +623,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
             })
           }
         } else {
-          const notesResp = await bgRequest<any>({
+          const notesResp = await request<any>({
             path: `/api/v1/notes/?page=${page}&results_per_page=${pageSize}` as any,
             method: 'GET' as any
           })
@@ -617,12 +650,14 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           }
         }
       } catch (err) {
+        if (signal.aborted) throw err
         console.error('Notes search error:', err)
         message.error(t('review:mediaPage.notesSearchError', { defaultValue: 'Failed to search notes' }))
       }
     }
 
     const finalCombinedTotal = actualMediaCount + actualNotesCount
+    signal.throwIfAborted()
     setCombinedTotal(finalCombinedTotal)
 
     return results
@@ -642,6 +677,8 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     boostFields.title,
     boostFields.content,
     metadataMatchMode,
+    lifetime,
+    scopedRequest,
     metadataFilters,
     mediaApiUnavailable,
     markMediaApiUnavailable,
@@ -655,6 +692,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
   const { data: queryResults, refetch, isLoading, isFetching } = useQuery({
     queryKey: [
       'media-search',
+      lifetimeKey,
       query,
       kinds,
       mediaTypes,
@@ -677,7 +715,23 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     queryFn: runSearch,
     enabled: false
   })
-  const results = queryResults ?? EMPTY_MEDIA_RESULTS
+  const safeRefetch = useCallback((...args: Parameters<typeof refetch>) => {
+    if (lifetime.current.signal.aborted) return Promise.resolve(undefined)
+    return refetch(...args)
+  }, [lifetime, refetch])
+  const isCurrent = useCallback(() => !lifetime.current.signal.aborted, [lifetime])
+  const refreshRef = useRef(safeRefetch)
+  refreshRef.current = safeRefetch
+  useEffect(() => {
+    const complete = (event: Event) => {
+      const detail = (event as CustomEvent<{ isCurrent?: () => boolean }>).detail
+      if (!isCurrent() || (typeof detail?.isCurrent === 'function' && !detail.isCurrent())) return
+      void refreshRef.current()
+    }
+    window.addEventListener('tldw:quick-ingest-complete', complete)
+    return () => window.removeEventListener('tldw:quick-ingest-complete', complete)
+  }, [isCurrent])
+  const results = lifetime.current.signal.aborted ? EMPTY_MEDIA_RESULTS : queryResults ?? EMPTY_MEDIA_RESULTS
 
   const normalizedMetadataFilters = useMemo(
     () => normalizeMetadataSearchFilters(metadataFilters),
@@ -836,6 +890,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
 
   // Initial load: populate media types
   useEffect(() => {
+    const signal = lifetime.current.signal
     const immediateCachedTypes = getImmediateCachedMediaTypes()
     if (immediateCachedTypes.length > 0) {
       setAvailableMediaTypes((prev) =>
@@ -849,6 +904,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
         const cached = normalizeMediaTypesCacheRecord(
           await storage.get(MEDIA_TYPES_CACHE_KEY).catch(() => null)
         )
+        signal.throwIfAborted()
         const now = Date.now()
         if (cached && isMediaTypesCacheFresh(cached.cachedAt, now, MEDIA_TYPES_CACHE_TTL_MS)) {
           setAvailableMediaTypes(
@@ -857,7 +913,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           seedMediaTypesCache(cached.types, { cachedAt: cached.cachedAt })
         }
 
-        const first = await bgRequest<any>({
+        const first = await scopedRequest<any>({
           path: `/api/v1/media/?page=1&results_per_page=50` as any,
           method: 'GET' as any
         })
@@ -870,7 +926,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           pagesToFetch.map((p) =>
             p === 1
               ? Promise.resolve(first)
-              : bgRequest<any>({
+              : scopedRequest<any>({
                   path: `/api/v1/media/?page=${p}&results_per_page=50` as any,
                   method: 'GET' as any
                 })
@@ -895,6 +951,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           }
         }
       } catch (error) {
+        if (signal.aborted) return
         if (isMediaEndpointMissingError(error)) {
           mediaApiUnavailableNotifiedRef.current = true
           setMediaApiUnavailable(true)
@@ -903,6 +960,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
       }
 
       try {
+        signal.throwIfAborted()
         await refetch()
       } catch {}
     })()
@@ -910,6 +968,8 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
 
   // Load keyword suggestions
   const loadKeywordSuggestions = useCallback(async (searchText?: string) => {
+    const signal = lifetime.current.signal
+    if (signal.aborted) return
     const normalizeKeywords = (items: any[]): string[] => {
       const out = new Set<string>()
       for (const item of items) {
@@ -973,12 +1033,14 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     if (keywordEndpointInFlightRef.current) {
       try {
         const pendingItems = await keywordEndpointInFlightRef.current
+        if (signal.aborted) return
         if (pendingItems) {
           setKeywordOptions(normalizeKeywords(pendingItems))
           setKeywordSourceMode('endpoint')
           return
         }
       } catch {
+        if (signal.aborted) return
         applyKeywordResultsFallback()
         return
       }
@@ -992,7 +1054,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
       try {
         const endpointRequest = (async () => {
           const endpointPath = `/api/v1/media/keywords?query=${encodeURIComponent(trimmedSearch)}`
-          const keywordResp = await bgRequest<any>({
+          const keywordResp = await scopedRequest<any>({
             path: endpointPath as any,
             method: 'GET' as any
           })
@@ -1012,6 +1074,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
         })()
         keywordEndpointInFlightRef.current = endpointRequest
         const endpointItems = await endpointRequest
+        if (signal.aborted) return
 
         setKeywordOptions(normalizeKeywords(endpointItems))
         setKeywordSourceMode('endpoint')
@@ -1020,6 +1083,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
         keywordEndpointRetryAtRef.current = 0
         return
       } catch (error) {
+        if (signal.aborted) return
         if (isMediaEndpointMissingError(error)) {
           keywordEndpointUnsupportedRef.current = true
           keywordEndpointUnavailableRef.current = true
@@ -1035,7 +1099,7 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     }
 
     applyKeywordResultsFallback()
-  }, [mediaApiUnavailable, results])
+  }, [mediaApiUnavailable, results, lifetime, scopedRequest])
 
   // Keep keyword suggestions in sync with results
   useEffect(() => {
@@ -1051,9 +1115,10 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
   }, [searchMode])
 
   const handleSearch = useCallback(() => {
+    if (lifetime.current.signal.aborted) return
     setPage(1)
     refetch()
-  }, [refetch])
+  }, [refetch, lifetime])
 
   return {
     // State
@@ -1094,7 +1159,8 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
     totalPages,
     // Query results
     results,
-    refetch,
+    refetch: safeRefetch,
+    isCurrent,
     isLoading,
     isFetching,
     // Callbacks

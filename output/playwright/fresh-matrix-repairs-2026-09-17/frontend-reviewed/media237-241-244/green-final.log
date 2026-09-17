@@ -1,0 +1,50 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+······················stderr | ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > shows inline fetch failure with retry and recovers on successful retry
+Error fetching media details: Error: temporary failure
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:303:30
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 500
+}
+
+········stderr | ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > creates a collection from bulk selection and opens it in multi-review
+No routes matched location "/media-multi" 
+
+·································································································································································
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx [ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx ]
+Error: Failed to resolve import "pa-tesseract.js" from "../packages/ui/src/utils/ocr.ts". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/utils/ocr.ts:2:29
+  1  |  import { getOCRLanguageToUse, isOfflineOCR, isOcrEnabled } from "@/services/ocr";
+  2  |  import { createWorker } from "pa-tesseract.js";
+     |                                ^
+  3  |  const OCR_CDN_BASE = "https://cdn.jsdelivr.net/npm/pa-tesseract.js@5.1.1/dist";
+  4  |  export async function processImageForOCR(imageData) {
+ ❯ TransformPluginContext._formatLog ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:28999:43
+ ❯ TransformPluginContext.error ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:28996:14
+ ❯ normalizeUrl ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:27119:18
+ ❯ ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:27177:32
+ ❯ TransformPluginContext.transform ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:27145:4
+ ❯ EnvironmentPluginContainer.transform ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:28797:14
+ ❯ loadAndTransform ../node_modules/.bun/vite@7.3.1+81e700f104edcbd1/node_modules/vite/dist/node/chunks/config.js:22670:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 15 passed (16)
+      Tests  191 passed (191)
+   Start at  12:01:52
+   Duration  10.27s (transform 6.64s, setup 2.43s, import 14.02s, tests 22.77s, environment 5.84s)
+

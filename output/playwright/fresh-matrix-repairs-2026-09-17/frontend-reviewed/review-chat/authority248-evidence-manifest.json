@@ -1,0 +1,47 @@
+{
+  "task": "TASK13260.190",
+  "finding": "UAT248",
+  "claim": "stale Character persistence dispatch after actual logout lease invalidation; no native cross-account DB-write claim",
+  "files": [
+    {
+      "path": "AUTHORITY-FINDING.md",
+      "bytes": 4274,
+      "sha256": "7688da44b75e3fb997914b70bc7dc2b9d3a0aaf55361d2d59f711976c18e53dc"
+    },
+    {
+      "path": "actual-auth-lease-probe.tsx.txt",
+      "bytes": 54947,
+      "sha256": "a5e905570c212aa8c8b23973b63a866bf24d53e7cf96322a2c3cc0900fa83f45"
+    },
+    {
+      "path": "auth-probe.config.ts",
+      "bytes": 523,
+      "sha256": "d95944d224409b38875ab72fe18d52979c918262865da71d67f117e353531a0a"
+    },
+    {
+      "path": "actual-auth-lease-command.json",
+      "bytes": 406,
+      "sha256": "b3c14fd91822d0bb0dc29bb49a052ea444c95625ba76a41a076a2ad9013cc96e"
+    },
+    {
+      "path": "actual-auth-lease-probe.log",
+      "bytes": 4924,
+      "sha256": "c98deaa9344281a138ccae6179d31c1a8fb44706c44d30478558a118b0cdaac0"
+    },
+    {
+      "path": "actual-auth-lease-setup-failure.log",
+      "bytes": 4566,
+      "sha256": "20318115d31b6206b9e749a14af1153927beaefd7e4411c12147f0d0f6c10edf"
+    },
+    {
+      "path": "authority-source-manifest.json",
+      "bytes": 1000,
+      "sha256": "8002930d5e2a52e3e910253b748acc685ad011dbd11afff8f5ae0d59623ecbaf"
+    }
+  ],
+  "baseVitestConfig": {
+    "path": ".tmp/uat-repairs-231-246/chat231-232-236-243/vitest.config.ts",
+    "sha256": "6a4a2514098297ae8545481ef96daee269411e6383f3e42a0decffaa6c295fab"
+  },
+  "frozenChatSourceManifestSha256": "43713006f45a461a49d7c6a5e202c98c94838c2da60c6e14ca9bdf3df4a97c8c"
+}

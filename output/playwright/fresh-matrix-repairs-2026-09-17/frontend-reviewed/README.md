@@ -1,0 +1,3 @@
+# Reviewed Media and Chat workflow repairs
+
+UAT231/232/236/237/241/243/244: independent Chat327 focused and103 adjacent pass, with2 unchanged speech fixture failures; independent Media193 plus37 real consumer controls pass. Both owned compiler comparisons retain90 identical diagnostics and introduce no lint errors/warnings. Native acceptance remains pending. Review separately confirmed UAT248 stale Character persistence dispatch after actual logout; its causal evidence is retained here and repair is tracked separately. UAT246 transport controls do not establish native timeout cause. See both independent reviews for limits and exact hashes.

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now247), and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now248), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
-**Task:** TASK13260 and children173–188.
+**Task:** TASK13260 and children173–190.
 
 ## Global constraints
 
@@ -42,7 +42,7 @@
 - [x]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle; independent32/0skip, native acceptance pending.
 - [x]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls; independent4/0skip, native acceptance pending.
 - [x]247: prevent own Media sequence rewind under RLS-filtered tenant initialization, retaining high-water IDs and explicit-ID repair without weakening authority; separate from147's foreign-table allowlist. Independent117/0skip within combined165, including lock lifetime/caller rollback; native pending.
-- [ ] Review and commit each independently testable unit; leave native acceptance pending until Stage4.
+- [x] Review and commit each independently testable backend/proxy unit; native acceptance remains pending until Stage4.
 
 ## Stage3: Repair UI, study and stream findings
 
@@ -53,8 +53,9 @@
 
 - [x] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion. Independent100/0skip; native acceptance pending.
 - [x] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Independent296pass/0skip, Bandit0/no added lint; original native statistics pending.
-- [ ] Media237/241/244: missing-auth initial render, late success/rejection after disconnect, delayed selection, actual wizard completion, preserved filters and old-owner rejection.
-- [ ] Chat/model231/232/236/243: correct surface copy, actionable sanitized400, qualified alias readiness/recovery and fresh ordinary-mode transition without private-state regressions.
+- [x] Media237/241/244: reviewed193+37 independent checks, including two review-discovered deletion callback races; exact90compiler baseline and no new lint diagnostics. Native acceptance pending.
+- [x] Chat/model231/232/236/243: independently reviewed327focused/103adjacent pass;2existing speech fixture failures reproduced on baseline; exact90compiler baseline, no new lint diagnostics. Native acceptance pending.
+- [ ]248: use the existing captured Character request scope/lifetime for transport and every persistence boundary; actual-auth causal regression, same-owner/recovery controls, independent review and native account-boundary verification.
 - [ ]246: correlate first-byte delivery using the existing actual stream path and bounded provider control; test a cause before changing budgets/forwarding. Repeat original TestBot with exact visible response and canonical reload on accepted source.
 - [ ] Review and commit disjoint units, recording tests and touched-scope static checks.
 
@@ -63,7 +64,7 @@
 **Goal:** Verify all repairs together before another full matrix.
 **Success criteria:** Relevant tests pass, mandatory PostgreSQL0skips, no added compiler/security findings, and each finding has native original-scenario evidence or an explicit verified external disposition.
 **Tests:** Combined affected frontend/backend suites; recorded90diagnostic compiler comparison; scoped lint/Bandit; exact real model workflows on declared repair profiles.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] Run combined tests once after integration; investigate failures rather than disable cases.
 - [ ] Review the final touched diff independently.

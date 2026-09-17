@@ -1,0 +1,598 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:93062) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ↓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > does not start protected Media reads during initial testing before the credential gate
+ × ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > remounts private catalogue state after an observed batched authority replacement 1050ms
+   → Unable to find an element with the text: Bob source. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+        [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-hidden[39m=[32m"false"[39m
+          [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+              [36m>[39m
+                [0mMedia Inspector[0m
+              [36m</h1>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center gap-2"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                [36m>[39m
+                  [0m1[0m
+                  [0m / [0m
+                  [0m1[0m
+                [36m</span>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Trash"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mtitle[39m=[32m"Trash"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M10 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M14 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M3 6h18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mTrash[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mBulk[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show media only"[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mMedia[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m1[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show notes only"[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mNotes[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m0[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-0 sh...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+        [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-hidden[39m=[32m"false"[39m
+          [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+              [36m>[39m
+                [0mMedia Inspector[0m
+              [36m</h1>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center gap-2"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                [36m>[39m
+                  [0m1[0m
+                  [0m / [0m
+                  [0m1[0m
+                [36m</span>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Trash"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mtitle[39m=[32m"Trash"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M10 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M14 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M3 6h18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mTrash[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mBulk[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show media only"[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mMedia[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m1[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show notes only"[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mNotes[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m0[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-0 sh...
+ ↓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows credential guidance and opens settings when auth is missing
+ ↓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows setup guidance and routes first-run users to setup
+ ↓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows unreachable guidance with retry and diagnostics actions
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > remounts private catalogue state after an observed batched authority replacement
+TestingLibraryElementError: Unable to find an element with the text: Bob source. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+        [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-hidden[39m=[32m"false"[39m
+          [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+              [36m>[39m
+                [0mMedia Inspector[0m
+              [36m</h1>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center gap-2"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                [36m>[39m
+                  [0m1[0m
+                  [0m / [0m
+                  [0m1[0m
+                [36m</span>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Trash"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mtitle[39m=[32m"Trash"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M10 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M14 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M3 6h18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mTrash[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mBulk[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show media only"[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mMedia[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m1[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show notes only"[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mNotes[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m0[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-0 sh...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+        [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-hidden[39m=[32m"false"[39m
+          [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+            [36m>[39m
+              [36m<h1[39m
+                [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+              [36m>[39m
+                [0mMedia Inspector[0m
+              [36m</h1>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center gap-2"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                [36m>[39m
+                  [0m1[0m
+                  [0m / [0m
+                  [0m1[0m
+                [36m</span>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Trash"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mtitle[39m=[32m"Trash"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M10 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M14 11v6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M3 6h18"[39m
+                    [36m/>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mTrash[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                  [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                    [33mfill[39m=[32m"none"[39m
+                    [33mheight[39m=[32m"24"[39m
+                    [33mstroke[39m=[32m"currentColor"[39m
+                    [33mstroke-linecap[39m=[32m"round"[39m
+                    [33mstroke-linejoin[39m=[32m"round"[39m
+                    [33mstroke-width[39m=[32m"2"[39m
+                    [33mviewBox[39m=[32m"0 0 24 24"[39m
+                    [33mwidth[39m=[32m"24"[39m
+                    [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                  [36m>[39m
+                    [36m<rect[39m
+                      [33mheight[39m=[32m"18"[39m
+                      [33mrx[39m=[32m"2"[39m
+                      [33mwidth[39m=[32m"18"[39m
+                      [33mx[39m=[32m"3"[39m
+                      [33my[39m=[32m"3"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                  [0mBulk[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show media only"[39m
+                [33maria-pressed[39m=[32m"true"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mMedia[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m1[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Show notes only"[39m
+                [33maria-pressed[39m=[32m"false"[39m
+                [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mNotes[0m
+                [36m</span>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                [36m>[39m
+                  [0m0[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"min-h-0 sh...
+ ❯ waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx:296:25
+    294|       useConnectionStore.setState(({ state }) => ({ state: { ...state,…
+    295|     })
+    296|     expect(await screen.findByText('Bob source')).toBeInTheDocument()
+       |                         ^
+    297|     expect(screen.queryByText('Alice source')).not.toBeInTheDocument()
+    298|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 skipped (5)
+   Start at  11:52:09
+   Duration  2.47s (transform 536ms, setup 90ms, import 1.01s, tests 1.05s, environment 225ms)
+

@@ -1,0 +1,344 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+stderr | ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > shows inline fetch failure with retry and recovers on successful retry
+Error fetching media details: Error: temporary failure
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:303:30
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 500
+}
+
+····x·x······························
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > detects stale selected media and auto-switches to the next available item
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  2
+Received:
+  1
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m1[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mNotes[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-bl...
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:514:55
+    512| 
+    513|     await waitFor(() => {
+    514|       expect(screen.getByTestId('selected-media-id')).toHaveTextConten…
+       |                                                       ^
+    515|       expect(screen.getByTestId('selected-content')).toHaveTextContent…
+    516|     })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ MutationObserver.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+ ❯ MutationObserver.invokeTheCallbackFunction ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/MutationCallback.js:19:26
+ ❯ notifyMutationObservers ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/helpers/mutation-observers.js:160:22
+ ❯ ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/helpers/mutation-observers.js:133:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > clears selection when stale detection finds no replacement items
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  none
+Received:
+  5
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m0[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface "[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mNotes[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-bl...
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:579:55
+    577| 
+    578|     await waitFor(() => {
+    579|       expect(screen.getByTestId('selected-media-id')).toHaveTextConten…
+       |                                                       ^
+    580|       expect(screen.getByTestId('selected-content')).toHaveTextContent…
+    581|     })
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ MutationObserver.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+ ❯ MutationObserver.invokeTheCallbackFunction ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/MutationCallback.js:19:26
+ ❯ notifyMutationObservers ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/helpers/mutation-observers.js:160:22
+ ❯ ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/helpers/mutation-observers.js:133:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 35 passed (37)
+   Start at  12:10:04
+   Duration  7.24s (transform 1.01s, setup 222ms, import 1.99s, tests 8.06s, environment 422ms)
+

@@ -1,5 +1,7 @@
+import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useConnectionStore } from '@/store/connection'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
 import { useMediaCapabilities } from '@/hooks/useMediaCapabilities'
@@ -115,11 +117,24 @@ const ViewMediaPage: React.FC = () => {
   const { demoEnabled } = useDemoMode()
   const { uxState } = useConnectionUxState()
   const { checkOnce } = useConnectionActions()
+  const [mediaAuthorityGeneration, setMediaAuthorityGeneration] = useState(0)
+  useEffect(() => useConnectionStore.subscribe((next, previous) => {
+    if ((previous.state.isConnected && !next.state.isConnected) ||
+      next.state.serverUrl !== previous.state.serverUrl) {
+      setMediaAuthorityGeneration(value => value + 1)
+    }
+  }), [])
 
   // Check media support
   const mediaUnsupported = !capsLoading && capabilities && !capabilities.hasMedia
 
-  if (!isOnline && uxState !== 'testing') {
+  if (!isOnline && uxState === 'testing') {
+    return <div role="status" className="flex h-full items-center justify-center">
+      {t('review:mediaEmpty.checkingConnection', { defaultValue: 'Checking connection…' })}
+    </div>
+  }
+
+  if (!isOnline) {
     if (uxState === 'error_auth' || uxState === 'configuring_auth') {
       return (
         <div className="flex h-full items-center justify-center">
@@ -289,10 +304,13 @@ const ViewMediaPage: React.FC = () => {
     )
   }
 
-  return <MediaPageContent />
+  return <MediaPageContent key={mediaAuthorityGeneration} />
 }
 
 const MediaPageContent: React.FC = () => {
+  const ownerScope = useHomeMilestoneScope()
+  const handoffOwnerRef = useRef(ownerScope)
+  handoffOwnerRef.current = ownerScope
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation(['review', 'common'])
   const navigate = useNavigate()
@@ -310,29 +328,8 @@ const MediaPageContent: React.FC = () => {
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
-  const { refetch: searchRefetch } = search
-
+  const { isCurrent: isMediaCurrent } = search
   const viewPrefs = useMediaViewPreferences()
-
-  // Auto-refresh media results when Quick Ingest completes
-  const searchRefetchRef = useRef(searchRefetch)
-  const ingestRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => { searchRefetchRef.current = searchRefetch }, [searchRefetch])
-  useEffect(() => {
-    const handleIngestComplete = () => {
-      if (ingestRefreshTimeoutRef.current !== null) {
-        clearTimeout(ingestRefreshTimeoutRef.current)
-      }
-      ingestRefreshTimeoutRef.current = setTimeout(() => { searchRefetchRef.current() }, 1500)
-    }
-    window.addEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-    return () => {
-      if (ingestRefreshTimeoutRef.current !== null) {
-        clearTimeout(ingestRefreshTimeoutRef.current)
-      }
-      window.removeEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-    }
-  }, [])
 
   // Compute display results (filtered by favorites/collections)
   // Need selection hook first for favorites/collections, but selection needs displayResults.
@@ -889,9 +886,18 @@ const MediaPageContent: React.FC = () => {
     }
   }
 
+  const handoffSelectionRef = useRef(nav.selected)
+  handoffSelectionRef.current = nav.selected
+  const fullContentReady = Boolean(ownerScope && nav.selected && !nav.detailLoading && !nav.detailFetchError &&
+    String(nav.lastFetchedId) === String(nav.selected.id) && nav.selectedContent.trim())
+  const chatWithMediaDisabledReason = fullContentReady ? undefined : !ownerScope
+    ? t('review:mediaPage.fullContentOwnerLoading', { defaultValue: 'Checking account…' }) : nav.detailLoading
+    ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
+    : t('review:mediaPage.fullContentUnavailable', { defaultValue: 'Full content is not available for this item.' })
+
   // Chat/action handlers
-  const handleChatWithMedia = useCallback(() => {
-    if (!nav.selected) return
+  const handleChatWithMedia = useCallback(async () => {
+    if (!nav.selected || !ownerScope || !fullContentReady || !isMediaCurrent()) return
 
     const title = nav.selected.title || String(nav.selected.id)
     const content = nav.selectedContent || ''
@@ -901,9 +907,11 @@ const MediaPageContent: React.FC = () => {
         mediaId: String(nav.selected.id),
         title,
         content,
-        mode: 'normal' as const
+        mode: 'normal' as const,
+        ownerScope
       }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
       try {
         window.dispatchEvent(
           new CustomEvent('tldw:discuss-media', {
@@ -916,6 +924,7 @@ const MediaPageContent: React.FC = () => {
     } catch {
       // ignore storage errors
     }
+    if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
     setChatMode('normal')
     setSelectedKnowledge(null as any)
     setRagMediaIds(null)
@@ -927,6 +936,9 @@ const MediaPageContent: React.FC = () => {
       )
     )
   }, [
+    fullContentReady,
+    ownerScope,
+    isMediaCurrent,
     nav.selectedContent,
     message,
     navigate,
@@ -937,8 +949,8 @@ const MediaPageContent: React.FC = () => {
     t
   ])
 
-  const handleChatAboutMedia = useCallback(() => {
-    if (!nav.selected) return
+  const handleChatAboutMedia = useCallback(async () => {
+    if (!nav.selected || !ownerScope || !isMediaCurrent()) return
 
     const idNum = Number(nav.selected.id)
     if (!Number.isFinite(idNum)) {
@@ -950,21 +962,24 @@ const MediaPageContent: React.FC = () => {
       )
       return
     }
-    setSelectedKnowledge(null as any)
-    setRagMediaIds([idNum])
-    setChatMode('rag')
     try {
       const payload = {
         mediaId: String(nav.selected.id),
-        mode: 'rag_media' as const
+        mode: 'rag_media' as const,
+        ownerScope
       }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:discuss-media', { detail: payload }))
       }
     } catch {
       // ignore storage/event errors
     }
+    if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
+    setSelectedKnowledge(null as any)
+    setRagMediaIds([idNum])
+    setChatMode('rag')
     navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
@@ -979,7 +994,7 @@ const MediaPageContent: React.FC = () => {
         'Opened media-scoped RAG chat.'
       )
     )
-  }, [nav.selected, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
+  }, [nav.selected, ownerScope, isMediaCurrent, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
 
   const handleGenerateFlashcardsFromMedia = useCallback(
     async (payload: {
@@ -1806,6 +1821,7 @@ const MediaPageContent: React.FC = () => {
               totalResults={displayResults.length}
               isLibraryEmpty={isEmptyLibrary}
               onChatWithMedia={handleChatWithMedia}
+              chatWithMediaDisabledReason={chatWithMediaDisabledReason}
               onChatAboutMedia={handleChatAboutMedia}
               onGenerateFlashcardsFromContent={handleGenerateFlashcardsFromMedia}
               onRefreshMedia={handleRefreshMedia}

@@ -175,6 +175,7 @@ interface ContentViewerProps {
   /** True only when the server has zero media items (no filters/search active). */
   isLibraryEmpty?: boolean
   onChatWithMedia?: () => void
+  chatWithMediaDisabledReason?: string
   onChatAboutMedia?: () => void
   onGenerateFlashcardsFromContent?: (payload: {
     text: string
@@ -214,6 +215,7 @@ export function ContentViewer({
   totalResults = 0,
   isLibraryEmpty: isLibraryEmptyProp = false,
   onChatWithMedia,
+  chatWithMediaDisabledReason,
   onChatAboutMedia,
   onGenerateFlashcardsFromContent,
   onRefreshMedia,
@@ -230,6 +232,9 @@ export function ContentViewer({
   navigationSelectionNonce = 0
 }: ContentViewerProps) {
   const { t } = useTranslation(['review', 'common'])
+  const fullContentDisabledReason = chatWithMediaDisabledReason || (isDetailLoading
+    ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
+    : !content.trim() ? t('review:mediaPage.fullContentUnavailable', { defaultValue: 'Full content is not available for this item.' }) : undefined)
   const [collapsedSections, setCollapsedSections] = useSetting(
     MEDIA_COLLAPSED_SECTIONS_SETTING
   )
@@ -517,6 +522,7 @@ export function ContentViewer({
     editState,
     modals,
     onChatWithMedia,
+    chatWithMediaDisabledReason: fullContentDisabledReason,
     onChatAboutMedia,
     onGenerateFlashcardsFromContent,
     onCreateNoteWithContent,
@@ -710,16 +716,17 @@ export function ContentViewer({
           <div className="flex max-w-full flex-wrap items-center justify-center gap-1">
             {!isNote && onChatWithMedia && (
               <Tooltip
-                title={t('review:reviewPage.chatWithMediaTooltipClarified', {
+                title={fullContentDisabledReason || t('review:reviewPage.chatWithMediaTooltipClarified', {
                   defaultValue:
                     'Chat with this media by sending its full content to the composer.'
                 })}
               >
                 <button
                   onClick={onChatWithMedia}
+                  disabled={Boolean(fullContentDisabledReason)}
                   className="p-1.5 text-text-muted hover:bg-surface2 rounded"
                   aria-label={chatWithLabel}
-                  title={chatWithLabel}
+                  title={fullContentDisabledReason || chatWithLabel}
                 >
                   <MessageSquare className="w-4 h-4" />
                 </button>

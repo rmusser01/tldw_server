@@ -1,0 +1,129 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Media/ContentViewer.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/ViewMediaPage.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T19:14:34Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx": {
+      "loc": 2340,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx": {
+      "loc": 1798,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Media/ContentViewer.tsx": {
+      "loc": 1989,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx": {
+      "loc": 371,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Media/hooks/useContentMetadata.tsx": {
+      "loc": 557,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/ViewMediaPage.tsx": {
+      "loc": 1754,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx": {
+      "loc": 292,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx": {
+      "loc": 1157,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx": {
+      "loc": 502,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx": {
+      "loc": 144,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/hooks/useMediaNavigationState.ts": {
+      "loc": 465,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Review/hooks/useMediaSearch.ts": {
+      "loc": 1101,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 12470,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

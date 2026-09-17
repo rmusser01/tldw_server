@@ -1,0 +1,63 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (34 tests | 1 failed | 33 skipped) 91ms
+     ↓ qualifies real Character stream lifetime without changing timeout policy: idle
+     ↓ qualifies real Character stream lifetime without changing timeout policy: explicit-budget
+     ↓ qualifies real Character stream lifetime without changing timeout policy: raw-progress
+     ↓ qualifies real Character stream lifetime without changing timeout policy: caller-abort
+     × qualifies real Character stream lifetime without changing timeout policy: authority-abort 90ms
+     ↓ maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport
+     ↓ retries failed complete-v2 in its original conversation with the greeting and user receipts intact
+     ↓ UAT103 keeps a local source diagnostic Retry in the original character conversation
+     ↓ retains server branching when regenerating actual assistant content: Complete reply
+     ↓ retains server branching when regenerating actual assistant content: Partial reply after interruption
+     ↓ retains server branching when regenerating actual assistant content: __tldw_error__:malformed
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0)
+     ↓ forwards scoped current-chat controls through the real Character transport (sampling=0.5)
+     ↓ omits unset controls from the real Character request after switching to an unconfigured model scope
+     ↓ retains captured model controls while a pending Character user save outlives a settings-scope change
+     ↓ does not publish recovered IDs or save an old owner's partial after the lease invalidates
+     ↓ preserves closed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves unclosed reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ preserves structured reasoning as a recoverable tracked completion with acknowledged IDs
+     ↓ forwards the confirmed assistant ID from fallback success to local persistence
+     ↓ forwards the confirmed assistant ID from degraded success to local persistence
+     ↓ keeps tracked character routing anchored to current chat metadata when global character state is stale
+     ↓ rebinds a greeting to the newly created conversation after a failed session
+     ↓ handles emote commands without sending chat
+     ↓ uses manual visual identity override when resolving assistant message metadata
+     ↓ does not let stale overlay assistant state override the active character chat
+     ↓ honors an explicit tracked character switch over the current chat metadata
+     ↓ reuses the latest store character chat when greeting persistence updates before the send closure
+     ↓ uses the latest store character id when the hook prop still points at another character
+     ↓ passes workspace scope through when creating a character-backed chat
+     ↓ strips explicit streaming emote directives and persists emote events
+     ↓ preserves explicit emote metadata when recovering a failed stream
+     ↓ does not duplicate recovery persistence when saved-degraded includes emote metadata
+     ↓ sends emote metadata when normal persist falls back to addChatMessage
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > qualifies real Character stream lifetime without changing timeout policy: authority-abort
+Error: Invalid WebUI networking config: advanced mode requires NEXT_PUBLIC_API_URL to be an absolute URL.
+ ❯ resolveBrowserTransport ../packages/ui/src/services/tldw/browser-networking.ts:163:11
+    161|   const parsedApiOrigin = parseHttpOrigin(input.apiOrigin)
+    162|   if (!parsedApiOrigin) {
+    163|     throw new Error(
+       |           ^
+    164|       "Invalid WebUI networking config: advanced mode requires NEXT_PU…
+    165|     )
+ ❯ resolvePublicApiOrigin lib/api-base.ts:28:5
+ ❯ resolveDefaultApiBaseUrl lib/api.ts:215:26
+ ❯ lib/api.ts:714:14
+ ❯ lib/auth.ts:1:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 33 skipped (34)
+   Start at  12:11:08
+   Duration  1.76s (transform 736ms, setup 96ms, import 1.29s, tests 91ms, environment 224ms)
+

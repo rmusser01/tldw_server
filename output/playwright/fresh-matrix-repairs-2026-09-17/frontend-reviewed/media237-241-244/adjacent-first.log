@@ -1,0 +1,1398 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:93350) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93342) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93343) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93349) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93344) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93353) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93340) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93354) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93341) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93352) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93346) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93345) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93348) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93347) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:93351) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Review/__tests__/useMediaNavigationState.content-extraction.test.ts > media navigation content extraction > uses the canonical media detail extractor 1ms
+ ✓ ../packages/ui/src/components/Review/__tests__/useMediaNavigationState.content-extraction.test.ts > media navigation content extraction > marks permalink details fetched before publishing the hydrated selection 0ms
+ ✓ ../packages/ui/src/components/Review/__tests__/useMediaNavigationState.error-classification.test.ts > media detail error reporting > does not report expected missing or trashed responses as runtime errors 1ms
+ ✓ ../packages/ui/src/components/Review/__tests__/useMediaNavigationState.error-classification.test.ts > media detail error reporting > continues reporting unexpected detail failures 0ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > discards late search/type work after unmount (resolve) 65ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > discards late search/type work after unmount (reject) 53ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > cancels callbacks on a synchronous connection authority loss before React unmount 3ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > hydrates playlist preflight seed from typed open detail 56ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — explains what first-time users can add and where it appears 73ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — focuses file upload when first-source file choice opens quick ingest 62ms
+ ✓ ../packages/ui/src/components/Review/__tests__/useMediaNavigationState.permalink-hydration.test.tsx > useMediaNavigationState permalink hydration > reuses the pending detail request when search results rerender 14ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > refreshes the actual catalogue for current wizard completion (before mount=false) 102ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — focuses pasted text input when first-source paste choice opens quick ingest 134ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > refreshes the actual catalogue for current wizard completion (before mount=true) 119ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not announce a saved catalogue change for error results 61ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > refreshes current catalogue criteria and page, but rejects an obsolete owned completion 416ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > loads a replacement owner without cached content from the previous mounted lifetime 56ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not announce a saved catalogue change for process-only results 68ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > masks Bob's completed result on logout before a replacement account can act 57ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > keeps a transport outage recoverable without reporting a runtime exception 54ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > keeps missing-endpoint guidance distinct from a transport outage 53ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > retains diagnostics for unexpected failures 52ms
+stderr | ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > shows inline fetch failure with retry and recovers on successful retry
+Error fetching media details: Error: temporary failure
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx:303:30
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+    at runTest (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:12) {
+  status: 500
+}
+
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — queues pasted first-source text as a text file 252ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > deletes selected items in bulk mode 71ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > loads account storage usage through the supported user storage API 32ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > does not start protected Media reads during initial testing before the credential gate 67ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > remounts private catalogue state after an observed batched authority replacement 42ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows credential guidance and opens settings when auth is missing 15ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows setup guidance and routes first-run users to setup 11ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows unreachable guidance with retry and diagnostics actions 11ms
+stderr | ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > creates a collection from bulk selection and opens it in multi-review
+No routes matched location "/media-multi" 
+
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — renders at step 1 and allows adding a URL 171ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > places ingest jobs and library stats after the results flow in the sidebar 29ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > adds keywords in bulk mode for selected media items 18ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > exports selected items via download blob 14ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > creates a collection from bulk selection and opens it in multi-review 16ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > merges selection into an existing collection and filters by combined members 20ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage14.bulk-actions.test.tsx > ViewMediaPage stage 14 bulk actions baseline > keeps bulk keyword tagging scoped to the active collection filter 20ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > debounces rapid query changes before triggering refetch with active filters 91ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > keeps explicit pagination changes instead of snapping back to page 1 13ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > issues a single refetch when filters change from a non-first page 14ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > wires resize observer + animation-frame height stabilization for content area 10ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > hydrates media type filters from cache before background sampling resolves 5ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > falls back to sampled media types when no fresh cache is available 7ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > hydrates initial keyword suggestions from loaded results before trying the keyword endpoint 5ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > retries keyword endpoint after cooldown instead of latching fallback forever 9ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > dedupes in-flight keyword lookups and suppresses unsupported endpoint retries 7ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > stops reading-progress hydration after the first fatal endpoint failure 4ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage12.performance.test.tsx > ViewMediaPage stage 12 performance guardrails > skips reading-progress hydration for non-document media results 3ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > shows inline fetch failure with retry and recovers on successful retry 55ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual direct upload, session state, and results UI 170ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual reattach, session state, and results UI 86ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > has no axe violations for core aria naming and region rules 164ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > clears previous content when newly selected item detail fetch fails 17ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > detects stale selected media and auto-switches to the next available item 14ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.stage13.error-handling.test.tsx > ViewMediaPage stage 13 error handling > clears selection when stale detection finds no replacement items 12ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps a saved-source Warning navigable through actual StrictMode reattach, session state, and results UI 83ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > disables full-content Chat with a visible reason until content is ready 311ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > announces loading and ready status when content state changes 23ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — blocks quick processing while disconnected and shows recovery 197ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — renders large-file guidance with the design-system alert 75ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores the cancelled StrictMode poll after its replacement accepts terminal results 59ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.metadataStage2.test.tsx > ContentViewer metadata stage 2 details > renders processing badges and prioritized safe metadata fields 150ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.metadataStage2.test.tsx > ContentViewer metadata stage 2 details > updates processing badge states when API payload status changes 25ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.metadataStage2.test.tsx > ContentViewer metadata stage 2 details > shows empty-state copy while keeping keyword controls available 20ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.metadataStage2.test.tsx > ContentViewer metadata stage 2 details > loads the collapsed metadata section body on demand 31ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > minimizes the actual processing view through processing button and resumes the same job 102ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > minimizes the actual processing view through close confirmation and resumes the same job 93ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > updates announcements for pointer, keyboard, and programmatic selection changes 248ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > does not re-announce on unrelated rerenders for the same item state 21ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage3.test.tsx > ContentViewer stage 3 playback > renders an embedded audio player for audio items with original files 156ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > leaves pending stages and percentages unchanged as elapsed time passes, then accepts a terminal result 62ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — renders FFmpeg media warnings with design-system state primitives 145ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > submits the queued wizard batch through the authenticated quick-ingest transport 74ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps AntD modal portal props stable while results land 69ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > opens named read-along and annotation actions from keyboard selection events 318ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage15.accessibility.test.tsx > ContentViewer stage 15 content announcements > uses reduced-motion scrolling for active read-along segment follow mode 17ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage3.test.tsx > ContentViewer stage 3 playback > seeks embedded playback when transcript timestamp chips are clicked 272ms
+ ✓ ../packages/ui/src/components/Media/__tests__/ContentViewer.stage3.test.tsx > ContentViewer stage 3 playback > hides transcript timings by default and reveals them when toggled 227ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > starts Ingest More in a new persisted session 88ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — warns when pasted URLs are duplicates after normalization 237ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — renders detected media labels with the design-system badge 130ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > processes the configured standard preset with its analysis provider 69ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > processes the configured deep preset with its analysis provider 73ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes the standard preset to Configure when analysis needs a provider 95ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 — summarizes mixed valid and invalid URL paste results 134ms
+ × ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx > ViewMediaPage metadata search integration > serializes metadata-mode constraints and preserves server-authoritative totals/results 1061ms
+   → expected 0 to be greater than 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m0[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface opacity-50 cursor-not-allowed"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Notes are unavailable in metadata mode"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+...
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > shows a newly ingested deep link even when the cached library is empty 42ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes the deep preset to Configure when analysis needs a provider 95ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 1 -> Step 2 — clicking configure advances to preset selector 157ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > keeps saved reading position when passive chapter selection resolves after progress restoration (remembered=false) 1162ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not enter processing when auto-process lacks an analysis provider 62ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes an auto-process provider warning from persisted step 2 to Configure 61ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 2 — offers configured providers and accepts session-scoped free text 141ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > routes an auto-process provider warning from persisted step 3 to Configure 61ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 2 — focuses and describes the localized provider warning 71ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 2 — remains editable when provider discovery fails 99ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > retries auto-process after closing and reopening a provider-blocked draft 128ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > waits for an in-flight connection check before consuming auto-process 106ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restores a hidden processing session when the late analysis provider guard blocks startRun 62ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > keeps Configure open for required analysis provider "" and advances after correction 144ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > preserves first-source open detail while syncing wizard state 68ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > keeps Configure open for required analysis provider "   " and advances after correction 161ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > syncs cleared first-source add mode from wizard reset 84ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > submits conference batch metadata and item overrides through the session payload 67ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not pre-seed direct tracking item identities before backend submissions are acknowledged 110ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > keeps Configure open for required analysis provider "none" and advances after correction 167ms
+ × ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx > ViewMediaPage metadata search integration > wires no-results recovery actions from ViewMediaPage 1009ms
+   → expected 0 to be greater than 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m0[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface opacity-50 cursor-not-allowed"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Notes are unavailable in metadata mode"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+...
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > allows the analysis-disabled Quick preset to reach Review without a provider 102ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > starts persisted direct-job reattach when tracking metadata arrives after the run begins 71ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps cancellation terminal when runtime completion arrives in the cancel click 81ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores runtime progress emitted in the cancel click 82ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > revalidates the provider after returning from Review to Configure 188ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > shows indeterminate work and confirmed item counts without implying optional stages completed 66ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > cancels an extension session acknowledged after cancellation 136ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > preserves a reported per-item percentage without claiming the item is finished 61ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not submit a direct session acknowledged after cancellation 83ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > keeps saved reading position when passive chapter selection resolves after progress restoration (remembered=true) 1158ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not start a session when setup resumes after cancellation 83ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps cancellation terminal when start acknowledgement rejects 80ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 2 -> Step 3 — clicking Next advances to review summary 208ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Review explains uncertain duration without inventing a size-based estimate 53ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > uses runtime completion events for extension-backed sessions instead of calling the broken SSE path 68ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > normalizes runtime duplicate results from db_message into skipped items 71ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > normalizes runtime ok results with error payloads into failed items 69ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > rehydrates a hidden processing session when the modal is reopened 54ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > rehydrates a completed session with results after a remount 53ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 3 — blocks final processing while disconnected and allows going back 252ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restores persisted file stubs with a reattach-required warning 59ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > reattaches persisted direct-ingest jobs after refresh 57ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > maps refreshed file-backed reattach results back to the original queued item id 56ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > does not run persisted direct-job reattach for extension runtime sessions 55ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 3 -> Step 4 — clicking Start Processing shows processing view 206ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 4 — shows durable collection tracking and exports failed URLs 72ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > restarts direct processing after refresh when tracking exists without persisted job ids 58ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > cancels a refreshed direct session using persisted tracking metadata 81ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores late persisted reattach processing after cancellation 60ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 5 — displays results after processing completes 239ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > ignores late persisted reattach completion after cancellation 67ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > reruns persisted direct-session reattach when item mapping metadata arrives later 108ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > preserves already completed item results when cancellation finalizes pending items 66ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > opens durable conference collections from terminal results 67ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx > QuickIngestWizardModal session runtime > keeps polling persisted direct-job reattach until the resumed session reaches a terminal state 55ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 5 — renders skipped duplicates separately and includes them in the summary 207ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > supports adding multiple URLs in a single batch 149ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > captures shared conference metadata for a 34-talk batch and shows it in review 366ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > allows overriding one talk title and speaker inside a conference batch 265ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — full wizard flow integration > Step 5 — Ingest More resets the wizard back to step 1 137ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > shows the full inline options surface without forcing the old full-modal placeholder 202ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > allows genuine scrolling and an explicit chapter jump to save their current positions 2392ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > clears a deleted deep link without hydrating its cached row again 46ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > retains Trash navigation after deleting the sole item and refreshing to an empty library 53ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > shows Auto chunking controls by default when chunking is enabled 167ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > disables Delete before confirmation when the caller lacks media.delete 37ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > opens the Chat composer directly with media context 40ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > hydrates and selects permalink media id even when not in current results 5ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > opens the saved Flashcard media source through its actual permalink consumer 3ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > falls back to LAST_MEDIA_ID_SETTING when URL has no id and clears legacy setting 5ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > keeps permalink id synchronized when navigating previous/next from a deep link 80ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > focuses the media search input when slash shortcut is pressed 18ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > keeps sidebar collapse/expand toggle behavior functional 81ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > reveals Manual chunking controls and hides them when switching back to Auto 230ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > preserves j/k keyboard navigation between selected items 8ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > preserves arrow-key pagination behavior 56ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > does not reset pagination after an explicit page change 9ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 3 permalinks > toggles keyboard shortcuts overlay with ? key 8ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > clamps Manual chunking numbers before storing advanced values 218ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 trash undo flow > shows undo notification after soft-delete from /media 44ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 trash undo flow > restores deleted media when undo action is invoked from toast 44ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 trash undo flow > does not call restore API unless undo action is triggered 43ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > does not hand off partial content while selected detail is pending, then sends the full source 73ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > does not hand off empty selected detail 38ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > does not hand off failure selected detail 41ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > ignores late source A after selecting and loading source B 76ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > keeps "chat with media" flow on normal mode with discuss-media payload 40ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.permalink.test.tsx > ViewMediaPage Stage 1 chat action semantics > keeps "chat about media" flow on rag mode with media-scoped payload 40ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > keeps review mode anchored to remote storage and leaves audio defaults available for video-only batches 199ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > disables audio transcription controls for document-only batches 163ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > stores a standard audio language option when selected 179ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > clears a selected standard audio language back to unset 213ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > maps an unknown saved audio language to a custom entry field 167ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > reopens custom audio language with current stored value after unknown-to-standard then custom 199ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > keeps audio language unselected when no value is saved 160ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > selecting the custom option keeps stored language until custom input is edited 179ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > loads transcription models from the backend catalog 316ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > preserves a current transcription model not returned by the backend catalog 294ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > clears transcription model selection via clear action 189ms
+ ✓ ../packages/ui/src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx > QuickIngestWizardModal — real configure step > refetches transcription model catalog when the configure step is hidden then shown again 470ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx > ViewMediaPage metadata search integration > serializes metadata-mode constraints and preserves server-authoritative totals/results
+AssertionError: expected 0 to be greater than 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m0[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface opacity-50 cursor-not-allowed"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Notes are unavailable in metadata mode"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+...
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:457:42
+    455| 
+    456|     await waitFor(() => {
+    457|       expect(mocks.metadataPaths.length).toBeGreaterThan(0)
+       |                                          ^
+    458|     })
+    459| 
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx > ViewMediaPage metadata search integration > wires no-results recovery actions from ViewMediaPage
+AssertionError: expected 0 to be greater than 0
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]"[39m
+          [33mstyle[39m=[32m"overflow-x: hidden; overflow-y: auto;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-hidden[39m=[32m"false"[39m
+            [33mclass[39m=[32m"flex min-h-full flex-col bg-surface"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"shrink-0 border-b border-border/80 bg-surface px-4 py-3.5"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"flex items-center justify-between gap-3"[39m
+              [36m>[39m
+                [36m<h1[39m
+                  [33mclass[39m=[32m"text-text text-base font-semibold"[39m
+                [36m>[39m
+                  [0mMedia Inspector[0m
+                [36m</h1>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex items-center gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"text-[11px] font-medium tabular-nums text-text-muted"[39m
+                  [36m>[39m
+                    [0m0[0m
+                    [0m / [0m
+                    [0m0[0m
+                  [36m</span>[39m
+                  [36m<button[39m
+                    [33maria-label[39m=[32m"Trash"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mtitle[39m=[32m"Trash"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M10 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M14 11v6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M3 6h18"[39m
+                      [36m/>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mTrash[0m
+                  [36m</button>[39m
+                  [36m<button[39m
+                    [33maria-pressed[39m=[32m"false"[39m
+                    [33mclass[39m=[32m"inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] border-border text-text-muted hover:bg-surface2 hover:text-text"[39m
+                    [33mdata-testid[39m=[32m"media-bulk-mode-toggle"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-square h-3.5 w-3.5"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<rect[39m
+                        [33mheight[39m=[32m"18"[39m
+                        [33mrx[39m=[32m"2"[39m
+                        [33mwidth[39m=[32m"18"[39m
+                        [33mx[39m=[32m"3"[39m
+                        [33my[39m=[32m"3"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                    [0mBulk[0m
+                  [36m</button>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 inline-flex items-center gap-1 rounded-lg border border-border bg-surface2/70 p-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show media only"[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors bg-primary text-white"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mMedia[0m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium"[39m
+                  [36m>[39m
+                    [0m0[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Show notes only"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors text-text hover:bg-surface opacity-50 cursor-not-allowed"[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtitle[39m=[32m"Notes are unavailable in metadata mode"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+...
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:545:36
+    543| 
+    544|     await waitFor(() => {
+    545|       expect(metadataPaths.length).toBeGreaterThan(0)
+       |                                    ^
+    546|     })
+    547| 
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 24 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:868:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "serializes metadata-mode constraints and preserves server-authoritative totals/results". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:868:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:52:14
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot destructure property 'signal' of 'undefined' as it is undefined.
+ ❯ Object.<anonymous> ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:327:50
+    325|   }, [message, t])
+    326| 
+    327|   const runSearch = useCallback(async ({ signal: querySignal }: { sign…
+       |                                                  ^
+    328|     const signal = AbortSignal.any([querySignal, lifetime.current.sign…
+    329|     signal.throwIfAborted()
+ ❯ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx:45:43
+ ❯ ../packages/ui/src/components/Review/hooks/useMediaSearch.ts:879:7
+ ❯ commitHookEffectListMount ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:23189:26
+ ❯ commitPassiveMountOnFiber ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24970:11
+ ❯ commitPassiveMountEffects_complete ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24930:9
+ ❯ commitPassiveMountEffects_begin ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24917:7
+ ❯ commitPassiveMountEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:24905:3
+ ❯ flushPassiveEffectsImpl ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27078:3
+ ❯ flushPassiveEffects ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:27023:14
+
+This error originated in "../packages/ui/src/components/Review/__tests__/ViewMediaPage.search-experience.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "wires no-results recovery actions from ViewMediaPage". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed | 14 passed (15)
+      Tests  2 failed | 185 passed (187)
+     Errors  24 errors
+   Start at  11:52:48
+   Duration  9.94s (transform 6.42s, setup 2.21s, import 13.91s, tests 23.99s, environment 5.22s)
+

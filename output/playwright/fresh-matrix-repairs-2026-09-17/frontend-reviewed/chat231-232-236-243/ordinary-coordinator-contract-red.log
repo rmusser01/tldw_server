@@ -1,0 +1,242 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (60 tests | 1 failed | 59 skipped) 1200ms
+     × uses ordinary workflow immediately after Bob creates and completes a chat following account clear 1199ms
+     ↓ promotes accepted entry to saved route and restores its transcript on remount: /chat?mode=character&characterId=4&keep=1
+     ↓ promotes accepted entry to saved route and restores its transcript on remount: /options.html#/chat?mode=character&characterId=4&keep=1
+     ↓ does not publish a superseded saved target after delayed scope hydration (return to A: false)
+     ↓ does not publish a superseded saved target after delayed scope hydration (return to A: true)
+     ↓ registers the webui chat route context on mount
+     ↓ waits for session scope readiness before consuming the one-time restore pass
+     ↓ falls back to recent chat only when restore reports nothing restored
+     ↓ stops recent-chat initialization when restore reports cancellation
+     ↓ does not overwrite a server chat selected while session scope initializes
+     ↓ applies explicit character chat route ids before persisted session restore
+     ↓ applies character route ids before persisted session restore
+     ↓ applies a settings-return server chat before persisted session restore
+     ↓ selects the saved Flashcard source conversation through the actual neutral Chat route consumer
+     ↓ applies a sidepanel handoff before persisted session restore
+     ↓ starts a fresh character route chat over an active server chat
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=false)
+     ↓ settles canonical saved entry with the real session subscription and local loader (StrictMode=true)
+     ↓ cancels pending generic restoration before applying an explicit settings target
+     ↓ finishes a delayed current settings local-history load
+     ↓ finishes a delayed current timeline local-history load
+     ↓ does not complete a failed local settings return as a successful server selection
+     ↓ uses canonical ordinary workflow after history load despite a persisted Character preference
+     ↓ uses canonical ordinary workflow after cold load despite a persisted Character preference
+     ↓ preserves the intended workflow for pending chat state
+     ↓ preserves the intended workflow for scope-pending chat state
+     ↓ preserves the intended workflow for fresh chat state
+     ↓ preserves the intended workflow for unsaved chat state
+     ↓ preserves the intended workflow for character chat state
+     ↓ preserves the intended workflow for persona chat state
+     ↓ keeps a saved target over a previous character while profile is delayed
+     ↓ keeps a saved target over a previous character while messages is delayed
+     ↓ does not install a late saved identity after picker changes during metadata fetch
+     ↓ does not install a late saved identity after picker-roundtrip changes during metadata fetch
+     ↓ does not install a late saved identity after replacement changes during metadata fetch
+     ↓ does not install a late saved identity after principal changes during metadata fetch
+     ↓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)
+     ↓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)
+     ↓ discards optional profile completion after replacement
+     ↓ discards optional profile completion after principal
+     ↓ discards optional profile completion after unmount
+     ↓ loads canonical messages without waiting for optional global selection persistence
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: immediate
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: profile
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: messages
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar
+     ↓ preserves canonical saved identity with actual WebUI storage and six loaders: cross-tab
+     ↓ uses the real picker to deliberately select Robot with a saved target
+     ↓ uses the real picker to deliberately select New choice with a saved target
+     ↓ UAT068 replaces a fully loaded saved Character from its search route without restoring it
+     ↓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it
+     ↓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it
+     ↓ UAT068 clear survives a 0ms route commit without restoring the saved Character
+     ↓ UAT068 clear survives a 70ms route commit without restoring the saved Character
+     ↓ UAT068 rejects cancel before retiring the owned saved route
+     ↓ UAT068 rejects other-surface before retiring the owned saved route
+     ↓ UAT068 rejects other-target before retiring the owned saved route
+     ↓ UAT068 rejects other-history before retiring the owned saved route
+     ↓ UAT068 rejects authority-roundtrip before retiring the owned saved route
+     ↓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx > Playground coordinator integration > uses ordinary workflow immediately after Bob creates and completes a chat following account clear
+AssertionError: expected "vi.fn()" to be called 1 times, but got 0 times
+
+Ignored nodes: comments, script, style
+[36m<html[39m
+  [33mclass[39m=[32m"dark"[39m
+[36m>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"relative flex h-full min-h-0 w-full flex-col items-center bg-bg text-text data-[is-dragging=true]:bg-surface2"[39m
+        [33mdata-is-dragging[39m=[32m"false"[39m
+        [33mstyle[39m=[32m"--chat-message-opacity: 0.6; --chat-character-image-opacity: 1;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"relative z-10 flex h-full min-h-0 w-full"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden text-text bg-bg"[39m
+            [33mdata-left-rail[39m=[32m"hidden"[39m
+            [33mdata-mode[39m=[32m"cockpit"[39m
+            [33mdata-right-rail[39m=[32m"hidden"[39m
+            [33mdata-testid[39m=[32m"playground-cockpit-shell"[39m
+          [36m>[39m
+            [36m<p[39m
+              [33mclass[39m=[32m"sr-only"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mode-summary"[39m
+            [36m>[39m
+              [0mCockpit rails hidden. Chat and composer remain active.[0m
+            [36m</p>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"[39m
+              [33mdata-mobile-panel[39m=[32m"none"[39m
+              [33mdata-testid[39m=[32m"playground-cockpit-mobile-rails"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33maria-label[39m=[32m"Mobile cockpit panels"[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"[39m
+                [33mrole[39m=[32m"tablist"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore context sidechannel[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-expanded[39m=[32m"false"[39m
+                  [33maria-selected[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus text-text-muted hover:bg-bg"[39m
+                  [33mid[39m=[32m"playground-cockpit-mobile-runtime-tab"[39m
+                  [33mrole[39m=[32m"tab"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mRestore runtime sidechannel[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"grid grid-cols-2 gap-1"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow context rail[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-controls[39m=[32m"playground-cockpit-mobile-runtime-panel"[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mclass[39m=[32m"min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0mShow runtime rail[0m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<p[39m
+                [33mclass[39m=[32m"sr-only"[39m
+                [33mdata-testid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+              [36m>[39m
+                [0mCockpit panels hidden. Composer draft remains available below.[0m
+              [36m</p>[39m
+              [36m<section[39m
+                [33maria-describedby[39m=[32m"playground-cockpit-mobile-panel-summary"[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33maria-labelledby[39m=[32m"playground-cockpit-mobile-context-tab"[39m
+                [33mclass[39m=[32m"max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 hidden"[39m
+                [33mhidden[39m=[32m""[39m
+                [33mid[39m=[32m"playground-cockpit-mobile-context-panel"[39m
+                [33mrole[39m=[32m"tabpanel"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex min-w-0 flex-col gap-2 text-sm"[39m
+                  [33mdata-testid[39m=[32m"playground-context-rail"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"rounded-md border border-border/70 bg-surface px-3 py-2"[39m
+                  [36m>[39m
+                    [36m<section[39m
+                      [33maria-label[39m=[32m"Next message composition"[39m
+                      [33mclass[39m=[32m"min-w-0"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex items-start justify-between gap-2"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"min-w-0"[39m
+                        [36m>[39m
+                          [36m<h2[39m
+                            [33mclass[39m=[32m"text-[11px] font-semibold uppercase text-text-muted"[39m
+                          [36m>[39m
+                            [0mComposition[0m
+                          [36m</h2>[39m
+                          [36m<p[39m
+                            [33mclass[39m=[32m"mt-1 text-sm font-medium text-text"[39m
+                        ...
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:479:59
+    477|       })
+    478|       fireEvent.click(screen.getByRole("button", { name: "Send ordinar…
+    479|       await waitFor(() => expect(ordinaryCompletion.save).toHaveBeenCa…
+       |                                                           ^
+    480|       expect(tldwClientState.createChat).toHaveBeenCalledTimes(1)
+    481|       expect(useStoreMessageOption.getState().serverChatId).toBe("bob-…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: setAbortController is not a function
+ ❯ Object.onSubmit ../packages/ui/src/hooks/chat/useChatActions.ts:3282:7
+    3280|       const newController = new AbortController()
+    3281|       signal = newController.signal
+    3282|       setAbortController(newController)
+       |       ^
+    3283|       activeAbortControllerRef.current = newController
+    3284|     } else {
+ ❯ onClick ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx:55:46
+ ❯ HTMLUnknownElement.callCallback ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4164:14
+ ❯ HTMLUnknownElement.callTheUserObjectsOperation ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30
+ ❯ innerInvokeEventListeners ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16
+ ❯ invokeEventListeners ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3
+ ❯ HTMLUnknownElementImpl._dispatch ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9
+ ❯ HTMLUnknownElementImpl.dispatchEvent ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:114:17
+ ❯ HTMLUnknownElement.dispatchEvent ../node_modules/.bun/jsdom@28.1.0+f552f6b883fec0ef/node_modules/jsdom/lib/generated/idl/EventTarget.js:241:34
+ ❯ Object.invokeGuardedCallbackDev ../node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/cjs/react-dom.development.js:4213:16
+
+This error originated in "../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "uses ordinary workflow immediately after Bob creates and completes a chat following account clear". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 59 skipped (60)
+     Errors  1 error
+   Start at  11:51:21
+   Duration  4.02s (transform 1.38s, setup 111ms, import 2.38s, tests 1.20s, environment 263ms)
+

@@ -1,0 +1,23 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:87213) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:87212) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > discards late search/type work after unmount (resolve) 68ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > discards late search/type work after unmount (reject) 54ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > cancels callbacks on a synchronous connection authority loss before React unmount 4ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > keeps a transport outage recoverable without reporting a runtime exception 55ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > keeps missing-endpoint guidance distinct from a transport outage 54ms
+ ✓ ../packages/ui/src/components/Review/hooks/__tests__/useMediaSearch.outage.test.tsx > Media search outage handling > retains diagnostics for unexpected failures 53ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > does not start protected Media reads during initial testing before the credential gate 66ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows credential guidance and opens settings when auth is missing 14ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows setup guidance and routes first-run users to setup 9ms
+ ✓ ../packages/ui/src/components/Review/__tests__/ViewMediaPage.connection.test.tsx > ViewMediaPage connection states > shows unreachable guidance with retry and diagnostics actions 11ms
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  11:40:59
+   Duration  1.96s (transform 952ms, setup 310ms, import 1.63s, tests 389ms, environment 672ms)
+

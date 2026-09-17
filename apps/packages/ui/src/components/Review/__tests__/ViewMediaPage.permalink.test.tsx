@@ -1,12 +1,17 @@
 import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import ViewMediaPage from '../ViewMediaPage'
+import ViewMediaPage, { MEDIA_STALE_CHECK_INTERVAL_MS } from '../ViewMediaPage'
+import { useMediaNavigationState } from '../hooks/useMediaNavigationState'
+import { useConnectionStore } from '@/store/connection'
+import type { MediaResultItem } from '@/components/Media/types'
+import { DISCUSS_MEDIA_PROMPT_SETTING } from '@/services/settings/ui-settings'
 import { getFlashcardSourceMeta } from '@/components/Flashcards/utils/source-reference'
 import { useReadingProgress, type UseReadingProgressDeps } from '@/components/Media/hooks/useReadingProgress'
 
 const mocks = vi.hoisted(() => ({
+  ownerScope: 'alice-scope' as string | null,
   canDelete: true,
   readingProbe: false,
   navigationData: { nodes: [] as Array<{ id: string; title: string; level: number; target_type: 'char_range'; target_start: number; target_end: number }> },
@@ -28,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   setSelectedKnowledge: vi.fn(),
   setRagMediaIds: vi.fn()
 }))
+
+vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => mocks.ownerScope }))
 
 vi.mock('@/hooks/useMediaCapabilities', () => ({
   useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
@@ -384,6 +391,7 @@ const renderMediaPage = (initialEntry: string) => {
 
 describe('ViewMediaPage Stage 3 permalinks', () => {
   beforeEach(() => {
+    mocks.ownerScope = 'alice-scope'
     mocks.canDelete = true
     mocks.readingProbe = false
     mocks.navigationData = { nodes: [] }
@@ -856,6 +864,7 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
 
 describe('ViewMediaPage Stage 1 trash undo flow', () => {
   beforeEach(() => {
+    mocks.ownerScope = 'alice-scope'
     mocks.queryData = [
       {
         kind: 'media',
@@ -996,6 +1005,7 @@ describe('ViewMediaPage Stage 1 trash undo flow', () => {
 
 describe('ViewMediaPage Stage 1 chat action semantics', () => {
   beforeEach(() => {
+    mocks.ownerScope = 'alice-scope'
     mocks.queryData = [
       {
         kind: 'media',
@@ -1050,6 +1060,87 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
       }
       return {}
     })
+  })
+
+  it.each(['Chat with media action', 'Chat about media action'])('does not expose a pending %s handoff after account replacement', async action => {
+    let finishWrite!: () => void
+    mocks.setSetting.mockImplementation(() => new Promise<void>(resolve => { finishWrite = resolve }))
+    const events: CustomEvent[] = []
+    const observe = (event: Event) => events.push(event as CustomEvent)
+    window.addEventListener('tldw:discuss-media', observe)
+    const view = renderMediaPage('/media?id=100')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100'))
+    fireEvent.click(screen.getByRole('button', { name: action }))
+    await waitFor(() => expect(finishWrite).toBeDefined())
+    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ownerScope: 'alice-scope' }))
+    expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
+    mocks.ownerScope = 'bob-scope'
+    view.unmount()
+    renderMediaPage('/media?id=100')
+    await act(async () => { finishWrite() })
+    expect(events).toHaveLength(0)
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
+    window.removeEventListener('tldw:discuss-media', observe)
+  })
+
+  it('requires a resolved owner before preparing a source handoff', async () => {
+    mocks.ownerScope = null
+    renderMediaPage('/media?id=100')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100'))
+    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Chat about media action' }))
+    expect(mocks.setSetting.mock.calls.filter(([setting]) => setting === DISCUSS_MEDIA_PROMPT_SETTING)).toHaveLength(0)
+    expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
+  })
+
+  it('does not hand off partial content while selected detail is pending, then sends the full source', async () => {
+    mocks.queryData = [{ kind: 'media', id: 100, title: 'Pending source', meta: { type: 'document' }, raw: {} }]
+    let resolveDetail!: (value: unknown) => void
+    const request = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation((input: { path?: string }) => input.path === '/api/v1/media/100'
+      ? new Promise(resolve => { resolveDetail = resolve }) : request(input))
+    renderMediaPage('/media?id=100')
+    await waitFor(() => expect(resolveDetail).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
+    expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    const content = 'Complete Cedar source. '.repeat(90).trim()
+    await act(async () => { resolveDetail({ id: 100, title: 'Pending source', content: { text: content } }) })
+    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
+    expect(await screen.findByText('Chat composer')).toBeInTheDocument()
+    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mediaId: '100', mode: 'normal', content }))
+  })
+
+  it.each(['empty', 'failure'])('does not hand off %s selected detail', async state => {
+    mocks.queryData = [{ kind: 'media', id: 100, title: 'No source', meta: { type: 'document' }, raw: {} }]
+    const request = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation(async (input: { path?: string }) => {
+      if (input.path !== '/api/v1/media/100') return request(input)
+      if (state === 'failure') throw Object.assign(new Error('Not found'), { status: 404 })
+      return { id: 100, content: '' }
+    })
+    renderMediaPage('/media?id=100')
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100'))
+    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
+    expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+  })
+
+  it('ignores late source A after selecting and loading source B', async () => {
+    mocks.queryData = [100, 101].map(id => ({ kind: 'media', id, title: `Source ${id}`, meta: { type: 'document' }, raw: {} }))
+    let resolveA!: (value: unknown) => void
+    const request = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation((input: { path?: string }) => input.path === '/api/v1/media/100'
+      ? new Promise(resolve => { resolveA = resolve }) : request(input))
+    renderMediaPage('/media?id=100')
+    await waitFor(() => expect(resolveA).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }))
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('101'))
+    await act(async () => { resolveA({ id: 100, content: { text: 'Wrong old source A' } }) })
+    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
+    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mediaId: '101', content: 'Content for 101' }))
+    expect(mocks.bgRequest.mock.calls.filter(([input]) => input.path === '/api/v1/media/101')).toHaveLength(1)
   })
 
   it('keeps "chat with media" flow on normal mode with discuss-media payload', async () => {
@@ -1124,5 +1215,69 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
       )
     ).toBe(true)
     dispatchSpy.mockRestore()
+  })
+})
+
+
+describe('Media stale-selection callback lifetime', () => {
+  const items: MediaResultItem[] = [1, 2, 3].map(id => ({ kind: 'media', id, title: 'Source ' + id, snippet: '', keywords: [], meta: {}, raw: {} }))
+  const t = (_key: string, options?: Record<string, unknown>) => String(options?.defaultValue || _key)
+  beforeEach(() => {
+    mocks.getSetting.mockReset().mockResolvedValue(undefined)
+    mocks.setSetting.mockReset().mockResolvedValue(undefined)
+    mocks.bgRequest.mockReset().mockResolvedValue({ content: 'Current source' })
+    mocks.messageWarning.mockReset()
+    useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true, serverUrl: 'http://localhost:8000' } }))
+  })
+  const mount = () => {
+    let tick: (() => void) | undefined
+    const original = window.setInterval.bind(window)
+    const timer = vi.spyOn(window, 'setInterval').mockImplementation((handler, delay, ...args) => {
+      if (delay === MEDIA_STALE_CHECK_INTERVAL_MS) {
+        tick = handler as () => void
+        return 123 as ReturnType<typeof window.setInterval>
+      }
+      return original(handler, delay, ...args)
+    })
+    const refetch = vi.fn().mockResolvedValue({ data: items.slice(1) })
+    const message = { error: mocks.messageError, warning: mocks.messageWarning, success: mocks.messageSuccess }
+    const hook = renderHook(() => useMediaNavigationState({ t, message, displayResults: items, refetch }), {
+      wrapper: ({ children }: React.PropsWithChildren) => <MemoryRouter initialEntries={['/media']}>{children}</MemoryRouter>
+    })
+    return { ...hook, refetch, timer, tick: () => tick?.() }
+  }
+  it('ignores a late deletion response after synchronous authority loss and recovery', async () => {
+    const hook = mount()
+    try {
+      await act(async () => { hook.result.current.setSelected(items[0]) })
+      await waitFor(() => expect(hook.result.current.detailLoading).toBe(false))
+      let reject!: (error: unknown) => void
+      mocks.bgRequest.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+      act(() => hook.tick())
+      expect(reject).toBeDefined()
+      await act(async () => {
+        useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: false } }))
+        useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true } }))
+        reject({ status: 404 })
+      })
+      expect(mocks.messageWarning).not.toHaveBeenCalled()
+      expect(hook.refetch).not.toHaveBeenCalled()
+      expect(hook.result.current.selected?.id).toBe(1)
+    } finally { hook.unmount(); hook.timer.mockRestore() }
+  })
+  it('keeps a newer selected source when deletion recovery refetch resolves late', async () => {
+    const hook = mount()
+    try {
+      await act(async () => { hook.result.current.setSelected(items[0]) })
+      await waitFor(() => expect(hook.result.current.detailLoading).toBe(false))
+      let finish!: (value: { data: MediaResultItem[] }) => void
+      hook.refetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      mocks.bgRequest.mockRejectedValueOnce({ status: 404 })
+      await act(async () => { hook.tick() })
+      expect(hook.refetch).toHaveBeenCalledTimes(1)
+      await act(async () => { hook.result.current.setSelected(items[1]) })
+      await act(async () => { finish({ data: [items[2]] }) })
+      expect(hook.result.current.selected?.id).toBe(2)
+    } finally { hook.unmount(); hook.timer.mockRestore() }
   })
 })

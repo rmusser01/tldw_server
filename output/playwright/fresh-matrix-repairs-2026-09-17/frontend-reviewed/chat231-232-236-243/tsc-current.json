@@ -1,0 +1,812 @@
+[
+  {
+    "file": "apps/packages/ui/src/components/Option/PresentationStudio/PresentationStudioPage.tsx",
+    "code": 2345,
+    "message": "Argument of type 'PresentationStudioRecord' is not assignable to parameter of type 'StructuredPresentationStudioRecord'.\n  Type 'StandaloneHtmlPresentationStudioRecord' is not assignable to type 'StructuredPresentationStudioRecord'.\n    Property 'slides' is missing in type 'StandaloneHtmlPresentationStudioRecord' but required in type '{ content_kind: \"structured_slides\"; marp_theme?: string; template_id?: string; visual_style_id?: string; visual_style_scope?: string; visual_style_name?: string; visual_style_version?: number; ... 4 more ...; custom_css?: string; }'.",
+    "location": {
+      "line": 312,
+      "character": 20
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2339,
+    "message": "Property 'id' does not exist on type 'unknown'.",
+    "location": {
+      "line": 169,
+      "character": 26
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2339,
+    "message": "Property 'id' does not exist on type 'unknown'.",
+    "location": {
+      "line": 177,
+      "character": 47
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2740,
+    "message": "Type '{}' is missing the following properties from type 'StructuredPromptBlock': id, name, role, content, and 3 more.",
+    "location": {
+      "line": 210,
+      "character": 18
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2740,
+    "message": "Type '{}' is missing the following properties from type 'StructuredPromptBlock': id, name, role, content, and 3 more.",
+    "location": {
+      "line": 210,
+      "character": 40
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2339,
+    "message": "Property 'id' does not exist on type 'unknown'.",
+    "location": {
+      "line": 235,
+      "character": 44
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/components/Option/Prompt/Structured/StructuredPromptEditor.tsx",
+    "code": 2339,
+    "message": "Property 'id' does not exist on type 'unknown'.",
+    "location": {
+      "line": 243,
+      "character": 35
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/services/prompt-sync.ts",
+    "code": 2339,
+    "message": "Property 'error' does not exist on type 'ExistingPullReconciliation'.\n  Property 'error' does not exist on type '{ safe: true; }'.",
+    "location": {
+      "line": 1054,
+      "character": 34
+    }
+  },
+  {
+    "file": "apps/packages/ui/src/services/prompt-sync.ts",
+    "code": 2339,
+    "message": "Property 'error' does not exist on type 'ExistingPullReconciliation'.\n  Property 'error' does not exist on type '{ safe: true; }'.",
+    "location": {
+      "line": 1085,
+      "character": 32
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1181,
+      "character": 47
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1182,
+      "character": 17
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'runtime' does not exist on type '{}'.",
+    "location": {
+      "line": 1187,
+      "character": 47
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'runtime' does not exist on type '{}'.",
+    "location": {
+      "line": 1188,
+      "character": 17
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2322,
+    "message": "Type '{}' is not assignable to type 'typeof chrome & Record<string, unknown>'.\n  Type '{}' is missing the following properties from type 'typeof chrome': storage, runtime, tabs, alarms, and 7 more.",
+    "location": {
+      "line": 1189,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1692,
+      "character": 53
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1693,
+      "character": 52
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1694,
+      "character": 55
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'storage' does not exist on type '{}'.",
+    "location": {
+      "line": 1719,
+      "character": 38
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+    "code": 2339,
+    "message": "Property 'runtime' does not exist on type '{}'.",
+    "location": {
+      "line": 1742,
+      "character": 34
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/prompt-improvement.spec.ts",
+    "code": 2339,
+    "message": "Property 'offsetHeight' does not exist on type 'HTMLElement | SVGElement'.\n  Property 'offsetHeight' does not exist on type 'SVGElement'.",
+    "location": {
+      "line": 399,
+      "character": 72
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/e2e/workflows/prompt-improvement.spec.ts",
+    "code": 2339,
+    "message": "Property 'offsetHeight' does not exist on type 'HTMLElement | SVGElement'.\n  Property 'offsetHeight' does not exist on type 'SVGElement'.",
+    "location": {
+      "line": 431,
+      "character": 68
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-evidence.test.ts",
+    "code": 2353,
+    "message": "Object literal may only specify known properties, and 'evidence' does not exist in type '{ scanArtifacts?: (root: any, { additionalSecrets, maxFiles, maxBytes }?: { additionalSecrets?: any[]; maxFiles?: number; maxBytes?: number; }) => void; summaryInput?: {}; syntheticKey?: string; }'.",
+    "location": {
+      "line": 314,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-evidence.test.ts",
+    "code": 2353,
+    "message": "Object literal may only specify known properties, and 'teardownOutcome' does not exist in type '{ scanArtifacts?: (root: any, { additionalSecrets, maxFiles, maxBytes }?: { additionalSecrets?: any[]; maxFiles?: number; maxBytes?: number; }) => void; summaryInput?: {}; syntheticKey?: string; }'.",
+    "location": {
+      "line": 368,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-evidence.test.ts",
+    "code": 2353,
+    "message": "Object literal may only specify known properties, and 'runtime' does not exist in type '{ scanArtifacts?: (root: any, { additionalSecrets, maxFiles, maxBytes }?: { additionalSecrets?: any[]; maxFiles?: number; maxBytes?: number; }) => void; summaryInput?: {}; syntheticKey?: string; }'.",
+    "location": {
+      "line": 394,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'string' is not assignable to type 'Platform'.",
+    "location": {
+      "line": 41,
+      "character": 4
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => Promise<boolean>>' is not assignable to type '(target: any) => boolean'.\n  Type 'Promise<boolean>' is not assignable to type 'boolean'.",
+    "location": {
+      "line": 42,
+      "character": 4
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => Promise<boolean>>' is not assignable to type '(target: any) => boolean'.\n  Type 'Promise<boolean>' is not assignable to type 'boolean'.",
+    "location": {
+      "line": 115,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => { loggingErrors: Error[]; pid: number; args: any[]; child: FakeChild; command: string; cwd: string; env: {}; name: string; }>' is not assignable to type '({ name, command, args, cwd, env, logPath }: { name: any; command: any; args?: any[]; cwd: any; env: any; logPath: any; }) => { name: any; command: any; args: any[]; cwd: any; logPath: any; child: ChildProcessByStdio<null, Readable, Readable>; pid: number; loggingErrors: any[]; }'.\n  Property 'logPath' is missing in type '{ loggingErrors: Error[]; pid: number; args: any[]; child: FakeChild; command: string; cwd: string; env: {}; name: string; }' but required in type '{ name: any; command: any; args: any[]; cwd: any; logPath: any; child: ChildProcessByStdio<null, Stream.Readable, Stream.Readable>; pid: number; loggingErrors: any[]; }'.",
+    "location": {
+      "line": 116,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => Promise<boolean>>' is not assignable to type '(target: any) => boolean'.\n  Type 'Promise<boolean>' is not assignable to type 'boolean'.",
+    "location": {
+      "line": 134,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => { loggingErrors: any[]; pid: number; args: any[]; child: FakeChild; command: string; cwd: string; env: {}; name: string; }>' is not assignable to type '({ name, command, args, cwd, env, logPath }: { name: any; command: any; args?: any[]; cwd: any; env: any; logPath: any; }) => { name: any; command: any; args: any[]; cwd: any; logPath: any; child: ChildProcessByStdio<null, Readable, Readable>; pid: number; loggingErrors: any[]; }'.\n  Property 'logPath' is missing in type '{ loggingErrors: any[]; pid: number; args: any[]; child: FakeChild; command: string; cwd: string; env: {}; name: string; }' but required in type '{ name: any; command: any; args: any[]; cwd: any; logPath: any; child: ChildProcessByStdio<null, Stream.Readable, Stream.Readable>; pid: number; loggingErrors: any[]; }'.",
+    "location": {
+      "line": 135,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 203,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 219,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 236,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 252,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 268,
+      "character": 41
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<(record: any) => Promise<void>>' is not assignable to type 'Mock<() => Promise<any>>'.\n  Type 'Mock<(record: any) => Promise<void>>' is not assignable to type '{ (): Promise<any>; new (): Promise<any>; }'.\n    Target signature provides too few arguments. Expected 1 or more, but got 0.",
+    "location": {
+      "line": 308,
+      "character": 41
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2740,
+    "message": "Type 'EventEmitter<any>' is missing the following properties from type 'Process': browser, stdout, stderr, stdin, and 50 more.",
+    "location": {
+      "line": 384,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+    "code": 2740,
+    "message": "Type 'EventEmitter<any>' is missing the following properties from type 'Process': browser, stdout, stderr, stdin, and 50 more.",
+    "location": {
+      "line": 426,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2741,
+    "message": "Property 'NODE_ENV' is missing in type '{ ANTHROPIC_API_KEY: string; CONTEXT_INTEGRITY_MODE: string; HOME: string; HOST_PROVIDER_SECRET: string; LANG: string; OPENAI_API_KEY: string; PATH: string; PLAYWRIGHT_BROWSERS_PATH: string; ... 5 more ...; VIRTUAL_ENV: string; }' but required in type 'ProcessEnv'.",
+    "location": {
+      "line": 276,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2339,
+    "message": "Property 'PATH' does not exist on type '{} | { AUTH_MODE: string; DATABASE_URL: string; HOME: any; JOBS_DB_PATH: string; JOBS_DB_URL: string; MCP_MODULES: string; MCP_MODULES_CONFIG: string; MEDIA_DB_PATH: string; SINGLE_USER_API_KEY: string; ... 9 more ...; USER_DB_BASE_DIR_ALLOWED_ROOTS: any; } | ... 4 more ... | { ...; }'.\n  Property 'PATH' does not exist on type '{}'.",
+    "location": {
+      "line": 299,
+      "character": 22
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2339,
+    "message": "Property 'LANG' does not exist on type '{} | { AUTH_MODE: string; DATABASE_URL: string; HOME: any; JOBS_DB_PATH: string; JOBS_DB_URL: string; MCP_MODULES: string; MCP_MODULES_CONFIG: string; MEDIA_DB_PATH: string; SINGLE_USER_API_KEY: string; ... 9 more ...; USER_DB_BASE_DIR_ALLOWED_ROOTS: any; } | ... 4 more ... | { ...; }'.\n  Property 'LANG' does not exist on type '{}'.",
+    "location": {
+      "line": 300,
+      "character": 22
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2339,
+    "message": "Property 'PLAYWRIGHT_BROWSERS_PATH' does not exist on type '{} | { AUTH_MODE: string; DATABASE_URL: string; HOME: any; JOBS_DB_PATH: string; JOBS_DB_URL: string; MCP_MODULES: string; MCP_MODULES_CONFIG: string; MEDIA_DB_PATH: string; SINGLE_USER_API_KEY: string; ... 9 more ...; USER_DB_BASE_DIR_ALLOWED_ROOTS: any; } | ... 4 more ... | { ...; }'.\n  Property 'PLAYWRIGHT_BROWSERS_PATH' does not exist on type '{}'.",
+    "location": {
+      "line": 301,
+      "character": 22
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2339,
+    "message": "Property 'SSL_CERT_FILE' does not exist on type '{} | { AUTH_MODE: string; DATABASE_URL: string; HOME: any; JOBS_DB_PATH: string; JOBS_DB_URL: string; MCP_MODULES: string; MCP_MODULES_CONFIG: string; MEDIA_DB_PATH: string; SINGLE_USER_API_KEY: string; ... 9 more ...; USER_DB_BASE_DIR_ALLOWED_ROOTS: any; } | ... 4 more ... | { ...; }'.\n  Property 'SSL_CERT_FILE' does not exist on type '{}'.",
+    "location": {
+      "line": 302,
+      "character": 22
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2339,
+    "message": "Property 'CONTEXT_INTEGRITY_MODE' does not exist on type '{} | { AUTH_MODE: string; DATABASE_URL: string; HOME: any; JOBS_DB_PATH: string; JOBS_DB_URL: string; MCP_MODULES: string; MCP_MODULES_CONFIG: string; MEDIA_DB_PATH: string; SINGLE_USER_API_KEY: string; ... 9 more ...; USER_DB_BASE_DIR_ALLOWED_ROOTS: any; } | ... 4 more ... | { ...; }'.\n  Property 'CONTEXT_INTEGRITY_MODE' does not exist on type '{}'.",
+    "location": {
+      "line": 310,
+      "character": 24
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2741,
+    "message": "Property 'NODE_ENV' is missing in type '{ PATH: string; }' but required in type 'ProcessEnv'.",
+    "location": {
+      "line": 359,
+      "character": 6
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2741,
+    "message": "Property 'NODE_ENV' is missing in type '{ PATH: string; VIRTUAL_ENV: string; }' but required in type 'ProcessEnv'.",
+    "location": {
+      "line": 469,
+      "character": 8
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2741,
+    "message": "Property 'NODE_ENV' is missing in type '{ PATH: string; }' but required in type 'ProcessEnv'.",
+    "location": {
+      "line": 475,
+      "character": 8
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+    "code": 2741,
+    "message": "Property 'NODE_ENV' is missing in type '{ PATH: string; }' but required in type 'ProcessEnv'.",
+    "location": {
+      "line": 483,
+      "character": 8
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 90,
+      "character": 51
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 91,
+      "character": 33
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 95,
+      "character": 43
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2493,
+    "message": "Tuple type '[url: string]' of length '1' has no element at index '1'.",
+    "location": {
+      "line": 148,
+      "character": 49
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 18048,
+    "message": "'init' is possibly 'undefined'.",
+    "location": {
+      "line": 148,
+      "character": 59
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2322,
+    "message": "Type 'Mock<() => Promise<never>>' is not assignable to type 'Mock<(activeRegistry: { spawn: Mock<(command: any) => { command: any; }>; stop: Mock<() => Promise<any>>; teardown: Mock<() => Promise<any>>; wait: Mock<() => Promise<{ code: number; signal: any; }>>; }, command: { ...; }) => { ...; }>'.\n  Type 'Mock<() => Promise<never>>' is not assignable to type 'MockInstance<(activeRegistry: { spawn: Mock<(command: any) => { command: any; }>; stop: Mock<() => Promise<any>>; teardown: Mock<() => Promise<any>>; wait: Mock<() => Promise<{ code: number; signal: any; }>>; }, command: { ...; }) => { ...; }>'.\n    Types of property 'mock' are incompatible.\n      Type 'MockContext<() => Promise<never>>' is not assignable to type 'MockContext<(activeRegistry: { spawn: Mock<(command: any) => { command: any; }>; stop: Mock<() => Promise<any>>; teardown: Mock<() => Promise<any>>; wait: Mock<() => Promise<{ code: number; signal: any; }>>; }, command: { ...; }) => { ...; }>'.\n        Type '() => Promise<never>' is not assignable to type '(activeRegistry: { spawn: Mock<(command: any) => { command: any; }>; stop: Mock<() => Promise<any>>; teardown: Mock<() => Promise<any>>; wait: Mock<() => Promise<{ code: number; signal: any; }>>; }, command: { name: string; }) => { ...; }'.\n          Property 'command' is missing in type 'Promise<never>' but required in type '{ command: any; }'.",
+    "location": {
+      "line": 216,
+      "character": 8
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 299,
+      "character": 49
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 300,
+      "character": 30
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 353,
+      "character": 45
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 354,
+      "character": 26
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 502,
+      "character": 49
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 504,
+      "character": 31
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 526,
+      "character": 45
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 529,
+      "character": 24
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 552,
+      "character": 47
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 553,
+      "character": 92
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 577,
+      "character": 49
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 579,
+      "character": 31
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 1 arguments, but got 2.",
+    "location": {
+      "line": 620,
+      "character": 47
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2554,
+    "message": "Expected 0 arguments, but got 1.",
+    "location": {
+      "line": 623,
+      "character": 26
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2493,
+    "message": "Tuple type '[]' of length '0' has no element at index '0'.",
+    "location": {
+      "line": 646,
+      "character": 56
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 18048,
+    "message": "'value' is possibly 'undefined'.",
+    "location": {
+      "line": 646,
+      "character": 67
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'stopChild' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 668,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'stopChild' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 694,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2493,
+    "message": "Tuple type '[]' of length '0' has no element at index '0'.",
+    "location": {
+      "line": 899,
+      "character": 58
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 18048,
+    "message": "'input' is possibly 'undefined'.",
+    "location": {
+      "line": 899,
+      "character": 69
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2532,
+    "message": "Object is possibly 'undefined'.",
+    "location": {
+      "line": 939,
+      "character": 11
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2493,
+    "message": "Tuple type '[]' of length '0' has no element at index '0'.",
+    "location": {
+      "line": 939,
+      "character": 55
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'runtime' does not exist on type 'AggregateError'.",
+    "location": {
+      "line": 974,
+      "character": 10
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 988,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1001,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1004,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1021,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1022,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1128,
+      "character": 20
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1129,
+      "character": 20
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1149,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1150,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1163,
+      "character": 20
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1164,
+      "character": 20
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeRuntime' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1174,
+      "character": 27
+    }
+  },
+  {
+    "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+    "code": 2339,
+    "message": "Property 'removeEvidence' does not exist on type '{ buildCommands: Mock<() => { [k: string]: { name: string; }; }>; buildEnvironments: Mock<() => {}>; createEvidence: Mock<() => { extensionDir: string; frontendRoot: string; logsDir: string; ... 4 more ...; webuiDir: string; }>; ... 10 more ...; waitForHttpOk: Mock<...>; }'.",
+    "location": {
+      "line": 1175,
+      "character": 27
+    }
+  }
+]

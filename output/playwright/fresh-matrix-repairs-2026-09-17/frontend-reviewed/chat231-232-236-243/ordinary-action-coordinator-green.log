@@ -1,0 +1,364 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ✓ ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (60 tests) 14928ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  310ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  514ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  534ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  367ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  709ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  607ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1095ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  895ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  1639ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  636ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  608ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  461ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  544ms
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability false'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability error'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability true control'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'user ACK only / persist genuinely uns…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'assistant ACK only / persist genuinel…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary unpersisted text fa…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary fallback on capabil…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: immediate
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue reports the exact diagnostic Retry outcome: provider failed
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Complete answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Partial answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps resolved ordinary metadata after saving the first completed turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (99 tests) 13507ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: immediate  417ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK  564ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK  567ms
+     ✓ UAT131 preserves captured source identity across late edit  361ms
+     ✓ UAT131 preserves captured source identity across equal rows  361ms
+     ✓ UAT131 preserves captured source identity across authority  359ms
+     ✓ UAT131 preserves captured source identity across new history  358ms
+     ✓ UAT131 preserves captured source identity across route roundtrip  358ms
+     ✓ UAT103 keeps a retrieval failure local through actual action, reload and next completion  413ms
+     ✓ UAT103 keeps a no evidence local through actual action, reload and next completion  426ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false  622ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false  627ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true  634ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true  637ms
+     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  423ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false  426ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false  437ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true  640ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true  635ms
+
+ Test Files  2 passed (2)
+      Tests  159 passed (159)
+   Start at  11:54:07
+   Duration  31.60s (transform 1.32s, setup 137ms, import 2.53s, tests 28.44s, environment 390ms)
+

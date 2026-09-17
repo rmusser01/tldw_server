@@ -1,0 +1,13 @@
+[
+  "node",
+  "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+  "run",
+  "--config",
+  ".tmp/uat-repairs-231-246/chat231-232-236-243/vitest.baseline.config.ts",
+  "../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+  "../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx",
+  "../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+  "../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx",
+  "-t",
+  "maps an actual HTTP|keeps resolved ordinary metadata|uses ordinary workflow immediately|renders real unavailable-model"
+]

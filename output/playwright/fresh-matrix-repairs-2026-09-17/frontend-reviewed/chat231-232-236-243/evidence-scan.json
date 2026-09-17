@@ -1,0 +1,6 @@
+{
+  "scope": "This safe author packet only; no runtime/private files read. Pattern scan does not prove absence of all secret forms.",
+  "files": 78,
+  "forbiddenFiles": 0,
+  "detections": []
+}

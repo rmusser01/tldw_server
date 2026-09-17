@@ -1,0 +1,12 @@
+[
+  "env",
+  "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart",
+  "node",
+  "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
+  "run",
+  "--config",
+  ".tmp/uat-repairs-231-246/review-chat/auth-probe.config.ts",
+  "../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+  "-t",
+  "qualifies real Character stream lifetime without changing timeout policy: authority-abort"
+]

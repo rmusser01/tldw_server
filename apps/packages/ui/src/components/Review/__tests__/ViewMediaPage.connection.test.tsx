@@ -1,9 +1,12 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import ViewMediaPage from "../ViewMediaPage"
+import { useConnectionStore } from "@/store/connection"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { bgRequest } from "@/services/background-proxy"
 
 const mocks = vi.hoisted(() => ({
   isOnline: true,
@@ -54,15 +57,6 @@ vi.mock("react-router-dom", async () => {
     useNavigate: () => mocks.navigate
   }
 })
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: [],
-    refetch: mocks.refetch,
-    isLoading: false,
-    isFetching: false
-  })
-}))
 
 vi.mock("@plasmohq/storage", () => ({
   Storage: class {
@@ -241,7 +235,7 @@ vi.mock("@/components/Media/MediaSectionNavigator", () => ({
 }))
 
 vi.mock("@/components/Media/ResultsList", () => ({
-  ResultsList: () => <div />
+  ResultsList: ({ results }: { results: Array<{ title: string }> }) => <div>{results.map(item => item.title).join(",")}</div>
 }))
 
 vi.mock("@/components/Media/ContentViewer", () => ({
@@ -258,9 +252,9 @@ vi.mock("@/components/Media/MediaLibraryStatsPanel", () => ({
 
 const renderPage = () =>
   render(
-    <MemoryRouter>
-      <ViewMediaPage />
-    </MemoryRouter>
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter><ViewMediaPage /></MemoryRouter>
+    </QueryClientProvider>
   )
 
 describe("ViewMediaPage connection states", () => {
@@ -274,6 +268,33 @@ describe("ViewMediaPage connection states", () => {
     mocks.navigate.mockReset()
     mocks.refetch.mockReset()
     mocks.checkOnce.mockReset()
+  })
+
+  it("does not start protected Media reads during initial testing before the credential gate", async () => {
+    mocks.isOnline = false
+    mocks.uxState = "testing"
+    vi.mocked(bgRequest).mockClear()
+    const view = renderPage()
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking connection"))
+    expect(bgRequest).not.toHaveBeenCalled()
+    mocks.uxState = "configuring_auth"
+    view.rerender(<QueryClientProvider client={new QueryClient()}><MemoryRouter><ViewMediaPage /></MemoryRouter></QueryClientProvider>)
+    expect(screen.getByText("Add your credentials to use Media")).toBeInTheDocument()
+    expect(bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("remounts private catalogue state after an observed batched authority replacement", async () => {
+    useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true } }))
+    vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 1, title: 'Alice source' }], pagination: { total_items: 1 } })
+    renderPage()
+    await screen.findByText('Alice source')
+    vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 2, title: 'Bob source' }], pagination: { total_items: 1 } })
+    act(() => {
+      useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: false } }))
+      useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true } }))
+    })
+    expect(await screen.findByText('Bob source')).toBeInTheDocument()
+    expect(screen.queryByText('Alice source')).not.toBeInTheDocument()
   })
 
   it("shows credential guidance and opens settings when auth is missing", () => {

@@ -2,6 +2,8 @@ import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useMediaSearch } from "@/components/Review/hooks/useMediaSearch"
 
 const mocks = vi.hoisted(() => ({
   startQuickIngestSession: vi.fn(),
@@ -131,11 +133,11 @@ vi.mock("@/routes/route-paths", () => ({
 }))
 
 vi.mock("@/store/connection", () => ({
-  useConnectionStore: (selector: any) =>
+  useConnectionStore: Object.assign((selector: any) =>
     selector({
       state: mocks.connectionState,
       checkOnce: mocks.checkConnection,
-    }),
+    }), { subscribe: () => () => {} }),
 }))
 
 vi.mock("lucide-react", async (importOriginal) => {
@@ -462,7 +464,48 @@ vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () =
 import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 let releaseAuthority: (() => void) | undefined
 
+const catalogueT = (key: string, opts?: Record<string, unknown>) => String(opts?.defaultValue ?? key)
+const catalogueMessage = { error: vi.fn(), warning: vi.fn() }
+function CatalogueProbe() {
+  const search = useMediaSearch({ t: catalogueT, message: catalogueMessage })
+  return <div data-testid="actual-catalogue">{search.results.map(item => item.title).join(',')} / {search.mediaTotal}</div>
+}
+
 describe("QuickIngestWizardModal session runtime", () => {
+  it.each([false, true])("refreshes the actual catalogue for current wizard completion (before mount=%s)", async beforeMount => {
+    let saved = false
+    mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => path.startsWith('/api/v1/media/?')
+      ? { items: saved ? [{ id: 7, title: 'New Cedar source', type: 'document' }] : [], pagination: { total_items: saved ? 1 : 0, total_pages: 1 } }
+      : { keywords: [] })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: 'qi-catalogue' })
+    useQuickIngestSessionStore.getState().createDraftSession({ queueItems: [{ id: 'cedar', kind: 'url', url: 'https://example.com/cedar', detectedType: 'web', icon: 'Globe', fileSize: 0, validation: { valid: true } }] })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}>
+      {!beforeMount && <CatalogueProbe />}<QuickIngestWizardModal key="wizard" open autoProcessQueued onClose={vi.fn()} />
+    </QueryClientProvider>)
+    if (!beforeMount) await waitFor(() => expect(screen.getByTestId('actual-catalogue')).toHaveTextContent('/ 0'))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalled())
+    await act(async () => {
+      saved = true
+      for (const listener of mocks.runtimeListeners) listener({ type: 'tldw:quick-ingest/completed', payload: { sessionId: 'qi-catalogue', results: [{ id: 'cedar', status: 'ok', type: 'document', mediaId: 7 }] } })
+    })
+    await screen.findByTestId('wizard-result-cedar')
+    if (beforeMount) view.rerender(<QueryClientProvider client={client}><CatalogueProbe /><QuickIngestWizardModal key="wizard" open autoProcessQueued onClose={vi.fn()} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByTestId('actual-catalogue')).toHaveTextContent('New Cedar source / 1'))
+  })
+
+  it.each(['error', 'process-only'])("does not announce a saved catalogue change for %s results", async kind => {
+    const listener = vi.fn()
+    window.addEventListener('tldw:quick-ingest-complete', listener)
+    try {
+      useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: 'completed',
+        results: [{ id: 'cedar', type: 'document', status: kind === 'error' ? 'error' : 'ok', ...(kind === 'error' ? { mediaId: 7 } : {}) }] })
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await screen.findByTestId('wizard-result-cedar')
+      expect(listener).not.toHaveBeenCalled()
+    } finally { window.removeEventListener('tldw:quick-ingest-complete', listener) }
+  })
+
   it("masks Bob's completed result on logout before a replacement account can act", async () => {
     useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),

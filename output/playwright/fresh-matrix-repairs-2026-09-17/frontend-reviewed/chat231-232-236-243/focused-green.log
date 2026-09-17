@@ -1,0 +1,594 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+ ✓ ../packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx (60 tests) 15764ms
+     ✓ uses canonical ordinary workflow after history load despite a persisted Character preference  319ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn false)  521ms
+     ✓ keeps the saved target while a raw preference change suppresses a late profile (same turn true)  551ms
+     ✓ preserves canonical saved identity with actual WebUI storage and six loaders: sidebar  387ms
+     ✓ uses the real picker to deliberately select Robot with a saved target  678ms
+     ✓ uses the real picker to deliberately select New choice with a saved target  617ms
+     ✓ UAT068 replaces a fully loaded saved Character from its search route without restoring it  1139ms
+     ✓ UAT068 replaces a fully loaded saved Character from its hash route without restoring it  1145ms
+     ✓ UAT068 replaces a fully loaded saved Character from its roundtrip route without restoring it  1849ms
+     ✓ UAT068 clear survives a 0ms route commit without restoring the saved Character  652ms
+     ✓ UAT068 clear survives a 70ms route commit without restoring the saved Character  645ms
+     ✓ UAT068 rejects cancel before retiring the owned saved route  489ms
+     ✓ keeps the saved conversation and preference after cancelling the real legacy picker confirmation  594ms
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from fallback success to local persistence
+Failed to persist assistant message via completions/persist: Error: Persist endpoint unavailable
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:656:9
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21)
+
+stderr | ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx > useChatActions character integration > forwards the confirmed assistant ID from degraded success to local persistence
+Failed to persist assistant message via completions/persist: Error: Saved with validation warning
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx:657:23
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1026:60
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:145:11
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:915:26
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1209:10)
+    at file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@vitest+runner@4.0.18/node_modules/@vitest/runner/dist/index.js:1653:37
+    at Traces.$ (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/traces.CCmnQaNT.js:142:27)
+    at trace (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/vitest@4.0.18+08ee8852a9d25cb0/node_modules/vitest/dist/chunks/test.B8ej_ZHS.js:239:21) {
+  status: 503,
+  detail: {
+    code: 'persist_validation_degraded',
+    saved: true,
+    assistant_message_id: 'fallback-assistant'
+  }
+}
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx (34 tests) 78ms
+stderr | ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx > PlaygroundChatErrorBanner > renders real unavailable-model guidance and opens model selection without discarding Retry
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx (17 tests | 1 failed) 124ms
+     × renders real unavailable-model guidance and opens model selection without discarding Retry 76ms
+     ✓ renders chat errors through the shared RecoveryCallout primitive 18ms
+     ✓ uses model-settings recovery when the encoded error is locally recoverable 8ms
+     ✓ uses the compact model selector for switch-model recovery 8ms
+     ✓ renders inline first-chat recovery actions when supplied 11ms
+     ✓ resolves the newest encoded assistant error 0ms
+     ✓ resolves encoded assistant errors loaded from server content fields 0ms
+     ✓ does not restore composer recovery after a saved retry succeeds (message) 1ms
+     ✓ does not restore composer recovery after a saved retry succeeds (content) 0ms
+     ✓ clears the old failure while a retry streams and exposes the retry's own failure 0ms
+     ✓ does not offer recovery for an older turn after a new user message 0ms
+     ✓ keeps the current failed attempt visible across non-conversational metadata 0ms
+     ✓ uses compact dismissal keys without embedding the encoded payload 0ms
+     ✓ keeps the scan signature stable for same-message non-error streaming updates 0ms
+     ✓ dismisses the current error but shows a later chat error 0ms
+     ✓ dismisses the captured submit error without hiding a newer error 0ms
+     ✓ does not dismiss a newly surfaced error when submit captured no prior error 0ms
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability false'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability error'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'both ACKs / capability true control'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'user ACK only / persist genuinely uns…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'assistant ACK only / persist genuinel…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary unpersisted text fa…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT157 'no ACK / ordinary fallback on capabil…'
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: immediate
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 0 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains incomplete promotion across same-authority reconnect after 1 copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 excludes the local diagnostic from a later global RAG question rewrite
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue retries an exact pending source diagnostic instead of extending its prose
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 Continue reports the exact diagnostic Retry outcome: provider failed
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Complete answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary Continue of Partial answer
+Using continueChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a retrieval failure local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 keeps a no evidence local through actual action, reload and next completion
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary false)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 retries the exact local source question and restores real context (temporary true)
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: undefined
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"rag","grounded":true,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 preserves ordinary handled text fallback: {"mode":"normal","grounded":false,"reason":"selected_source_retrieval_failed"}
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > UAT103 promotes genuine temporary history with exact receipts while keeping its local diagnostic
+Using ragMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not publish delayed image capability errors after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > hydrates a failed saved turn before Retry without duplicating the canonical user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply delayed failed-user correlation after A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > successful regeneration does not re-ACK the already acknowledged user
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > real failed-turn regeneration sends the intended user once without its display error
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > persists a real acknowledged reasoning-only stream as one recoverable saved pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to B
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not apply late stream acknowledgements after switching A to B to A
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > establishes one neutral conversation and local history before inference, including a queued second turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cannot autosave a second conversation while the completed first pair is waiting for local persistence
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps temporary inference unsaved and promotes its existing pair only once
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps resolved ordinary metadata after saving the first completed turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > returns a recoverable creation failure and retries without a duplicate pair
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during create before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > waits for the entire local promotion during message before a follow-up and queued turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > rechecks the current conversation after promotion finishes during send initialization
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cancels a waiting follow-up without cancelling the owning promotion
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > cleans up a failed promotion so retry saves the original pair before the next turn
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 0 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after 1 acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > retries incomplete promotion through the visible notification after ambiguous commit acknowledged copies
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after new history on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > does not join or publish an older promotion after A to B to A on the same surface
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old stream completes
+Using normalChatMode
+
+stdout | ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx > saved normal Chat pipeline with autosave > keeps the new account's state when an old local persistence completes
+Using normalChatMode
+
+ ✓ ../packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx (99 tests) 14019ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: immediate  419ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: delayed ACK  570ms
+     ✓ UAT131 promotes exact greeting identity through loader, send and reload: ambiguous ACK  574ms
+     ✓ UAT131 preserves captured source identity across late edit  367ms
+     ✓ UAT131 preserves captured source identity across equal rows  368ms
+     ✓ UAT131 preserves captured source identity across authority  365ms
+     ✓ UAT131 preserves captured source identity across new history  368ms
+     ✓ UAT131 preserves captured source identity across route roundtrip  366ms
+     ✓ UAT103 keeps a retrieval failure local through actual action, reload and next completion  421ms
+     ✓ UAT103 keeps a no evidence local through actual action, reload and next completion  425ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior false  637ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior false  640ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '' / prior true  654ms
+     ✓ keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: '  Keep this image  ' / prior true  644ms
+     ✓ hydrates a failed saved turn before Retry without duplicating the canonical user  428ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior false  434ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior false  451ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: 'Image question' / prior true  648ms
+     ✓ recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: '' / prior true  659ms
+ ✓ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.test.tsx (12 tests) 944ms
+ ✓ ../packages/ui/src/components/Option/Models/__tests__/ModelsBody.model-owner.test.tsx (1 test) 193ms
+ ✓ ../packages/ui/src/utils/__tests__/chat-model-availability.test.ts (59 tests) 5ms
+ ✓ ../packages/ui/src/utils/__tests__/resolve-api-provider.test.ts (22 tests) 3ms
+ ✓ ../packages/ui/src/utils/__tests__/chat-error-message.test.ts (17 tests) 3ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts (5 tests) 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx > PlaygroundChatErrorBanner > renders real unavailable-model guidance and opens model selection without discarding Retry
+TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Choose another model"
+
+Here are the accessible roles:
+
+  alert:
+
+  Name "":
+  [36m<section[39m
+    [33mclass[39m=[32m"rounded-lg border bg-surface p-4 text-text shadow-sm mb-2"[39m
+    [33mdata-ds-component[39m=[32m"RecoveryCallout"[39m
+    [33mdata-testid[39m=[32m"playground-chat-error-banner"[39m
+    [33mrole[39m=[32m"alert"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "The selected model is not available.":
+  [36m<h2[39m
+    [33mclass[39m=[32m"text-base font-semibold text-text"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Retry chat":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Retry chat"[39m
+    [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed bg-primary text-white hover:bg-primaryStrong active:bg-primaryStrong px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+    [33mdata-testid[39m=[32m"playground-chat-error-retry"[39m
+    [33mtitle[39m=[32m"Retry chat"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Edit provider":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Edit provider"[39m
+    [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+    [33mdata-testid[39m=[32m"playground-chat-error-edit-provider"[39m
+    [33mtitle[39m=[32m"Edit provider"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Switch provider":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Switch provider"[39m
+    [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+    [33mdata-testid[39m=[32m"playground-chat-error-switch-provider"[39m
+    [33mtitle[39m=[32m"Switch provider"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Health & diagnostics":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Health & diagnostics"[39m
+    [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+    [33mdata-testid[39m=[32m"playground-chat-error-diagnostics"[39m
+    [33mtitle[39m=[32m"Health & diagnostics"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Dismiss error":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Dismiss error"[39m
+    [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+    [33mtitle[39m=[32m"Dismiss error"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33mclass[39m=[32m"rounded-lg border bg-surface p-4 text-text shadow-sm mb-2"[39m
+      [33mdata-ds-component[39m=[32m"RecoveryCallout"[39m
+      [33mdata-testid[39m=[32m"playground-chat-error-banner"[39m
+      [33mrole[39m=[32m"alert"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-col gap-3"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-col gap-2"[39m
+        [36m>[39m
+          [36m<span[39m
+            [33mclass[39m=[32m"inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-semibold border-state-error/30 bg-state-error/10 text-state-error"[39m
+          [36m>[39m
+            [0mError[0m
+          [36m</span>[39m
+          [36m<div>[39m
+            [36m<h2[39m
+              [33mclass[39m=[32m"text-base font-semibold text-text"[39m
+            [36m>[39m
+              [0mThe selected model is not available.[0m
+            [36m</h2>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-1 text-sm text-text-muted"[39m
+            [36m>[39m
+              [0mChoose a different model or refresh the model list, then try again.[0m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Retry chat"[39m
+            [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed bg-primary text-white hover:bg-primaryStrong active:bg-primaryStrong px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+            [33mdata-testid[39m=[32m"playground-chat-error-retry"[39m
+            [33mtitle[39m=[32m"Retry chat"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mRetry chat[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Edit provider"[39m
+            [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+            [33mdata-testid[39m=[32m"playground-chat-error-edit-provider"[39m
+            [33mtitle[39m=[32m"Edit provider"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mEdit provider[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Switch provider"[39m
+            [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+            [33mdata-testid[39m=[32m"playground-chat-error-switch-provider"[39m
+            [33mtitle[39m=[32m"Switch provider"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mSwitch provider[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Health & diagnostics"[39m
+            [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+            [33mdata-testid[39m=[32m"playground-chat-error-diagnostics"[39m
+            [33mtitle[39m=[32m"Health & diagnostics"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mHealth & diagnostics[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"Dismiss error"[39m
+            [33mclass[39m=[32m"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed border border-border bg-transparent text-text hover:bg-surface2 active:bg-surface2 px-3.5 py-1.5 text-sm min-h-[36px]"[39m
+            [33mtitle[39m=[32m"Dismiss error"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0mDismiss error[0m
+          [36m</button>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx:35:30
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  1 failed | 325 passed (326)
+   Start at  11:59:03
+   Duration  38.53s (transform 1.46s, setup 652ms, import 4.22s, tests 31.14s, environment 2.00s)
+

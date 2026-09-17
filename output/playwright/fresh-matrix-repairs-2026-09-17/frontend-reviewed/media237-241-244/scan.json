@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-17T19:13:39.708Z",
+  "files": 48,
+  "rules": [
+    "jwt",
+    "privateKey",
+    "liveKey",
+    "credentialUrl"
+  ],
+  "hits": []
+}

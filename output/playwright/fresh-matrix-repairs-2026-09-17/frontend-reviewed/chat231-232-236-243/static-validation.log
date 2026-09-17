@@ -1,0 +1,125 @@
+
+<--- Last few GCs --->
+
+[95542:0xada80c000]    38527 ms: Scavenge (interleaved) 4079.0 (4098.5) -> 4076.7 (4107.5) MB, pooled: 0 MB, 4.33 / 0.00 ms  (average mu = 0.143, current mu = 0.070) allocation failure; 
+[95542:0xada80c000]    38975 ms: Mark-Compact (reduce) 4084.4 (4107.9) -> 4082.9 (4099.4) MB, pooled: 0 MB, 377.12 / 0.00 ms  (+ 2.6 ms in 114 steps since start of marking, biggest step 0.8 ms, walltime since start of marking 392 ms) (average mu = 0.166, 
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x100bae894 node::OOMErrorHandler(char const*, v8::OOMDetails const&) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 2: 0x100d9a07c v8::internal::V8::FatalProcessOutOfMemory(v8::internal::Isolate*, char const*, v8::OOMDetails const&) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 3: 0x100ff8208 v8::internal::Heap::stack() [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 4: 0x100ffb5dc v8::internal::Heap::HasLowYoungGenerationAllocationRate() [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 5: 0x10100c7f8 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 6: 0x10100c0cc void heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 7: 0x1019c1664 PushAllRegistersAndIterateStack [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 8: 0x100ff5f0c v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+ 9: 0x100feac38 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+10: 0x100fcc3c0 v8::internal::Factory::NewFillerObject(int, v8::internal::AllocationAlignment, v8::internal::AllocationType, v8::internal::AllocationOrigin) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+11: 0x10145b008 v8::internal::Runtime_AllocateInYoungGeneration(int, unsigned long*, v8::internal::Isolate*) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+12: 0x101ab1f74 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+13: 0x1280f67f4 
+14: 0x12816def0 
+15: 0x1280a0750 
+16: 0x127c01f8c 
+17: 0x1280a2250 
+18: 0x126b5c9b4 
+19: 0x126b65378 
+20: 0x127f14dc8 
+21: 0x127b1ff08 
+22: 0x12802eae0 
+23: 0x125f6d930 
+24: 0x12801ac6c 
+25: 0x126b5cd2c 
+26: 0x126b65378 
+27: 0x127f14dc8 
+28: 0x127b1ff08 
+29: 0x12586fda4 
+30: 0x126b5cba4 
+31: 0x126b65378 
+32: 0x127f14dc8 
+33: 0x127b1ff08 
+34: 0x127ae9688 
+35: 0x127db5b94 
+36: 0x125a8a5a8 
+37: 0x127ad60dc 
+38: 0x126110750 
+39: 0x126a5c9dc 
+40: 0x12801c3cc 
+41: 0x125c76c38 
+42: 0x125b8a1c8 
+43: 0x127ad5374 
+44: 0x127a2c8dc 
+45: 0x126b0dd94 
+46: 0x126c15fb8 
+47: 0x126a5c478 
+48: 0x128099c04 
+49: 0x126ad3604 
+50: 0x1263af808 
+51: 0x1280bc160 
+52: 0x127ce1e40 
+53: 0x1280b72fc 
+54: 0x125c5f824 
+55: 0x126c3c730 
+56: 0x1280b68e4 
+57: 0x126c3d094 
+58: 0x12800e96c 
+59: 0x127a2c4f8 
+60: 0x127ce2a38 
+61: 0x1280b72fc 
+62: 0x125c5f824 
+63: 0x126c3c730 
+64: 0x1280b68e4 
+65: 0x127f1ed50 
+66: 0x127f1f1c4 
+67: 0x125a25414 
+68: 0x127ce2a64 
+69: 0x128087dd8 
+70: 0x127ce2aec 
+71: 0x128087dd8 
+72: 0x127ce2aec 
+73: 0x128087dd8 
+74: 0x127ce2aec 
+75: 0x128087dd8 
+76: 0x127ce2aec 
+77: 0x1280b72fc 
+78: 0x125c5f824 
+79: 0x126c3c730 
+80: 0x1280b68e4 
+81: 0x126c3d094 
+82: 0x12800e96c 
+83: 0x127a2c4f8 
+84: 0x127ce2a38 
+85: 0x1280b72fc 
+86: 0x125c5f824 
+87: 0x1280b0f98 
+88: 0x1280b68e4 
+89: 0x127f1ed50 
+90: 0x127f1f1c4 
+91: 0x125a25414 
+92: 0x127ce2a64 
+93: 0x125f55124 
+94: 0x125c5f824 
+95: 0x126c3c730 
+96: 0x12588c510 
+97: 0x1269703dc 
+98: 0x127c1e4f4 
+99: 0x12800e82c 
+100: 0x101a14bec Builtins_InterpreterEntryTrampoline [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+101: 0x101a14bec Builtins_InterpreterEntryTrampoline [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+102: 0x101a53648 Builtins_AsyncFunctionAwaitResolveClosure [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+103: 0x101b285f8 Builtins_PromiseFulfillReactionJob [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+104: 0x101a42a50 Builtins_RunMicrotasks [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+105: 0x101a127b0 Builtins_JSRunMicrotasksEntry [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+106: 0x100f3c798 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+107: 0x100f3d00c v8::internal::(anonymous namespace)::InvokeWithTryCatch(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+108: 0x100f3d148 v8::internal::Execution::TryRunMicrotasks(v8::internal::Isolate*, v8::internal::MicrotaskQueue*) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+109: 0x100f6c04c v8::internal::MicrotaskQueue::RunMicrotasks(v8::internal::Isolate*) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+110: 0x100f6c9ac v8::internal::MicrotaskQueue::PerformCheckpoint(v8::Isolate*) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+111: 0x100aa4f4c node::InternalCallbackScope::Close() [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+112: 0x100aa4a18 node::InternalCallbackScope::~InternalCallbackScope() [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+113: 0x100b64ed0 node::StartExecution(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+114: 0x100aa9ae0 node::LoadEnvironment(node::Environment*, std::__1::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>, std::__1::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+115: 0x100c02648 node::NodeMainInstance::Run() [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+116: 0x100b689ec node::Start(int, char**) [/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node]
+117: 0x1851afe00 start [/usr/lib/dyld]
