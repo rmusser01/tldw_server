@@ -627,7 +627,7 @@ class KeywordStore:
                 SELECT k.*
                 FROM {source_table} k
                 WHERE k.deleted = FALSE
-                  AND k.keyword ILIKE ? ESCAPE '\\'
+                  AND k.keyword ILIKE (?) ESCAPE '\\'
                 ORDER BY k.last_modified DESC
                 LIMIT ?
             """.format_map(locals())  # nosec B608
