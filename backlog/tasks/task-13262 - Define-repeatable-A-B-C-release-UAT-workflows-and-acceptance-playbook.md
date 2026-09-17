@@ -4,12 +4,14 @@ title: Define repeatable A B C release UAT workflows and acceptance playbook
 status: Done
 assignee: []
 created_date: '2026-09-17 18:03'
-updated_date: '2026-09-17 18:32'
+updated_date: '2026-09-17 18:34'
 labels:
   - documentation
   - uat
   - release
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2966'
 documentation:
   - Docs/Development/RELEASE_UAT_PLAYBOOK.md
 priority: high
@@ -46,6 +48,8 @@ Validation: scoped Prettier check PASS; structural/link/example/command validati
 User explicitly requested a PR against dev after accepting the document. Created isolated codex/release-uat-playbook worktree from freshly fetched origin/dev59049e094e0845a4611ea725ae19b7c1754ea709. Copied only the playbook and its official Backlog record; active UAT branch/index untouched. Two unmerged UAT-report links converted to explicitly historical references so the docs-only PR has no dangling dependency on the separate UAT workstream. Draft PR will leave requester-written Change summary pending per repository merge policy.
 
 PR validation on the isolated dev-based branch: scoped Prettier check passed; 43 unique workflow IDs, 69 relative links and anchors, one parseable JSON example, eight existing package script names, required workflow fields and whitespace checks passed with zero errors. No runtime tests were run: only Markdown documentation and task metadata changed. Bandit is not applicable to this non-code scope.
+
+Published draft PR #2966 against dev: https://github.com/rmusser01/tldw_server/pull/2966 . The PR contains only the release UAT playbook and this task record. Requester-authored Change summary remains pending under the repository merge policy; no merge was requested or performed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
