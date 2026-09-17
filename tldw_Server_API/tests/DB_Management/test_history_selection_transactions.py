@@ -696,3 +696,67 @@ def test_skill_visibility_read_does_not_create_registry_and_detects_stale_eligib
     with db.transaction() as conn:
         conn.execute("UPDATE skill_registry SET disable_model_invocation = FALSE WHERE name = ?", ("disabled",))
     assert db.history_skills_may_be_visible() is True
+
+
+def legacy_selection(db, cid, *, before_first=False):
+    from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+
+    for mid in ("legacy-a", "legacy-b"):
+        add(db, cid, mid, id=mid, parent_message_id=None)
+    original = snapshot(db, cid)
+    confirm(db, cid, confirm_body(original, "accepted-legacy", ["legacy-a", "legacy-b"]))
+    current = snapshot_to_wire(snapshot(db, cid, projection_id="accepted-legacy"))
+    cursor = (
+        {"kind": "before_message", "message_id": "legacy-a"}
+        if before_first
+        else {"kind": "after_message", "message_id": "legacy-b"}
+    )
+    return resolve_history_selection(
+        current,
+        {
+            "owner_key": OWNER_KEY,
+            "conversation_id": cid,
+            "interpretation": {"kind": "legacy_linear_v1", "projection_id": "accepted-legacy"},
+            "cursor": cursor,
+            "selection_revision": 1,
+        },
+        "send",
+        "legacy-retry",
+    )["selection"]
+
+
+@pytest.mark.parametrize("before_first", [False, True])
+def test_legacy_result_retry_has_stable_substantive_state(history_db, before_first):
+    db, cid = history_db
+    accepted = admit(db, cid, legacy_selection(db, cid, before_first=before_first))
+    assert db.get_message_by_id("accepted-user")["parent_message_id"] == (None if before_first else "legacy-b")
+    assert settle(db, cid, accepted) == settle(db, cid, accepted)
+
+
+@pytest.mark.parametrize("drift", ["edit", "delete"])
+def test_legacy_settlement_ignores_old_source_drift_but_checks_accepted_chain(history_db, drift):
+    db, cid = history_db
+    accepted = db.append_selected_history_inputs(
+        cid,
+        legacy_selection(db, cid),
+        [{"sender": "user", "content": "first"}, {"sender": "tool", "content": "last"}],
+        owner_client_id="alice",
+        owner_key=OWNER_KEY,
+    )
+    first = db.get_message_by_id(accepted["input_message_id"])["parent_message_id"]
+    with db.transaction() as conn:
+        if drift == "edit":
+            conn.execute(
+                "UPDATE messages SET content = ?, version = version + 1 WHERE id = ?",
+                ("edited old source", "legacy-a"),
+            )
+        else:
+            conn.execute("UPDATE messages SET deleted = TRUE WHERE id = ?", ("legacy-a",))
+    assert settle(db, cid, accepted) == settle(db, cid, accepted)
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE messages SET content = ? WHERE id = ?", ("edited accepted input without version bump", first)
+        )
+    with pytest.raises(HistorySelectionError, match="stale_parent"):
+        settle(db, cid, accepted, mid="must-not-write")
+    assert db.get_message_by_id("must-not-write") is None

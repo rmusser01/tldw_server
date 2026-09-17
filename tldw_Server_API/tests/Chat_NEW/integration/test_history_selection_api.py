@@ -72,10 +72,47 @@ def test_legacy_review_returns_complete_bound_source_and_sync_rejects(history_ap
         cursor={"kind": "after_message", "message_id": "one"})
     assert reviewed.status_code == 200, reviewed.text
     assert [row["id"] for row in reviewed.json()["selected_content"]] == ["two", "one"]
+    selection = resolve_history_selection(
+        reviewed.json()["snapshot"], reviewed.json()["view"], "send", "legacy-api-retry"
+    )["selection"]
+    accepted = client.post(
+        f"/api/v1/chats/{cid}/messages",
+        headers=headers,
+        json={
+            "id": "legacy-api-input",
+            "role": "user",
+            "content": "new question",
+            "tldw_history_selection_v1": selection,
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    admission = accepted.json()["tldw_history_admission_v1"]
+    reference = {
+        key: admission[key]
+        for key in (
+            "version",
+            "owner_key",
+            "conversation_id",
+            "input_message_id",
+            "input_message_revision",
+            "selection_digest",
+        )
+    }
+    db.update_message("two", {"content": "old source changed"}, expected_version=1)
+    payload = {
+        "id": "legacy-api-result",
+        "role": "assistant",
+        "content": "late reply",
+        "tldw_history_admission_v1": reference,
+    }
+    for _ in range(2):
+        reply = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+        assert reply.status_code == 201, reply.text
+    assert db.get_message_by_id("legacy-api-result")["parent_message_id"] == "legacy-api-input"
     monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
     response = capture(client, cid, headers)
     assert response.status_code == 409
-    assert db.count_messages_for_conversation(cid) == 2
+    assert db.count_messages_for_conversation(cid) == 4
 
 
 def test_character_settlement_uses_owner_admission_and_rejects_forged_retry(history_api, monkeypatch):
@@ -260,3 +297,64 @@ def test_before_first_admission_has_explicit_null_parent(history_api):
         "content": "new branch", "tldw_history_selection_v1": selection})
     assert response.status_code == 201, response.text
     assert db.get_message_by_id("new-root")["parent_message_id"] is None
+
+
+@pytest.mark.parametrize("invalid", ["digest", "author_note"])
+def test_saved_materialized_context_rejects_in_owner_transaction_without_writes(history_api, monkeypatch, invalid):
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+    from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+        build_materialized_behavior_settings,
+    )
+
+    client, db, _, headers = history_api
+    monkeypatch.setattr(db, "client_id", "1")
+    char = db.add_character_card({"name": "Bound character", "description": "saved", "client_id": "1"})
+    cid = create_character_conversation(
+        db,
+        conversation_data={"character_id": char},
+        provider="openai",
+        model="gpt-4o-mini",
+        prompt_preset_id="st_default",
+    )
+    with db.transaction() as conn:
+        state = db.get_roleplay_resume_state(cid, conn=conn, owner_client_id="1")
+    settings = state["settings"]
+    values = settings["roleplayBehaviorV1"]["values"]
+    if invalid == "author_note":
+        values["behavior_controls"]["author_note"] = {"enabled": True, "text": "REQUIRED SAVED NOTE"}
+    else:
+        values["base_snapshot"]["digest"] = "sha256:" + "0" * 64
+    settings["roleplayBehaviorV1"] = build_materialized_behavior_settings(values)
+    db.upsert_conversation_settings(cid, settings)
+    before = db.get_conversation_settings(cid)
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "invalid-materialized")["selection"]
+    reads = []
+    original = db.get_roleplay_resume_state
+
+    def checked_read(*args, **kwargs):
+        reads.append(kwargs.get("conn") is not None and kwargs.get("lock_for_update") is True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(db, "get_roleplay_resume_state", checked_read)
+    response = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            "model": "gpt-4o-mini",
+            "conversation_id": cid,
+            "save_to_db": True,
+            "messages": [{"role": "user", "content": "hello"}],
+            "tldw_history_selection_v1": selection,
+        },
+    )
+    assert response.status_code == 409, response.text
+    expected = (
+        "unsupported_history_context_author_note"
+        if invalid == "author_note"
+        else "unsupported_history_context_materialized_binding"
+    )
+    assert response.json()["detail"]["code"] == expected
+    assert any(reads)
+    assert db.count_messages_for_conversation(cid) == 0
+    assert db.get_conversation_settings(cid) == before

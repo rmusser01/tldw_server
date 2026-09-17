@@ -3451,7 +3451,12 @@ async def create_chat_completion(
             ]
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
-        if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+        if (
+            request_data.tldw_history_selection_v1 is None
+            and user_base_dir is not None
+            and current_user
+            and getattr(current_user, "id", None) is not None
+        ):
             request_data.tools = await add_skill_tool_to_tools_list_async(
                 request_data.tools,
                 user_id=current_user.id,

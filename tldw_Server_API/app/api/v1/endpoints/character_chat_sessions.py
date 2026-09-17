@@ -8444,20 +8444,34 @@ async def persist_streamed_assistant_message(
         if body.tldw_history_admission_v1 is not None:
             from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
             from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
-            payload = {"id": requested_assistant_message_id, "sender": "assistant", "content": assistant_content,
-                       "tool_calls": getattr(body, "tool_calls", None), "extra_metadata": metadata_extra,
-                       "ranking": body.ranking}
+            normalized_tool_calls = _validate_and_truncate_tool_calls(body.tool_calls)
+            payload = {
+                "id": requested_assistant_message_id,
+                "sender": "assistant",
+                "content": assistant_content,
+                "tool_calls": normalized_tool_calls,
+                "extra_metadata": metadata_extra,
+                "ranking": body.ranking,
+            }
             if "user_message_id" in body.model_fields_set:
                 payload["parent_message_id"] = body.user_message_id
             try:
-                assistant_msg_id = db.settle_history_admission(chat_id,
-                    body.tldw_history_admission_v1.model_dump(mode="json"), payload,
-                    owner_client_id=str(current_user.id), owner_key=native_history_owner_key(request, current_user.id))
+                assistant_msg_id = db.settle_history_admission(
+                    chat_id,
+                    body.tldw_history_admission_v1.model_dump(mode="json"),
+                    payload,
+                    owner_client_id=str(current_user.id),
+                    owner_key=native_history_owner_key(request, current_user.id),
+                )
             except HistorySelectionError as exc:
                 raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
-            _apply_stream_persist_side_effects(db, chat_id=chat_id, assistant_message_id=assistant_msg_id,
-                tool_calls=getattr(body, "tool_calls", None), metadata_extra=metadata_extra,
-                chat_rating=getattr(body, "chat_rating", None))
+            # Metadata is normalized and protected in the settlement transaction.
+            # Only the independent conversation rating remains a later side effect.
+            _update_chat_rating_after_stream_persist(
+                db,
+                chat_id=chat_id,
+                chat_rating=body.chat_rating,
+            )
             return CharacterChatStreamPersistResponse(chat_id=chat_id, assistant_message_id=assistant_msg_id, saved=True)
 
         # Persist assistant response via Character_Chat guardrails
