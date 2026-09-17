@@ -1253,7 +1253,7 @@ class PersonaStateStore:
         if require_missing_session_id:
             clauses.append("(session_id IS NULL OR session_id = '')")
         if not include_archived:
-            clauses.append("archived = 0")
+            clauses.append("archived = FALSE" if self.backend_type == BackendType.POSTGRESQL else "archived = 0")
         if not include_deleted:
             clauses.append("deleted = 0")
         return " AND ".join(clauses), params
@@ -4089,7 +4089,7 @@ class PersonaStateStore:
             "ORDER BY last_modified DESC, id ASC LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return [self._persona_memory_row_to_dict(row) for row in cursor.fetchall() if row]
 
     def get_persona_memory_entry_by_id(
