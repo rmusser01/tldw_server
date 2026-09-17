@@ -45239,28 +45239,28 @@ class TransactionContextManager:
         if self.is_outermost_transaction:
             if exc_type:
                 logger.error(
-                    "Transaction (outermost) failed, rolling back on thread {}: {} - {}",
-                    threading.get_ident(), exc_type.__name__, exc_val, exc_info=False) # exc_info=exc_tb if full traceback wanted here
+                    f"Transaction (outermost) failed, rolling back on thread {threading.get_ident()}: {exc_type.__name__} - {exc_val}",
+                    exc_info=False) # exc_info=exc_tb if full traceback wanted here
                 try:
                     self.conn.rollback()
                     logger.debug(f"Rollback successful on thread {threading.get_ident()}.")
                 except sqlite3.Error as rb_err:
-                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), rb_err, exc_info=True)
+                    logger.critical(f"Rollback FAILED on thread {threading.get_ident()}: {rb_err}", exc_info=True)
             else:
                 try:
                     self.conn.commit()
                     logger.debug(
                         f"Transaction (outermost) committed successfully on thread {threading.get_ident()}.")
                 except sqlite3.Error as commit_err:
-                    logger.error("Commit FAILED on thread {}, attempting rollback: {}",
-                                 threading.get_ident(), commit_err, exc_info=True)
+                    logger.error(f"Commit FAILED on thread {threading.get_ident()}, attempting rollback: {commit_err}",
+                                 exc_info=True)
                     try:
                         self.conn.rollback()
                         logger.debug(f"Rollback after failed commit successful on thread {threading.get_ident()}.")
                     except sqlite3.Error as rb_err_after_commit_fail:
                         logger.critical(
-                            "Rollback after failed commit also FAILED on thread {}: {}",
-                            threading.get_ident(), rb_err_after_commit_fail, exc_info=True)
+                            f"Rollback after failed commit also FAILED on thread {threading.get_ident()}: {rb_err_after_commit_fail}",
+                            exc_info=True)
                     # Re-raise the commit error so the caller knows the transaction failed.
                     # Encapsulate it if it's not already a DB-specific error from our library.
                     if not isinstance(commit_err, CharactersRAGDBError):

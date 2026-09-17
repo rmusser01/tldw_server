@@ -1,0 +1,46 @@
+{
+  "checks": [
+    {
+      "name": "ruff",
+      "command": [
+        "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+        "-m",
+        "ruff",
+        "check",
+        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+        "tldw_Server_API/tests/DB_Management/test_transaction_error_logging_backends.py",
+        "--output-format",
+        "json"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "bandit-production",
+      "command": [
+        "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+        "-m",
+        "bandit",
+        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+        "-f",
+        "json"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "bandit-test",
+      "command": [
+        "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+        "-m",
+        "bandit",
+        "tldw_Server_API/tests/DB_Management/test_transaction_error_logging_backends.py",
+        "-s",
+        "B101",
+        "-f",
+        "json"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "compiled_files": 2,
+  "ast_changed_calls": 4
+}
