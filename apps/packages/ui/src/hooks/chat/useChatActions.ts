@@ -3736,6 +3736,8 @@ export const useChatActions = ({
             signal,
             {
               ...scopedNormalModeParams,
+              ownsAbortController: (turnSignal: AbortSignal) =>
+                activeAbortControllerRef.current?.signal === turnSignal,
               historySelection: historySelection
                 ? {
                     controller: historySelection,

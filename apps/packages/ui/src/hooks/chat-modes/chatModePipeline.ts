@@ -84,6 +84,7 @@ export type ChatModeParamsBase = {
   // shared abort controller identified by `signal`. Used so a finishing turn
   // does not clobber a newer in-flight turn's streaming flag / controller.
   // When omitted, callers get the previous unconditional reset behavior.
+  ownsAbortController?: (signal: AbortSignal) => boolean
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   // Scope leases use a derived signal. When that signal aborts without a user
   // cancellation, discard the entire turn so no old-scope output is saved.
@@ -826,7 +827,11 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         timetaken = reasoningTime
       }
 
-      if (count === 0) {
+      if (
+        count === 0 &&
+        (!historyTurn || historyTurn.canUpdateView()) &&
+        (!params.ownsAbortController || params.ownsAbortController(signal))
+      ) {
         setIsProcessing(true)
       }
 
@@ -1197,7 +1202,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const stillOwnsTurn = params.releaseAbortControllerIfOwned
       ? params.releaseAbortControllerIfOwned(signal)
       : true
-    if (stillOwnsTurn && (!historyTurn || historyTurn.canUpdateView())) {
+    if (stillOwnsTurn) {
       setIsProcessing(false)
       setStreaming(false)
       setAbortController(null)

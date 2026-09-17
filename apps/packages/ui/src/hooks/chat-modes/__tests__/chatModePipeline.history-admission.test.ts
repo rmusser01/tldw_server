@@ -262,3 +262,67 @@ it("unknown outcomes live only in scoped recovery, not retryable message bubbles
   expect(display).toEqual([])
   expect(turn.recover).toHaveBeenCalledOnce()
 })
+
+it("releases the owned activity after a swipe without changing the newly selected transcript", async () => {
+  const turn = makeTurn(),
+    processing = vi.fn(),
+    streaming = vi.fn(),
+    controller = vi.fn(),
+    history = vi.fn(),
+    release = vi.fn(() => true)
+  mocks.stream.mockImplementation(async function* () {
+    turn.canUpdateView = () => false
+    turn.currentView = () => ({ ...turn.capture.view, selection_revision: 2 })
+    yield "accepted answer"
+  })
+  await invoke(turn, {
+    setIsProcessing: processing,
+    setStreaming: streaming,
+    setAbortController: controller,
+    setHistory: history,
+    releaseAbortControllerIfOwned: release
+  })
+  expect(release).toHaveBeenCalledOnce()
+  expect(processing).toHaveBeenLastCalledWith(false)
+  expect(streaming).toHaveBeenLastCalledWith(false)
+  expect(controller).toHaveBeenLastCalledWith(null)
+  expect(history).not.toHaveBeenCalled()
+})
+it("a first held token after navigation never marks the destination busy or clears a newer controller", async () => {
+  const turn = makeTurn(),
+    processing = vi.fn(),
+    streaming = vi.fn(),
+    controller = vi.fn()
+  mocks.stream.mockImplementation(async function* () {
+    turn.canUpdateView = () => false
+    processing.mockClear()
+    streaming.mockClear()
+    controller.mockClear()
+    yield "old answer"
+  })
+  await invoke(turn, {
+    setIsProcessing: processing,
+    setStreaming: streaming,
+    setAbortController: controller,
+    releaseAbortControllerIfOwned: () => false
+  })
+  expect(processing).not.toHaveBeenCalled()
+  expect(streaming).not.toHaveBeenCalled()
+  expect(controller).not.toHaveBeenCalled()
+})
+
+it("an old first chunk cannot restart activity after a newer same-view operation completed", async () => {
+  const processing = vi.fn(),
+    streaming = vi.fn(),
+    controller = vi.fn()
+  await invoke(makeTurn(), {
+    setIsProcessing: processing,
+    setStreaming: streaming,
+    setAbortController: controller,
+    ownsAbortController: () => false,
+    releaseAbortControllerIfOwned: () => false
+  })
+  expect(processing).not.toHaveBeenCalled()
+  expect(streaming).not.toHaveBeenCalled()
+  expect(controller).not.toHaveBeenCalled()
+})

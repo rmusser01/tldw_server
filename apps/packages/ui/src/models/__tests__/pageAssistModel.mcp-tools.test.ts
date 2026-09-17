@@ -272,6 +272,7 @@ describe("pageAssistModel MCP tools", () => {
 it("freezes resolved model options into a stateless prepared body before ambient state changes", async () => {
   useStoreChatModelSettings.getState().reset()
   useStoreChatModelSettings.getState().setTemperature(0.23)
+  useStoreChatModelSettings.setState({ slashCommandInjectionMode: "preface" })
   useStoreMessageOption.setState({
     serverChatId: "ambient-chat",
     temporaryChat: false,
@@ -287,6 +288,7 @@ it("freezes resolved model options into a stateless prepared body before ambient
   useStoreMessageOption.setState({ serverChatId: "other-chat" })
   expect(body).toMatchObject({
     temperature: 0.23,
+    slash_command_injection_mode: "preface",
     save_to_db: false,
     messages: [{ role: "user", content: "question" }]
   })

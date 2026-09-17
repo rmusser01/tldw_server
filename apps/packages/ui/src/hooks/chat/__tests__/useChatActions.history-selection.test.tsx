@@ -320,7 +320,14 @@ vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
     pageAssistModel: async (options: any) =>
-      new ChatTldw({ ...options, temperature: 0.23, supportsMultimodal: true })
+      new ChatTldw({
+        ...options,
+        temperature: 0.23,
+        supportsMultimodal: true,
+        slashCommandInjectionMode: (
+          await import("@/store/model")
+        ).useStoreChatModelSettings.getState().slashCommandInjectionMode
+      })
   }
 })
 vi.mock("@/hooks/utils/messageHelpers", async (original) => original())
@@ -537,6 +544,7 @@ it("native owner capability survives display navigation while a held result sett
     h1.controller.navigate()
     displayed = [{ id: "new-view", message: "keep" }]
     options.setHistory.mockClear()
+    options.setIsProcessing.mockClear()
     yield { choices: [{ delta: { content: "old result" } }] }
   })
   const { result } = renderHook(() => useChatActions(options as any))
@@ -554,6 +562,9 @@ it("native owner capability survives display navigation while a held result sett
     }
   ])
   expect(options.setHistory).not.toHaveBeenCalled()
+  expect(options.setIsProcessing).not.toHaveBeenCalledWith(true)
+  expect(options.setStreaming).toHaveBeenLastCalledWith(false)
+  expect(options.setAbortController).toHaveBeenLastCalledWith(null)
 })
 
 it("unknown admission after navigation retains immutable original intent and dispatches no provider", async () => {
@@ -588,39 +599,42 @@ it("first durable ordinary send creates its local owner and admits before infere
     history: []
   }
   let current: any = { owner: null, view: null, status: "idle" }
-  const load = vi.fn(async ({ historyId }: any) => {
-    const view = {
-      owner_key: "local-key",
-      conversation_id: historyId,
-      view_session_id: "new",
-      selection_revision: 0,
-      cursor: { kind: "empty" },
-      interpretation: { kind: "parent_graph_v1" }
-    }
-    const capture = {
-      ...captureFor(view),
-      snapshot: {
-        ...captureFor(view).snapshot,
+  const load = vi.fn(
+    async ({ historyId }: any, _reference: any, onLoaded: any) => {
+      const view = {
         owner_key: "local-key",
         conversation_id: historyId,
-        nodes: []
+        view_session_id: "new",
+        selection_revision: 0,
+        cursor: { kind: "empty" },
+        interpretation: { kind: "parent_graph_v1" }
       }
+      const capture = {
+        ...captureFor(view),
+        snapshot: {
+          ...captureFor(view).snapshot,
+          owner_key: "local-key",
+          conversation_id: historyId,
+          nodes: []
+        }
+      }
+      current = {
+        owner: {
+          kind: "local",
+          profile_id: "profile",
+          owner_key: "local-key",
+          conversation_id: historyId
+        },
+        view,
+        status: "ready",
+        capture,
+        bookmarkScope: { profile_id: "profile", client_session_id: "client" }
+      }
+      h1.localCapture.mockResolvedValue(capture)
+      onLoaded({ owner: current.owner, view: current.view })
+      return true
     }
-    current = {
-      owner: {
-        kind: "local",
-        profile_id: "profile",
-        owner_key: "local-key",
-        conversation_id: historyId
-      },
-      view,
-      status: "ready",
-      capture,
-      bookmarkScope: { profile_id: "profile", client_session_id: "client" }
-    }
-    h1.localCapture.mockResolvedValue(capture)
-    return true
-  })
+  )
   h1.controller = {
     getCurrent: () => current,
     fence: () => () => true,
@@ -796,3 +810,135 @@ it("a settings change during owner admission retains accepted input without prov
     admission: { input_message_id: addChatMessageMock.mock.calls[0][1].id }
   })
 })
+
+it.each([false, true])(
+  "a deferred first owner load cannot adopt another ready conversation (load result %s)",
+  async (loadResult) => {
+    const options = {
+      ...ordinaryOptions(),
+      historyId: null,
+      serverChatId: null,
+      messages: [],
+      history: []
+    }
+    const destination = makeController().getCurrent()
+    let current: any = { owner: null, view: null, status: "idle" }
+    let release!: (value: boolean) => void
+    let started!: () => void
+    const loading = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const load = vi.fn((_target: any, _reference: any, onLoaded: any) => {
+      started()
+      return new Promise<boolean>((resolve) => {
+        release = (value) => {
+          if (value)
+            onLoaded({ owner: destination.owner, view: destination.view })
+          resolve(value)
+        }
+      })
+    })
+    h1.controller = {
+      getCurrent: () => current,
+      fence: () => () => true,
+      loadConversation: load,
+      followResult: vi.fn()
+    }
+    h1.saveHistory.mockResolvedValue({ id: "created-original" })
+    const { result } = renderHook(() => useChatActions(options as any))
+    await act(async () => {
+      const pending = result.current.onSubmit({
+        message: "old draft",
+        image: ""
+      })
+      await loading
+      current = destination
+      options.setMessages.mockClear()
+      options.setHistory.mockClear()
+      options.setHistoryId.mockClear()
+      release(loadResult)
+      await pending
+    })
+    expect(h1.localAppend).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(h1.wire).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.setHistory).not.toHaveBeenCalled()
+    expect(options.setHistoryId).not.toHaveBeenCalled()
+    expect(current).toBe(destination)
+  }
+)
+
+it("before-first on a nonempty full-page source admits an empty prior path and sends only current input", async () => {
+  const current = h1.controller.getCurrent()
+  current.view.cursor = { kind: "empty" }
+  current.capture = captureFor(current.view)
+  expect(current.capture.snapshot.nodes).toHaveLength(3)
+  const { result } = renderHook(() => useChatActions(ordinaryOptions() as any))
+  await act(async () => {
+    await result.current.onSubmit({ message: "fresh question", image: "" })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(
+    h1.wire.mock.calls[0][0].messages.filter(
+      (row: any) => row.role !== "system"
+    )
+  ).toEqual([{ role: "user", content: "fresh question" }])
+  const user = addChatMessageMock.mock.calls[0][1]
+  expect(user.tldw_history_selection_v1.messages).toEqual([])
+  expect(user.tldw_history_selection_v1.cursor).toEqual({ kind: "empty" })
+  expect(user.parent_message_id ?? null).toBeNull()
+})
+
+it("a mounted swipe during an accepted full-page send releases its activity while preserving selection", async () => {
+  const options = ordinaryOptions()
+  h1.wire.mockImplementation(async function* () {
+    const current = h1.controller.getCurrent()
+    current.view = {
+      ...current.view,
+      selection_revision: 2,
+      cursor: { kind: "after_message", message_id: "a2" }
+    }
+    options.setHistory.mockClear()
+    options.setMessages.mockClear()
+    yield { choices: [{ delta: { content: "accepted answer" } }] }
+  })
+  const { result } = renderHook(() => useChatActions(options as any))
+  await act(async () => {
+    await result.current.onSubmit({ message: "next", image: "" })
+  })
+  expect(options.setIsProcessing).toHaveBeenLastCalledWith(false)
+  expect(options.setStreaming).toHaveBeenLastCalledWith(false)
+  expect(options.setAbortController).toHaveBeenLastCalledWith(null)
+  expect(options.setMessages).not.toHaveBeenCalled()
+  expect(options.setHistory).not.toHaveBeenCalled()
+  expect(h1.controller.getCurrent().view.cursor.message_id).toBe("a2")
+  expect(addChatMessageMock.mock.calls[1][1].parent_message_id).toBe(
+    addChatMessageMock.mock.calls[0][1].id
+  )
+})
+
+it.each(["preface", "replace"])(
+  "finalizes slash injection %s into the exact mounted provider body",
+  async (mode) => {
+    const { useStoreChatModelSettings } = await import("@/store/model")
+    const { historyDigest } = await import("@/db/dexie/history-selection")
+    useStoreChatModelSettings.setState({ slashCommandInjectionMode: mode })
+    const { result } = renderHook(() =>
+      useChatActions(ordinaryOptions() as any)
+    )
+    await act(async () => {
+      await result.current.onSubmit({ message: "next", image: "" })
+    })
+    const body = h1.wire.mock.calls[0][0]
+    expect(body.slash_command_injection_mode).toBe(mode)
+    expect(
+      addChatMessageMock.mock.calls[0][1].tldw_history_selection_v1
+        .request_context_digest
+    ).toBe(historyDigest(body))
+    expect(Object.isFrozen(body)).toBe(true)
+    expect(body.conversation_id).toBeUndefined()
+    expect(body.history_message_limit).toBeUndefined()
+    expect(body.save_to_db).toBe(false)
+  }
+)

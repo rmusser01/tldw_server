@@ -685,7 +685,12 @@ it("dispatches the exact finalized stateless wire body without rereading message
       { role: "tool", tool_call_id: "c1", content: " result " },
       { role: "user", content: " next " }
     ],
-    { model: "chosen", temperature: 0.23, saveToDb: false },
+    {
+      model: "chosen",
+      temperature: 0.23,
+      slashCommandInjectionMode: "replace",
+      saveToDb: false
+    },
     true
   )
   Object.freeze(request)
@@ -694,6 +699,7 @@ it("dispatches the exact finalized stateless wire body without rereading message
     [{ role: "user", content: "wrong" }],
     {
       model: "changed",
+      slashCommandInjectionMode: "preface",
       temperature: 1.8,
       conversationId: "ambient",
       saveToDb: true,
@@ -705,6 +711,7 @@ it("dispatches the exact finalized stateless wire body without rereading message
   expect(actual).toBe(request)
   expect(actual).toMatchObject({
     model: "chosen",
+    slash_command_injection_mode: "replace",
     temperature: 0.23,
     save_to_db: false,
     messages: [

@@ -136,6 +136,7 @@ export const useMessage = () => {
     setEmbeddingController,
   } = usePageAssist();
   const discardCurrentTurnOnAbortRef = React.useRef(false);
+  const activeNormalControllerRef = React.useRef<AbortController | null>(null);
 
   // Messages now come from Zustand store (single source of truth)
   const messages = useStoreMessageOption((state) => state.messages);
@@ -2619,6 +2620,12 @@ export const useMessage = () => {
     }
 
     if (!usesLegacySidepanelRag) setAbortController(activeController);
+    activeNormalControllerRef.current = activeController;
+    const releaseNormalControllerIfOwned = () => {
+      if (activeNormalControllerRef.current !== activeController) return false;
+      activeNormalControllerRef.current = null;
+      return true;
+    };
     replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
@@ -2888,6 +2895,9 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                ownsAbortController: () =>
+                  activeNormalControllerRef.current === activeController,
+                releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
                 historySelection: historySelection
                   ? {
                       controller: historySelection,
@@ -2938,6 +2948,9 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                ownsAbortController: () =>
+                  activeNormalControllerRef.current === activeController,
+                releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
                 historySelection: historySelection
                   ? {
                       controller: historySelection,

@@ -577,7 +577,6 @@ it("surfaces a failed explicit mirror binding after owner capture", async () => 
   expect(result.current.error).toBe("mirror_binding_failed")
 })
 
-
 it("restores scoped pending operations from older views without making them selected rows", async () => {
   const entry: any = {
     scope: { profile_id: "profile", client_session_id: "old-view" },
@@ -611,4 +610,88 @@ it("restores scoped pending operations from older views without making them sele
     "op"
   )
   expect(result.current.recoveries).toEqual([])
+})
+
+it("a historyId-only bound native mirror supplies its own successful load receipt", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    server_scope_key: "verified-scope",
+    title: "Bound"
+  })
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    expect(
+      await result.current.loadConversation(
+        { historyId: "mirror" },
+        null,
+        receipt
+      )
+    ).toBe(true)
+  })
+  expect(receipt).toHaveBeenCalledOnce()
+  expect(receipt.mock.calls[0][0]).toEqual({
+    owner: result.current.owner,
+    view: result.current.view
+  })
+  expect(receipt.mock.calls[0][0].owner).toMatchObject({
+    kind: "native",
+    conversation_id: "chat"
+  })
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+})
+
+it("a superseded deferred owner load emits no receipt for the destination", async () => {
+  let finish!: (value: any) => void, entered!: () => void
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  mocks.details.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+        entered()
+      })
+  )
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    const pending = result.current.loadConversation(
+      { historyId: "old" },
+      null,
+      receipt
+    )
+    await started
+    await result.current.open(owner)
+    finish({ id: "old" })
+    expect(await pending).toBe(false)
+  })
+  expect(receipt).not.toHaveBeenCalled()
+  expect(result.current.owner).toBe(owner)
+})
+
+it("a same-owner cursor change after open cannot become that load's receipt", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    title: "Old"
+  })
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  mocks.link.mockImplementationOnce(async () => {
+    await result.current.choose({ kind: "empty" })
+  })
+  await act(async () => {
+    expect(
+      await result.current.loadConversation(
+        { historyId: "mirror", bindUnbound: true },
+        null,
+        receipt
+      )
+    ).toBe(true)
+  })
+  expect(result.current.status).toBe("ready")
+  expect(result.current.view?.cursor).toEqual({ kind: "empty" })
+  expect(receipt).not.toHaveBeenCalled()
 })

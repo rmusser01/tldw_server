@@ -330,7 +330,8 @@ export class ChatTldw {
       apiProvider: this.apiProvider,
       extraHeaders: this.extraHeaders,
       saveToDb: false,
-      researchContext: this.researchContext
+      researchContext: this.researchContext,
+      slashCommandInjectionMode: this.slashCommandInjectionMode
     })
   }
 

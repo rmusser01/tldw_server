@@ -1,4 +1,7 @@
-import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type {
+  HistoryLoadReceipt,
+  HistorySelectionController
+} from "@/hooks/chat/useHistorySelection"
 import type { HistorySendTurn } from "@/types/chat-modes"
 import {
   captureHistorySnapshot,
@@ -176,6 +179,7 @@ type NormalChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  ownsAbortController?: (signal: AbortSignal) => boolean
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
@@ -650,11 +654,32 @@ const captureNormalHistoryTurn = async (
       params.setHistoryId(localId)
     }
     if (!originIsCurrent()) throw new Error("stale_selection")
-    await controller.loadConversation(
-      { historyId: localId, serverChatId: params.serverChatId },
-      null
-    )
+    const target = { historyId: localId, serverChatId: params.serverChatId }
+    let receipt: HistoryLoadReceipt | undefined
+    const loaded = await controller.loadConversation(target, null, (value) => {
+      receipt = value
+    })
     current = controller.getCurrent()
+    if (
+      !loaded ||
+      !receipt ||
+      current.owner !== receipt.owner ||
+      current.view !== receipt.view
+    ) {
+      throw new Error("stale_selection")
+    }
+    // A historyId-only bound mirror is resolved by the loader; no metadata reread.
+    // Explicit native targets and newly created local targets must still match.
+    const expectedId =
+      target.serverChatId || (!params.historyId ? localId : null)
+    const expectedKind = target.serverChatId ? "native" : "local"
+    if (
+      expectedId &&
+      (receipt.owner.kind !== expectedKind ||
+        receipt.owner.conversation_id !== expectedId)
+    ) {
+      throw new Error("owner_conversation_mismatch")
+    }
   }
   if (
     current.status !== "ready" ||
@@ -886,6 +911,9 @@ export const normalChatMode = async (
         servicePromptSnapshot,
         discardCurrentTurnOnAbort: servicePromptSnapshot
           ? () => servicePromptSnapshot.scopeInvalidatedSignal.aborted
+          : undefined,
+        ownsAbortController: params.ownsAbortController
+          ? () => params.ownsAbortController!(signal)
           : undefined,
         releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
           ? () => params.releaseAbortControllerIfOwned!(signal)

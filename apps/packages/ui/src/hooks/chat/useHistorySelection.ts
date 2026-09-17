@@ -101,6 +101,11 @@ const errorCode = (error: unknown) =>
       (error instanceof Error ? error.message : "history_selection_failed")
   )
 
+export type HistoryLoadReceipt = {
+  owner: HistoryOwnerV1
+  view: HistoryViewSelectionV1
+}
+
 /** One controller per mounted view. Reopen references initialize a fresh writer. */
 export function useHistorySelection(
   options: {
@@ -213,7 +218,8 @@ export function useHistorySelection(
   const open = useCallback(
     async (
       owner: HistoryOwnerV1,
-      reference?: HistorySelectionReference | null
+      reference?: HistorySelectionReference | null,
+      onOpened?: (receipt: HistoryLoadReceipt) => void
     ) => {
       const operation = invalidate()
       if (owner.kind !== "native") {
@@ -354,7 +360,22 @@ export function useHistorySelection(
               intent: pendingBookmark.pending_confirmation
             }
           : null
-        return await install(result, owner, scope, operation.epoch, pending)
+        const installed = await install(
+          result,
+          owner,
+          scope,
+          operation.epoch,
+          pending
+        )
+        if (
+          installed &&
+          operation.epoch === epoch.current &&
+          live.current.view === result.view &&
+          live.current.status === "ready"
+        ) {
+          onOpened?.({ owner, view: result.view })
+        }
+        return installed
       } catch (error) {
         if (operation.epoch !== epoch.current) return false
         publish({
@@ -573,8 +594,28 @@ export function useHistorySelection(
         scope?: import("@/types/chat-scope").ChatScope
         bindUnbound?: boolean
       },
-      reference?: HistorySelectionReference | null
+      reference?: HistorySelectionReference | null,
+      onLoaded?: (receipt: HistoryLoadReceipt) => void
     ) => {
+      let openedReceipt: HistoryLoadReceipt | undefined
+      let openedEpoch: number | undefined
+      const opened = (receipt: HistoryLoadReceipt) => {
+        openedReceipt = receipt
+        openedEpoch = epoch.current
+      }
+      const completed = (result: boolean) => {
+        if (
+          result &&
+          openedReceipt &&
+          openedEpoch === epoch.current &&
+          live.current.owner === openedReceipt.owner &&
+          live.current.view === openedReceipt.view &&
+          live.current.status === "ready"
+        ) {
+          onLoaded?.(openedReceipt)
+        }
+        return result
+      }
       const operation = invalidate()
       releaseOwnerLease.current?.()
       releaseOwnerLease.current = null
@@ -599,7 +640,7 @@ export function useHistorySelection(
             await import("@/db/dexie/history-selection")
           const owner = await getLocalHistoryOwner(target.historyId!)
           if (operation.epoch !== epoch.current) return false
-          return open(owner, reference)
+          return completed(await open(owner, reference, opened))
         }
         if (
           details?.server_chat_id &&
@@ -652,7 +693,7 @@ export function useHistorySelection(
           validate_lease: () => valid
         }
         capturedOwner = owner
-        const result = await open(owner, reference)
+        const result = await open(owner, reference, opened)
         // Only an explicit action plus an authorized owner capture can bind an old mirror.
         if (
           target.bindUnbound &&
@@ -681,7 +722,7 @@ export function useHistorySelection(
             return true
           }
         }
-        return result
+        return completed(result)
       } catch (error) {
         if (operation.epoch !== epoch.current) return false
         return open({ kind: "unavailable", code: errorCode(error) })

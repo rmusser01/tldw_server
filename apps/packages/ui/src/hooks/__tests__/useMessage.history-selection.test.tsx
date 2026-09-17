@@ -617,3 +617,72 @@ it("mounted sidepanel normal submit uses canonical A1 selection and pre-admits i
   expect(assistant.tldw_history_admission_v1.input_message_id).toBe(user.id)
   expect(h1.append).toHaveBeenCalledTimes(2)
 })
+
+it("before-first on a nonempty sidepanel source admits an empty prior path and sends only current input", async () => {
+  const current = h1.controller.getCurrent()
+  current.view.cursor = { kind: "empty" }
+  current.capture = captureFor(current.view)
+  expect(current.capture.snapshot.nodes).toHaveLength(3)
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "fresh question", image: "" })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(
+    h1.wire.mock.calls[0][0].messages.filter(
+      (row: any) => row.role !== "system"
+    )
+  ).toEqual([{ role: "user", content: "fresh question" }])
+  const user = h1.append.mock.calls[0][1]
+  expect(user.tldw_history_selection_v1.messages).toEqual([])
+  expect(user.tldw_history_selection_v1.cursor).toEqual({ kind: "empty" })
+  expect(user.parent_message_id ?? null).toBeNull()
+})
+
+it("an older sidepanel send cannot clear the newer send's activity or Stop controller", async () => {
+  let entered!: () => void,
+    releaseFirst!: () => void,
+    releaseSecond!: () => void
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const first = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  const second = new Promise<void>((resolve) => {
+    releaseSecond = resolve
+  })
+  let secondEntered!: () => void
+  const secondStarted = new Promise<void>((resolve) => {
+    secondEntered = resolve
+  })
+  h1.wire.mockImplementationOnce(async function* () {
+    entered()
+    await first
+    yield { choices: [{ delta: { content: "first" } }] }
+  })
+  h1.wire.mockImplementationOnce(async function* () {
+    secondEntered()
+    await second
+    yield { choices: [{ delta: { content: "second" } }] }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    const old = result.current.onSubmit({ message: "first", image: "" })
+    await started
+    const newer = result.current.onSubmit({ message: "second", image: "" })
+    await secondStarted
+    mocks.setStreaming.mockClear()
+    mocks.setIsProcessing.mockClear()
+    mocks.setAbortController.mockClear()
+    releaseFirst()
+    await old
+    expect(mocks.setStreaming).not.toHaveBeenCalledWith(false)
+    expect(mocks.setIsProcessing).not.toHaveBeenCalledWith(false)
+    expect(mocks.setAbortController).not.toHaveBeenCalledWith(null)
+    releaseSecond()
+    await newer
+    expect(mocks.setStreaming).toHaveBeenLastCalledWith(false)
+    expect(mocks.setAbortController).toHaveBeenLastCalledWith(null)
+  })
+})
