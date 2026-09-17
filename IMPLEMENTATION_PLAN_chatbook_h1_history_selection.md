@@ -29,11 +29,13 @@ Execution started from the reviewed design commit on `codex/chatbook-h1-history-
 
 Execution uses the root checkout's existing virtual environment with this isolated worktree as cwd/PYTHONPATH. After a frozen Bun install, `pnpm exec` attempted dependency reconciliation; use the installed `apps/packages/ui/node_modules/.bin/vitest` from the UI package cwd for equivalent focused test commands. The shared JSON fixture is explicitly tracked despite the repository's JSON ignore rule.
 
-- [ ] Read the current Backlog workflow and TASK-13261.1; set implementation status to In Progress when actual execution starts. Keep design and implementation completion separate.
-- [ ] Use the worktree workflow to create an isolated `codex/` branch from freshly verified `dev`. The current `codex/fresh-install-uat-fixes` checkout contains unrelated edits. Do not checkout, reset, stash or stage that work. Bring only the approved design/plan/task artifacts into the isolated worktree.
-- [ ] Compare the new base against the reviewed pin for all touched paths. Read TASK-188, TASK-13023, TASK-13260.15 and active UAT chronology/acknowledgement/provider fixes. Integrate their invariants rather than replacing the files with pinned copies. Record the actual implementation base in this plan and Backlog.
-- [ ] Read repository and app AGENTS instructions. Use the existing environment/lockfiles. Shared UI tests use Vitest, not Bun's test runner. Commands below are run from the repository root unless a working directory is stated.
-- [ ] Capture focused baseline results before each affected stage. Reproduce a target behavioral defect with its test before the corresponding fix; do not demand unrelated full-suite success before a bounded change.
+- [x] Read the current Backlog workflow and TASK-13261.1; set implementation status to In Progress when actual execution starts. Keep design and implementation completion separate.
+- [x] Use the worktree workflow to create an isolated `codex/` branch from freshly verified `dev`. The current `codex/fresh-install-uat-fixes` checkout contains unrelated edits. Do not checkout, reset, stash or stage that work. Bring only the approved design/plan/task artifacts into the isolated worktree.
+- [x] Compare the new base against the reviewed pin for all touched paths. Read TASK-188, TASK-13023, TASK-13260.15 and active UAT chronology/acknowledgement/provider fixes. Integrate their invariants rather than replacing the files with pinned copies. Record the actual implementation base in this plan and Backlog.
+- [x] Read repository and app AGENTS instructions. Use the existing environment/lockfiles. Shared UI tests use Vitest, not Bun's test runner. Commands below are run from the repository root unless a working directory is stated.
+- [x] Capture focused baseline results before each affected stage. Reproduce a target behavioral defect with its test before the corresponding fix; do not demand unrelated full-suite success before a bounded change.
+
+Execution worktree: `.worktrees/chatbook-h1-history-design`, branch `codex/chatbook-h1-history-selection`, implementation base `f00e12a5aa` with reviewed dev `59049e09`. The ledger records the completed native and client scope baselines; the same focused-baseline policy continues for remaining stages. Main UAT reconciliation is read-only, most recently at `a684ef4dd2`, with the scoped mirror helper at `c415ac44c3`.
 
 Keep each task's failing/passing command, relevant changed paths and commit in TASK-13261.1. A commit includes only that task's changes and tracking. Run `git diff --check`, relevant lint/type checks and Bandit for touched Python before its commit; never bypass hooks. A failed unrelated baseline is recorded with evidence, not hidden by disabling tests.
 
@@ -131,20 +133,33 @@ def confirm_legacy_history_projection(
     owner_key: str | None = None, conn=None,
 ) -> dict[str, Any]: ...
 
-def append_message_with_history_selection(
-    self, payload: dict[str, object], selection: HistorySelectionV1,
-    *, owner_client_id: str, conn=None
-) -> HistoryAdmissionV1: ...
+def validate_history_selection(
+    self, conversation_id: str, selection: Mapping[str, Any], *,
+    owner_client_id: str, owner_key: str, conn: Any,
+) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]: ...
 
-def persist_assistant_with_history_admission(
-    self, payload: dict[str, object], admission: HistoryAdmissionReferenceV1,
-    *, owner_client_id: str, conn=None
-) -> dict[str, object]: ...
+def append_selected_history_input(
+    self, conversation_id: str, selection: Mapping[str, Any],
+    message: Mapping[str, Any], *, owner_client_id: str,
+    owner_key: str, conn: Any | None = None,
+) -> dict[str, Any]: ...  # full owner-issued HistoryAdmissionV1
+
+def append_selected_history_inputs(
+    self, conversation_id: str, selection: Mapping[str, Any],
+    messages: Sequence[Mapping[str, Any]], *, owner_client_id: str,
+    owner_key: str, conn: Any | None = None,
+) -> dict[str, Any]: ...  # final-input admission; atomic server chain
+
+def settle_history_admission(
+    self, conversation_id: str, reference: Mapping[str, Any],
+    message: Mapping[str, Any], *, owner_client_id: str,
+    owner_key: str, conn: Any | None = None,
+) -> str: ...  # persisted assistant/tool result message ID
 ```
 
 These are signature declarations, not placeholder implementations. Reuse the actual backend connection type when adding annotations. Transaction ownership follows existing caller-connection conventions; a supplied connection is not committed independently.
 
-Task 2.1's native confirmation returns a detached JSON-shaped `LegacyHistoryProjectionV1` mapping that the API validates against its strict envelope. Its selected-content reader retains parsed `tool_calls` and `extra_metadata` alongside ID/revision/text/ordered images; Task 2.2 must extend the shared typed capture explicitly before composing from it. The optional DB-internal owner-key fallback is not a cross-server browser namespace; authenticated adapters supply their verified owner key. Protected legacy descendants require the explicitly selected projection ID; Python's matching resolver uses the keyword-only `projection_id` argument.
+Task 2.1's native confirmation returns a detached JSON-shaped `LegacyHistoryProjectionV1` mapping that the API validates against its strict envelope. Its selected-content reader retains parsed `tool_calls` and `extra_metadata` alongside ID/revision/text/ordered images; Task 2.2's implementation carries these through both typed binders and the wire capture. The Task2.2 method names above distinguish client-managed stable-ID admission from atomic server-owned chains; their independent review and fix review are complete. The optional DB-internal owner-key fallback is not a cross-server browser namespace; authenticated adapters supply their verified owner key. Protected legacy descendants require the explicitly selected projection ID; Python's matching resolver uses the keyword-only `projection_id` argument.
 
 ## Stage 1: selected-path contract and identity
 
@@ -258,20 +273,34 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 - Modify `tldw_Server_API/app/api/v1/endpoints/chat.py`, `character_messages.py` and `character_chat_sessions.py`.
 - Modify `tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py`, `chat_session_schemas.py` and the new selection schema envelopes.
 - Modify `tldw_Server_API/app/core/Chat/chat_service.py`, `persistence_service.py` and `DB_Management/chacha/message_store.py`.
+- Add a focused `core/Chat/history_context.py` adapter and unit coverage if needed to project already-saved, validated behavior within native selection admission. It must consume captured context without live character/persona/worldbook reloads; precise unsupported state is rejected before writes.
+- Extend `DB_Management/ChaChaNotes_DB.py` only for delegation of the new owner methods, and `tests/DB_Management/test_history_selection_transactions.py` for real admission/settlement races.
+- Modify `DB_Management/backends/sqlite_backend.py` only to register the fixed snapshot hash function at connection creation. Cover reused A→B→A connections and independent stores with active cursors; remove per-operation registration/cache.
+- Extend the shared history-selection core/wire/types/binders and their focused tests as required to transport coherent tool/history fields from the captured native content; preserve the canonical selection tuple.
 - Create `tldw_Server_API/tests/Chat_NEW/integration/test_history_selection_api.py`.
+- Extend `tldw_Server_API/tests/Sync/test_sync_v2_chat_materializer.py` only to verify imported admission-shaped metadata cannot establish native protected acceptance, using the existing service/store fixtures.
 - Extend `tldw_Server_API/tests/Chat_NEW/unit/test_chat_continuation_controls.py`, `tests/Chat_NEW/integration/test_chat_continuation_controls_integration.py`, `tests/Chat/unit/test_chat_service_call_params.py` and `tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py` under `tldw_Server_API/`.
+- Extend `tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py` only for the real tool-auto-continuation accepted-parent path.
 
 **Interfaces:** Consumes Task 2.1 owner methods. Produces the two selection/review routes; `MessageCreate.tldw_history_selection_v1` (user) and `MessageCreate.tldw_history_admission_v1` (assistant); accepted input/admission response; character assistant admission reference; and `ChatCompletionRequest.tldw_history_selection_v1` routed through existing `continuation_runtime`.
 
-- [ ] Add endpoint tests for ownership/workspace scope, before-first/empty, stale manifest, unsupported sync owner and old unversioned request compatibility. Assert mutation counts, not merely response status.
-- [ ] Add client-managed append tests: parent derived from accepted path, conflicting supplied parent rejected, protected input metadata and user row committed together, rollback on metadata failure. Forge admission via ordinary metadata/settings/sync input and assert it cannot create owner acceptance.
-- [ ] Add assistant persistence tests for accepted input identity/version, wrong parent, incompatible edit/delete, same stable-ID retry with a different admission, late result after another view chooses a branch, and scope change. Exercise both ordinary generic `addChatMessage` and `CharacterChatStreamPersistRequest`, delegating to the same owner settlement operation. An unrelated branch must not invalidate the original parent.
-- [ ] Run focused files to red, then add strict request/response envelopes and owner operations. Preserve existing user/access/rate/image validation and use DB abstractions; do not insert direct SQL in endpoints.
-- [ ] Keep `storage_context_digest` owner-validated. Treat client `request_context_digest` as inert provenance; the client validates its composer lease. The server-owned completion path validates actual supplied request fields plus its storage context. Never treat a client hash as accepted server context.
-- [ ] Route versioned server-owned completion through selected rows; skip timestamp history reload and signature-overlap dedup only for this path. Append current-turn input rows with explicit parents, then bind assistant/tool/continuation persistence to the returned final input. Test the existing continuation branch that currently passes a null assistant parent.
-- [ ] Reject versioned sync-routed mutations before any write when no retained-selection/admission adapter exists. Keep default-dataset membership distinct from conversation enrollment. Do not add H4 materialization here.
-- [ ] Exclude selection/admission fields from provider params, `extra_body` and headers. Verify current normal system/worldbook/character behavior still passes, including multi-image history and existing continuation fixtures.
-- [ ] Run endpoint/service suites, focused lint/compile and touched-scope Bandit; review and commit the native path.
+Implementation binding: derive the API owner key from normalized trusted request base/root_path and authenticated user identity; compare any supplied key rather than treating it as authority. Only the read-only capture request may omit a bootstrap owner key. Its response binds the strict view/snapshot; durable selections and mutations still require the key, stored by the browser under its verified server/account scope. Versioned completion messages are new current inputs, with generated IDs accepted atomically and no replay of a consumed source selection. Native accepted input revision is its row-version string, with a separate protected substantive-state hash detecting metadata/image drift without recursive admission hashing.
+
+Admission refinement: accept a multi-input completion chain in one transaction against the original finalized selection, return the final input admission with the unchanged selection digest/manifest, and bind every accepted input's identity/version/state in protected metadata. Scope consumed-selection checks to the owner/conversation and protected server-completion provenance, including tool-only chains. Client-managed stable-ID matching retries remain distinct. Settlement checks the accepted chain and current authorization, not unrelated later history/settings changes. The complete manifest may include a same-statement, 200-Unicode-character text preview for recognizable legacy review.
+
+Effective behavior refinement: versioned server completion uses the neutral context or a supported, validated saved character behavior projection read in the same owner transaction as selection validation. Support matching self-contained single-character prompt behavior. Do not read/create a live default character before admission, or silently reload live persona/character/exemplar/worldbook sources afterward. Invalid/missing snapshots or effective behavior/assets without a faithful bounded adapter return explicit unsupported capability before append. Record the exact supported and gated states; client-managed/stateless generation stays separate and unsupported states earn no parity credit.
+
+- [x] Add endpoint tests for ownership/workspace scope, before-first/empty, stale manifest, unsupported sync owner and old unversioned request compatibility. Assert mutation counts, not merely response status.
+- [x] Add client-managed append tests: parent derived from accepted path, conflicting supplied parent rejected, protected input metadata and user row committed together, rollback on metadata failure. Forge admission via ordinary metadata/settings/sync input and assert it cannot create owner acceptance.
+- [x] Add assistant persistence tests for accepted input identity/version, wrong parent, incompatible edit/delete, same stable-ID retry with a different admission, late result after another view chooses a branch, and scope change. Exercise both ordinary generic `addChatMessage` and `CharacterChatStreamPersistRequest`, delegating to the same owner settlement operation. An unrelated branch must not invalidate the original parent.
+- [x] Run focused files to red, then add strict request/response envelopes and owner operations. Preserve existing user/access/rate/image validation and use DB abstractions; do not insert direct SQL in endpoints.
+- [x] Keep `storage_context_digest` owner-validated. Treat client `request_context_digest` as inert provenance; the client validates its composer lease. The server-owned completion path validates actual supplied request fields plus its storage context. Never treat a client hash as accepted server context.
+- [x] Route versioned server-owned completion through selected rows; skip timestamp history reload and signature-overlap dedup only for this path. Append current-turn input rows with explicit parents, then bind assistant/tool/continuation persistence to the returned final input. Test the existing continuation branch that currently passes a null assistant parent.
+- [x] Reject versioned sync-routed mutations before any write when no retained-selection/admission adapter exists. Keep default-dataset membership distinct from conversation enrollment. Do not add H4 materialization here.
+- [x] Exclude selection/admission fields from provider params, `extra_body` and headers. Verify current normal system/worldbook/character behavior still passes, including multi-image history and existing continuation fixtures.
+- [x] Run endpoint/service suites, focused lint/compile and touched-scope Bandit; review and commit the native path.
+
+Execution evidence: implementation `3f8144d505` and fix `db1c6feddf` provide native selection, admission and generic/character settlement. The independent review found six P2 issues; scoped re-review confirms all six addressed and no new P1/P2. Final changed-scope evidence: 67 real SQLite/PostgreSQL tests passed with one intentionally SQLite-only parametrization skipped; 69 endpoint/context tests and one actual-factory compatibility test passed. Compile/diff checks and production Bandit passed with zero findings. Two proven baseline Ruff findings and third-party warnings are disclosed in the report. Client leases, local owners and mounted surfaces remain subsequent tasks; this does not close overall H1.
 
 ### Task 2.3: local owner projections, admission and bookmarks
 
@@ -282,6 +311,7 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 - Create `apps/packages/ui/src/db/dexie/__tests__/history-selection.test.ts`.
 - Create `apps/packages/ui/src/services/chat-history-selection.ts` and `src/services/__tests__/chat-history-selection.test.ts`.
 - Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts` and `src/services/tldw/domains/chat-rag.ts` for strict selection/admission requests. The domain mixin supplies the live `addChatMessage` method; changing only the base-class duplicate does not update runtime behavior.
+- Extend `src/services/tldw/service-prompt-scope-error.ts` and its existing tests with only the exact new versioned selection, legacy-confirmation and character-settlement routes/methods needed by the captured request lease. The transport rejects an unknown route carrying `servicePromptConfig`; do not remove or broadly widen that guard.
 
 **Interfaces:** Consumes Stage 1 types and Task 2.2 routes. Produces `captureHistorySnapshot`, `finalizeHistorySelection`, `confirmLegacyHistoryProjection`, owner-scoped bookmark load/save, and immutable local accepted user metadata for later settlement.
 
@@ -311,6 +341,7 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 - Create `apps/packages/ui/src/hooks/chat/useHistorySelection.ts` and `src/hooks/chat/__tests__/useHistorySelection.test.tsx`.
 - Create `apps/packages/ui/src/components/Common/Playground/HistorySelectionReview.tsx` and neighboring `__tests__/HistorySelectionReview.test.tsx`.
 - Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`, `Playground.tsx`, `components/Sidepanel/Chat/body.tsx` and `routes/sidepanel-chat.tsx`.
+- Extend `components/Sidepanel/Chat/SidepanelHeaderSimple.tsx`, `ControlRow.tsx` and their existing route/handoff tests only where necessary to route H1 expansion to the extension full page with the scoped selection reference. Keep explicit WebUI draft/page-context handoff distinct.
 - Modify `apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx`, `hooks/chat/useServerChatLoader.ts`, `store/playground-session.tsx`, `store/sidepanel-chat-tabs.tsx` and `store/option/types.ts`.
 - Extend `apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx`, `useServerChatLoader.test.ts`, `useServerChatLoader.scope.test.tsx` and `src/store/__tests__/playground-session-store.test.ts`.
 - Modify canonical `apps/packages/ui/src/assets/locale/en/playground.json`; regenerate `apps/packages/ui/src/public/_locales/en/playground.json` through the existing locale script. Use the shared Playground namespace in both shells.
@@ -330,8 +361,12 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 **Files:**
 
 - Modify `apps/packages/ui/src/hooks/chat/useChatActions.ts`, `hooks/useMessage.tsx`, `hooks/useMessageOption.tsx`, `hooks/chat-modes/normalChatMode.ts` and `hooks/chat-helper/index.ts` (the actual `saveMessageOnSuccess` implementation).
+- Extend `hooks/chat-modes/chatModePipeline.ts` and `src/types/chat-modes.ts` only at the prepared-request/admission/settlement boundary. The final provider payload is assembled in the shared pipeline after asynchronous prompt preparation, dynamic UI and steering injection; finalization before those steps would bind the wrong request. Preserve all other modes' existing behavior when H1 is absent.
+- Extend `src/models/index.ts`, `src/models/ChatTldw.ts` and `src/services/tldw/TldwChat.ts` only as required to capture the actual resolved model/tool/provider inputs before finalization and use an explicit stateless client-managed inference request. The current model builder rereads ambient settings/tools and defaults server autosave from the active conversation. Reuse existing normalization and preserve legacy behavior outside H1.
 - Modify `apps/packages/ui/src/utils/generate-history.ts` only for explicit input normalization/identity-safe versioned assembly.
 - Extend `apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx`, `hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts` and `hooks/chat-helper/__tests__/saveMessageOnSuccess.scope.test.ts`.
+- Add focused shared-pipeline admission coverage alongside the existing `chatModePipeline.abort-lifecycle`, `conversation-id`, `error-recovery.guard` and `provider-recovery` suites; extend the appropriate `saveMessageOnError` regression to ensure a provider error after admission does not append a duplicate user or erase the accepted input.
+- Extend relevant model/transport tests beside `src/models/__tests__/pageAssistModel.mcp-tools.test.ts`, `ChatTldw.stream-metadata.test.ts` and `src/services/__tests__/tldw-chat.message-sanitization.test.ts` so the actual outbound request uses the finalized settings/messages and cannot independently autosave an already admitted turn.
 - Create `apps/packages/ui/src/hooks/__tests__/useMessage.history-selection.test.tsx` and `src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx`.
 
 **Interfaces:** Consumes immutable owner selection/admission plus existing composer/connection leases. Produces exact normal provider history and parent-bound settlement, while retaining current comparison `historyForModel` inputs.
@@ -360,10 +395,12 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 **Files:**
 
 - Modify `apps/packages/ui/src/db/dexie/branch.ts`, `types.ts` and `helpers.ts` where exports/call signatures change.
+- Modify `apps/packages/ui/src/db/dexie/chat.ts` only where existing stable-ID edit/delete operations need conversation ownership enforcement for selected-history controls; reuse those operations instead of adding a parallel mutation service.
 - Modify `apps/packages/ui/src/hooks/handlers/messageHandlers.ts`, `hooks/chat/useChatActions.ts`, `hooks/chat/chat-action-utils.ts`, `hooks/useMessage.tsx` and `hooks/useMessageOption.tsx`.
 - Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`, `PlaygroundCompareCluster.tsx` and `components/Sidepanel/Chat/body.tsx`.
 - Create `apps/packages/ui/src/db/dexie/__tests__/branch-projection.test.ts`.
 - Extend `apps/packages/ui/src/hooks/handlers/__tests__/messageHandlers.branch.test.ts` and `src/components/Option/Playground/__tests__/PlaygroundChat.per-model-routing.integration.test.tsx`.
+- Extend `src/db/dexie/__tests__/message-target-by-id.test.ts` and the mounted history-selection suites for editing/deleting the selected variant with an unpersisted greeting and hidden alternatives present.
 
 **Interfaces:** Consumes normal `HistorySelectionV1` or explicit `CompareHistorySelectionV1`. Produces `prepareLocalFork`, `commitLocalFork` and the typed branch request/result contract.
 
@@ -374,6 +411,7 @@ Execution evidence: `8a293d1ef3` implements schema 68, coherent snapshots and im
 - [ ] Encode the spec allowlist and unsupported-required-state gate before transaction write. Character/default snapshots, unfenced external settings, remote protected references and unsupported rich assets must not silently become default/plain children. Source-only provenance remains inert; source sync enrollment is never child upload authority.
 - [ ] Validate source revisions inside the existing Dexie transaction and commit messages/history/files together. Remove both index-based prefix copying and the second snapshot-copy fallback. A definite abort has no child; uncertainty retains the operation result for Task 4.2.
 - [ ] Convert all live branch controls to stable boundary requests, including greeting offsets and comparison. Do not retain an index overload in a mutation path for convenience.
+- [ ] Preserve stable identity in adjacent H1 edit/delete/regenerate controls now that rendered paths differ from persisted row order. A UI position may select the visible target synchronously, but every owner mutation must carry its scoped stable ID; no fallback to index helpers or text equality. Edit-and-send/regenerate must capture an explicit path boundary and must not delete all later timestamp rows or unrelated alternatives. Reuse existing ID-addressed DB seams with real conversation checks and observable failures; temporary/unsaved rows must never be treated as persisted authority. Include source/child and hidden-alternative isolation tests.
 - [ ] Run projector and mounted branch/compare tests; type-check both consumers, review and commit.
 
 ### Task 4.2: pending operation store and no automatic fallback
