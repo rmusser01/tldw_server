@@ -1,0 +1,22 @@
+{
+  "phase": "after independent run",
+  "files": [
+    {
+      "path": "apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs",
+      "sha256": "19643c1987d996d0f109d0eb877ce1f2b2dbbcc97969b3de78a26e90183546b2"
+    },
+    {
+      "path": "apps/tldw-frontend/next.config.mjs",
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188"
+    },
+    {
+      "path": "apps/tldw-frontend/package.json",
+      "sha256": "86f71612f0333f4508b42c321398fe359c58f6b680dc9d2d8959dadde53a6408"
+    },
+    {
+      "path": "apps/tldw-frontend/node_modules/next/package.json",
+      "sha256": "caa51e521d4ab3d7e5d0b647af543561a20b6df049180c2191a99aa84343d07b"
+    }
+  ],
+  "allStable": true
+}

@@ -30,20 +30,15 @@ const upstream = createServer(async (req, res) => {
     res.once('close', () => abortClosed());
     abortArrived();
   } else if (req.url === '/api/v1/silent-sse') {
-    // UAT246 diagnostic: establish the SSE response before a body-idle period.
-    const started = Date.now();
-    const timing = { kind: 'sse-timing' };
-    records.push(timing);
+    // UAT246 diagnostic: headers are available before the first body bytes.
     res.setHeader('content-type', 'text/event-stream');
     res.flushHeaders();
-    res.write('data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n');
     const timer = setTimeout(() => {
       pendingTimers.delete(timer);
-      timing.contentAfterMs = Date.now() - started;
       res.end('data: {"choices":[{"delta":{"content":"BEEP BOOP"}}]}\n\ndata: [DONE]\n\n');
     }, 31_500);
     pendingTimers.add(timer);
-    res.once('close', () => { timing.closedAfterMs = Date.now() - started; clearTimeout(timer); pendingTimers.delete(timer); });
+    res.once('close', () => { clearTimeout(timer); pendingTimers.delete(timer); });
   } else if (req.url === '/api/v1/flashcards/generate') {
     // Real wall time: this must outlast Next's default 30-second rewrite cutoff.
     const timer = setTimeout(() => {
@@ -164,19 +159,13 @@ test('delivers a generation response after the former 30-second cutoff', { timeo
   assert.ok(Date.now() - started >= 31_000, 'must exercise the former timeout boundary');
 });
 
-test('preserves established SSE after an early role frame and 30 seconds of silence', { timeout: 45_000 }, async context => {
+test('preserves established SSE headers while first body bytes wait past 30 seconds', { timeout: 45_000 }, async () => {
   const started = Date.now();
-  let headersAfterMs;
-  try {
-    const response = await fetch(`${origin}/api/v1/silent-sse`, {
-      method: 'POST', signal: AbortSignal.timeout(40_000),
-    });
-    headersAfterMs = Date.now() - started;
-    assert.equal(response.status, 200);
-    assert.ok(headersAfterMs < 5000, 'the role frame must establish the response before delayed content');
-    assert.equal(await response.text(), 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\ndata: {"choices":[{"delta":{"content":"BEEP BOOP"}}]}\n\ndata: [DONE]\n\n');
-    assert.ok(Date.now() - started >= 31_000, 'must exercise established-response inactivity');
-  } finally {
-    context.diagnostic(JSON.stringify({ headersAfterMs, elapsedMs: Date.now() - started, upstream: records.find(row => row.kind === 'sse-timing') }));
-  }
+  const response = await fetch(`${origin}/api/v1/silent-sse`, {
+    method: 'POST', signal: AbortSignal.timeout(40_000),
+  });
+  assert.equal(response.status, 200);
+  assert.ok(Date.now() - started < 5000, 'headers must precede delayed body bytes');
+  assert.equal(await response.text(), 'data: {"choices":[{"delta":{"content":"BEEP BOOP"}}]}\n\ndata: [DONE]\n\n');
+  assert.ok(Date.now() - started >= 31_000, 'must exercise established-response inactivity');
 });

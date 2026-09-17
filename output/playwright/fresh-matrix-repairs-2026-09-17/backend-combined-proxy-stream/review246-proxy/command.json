@@ -1,0 +1,5 @@
+[
+  "node",
+  "--test",
+  "apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs"
+]

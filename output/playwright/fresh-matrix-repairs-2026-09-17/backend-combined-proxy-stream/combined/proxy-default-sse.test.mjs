@@ -10,7 +10,7 @@ import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const app = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const app = "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend";
 const records = [];
 let fixture;
 let next;
@@ -81,7 +81,7 @@ before(async () => {
   await writeFile(path.join(fixture, 'pages/index.js'), 'export default function Page() { return null }\n');
   await writeFile(path.join(fixture, 'package.json'), '{"type":"module"}\n');
   await writeFile(path.join(fixture, 'next.config.mjs'),
-    `export { default } from ${JSON.stringify(pathToFileURL(path.join(app, 'next.config.mjs')).href)};\n`);
+    `export { default } from ${JSON.stringify("file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/combined/proxy-default.config.mjs")};\n`);
   await symlink(path.join(app, 'node_modules'), path.join(fixture, 'node_modules'), 'dir');
   next = spawn(process.execPath, [path.join(app, 'node_modules/next/dist/bin/next'),
     'dev', fixture, '--webpack', '--hostname', '127.0.0.1', '--port', String(webPort)], {

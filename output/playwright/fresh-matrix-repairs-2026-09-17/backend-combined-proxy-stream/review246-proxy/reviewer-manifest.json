@@ -1,0 +1,63 @@
+{
+  "verdict": "clear_bounded_proxy_diagnostic_native246_unproven",
+  "files": [
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/REVIEW.md",
+      "sha256": "3e3174e077a05249f9b5836a3c2846f0d3bf179c387421c81cb02248ff3e34e6"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/command.json",
+      "sha256": "6067f6c972ec93e7d5dd765e3a85a1760a133252713447e5e9e6d456345e0f95"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/eslint.json",
+      "sha256": "4a53de5ed803161ef3ee9a9e45cc1e1842db0dfa1821455ea079e5cc42433c82"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/independent-five.log",
+      "sha256": "ef869b814c995e3ad49a8c8d847672837358541af1d7602c8512ef306a8a2af9"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/source-after.json",
+      "sha256": "ba87d1ab5a5d1529958c82a4281247daff21e4a1d6fa38c3a6883f3c207d459f"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/review246-proxy/source-check.json",
+      "sha256": "9e419ba41b89ada22ec8182a8a40a2a051d72d54ea3d0a1b27194ade6995fd02"
+    }
+  ],
+  "authorControls": [
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-default.config.mjs",
+      "sha256": "0a18c97f41b4435fb0b137a25e1b7ddd4f9e570cfeb9cd88d548948969bd9f1c"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-default-sse.test.mjs",
+      "sha256": "bbd296956a85fd4194f3a61e21d0a7fdfae642019a2bfe380f443da5c8b68dd0"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-sse-default-timed.log",
+      "sha256": "075d64ff49e8aafe9181f57979ed10c43f20e26dd7211acfebfc3a1c4342fae9"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-sse-current.log",
+      "sha256": "c5d0b5dc6260b3d8aa1f5a67d17e0f3f15846044be7941d23f62b389688ad995"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-headers-only.test-snapshot.mjs",
+      "sha256": "b2701f96564d0146eeaa47a1d3cf76df4d8dfb6e5b77535265eeb91c96d3c69b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-headers-only-default.test-snapshot.mjs",
+      "sha256": "bc5723912e4af3010ce9025062c88021304fb54116f6468d43a023245632d0ba"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-headers-only-current.log",
+      "sha256": "f94e333321fa175373827816d7d4ac3a7a07feb46f937e437be958e4f494f2da"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/combined/proxy-headers-only-default.log",
+      "sha256": "9e180d366c2964d946e82c9f9f9b7e8cc0f917a8ca20ca289327a4803eb58c6e"
+    }
+  ]
+}

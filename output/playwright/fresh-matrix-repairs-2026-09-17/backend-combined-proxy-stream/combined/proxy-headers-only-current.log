@@ -1,0 +1,26 @@
+✖ preserves established SSE headers while first body bytes wait past 30 seconds (34473.373959ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 34591.729083
+
+✖ failing tests:
+
+test at scripts/__tests__/quickstart-proxy-timeout.test.mjs:162:1
+✖ preserves established SSE headers while first body bytes wait past 30 seconds (34473.373959ms)
+  AssertionError [ERR_ASSERTION]: headers must precede delayed body bytes
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/scripts/__tests__/quickstart-proxy-timeout.test.mjs:168:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

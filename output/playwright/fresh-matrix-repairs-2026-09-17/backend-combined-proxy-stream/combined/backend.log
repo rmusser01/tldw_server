@@ -1,0 +1,86 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=3662390028
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 616 items
+
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_safe_paths.py . [  0%]
+...                                                                      [  0%]
+tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingestion_audio_transcripts.py . [  0%]
+.                                                                        [  0%]
+tldw_Server_API/tests/DB_Management/test_flashcard_analytics_backends.py . [  1%]
+........................................................................ [ 12%]
+.........                                                                [ 14%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_jobs_worker.py . [ 14%]
+....................                                                     [ 17%]
+tldw_Server_API/tests/DB_Management/test_media_postgres_migrations.py .  [ 17%]
+tldw_Server_API/tests/AuthNZ/integration/test_database_runtime_selection.py . [ 18%]
+...........                                                              [ 19%]
+tldw_Server_API/tests/DB_Management/test_media_ingest_worker_content_scope.py . [ 19%]
+...............................................                          [ 27%]
+tldw_Server_API/tests/AuthNZ/unit/test_pg_migrations_authnz_core.py .... [ 28%]
+.....                                                                    [ 29%]
+tldw_Server_API/tests/DB_Management/test_character_world_book_reads_backends.py . [ 29%]
+.........................                                                [ 33%]
+tldw_Server_API/tests/MediaIngestion_NEW/integration/test_media_ingest_jobs.py . [ 33%]
+.......                                                                  [ 34%]
+tldw_Server_API/tests/Admin/test_admin_storage_quotas.py ..............  [ 36%]
+tldw_Server_API/tests/DB_Management/test_character_local_stream_delivery_backends.py . [ 37%]
+.......                                                                  [ 38%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_metadata_contract.py . [ 38%]
+..........                                                               [ 39%]
+tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py . [ 40%]
+................................                                         [ 45%]
+tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py . [ 45%]
+...                                                                      [ 45%]
+tldw_Server_API/tests/AuthNZ/unit/test_pg_storage_quotas_schema.py ..    [ 46%]
+tldw_Server_API/tests/Billing/test_storage_quota_guard.py ...........    [ 48%]
+tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_monotonicity.py . [ 48%]
+.............                                                            [ 50%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest_cancellation.py . [ 50%]
+.                                                                        [ 50%]
+tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py .. [ 50%]
+........................................................................ [ 62%]
+......................                                                   [ 66%]
+tldw_Server_API/tests/DB_Management/test_media_postgres_sequence_ownership.py . [ 66%]
+..                                                                       [ 66%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py . [ 66%]
+.........                                                                [ 68%]
+tldw_Server_API/tests/DB_Management/test_chacha_postgres_sequence_ownership.py . [ 68%]
+..                                                                       [ 68%]
+tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py . [ 68%]
+........................................................................ [ 80%]
+........................................................................ [ 92%]
+....................................                                     [ 98%]
+tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_collections_dual_write.py . [ 98%]
+....                                                                     [ 99%]
+tldw_Server_API/tests/DB_Management/test_world_book_initialization_backends.py . [ 99%]
+.....                                                                    [100%]2026-09-17 12:19:17.151 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-17 12:19:17.151 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 12:19:17.156 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 12:19:17.160 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-17 12:19:17.165 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-17 12:19:17.169 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-17 12:19:17.171 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-17 12:19:17.173 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-17 12:19:17.174 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-17 12:19:17.174 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-17 12:19:17.174 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-17 12:19:17.185 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-17 12:19:17.185 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-17 12:19:17.185 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-17 12:19:17.186 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e4d099d3
+2026-09-17 12:19:17.187 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-e4d099d3/1/workflows/workflows_scheduler.db
+2026-09-17 12:19:17.187 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-17 12:19:17.187 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-17 12:19:17.187 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+
+
+================= 616 passed, 66 warnings in 697.89s (0:11:37) =================

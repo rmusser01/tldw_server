@@ -2641,6 +2641,12 @@ UAT231/232/236/243 pass independent327 focused checks;103 adjacent pass with2 sp
 
 ### Combined backend verification
 
-The reviewed backend repairs pass one combined required-PostgreSQL/SQLite run:616passed,0skips,66warnings,697.89seconds. Receipt currently `.tmp/uat-repairs-231-246/combined/backend.log`; exact command retained alongside. This combines the worker/sequence, quota/bootstrap, World Book, Study analytics/session/HTTP, stream diagnostics and adjacent ingestion controls. Native acceptance remains pending.
+The reviewed backend repairs pass one combined required-PostgreSQL/SQLite run:616passed,0skips,66warnings,697.89seconds. [Retained receipt and exact command](../../output/playwright/fresh-matrix-repairs-2026-09-17/backend-combined-proxy-stream/README.md), manifest `69af4a870e9a6520638b328af882c091984612cbfbf2ec3207a1f70951ec11e0`. This combines the worker/sequence, quota/bootstrap, World Book, Study analytics/session/HTTP, stream diagnostics and adjacent ingestion controls. Native acceptance remains pending.
 
 UAT249 fixture implementation is independently reviewed:9focused tests pass, all9original assertions remain, no production changes. [Retained evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/speech-fixture-reviewed/README.md), manifest `3b8ba6d112a1cc93ca6bdb22c9806b3a378904b48f4bd5949c5292d69f1e81c3`. Final combined adjacency awaits248 integration;249 stays open until that verification.
+
+### UAT246: controlled proxy failure mechanism established
+
+The installed-Next external rewrite with original default timeout receives an early role frame/HTTP200 at3ms, closes the upstream at30003ms before delayed content, and leaves the downstream reader waiting until its40003ms client deadline. The already repaired180000ms proxy configuration passes the same stream: content31500ms/full response31505ms. Independent complete fixture5passed/0skips, syntax/lint clean, source hash stable. [Bounded review](../../output/playwright/fresh-matrix-repairs-2026-09-17/backend-combined-proxy-stream/review246-proxy/REVIEW.md). Initial headers-only fixture assumption failed and is retained explicitly.
+
+This demonstrates a possible cause for early200 followed by a45-second browser idle timeout, but the original native246 lacks body-byte timing. It is not yet an attribution or acceptance claim. No new timeout policy or production change accompanies this diagnostic; original TestBot completion, canonical reload and passive live timing remain required.

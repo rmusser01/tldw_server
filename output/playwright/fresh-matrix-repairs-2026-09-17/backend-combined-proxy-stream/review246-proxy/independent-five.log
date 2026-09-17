@@ -1,0 +1,14 @@
+✔ forwards ordinary request body and authorization through the real rewrite (684.497459ms)
+✔ preserves upstream error status and body (2.450958ms)
+✔ client cancellation closes the upstream connection (2.817084ms)
+✔ delivers a generation response after the former 30-second cutoff (31503.939792ms)
+✔ preserves established SSE after an early role frame and 30 seconds of silence (31505.157083ms)
+ℹ {"headersAfterMs":3,"elapsedMs":31505,"upstream":{"kind":"sse-timing","contentAfterMs":31500,"closedAfterMs":31501}}
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63756.917875

@@ -1,0 +1,20 @@
+✖ preserves established SSE after an early role frame and 30 seconds of silence (40740.945958ms)
+ℹ {"headersAfterMs":3,"elapsedMs":40003,"upstream":{"kind":"sse-timing","closedAfterMs":30003}}
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40813.389875
+
+✖ failing tests:
+
+test at .tmp/uat-repairs-231-246/combined/proxy-default-sse.test.mjs:167:1
+✖ preserves established SSE after an early role frame and 30 seconds of silence (40740.945958ms)
+  TimeoutError: The operation was aborted due to timeout
+      at new DOMException (node:internal/per_context/domexception:77:18)
+      at Timeout._onTimeout (node:internal/abort_controller:154:9)
+      at listOnTimeout (node:internal/timers:608:17)
+      at process.processTimers (node:internal/timers:543:7)

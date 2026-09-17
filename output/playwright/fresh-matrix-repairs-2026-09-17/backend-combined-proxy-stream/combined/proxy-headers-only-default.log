@@ -1,0 +1,22 @@
+✖ preserves established SSE headers while first body bytes wait past 30 seconds (40666.617417ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40719.073083
+
+✖ failing tests:
+
+test at .tmp/uat-repairs-231-246/combined/proxy-default-sse.test.mjs:162:1
+✖ preserves established SSE headers while first body bytes wait past 30 seconds (40666.617417ms)
+  TimeoutError: The operation was aborted due to timeout
+      at node:internal/deps/undici/undici:15422:13
+      at processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at runNextTicks (node:internal/process/task_queues:69:3)
+      at process.processTimers (node:internal/timers:540:9)
+      at async TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/combined/proxy-default-sse.test.mjs:164:20)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3)
