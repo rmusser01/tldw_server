@@ -1,0 +1,27 @@
+{
+  "scope": "Targeted PG-single Study only",
+  "findings": [
+    "UAT234",
+    "UAT235",
+    "UAT240",
+    "UAT242"
+  ],
+  "disposition": "Bounded observations pass; no full finding closure",
+  "files": [
+    {
+      "path": "REVIEW.md",
+      "sha256": "593ec5f8ae345b9e4eded22a4a6ea566d8659627f6ffad90c18f361a0b334104",
+      "bytes": 4961
+    },
+    {
+      "path": "inputs.json",
+      "sha256": "c7078c456a59326aa28746ea96ca3158dbdaeaffe2b97efef07942465389f21e",
+      "bytes": 8585
+    },
+    {
+      "path": "evidence-projection.json",
+      "sha256": "bce19df74daa379710f874960c2270686910b3891012e214c8f0035dcac4a999",
+      "bytes": 13828
+    }
+  ]
+}

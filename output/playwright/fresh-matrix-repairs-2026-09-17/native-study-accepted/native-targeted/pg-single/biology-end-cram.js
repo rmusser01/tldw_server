@@ -1,0 +1,1 @@
+async page=>{await page.getByRole('button',{name:'End Session',exact:true}).click();return {at:new Date().toISOString(),body:await page.getByRole('tabpanel',{name:'Study',exact:true}).ariaSnapshot()};}

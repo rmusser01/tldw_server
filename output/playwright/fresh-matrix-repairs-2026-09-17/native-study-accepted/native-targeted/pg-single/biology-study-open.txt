@@ -1,0 +1,11 @@
+### Result
+{"at":"2026-09-17T20:46:43.314Z","body":"- tabpanel \"Study\":\n  - text: Select deck\n  - combobox\n  - img \"down\"\n  - radiogroup \"segmented control\":\n    - radio \"Due only\" [checked]\n    - text: Due only\n    - radio \"Cram\"\n    - text: Cram\n  - radiogroup \"segmented control\":\n    - radio \"Front first\" [checked]\n    - text: Front first\n    - radio \"Back first\"\n    - text: Back first\n  - button \"Create a new card\"\n  - region \"Source reviews\":\n    - strong: Source reviews\n    - text: No source reviews due\n    - button \"Schedule\"\n  - text: Loading deck study options...\n  - heading [level=3]\n  - list:\n    - listitem\n    - listitem\n    - listitem\n    - listitem\n  - text: Recent study sessions Loading recent study sessions..."}
+### Ran Playwright code
+```js
+await (async page=>{await page.getByRole('tab',{name:'Study',exact:true}).click();await page.getByRole('tabpanel',{name:'Study',exact:true}).waitFor({timeout:15000});return {at:new Date().toISOString(),body:await page.getByRole('tabpanel',{name:'Study',exact:true}).ariaSnapshot()};}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18782/flashcards?tab=review
+- Page Title: Flashcards | tldw
+

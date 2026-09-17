@@ -1,0 +1,489 @@
+{
+  "scope": "Targeted PG multi, same-owner Alice2 workflow; no Bob/RLS isolation test",
+  "generation": {
+    "requestAt": "2026-09-17T21:05:40.661Z",
+    "responseAt": "2026-09-17T21:06:16.203Z",
+    "status": 200,
+    "elapsedSeconds": 35.542,
+    "inputCharacters": 227,
+    "inputSha256": "e1b8afa7d8d1a309631eb808bcd94ef419e0e9a7ab9baab30533c60dc43c95c2",
+    "inputMatchesPGSingle": true,
+    "input": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+    "drafts": [
+      {
+        "front": "What is the powerhouse of the cell?",
+        "back": "The mitochondria."
+      },
+      {
+        "front": "What does DNA stand for?",
+        "back": "Deoxyribonucleic acid."
+      },
+      {
+        "front": "What does photosynthesis convert light energy into?",
+        "back": "Chemical energy."
+      },
+      {
+        "front": "How many bones does the human body have?",
+        "back": "The human body has 206 bones."
+      },
+      {
+        "front": "At what temperature does water boil at sea level?",
+        "back": "Water boils at 100 degrees Celsius at sea level."
+      }
+    ]
+  },
+  "sourceRefId": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+  "createRecords": [
+    {
+      "at": "2026-09-17T21:07:08.556Z",
+      "status": 200,
+      "card": {
+        "uuid": "8e785ba0-07dc-42ae-bcdb-7366a0e7dc60",
+        "deck_id": 1,
+        "front": "What is the powerhouse of the cell?",
+        "back": "The mitochondria.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 2,
+        "repetitions": 0,
+        "lapses": 0,
+        "interval_days": 0
+      }
+    },
+    {
+      "at": "2026-09-17T21:07:08.619Z",
+      "status": 200,
+      "card": {
+        "uuid": "c6d401da-55a4-4b1f-ac98-746fe078309c",
+        "deck_id": 1,
+        "front": "What does DNA stand for?",
+        "back": "Deoxyribonucleic acid.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 2,
+        "repetitions": 0,
+        "lapses": 0,
+        "interval_days": 0
+      }
+    },
+    {
+      "at": "2026-09-17T21:07:08.675Z",
+      "status": 200,
+      "card": {
+        "uuid": "b398499b-930f-469f-a08f-a5730522fbc6",
+        "deck_id": 1,
+        "front": "What does photosynthesis convert light energy into?",
+        "back": "Chemical energy.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 2,
+        "repetitions": 0,
+        "lapses": 0,
+        "interval_days": 0
+      }
+    },
+    {
+      "at": "2026-09-17T21:07:08.743Z",
+      "status": 200,
+      "card": {
+        "uuid": "caf98adb-a84c-4a21-9d47-b8973b7bf826",
+        "deck_id": 1,
+        "front": "How many bones does the human body have?",
+        "back": "The human body has 206 bones.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 2,
+        "repetitions": 0,
+        "lapses": 0,
+        "interval_days": 0
+      }
+    },
+    {
+      "at": "2026-09-17T21:07:08.807Z",
+      "status": 200,
+      "card": {
+        "uuid": "baccf0ac-5ba7-455d-b4c1-7d9d74100df0",
+        "deck_id": 1,
+        "front": "At what temperature does water boil at sea level?",
+        "back": "Water boils at 100 degrees Celsius at sea level.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 2,
+        "repetitions": 0,
+        "lapses": 0,
+        "interval_days": 0
+      }
+    }
+  ],
+  "fiveReviewResponses": [
+    {
+      "uuid": "8e785ba0-07dc-42ae-bcdb-7366a0e7dc60",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:07:53.769000+00:00",
+      "last_reviewed_at": "2026-09-17T21:07:53.769000+00:00",
+      "last_modified": "2026-09-17T21:07:53.769000+00:00",
+      "version": 3,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 1
+    },
+    {
+      "uuid": "c6d401da-55a4-4b1f-ac98-746fe078309c",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:07:54.079000+00:00",
+      "last_reviewed_at": "2026-09-17T21:07:54.079000+00:00",
+      "last_modified": "2026-09-17T21:07:54.079000+00:00",
+      "version": 3,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 1
+    },
+    {
+      "uuid": "b398499b-930f-469f-a08f-a5730522fbc6",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:07:54.369000+00:00",
+      "last_reviewed_at": "2026-09-17T21:07:54.369000+00:00",
+      "last_modified": "2026-09-17T21:07:54.369000+00:00",
+      "version": 3,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 1
+    },
+    {
+      "uuid": "caf98adb-a84c-4a21-9d47-b8973b7bf826",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:07:54.682000+00:00",
+      "last_reviewed_at": "2026-09-17T21:07:54.682000+00:00",
+      "last_modified": "2026-09-17T21:07:54.682000+00:00",
+      "version": 3,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 1
+    },
+    {
+      "uuid": "baccf0ac-5ba7-455d-b4c1-7d9d74100df0",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:07:54.996000+00:00",
+      "last_reviewed_at": "2026-09-17T21:07:54.996000+00:00",
+      "last_modified": "2026-09-17T21:07:54.996000+00:00",
+      "version": 3,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 1
+    }
+  ],
+  "practiceOff": {
+    "at": "2026-09-17T21:08:51.509Z",
+    "events": [
+      {
+        "event": "request",
+        "at": "2026-09-17T21:08:51.500Z",
+        "url": "http://127.0.0.1:18783/api/v1/flashcards/c6d401da-55a4-4b1f-ac98-746fe078309c/assistant",
+        "method": "GET",
+        "body": null
+      }
+    ],
+    "schedulePostsInCapturedWindow": 0
+  },
+  "good": {
+    "uuid": "c6d401da-55a4-4b1f-ac98-746fe078309c",
+    "ef": 2.5,
+    "interval_days": 10,
+    "repetitions": 2,
+    "lapses": 0,
+    "due_at": "2026-09-27T21:09:22.317000+00:00",
+    "last_reviewed_at": "2026-09-17T21:09:22.317000+00:00",
+    "last_modified": "2026-09-17T21:09:22.317000+00:00",
+    "version": 4,
+    "scheduler_type": "sm2_plus",
+    "queue_state": "review",
+    "step_index": null,
+    "suspended_reason": null,
+    "next_intervals": {
+      "again": "10 min",
+      "hard": "14 days",
+      "good": "25 days",
+      "easy": "1 mo"
+    },
+    "review_session_id": 2
+  },
+  "hard": {
+    "uuid": "c6d401da-55a4-4b1f-ac98-746fe078309c",
+    "ef": 2.35,
+    "interval_days": 14,
+    "repetitions": 3,
+    "lapses": 0,
+    "due_at": "2026-10-01T21:09:22.598000+00:00",
+    "last_reviewed_at": "2026-09-17T21:09:22.598000+00:00",
+    "last_modified": "2026-09-17T21:09:22.598000+00:00",
+    "version": 5,
+    "scheduler_type": "sm2_plus",
+    "queue_state": "review",
+    "step_index": null,
+    "suspended_reason": null,
+    "next_intervals": {
+      "again": "10 min",
+      "hard": "20 days",
+      "good": "1 mo",
+      "easy": "1 mo"
+    },
+    "review_session_id": 2
+  },
+  "reloadedAnalytics": {
+    "event": "response",
+    "at": "2026-09-17T21:09:48.223Z",
+    "bodyReadAt": "2026-09-17T21:09:48.245Z",
+    "url": "http://127.0.0.1:18783/api/v1/flashcards/analytics/summary?include_workspace_items=false",
+    "status": 200,
+    "body": {
+      "reviewed_today": 7,
+      "retention_rate_today": 100,
+      "lapse_rate_today": 0,
+      "avg_answer_time_ms_today": 2143,
+      "study_streak_days": 1,
+      "generated_at": "2026-09-17T21:09:48.163Z",
+      "decks": [
+        {
+          "deck_id": 1,
+          "deck_name": "Biology Basics Repair Alice PGmulti 20260917",
+          "total": 5,
+          "new": 0,
+          "learning": 0,
+          "due": 0,
+          "mature": 0
+        }
+      ]
+    }
+  },
+  "reloadedSessions": {
+    "event": "response",
+    "at": "2026-09-17T21:09:48.223Z",
+    "bodyReadAt": "2026-09-17T21:09:48.245Z",
+    "url": "http://127.0.0.1:18783/api/v1/flashcards/review-sessions?status=completed&limit=8",
+    "status": 200,
+    "body": [
+      {
+        "id": 2,
+        "deck_id": null,
+        "deck_name_snapshot": null,
+        "review_mode": "cram",
+        "tag_filter": null,
+        "scope_key": "cram:global",
+        "status": "completed",
+        "started_at": "2026-09-17T21:09:22.320000+00:00",
+        "last_activity_at": "2026-09-17T21:09:47.514000+00:00",
+        "completed_at": "2026-09-17T21:09:47.514000+00:00",
+        "cards_reviewed": 2,
+        "client_id": "2"
+      },
+      {
+        "id": 1,
+        "deck_id": 1,
+        "deck_name_snapshot": "Biology Basics Repair Alice PGmulti 20260917",
+        "review_mode": "due",
+        "tag_filter": null,
+        "scope_key": "due:deck:1",
+        "status": "completed",
+        "started_at": "2026-09-17T21:07:53.770000+00:00",
+        "last_activity_at": "2026-09-17T21:07:55.240000+00:00",
+        "completed_at": "2026-09-17T21:07:55.240000+00:00",
+        "cards_reviewed": 5,
+        "client_id": "2"
+      }
+    ]
+  },
+  "canonicalFullReadback": {
+    "at": "2026-09-17T21:10:52.606Z",
+    "status": 200,
+    "total": 6,
+    "biologyCards": [
+      {
+        "uuid": "8e785ba0-07dc-42ae-bcdb-7366a0e7dc60",
+        "deck_id": 1,
+        "front": "What is the powerhouse of the cell?",
+        "back": "The mitochondria.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4
+      },
+      {
+        "uuid": "b398499b-930f-469f-a08f-a5730522fbc6",
+        "deck_id": 1,
+        "front": "What does photosynthesis convert light energy into?",
+        "back": "Chemical energy.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4
+      },
+      {
+        "uuid": "caf98adb-a84c-4a21-9d47-b8973b7bf826",
+        "deck_id": 1,
+        "front": "How many bones does the human body have?",
+        "back": "The human body has 206 bones.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4
+      },
+      {
+        "uuid": "baccf0ac-5ba7-455d-b4c1-7d9d74100df0",
+        "deck_id": 1,
+        "front": "At what temperature does water boil at sea level?",
+        "back": "Water boils at 100 degrees Celsius at sea level.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4
+      },
+      {
+        "uuid": "c6d401da-55a4-4b1f-ac98-746fe078309c",
+        "deck_id": 1,
+        "front": "What does DNA stand for?",
+        "back": "Deoxyribonucleic acid.",
+        "source_ref_id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+        "client_id": "2",
+        "version": 5,
+        "repetitions": 3,
+        "lapses": 0,
+        "interval_days": 14
+      }
+    ]
+  },
+  "singular242": {
+    "uuid": "092de4e6-5289-41f4-907b-8b7fd007cf1b",
+    "deckId": 2,
+    "sessionId": 3,
+    "completionText": "1 card reviewed this session",
+    "recentSessionText": "1 card reviewed",
+    "reloadedRecentSessionProven": true,
+    "rating": {
+      "uuid": "092de4e6-5289-41f4-907b-8b7fd007cf1b",
+      "ef": 2.5,
+      "interval_days": 4,
+      "repetitions": 1,
+      "lapses": 0,
+      "due_at": "2026-09-21T21:10:30.230000+00:00",
+      "last_reviewed_at": "2026-09-17T21:10:30.230000+00:00",
+      "last_modified": "2026-09-17T21:10:30.230000+00:00",
+      "version": 2,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "6 days",
+        "good": "10 days",
+        "easy": "13 days"
+      },
+      "review_session_id": 3
+    },
+    "additionalReviewRaisesGlobalTotalTo": 8
+  },
+  "singleAuditBinding": {
+    "reportSha256": "593ec5f8ae345b9e4eded22a4a6ea566d8659627f6ffad90c18f361a0b334104",
+    "projectionSha256": "bce19df74daa379710f874960c2270686910b3891012e214c8f0035dcac4a999"
+  },
+  "limitations": [
+    "The observed identity/source/deck/card/session all bind to Alice2; no Bob interaction or sharing operation was performed in this reviewed workflow. This is not a Bob-denial or RLS isolation test.",
+    "No runtime startup/source revalidation, screenshot or clean-console claim; original-scenario acceptance is not a full matrix.",
+    "Initial Notev1 content and later card source linkage are proven; no post-study source Note reread is present.",
+    "Practice no-POST evidence is bounded to the action window and canonical first-card preservation."
+  ],
+  "aliceIdentity": {
+    "event": "identity",
+    "at": "2026-09-17T21:04:11.203Z",
+    "status": 200,
+    "identity": {
+      "id": 2,
+      "username": "alice"
+    }
+  },
+  "canonicalSourceNote": {
+    "at": "2026-09-17T21:04:54.823Z",
+    "status": 200,
+    "note": {
+      "id": "000bdb21-2146-4d01-a4cc-b3de0160a3b3",
+      "title": "Biology Basics — Repair Alice PGmulti 20260917",
+      "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+      "client_id": "2",
+      "version": 1
+    }
+  },
+  "strictSelectorDisposition": {
+    "input": "biology-saved-study.txt",
+    "observed": "Saved-five text matched status and toast; continuation scopes status, with no resubmit",
+    "fiveCreateResponsesOnly": true
+  },
+  "originalScenarioMapping": {
+    "UAT234": "Successful slow generation and five actual persisted/reviewed cards",
+    "UAT235": "Authoritative Re-rate Hard14days preview matches persisted interval14days",
+    "UAT240": "Hard retains lapses0 and correct reloaded7/100%/0 analytics",
+    "UAT242": "Singular completion and Recent sessions wording, including reload"
+  }
+}

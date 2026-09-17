@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now253), and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now254), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
@@ -40,7 +40,7 @@
 - [x]245: extend canonical bootstrap and real quota/guard controls; retain partial-index upserts, FK/check constraints, fractional usage and fail-closed behavior. Independent52/0skip; native admission pending.
 - [x]238/233: reproduce actual worker persistence with trusted owner in required PostgreSQL; carry scope through executor and reset it; remove warning self-extension at its producer. Independent48/0skip within combined165; native pending.
 - [x]239: reproduce catalogue failure through actual PostgreSQL connection wrapper and use supported read lifecycle; independent32/0skip, native acceptance pending.
-- [x]234: prove the installed rewrite deadline with a controlled upstream, set the finite budget, repeat >30s success/client-abort/upstream-failure controls; independent4/0skip, native acceptance pending.
+- [x]234: installed rewrite deadline repaired and independently verified; original five-fact/five-card generation/save/distinct Study/reload accepted in both PostgreSQL modes at44.469/35.542seconds, with paired native audits and retention review.
 - [x]247: prevent own Media sequence rewind under RLS-filtered tenant initialization, retaining high-water IDs and explicit-ID repair without weakening authority; separate from147's foreign-table allowlist. Independent117/0skip within combined165, including lock lifetime/caller rollback; native pending.
 - [x] Review and commit each independently testable backend/proxy unit; native acceptance remains pending until Stage4.
 
@@ -51,8 +51,8 @@
 **Tests:** Actual component/hook/QueryClient lifetimes; provider alias conflict controls; saved ordinary-mode transition; canonical re-rate previews; real SQLite/PG Hard/Again analytics; one/multiple localization; transport first-byte/idle/abort boundaries.
 **Status:** In Progress
 
-- [x] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion. Independent100/0skip; native acceptance pending.
-- [x] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Independent296pass/0skip, Bandit0/no added lint; original native statistics pending.
+- [x] Study235/242: independent100/0skip plus both PostgreSQL modes native authoritative re-rate14day preview/persistence, practice-only no write, separate one-card Due singular completion and reload; paired native audits and retention clear.
+- [x] Analytics240: independent296pass/0skip across SQLite/PostgreSQL, Bandit0/no added lint; both PostgreSQL modes native Good/Hard/reload retain lapses0 and100%retention/0%lapse analytics, independently accepted.
 - [x] Media237/241/244: reviewed193+37 independent checks, including two review-discovered deletion callback races; exact90compiler baseline and no new lint diagnostics. Native acceptance pending.
 - [x] Chat/model231/232/236/243: independently reviewed327focused/103adjacent pass;2existing speech fixture failures reproduced on baseline; exact90compiler baseline, no new lint diagnostics. Native acceptance pending.
 - [x]249: repair only the stale speech timeout fixture using current configuration storage; retain original timeout and sanitizer assertions, with independent verification.
@@ -78,6 +78,7 @@
 - [x]252: repair the baseline-confirmed protected-pool DDL test fixture while preserving the missing governance-table assertion and production guards; independent139combined tests, zero skips and no new static findings.
 - [x]253 implementation: repair actual PostgreSQL MediaFiles bindings in six repository methods; independent93tests/zero skips and retention review clear. Original persisted source/native full-content handoff acceptance remains pending.
 - [ ]196 harness task: independently review a bounded source-upgrade launcher preserving original profiles, data, fixture holders and historical receipts, then record explicit new-runtime provenance for targeted acceptance. This is not a new UAT finding or a fresh-install matrix cell.
+- [ ]254: actual first upgrade frontend exposes incompatible build-directory prefix despite124 synthetic passes. Preserve failed attempt, correct only helper prefix, prove real Next config acceptance (causal RED→125combined passes), independently review and retry with new copy-run identity. Product config guard and original profile/fixture records remain unchanged.
 
 ## Stage5: Repeat full fresh UAT
 

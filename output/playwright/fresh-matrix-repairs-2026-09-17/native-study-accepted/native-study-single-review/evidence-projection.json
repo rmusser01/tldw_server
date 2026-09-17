@@ -1,0 +1,425 @@
+{
+  "scope": "Targeted PG single only; UAT234/235/240 plus separate UAT242 singular native observations",
+  "note": {
+    "id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+    "version": 1,
+    "owner": "1",
+    "characters": 227,
+    "contentSha256": "e1b8afa7d8d1a309631eb808bcd94ef419e0e9a7ab9baab30533c60dc43c95c2",
+    "content": "The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.",
+    "readbacks": [
+      {
+        "at": "2026-09-17T20:41:30.577Z",
+        "status": 200
+      },
+      {
+        "at": "2026-09-17T20:42:00.584Z",
+        "status": 200
+      },
+      {
+        "at": "2026-09-17T20:42:30.586Z",
+        "status": 200
+      }
+    ]
+  },
+  "generation": {
+    "requestAt": "2026-09-17T20:43:51.712Z",
+    "responseAt": "2026-09-17T20:44:36.181Z",
+    "elapsedSeconds": 44.469,
+    "status": 200,
+    "requestedCount": 5,
+    "actualDraftCount": 5,
+    "provider": "llama.cpp",
+    "drafts": [
+      {
+        "front": "What is the mitochondria?",
+        "back": "The mitochondria is the powerhouse of the cell."
+      },
+      {
+        "front": "What does DNA stand for?",
+        "back": "DNA stands for deoxyribonucleic acid."
+      },
+      {
+        "front": "What does photosynthesis convert light energy into?",
+        "back": "Photosynthesis converts light energy into chemical energy."
+      },
+      {
+        "front": "How many bones does the human body have?",
+        "back": "The human body has 206 bones."
+      },
+      {
+        "front": "At what temperature does water boil at sea level?",
+        "back": "Water boils at 100 degrees Celsius at sea level."
+      }
+    ]
+  },
+  "savedReviewCards": [
+    {
+      "front": "What is the mitochondria?",
+      "uuid": "044e7f4c-090d-4af5-be11-3fd50aaefa67",
+      "ratingStatus": 200,
+      "version": 3,
+      "repetitions": 1,
+      "lapses": 0,
+      "reviewSessionId": 1
+    },
+    {
+      "front": "What does DNA stand for?",
+      "uuid": "fd06ab8c-8445-4abf-9cde-f668ffb897f4",
+      "ratingStatus": 200,
+      "version": 3,
+      "repetitions": 1,
+      "lapses": 0,
+      "reviewSessionId": 1
+    },
+    {
+      "front": "What does photosynthesis convert light energy into?",
+      "uuid": "aa1ad8e5-7f03-4efa-8b56-b70cdff54864",
+      "ratingStatus": 200,
+      "version": 3,
+      "repetitions": 1,
+      "lapses": 0,
+      "reviewSessionId": 1
+    },
+    {
+      "front": "How many bones does the human body have?",
+      "uuid": "3ad5fe53-020a-4351-9fc0-19a958ac6e5b",
+      "ratingStatus": 200,
+      "version": 3,
+      "repetitions": 1,
+      "lapses": 0,
+      "reviewSessionId": 1
+    },
+    {
+      "front": "At what temperature does water boil at sea level?",
+      "uuid": "997dc968-5fe1-40bf-b545-86c0999e41d8",
+      "ratingStatus": 200,
+      "version": 3,
+      "repetitions": 1,
+      "lapses": 0,
+      "reviewSessionId": 1
+    }
+  ],
+  "practiceOff": {
+    "observedAt": "2026-09-17T20:57:39.930Z",
+    "observedRequests": [
+      {
+        "event": "request",
+        "at": "2026-09-17T20:57:39.921Z",
+        "url": "http://127.0.0.1:18782/api/v1/flashcards/fd06ab8c-8445-4abf-9cde-f668ffb897f4/assistant",
+        "method": "GET",
+        "body": null
+      }
+    ],
+    "schedulePostsInObservedWindow": 0,
+    "advancedFromCard": "044e7f4c-090d-4af5-be11-3fd50aaefa67",
+    "advancedToCard": "fd06ab8c-8445-4abf-9cde-f668ffb897f4"
+  },
+  "rerate": {
+    "good": {
+      "uuid": "fd06ab8c-8445-4abf-9cde-f668ffb897f4",
+      "ef": 2.5,
+      "interval_days": 10,
+      "repetitions": 2,
+      "lapses": 0,
+      "due_at": "2026-09-27T20:59:09.838000+00:00",
+      "last_reviewed_at": "2026-09-17T20:59:09.838000+00:00",
+      "last_modified": "2026-09-17T20:59:09.838000+00:00",
+      "version": 4,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "14 days",
+        "good": "25 days",
+        "easy": "1 mo"
+      },
+      "review_session_id": 2
+    },
+    "hard": {
+      "uuid": "fd06ab8c-8445-4abf-9cde-f668ffb897f4",
+      "ef": 2.35,
+      "interval_days": 14,
+      "repetitions": 3,
+      "lapses": 0,
+      "due_at": "2026-10-01T20:59:10.009000+00:00",
+      "last_reviewed_at": "2026-09-17T20:59:10.009000+00:00",
+      "last_modified": "2026-09-17T20:59:10.009000+00:00",
+      "version": 5,
+      "scheduler_type": "sm2_plus",
+      "queue_state": "review",
+      "step_index": null,
+      "suspended_reason": null,
+      "next_intervals": {
+        "again": "10 min",
+        "hard": "20 days",
+        "good": "1 mo",
+        "easy": "1 mo"
+      },
+      "review_session_id": 2
+    },
+    "goodDueDeltaSeconds": 864000,
+    "hardDueDeltaSeconds": 1209600
+  },
+  "finalReload": {
+    "capturedAt": "2026-09-17T21:00:17.033Z",
+    "analyticsAt": "2026-09-17T21:00:16.750Z",
+    "analytics": {
+      "reviewed_today": 7,
+      "retention_rate_today": 100,
+      "lapse_rate_today": 0,
+      "avg_answer_time_ms_today": 4150.428571428572,
+      "study_streak_days": 1,
+      "generated_at": "2026-09-17T21:00:16.728Z",
+      "decks": [
+        {
+          "deck_id": 1,
+          "deck_name": "Biology Basics Repair PGsingle 20260917",
+          "total": 5,
+          "new": 0,
+          "learning": 0,
+          "due": 0,
+          "mature": 0
+        }
+      ]
+    },
+    "sessionsAt": "2026-09-17T21:00:16.681Z",
+    "sessions": [
+      {
+        "id": 2,
+        "deck_id": null,
+        "deck_name_snapshot": null,
+        "review_mode": "cram",
+        "tag_filter": null,
+        "scope_key": "cram:global",
+        "status": "completed",
+        "started_at": "2026-09-17T20:59:09.840000+00:00",
+        "last_activity_at": "2026-09-17T20:59:56.634000+00:00",
+        "completed_at": "2026-09-17T20:59:56.634000+00:00",
+        "cards_reviewed": 2,
+        "client_id": "1"
+      },
+      {
+        "id": 1,
+        "deck_id": 1,
+        "deck_name_snapshot": "Biology Basics Repair PGsingle 20260917",
+        "review_mode": "due",
+        "tag_filter": null,
+        "scope_key": "due:deck:1",
+        "status": "completed",
+        "started_at": "2026-09-17T20:48:40.636000+00:00",
+        "last_activity_at": "2026-09-17T20:48:42.187000+00:00",
+        "completed_at": "2026-09-17T20:48:42.187000+00:00",
+        "cards_reviewed": 5,
+        "client_id": "1"
+      }
+    ]
+  },
+  "limits": [
+    "PG multi and other required modes remain outside this audit; no finding closure.",
+    "Practice no-POST claim is bounded to the captured action window and corroborated by final seven-event total; no independent DB snapshot or full wire audit.",
+    "Re-rate is an additional review of the post-Good schedule; seven analytics events are not seven distinct cards.",
+    "No post-study reread of the source Note in this set; initial v1 content and source links are proven.",
+    "No independent startup/revision/role attribution, screenshots, console-cleanliness or provider-outage inference from this bounded set.",
+    "The supplemental capture resolves the earlier observer filter omission without changing the original receipts.",
+    "UAT242 singular wording is proven for this due-review completion and reload; other required modes and full finding closure remain separate."
+  ],
+  "canonicalPersistenceSupplement": {
+    "input": "study-persistence-captured.txt",
+    "capturedAt": "2026-09-17T21:03:37.870Z",
+    "create200Records": [
+      {
+        "at": "2026-09-17T20:45:16.647Z",
+        "card": {
+          "uuid": "044e7f4c-090d-4af5-be11-3fd50aaefa67",
+          "deck_id": 1,
+          "front": "What is the mitochondria?",
+          "back": "The mitochondria is the powerhouse of the cell.",
+          "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+          "version": 2,
+          "repetitions": 0,
+          "lapses": 0,
+          "interval_days": 0,
+          "client_id": "1"
+        }
+      },
+      {
+        "at": "2026-09-17T20:45:16.705Z",
+        "card": {
+          "uuid": "fd06ab8c-8445-4abf-9cde-f668ffb897f4",
+          "deck_id": 1,
+          "front": "What does DNA stand for?",
+          "back": "DNA stands for deoxyribonucleic acid.",
+          "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+          "version": 2,
+          "repetitions": 0,
+          "lapses": 0,
+          "interval_days": 0,
+          "client_id": "1"
+        }
+      },
+      {
+        "at": "2026-09-17T20:45:16.763Z",
+        "card": {
+          "uuid": "aa1ad8e5-7f03-4efa-8b56-b70cdff54864",
+          "deck_id": 1,
+          "front": "What does photosynthesis convert light energy into?",
+          "back": "Photosynthesis converts light energy into chemical energy.",
+          "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+          "version": 2,
+          "repetitions": 0,
+          "lapses": 0,
+          "interval_days": 0,
+          "client_id": "1"
+        }
+      },
+      {
+        "at": "2026-09-17T20:45:16.819Z",
+        "card": {
+          "uuid": "3ad5fe53-020a-4351-9fc0-19a958ac6e5b",
+          "deck_id": 1,
+          "front": "How many bones does the human body have?",
+          "back": "The human body has 206 bones.",
+          "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+          "version": 2,
+          "repetitions": 0,
+          "lapses": 0,
+          "interval_days": 0,
+          "client_id": "1"
+        }
+      },
+      {
+        "at": "2026-09-17T20:45:16.905Z",
+        "card": {
+          "uuid": "997dc968-5fe1-40bf-b545-86c0999e41d8",
+          "deck_id": 1,
+          "front": "At what temperature does water boil at sea level?",
+          "back": "Water boils at 100 degrees Celsius at sea level.",
+          "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+          "version": 2,
+          "repetitions": 0,
+          "lapses": 0,
+          "interval_days": 0,
+          "client_id": "1"
+        }
+      }
+    ],
+    "reloadCommandPresent": true,
+    "readbackAt": "2026-09-17T21:03:37.785Z",
+    "readbackStatus": 200,
+    "totalCatalogue": 6,
+    "biologyCards": [
+      {
+        "uuid": "044e7f4c-090d-4af5-be11-3fd50aaefa67",
+        "deck_id": 1,
+        "front": "What is the mitochondria?",
+        "back": "The mitochondria is the powerhouse of the cell.",
+        "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4,
+        "client_id": "1"
+      },
+      {
+        "uuid": "aa1ad8e5-7f03-4efa-8b56-b70cdff54864",
+        "deck_id": 1,
+        "front": "What does photosynthesis convert light energy into?",
+        "back": "Photosynthesis converts light energy into chemical energy.",
+        "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4,
+        "client_id": "1"
+      },
+      {
+        "uuid": "3ad5fe53-020a-4351-9fc0-19a958ac6e5b",
+        "deck_id": 1,
+        "front": "How many bones does the human body have?",
+        "back": "The human body has 206 bones.",
+        "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4,
+        "client_id": "1"
+      },
+      {
+        "uuid": "997dc968-5fe1-40bf-b545-86c0999e41d8",
+        "deck_id": 1,
+        "front": "At what temperature does water boil at sea level?",
+        "back": "Water boils at 100 degrees Celsius at sea level.",
+        "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+        "version": 3,
+        "repetitions": 1,
+        "lapses": 0,
+        "interval_days": 4,
+        "client_id": "1"
+      },
+      {
+        "uuid": "fd06ab8c-8445-4abf-9cde-f668ffb897f4",
+        "deck_id": 1,
+        "front": "What does DNA stand for?",
+        "back": "DNA stands for deoxyribonucleic acid.",
+        "source_ref_id": "a9ddaf36-5011-49d3-ae11-081e9b1cd4e4",
+        "version": 5,
+        "repetitions": 3,
+        "lapses": 0,
+        "interval_days": 14,
+        "client_id": "1"
+      }
+    ],
+    "observerFilterGapResolved": true
+  },
+  "singular242": {
+    "cardUuid": "a6d095f1-d1ee-4590-8078-c333ab664b06",
+    "deckId": 2,
+    "sessionId": 3,
+    "rating": {
+      "status": 200,
+      "body": {
+        "uuid": "a6d095f1-d1ee-4590-8078-c333ab664b06",
+        "ef": 2.5,
+        "interval_days": 4,
+        "repetitions": 1,
+        "lapses": 0,
+        "due_at": "2026-09-21T21:03:09.461000+00:00",
+        "last_reviewed_at": "2026-09-17T21:03:09.461000+00:00",
+        "last_modified": "2026-09-17T21:03:09.461000+00:00",
+        "version": 2,
+        "scheduler_type": "sm2_plus",
+        "queue_state": "review",
+        "step_index": null,
+        "suspended_reason": null,
+        "next_intervals": {
+          "again": "10 min",
+          "hard": "6 days",
+          "good": "10 days",
+          "easy": "13 days"
+        },
+        "review_session_id": 3
+      }
+    },
+    "completionText": "1 card reviewed this session",
+    "recentSessionText": "1 card reviewed",
+    "reloadedRecentSessionProven": true,
+    "savedSession": {
+      "id": 3,
+      "deck_id": 2,
+      "deck_name_snapshot": "Singular Study Repair PGsingle 20260917",
+      "review_mode": "due",
+      "tag_filter": null,
+      "scope_key": "due:deck:2",
+      "status": "completed",
+      "started_at": "2026-09-17T21:03:09.462000+00:00",
+      "last_activity_at": "2026-09-17T21:03:09.644000+00:00",
+      "completed_at": "2026-09-17T21:03:09.644000+00:00",
+      "cards_reviewed": 1,
+      "client_id": "1"
+    },
+    "additionalReviewRaisesGlobalTotalTo": 8
+  }
+}

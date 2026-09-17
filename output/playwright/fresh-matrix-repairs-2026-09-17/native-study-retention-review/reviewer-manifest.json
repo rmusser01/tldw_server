@@ -1,0 +1,22 @@
+{
+  "verdict": "CLEAR",
+  "scope": "Retention only: paired original-scenario Study acceptance UAT234/235/240/242",
+  "packetManifestSha": "1eaa9c16e37f956198d9184f2b120ee287f6cf157dfb31abb7b325a31bb66204",
+  "files": [
+    {
+      "path": "REVIEW.md",
+      "bytes": 3296,
+      "sha256": "ead5dd5ed91ac3d1c35800a3c719550ea638cd9e0585a68169c79026647be4d0"
+    },
+    {
+      "path": "verification.json",
+      "bytes": 1765,
+      "sha256": "ef88681613dcabac3fe862ebccac9f4c1fd229e70498dae6f697be27c772adad"
+    },
+    {
+      "path": "verify.mjs",
+      "bytes": 6528,
+      "sha256": "c996f9e539cdd7fa0aadca8bc7d180d24ce000f8273aaa925f9a9291bc48ecc6"
+    }
+  ]
+}

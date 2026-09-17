@@ -1,0 +1,176 @@
+### Page
+- Page URL: http://127.0.0.1:18782/flashcards?tab=review
+- Page Title: Flashcards | tldw
+### Snapshot
+```yaml
+- generic [ref=f2e1]:
+  - generic [ref=f2e15]:
+    - link "Skip to main content" [ref=f2e16] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f2e17]:
+      - button "Expand sidebar" [ref=f2e18] [cursor=pointer]
+      - button "New Chat" [ref=f2e22] [cursor=pointer]
+      - generic [ref=f2e25]:
+        - button "Quick Ingest" [ref=f2e26] [cursor=pointer]
+        - button "Chat" [ref=f2e30] [cursor=pointer]
+        - button "Prompts" [ref=f2e33] [cursor=pointer]
+        - button "Characters" [ref=f2e37] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f2e42] [cursor=pointer]
+        - button "World Books" [ref=f2e46] [cursor=pointer]
+        - button "Notes" [ref=f2e49] [cursor=pointer]
+        - button "Knowledge QA" [ref=f2e53] [cursor=pointer]
+        - button "Media" [ref=f2e61] [cursor=pointer]
+        - button "Document Workspace" [ref=f2e64] [cursor=pointer]
+        - button "Research Workspace" [ref=f2e70] [cursor=pointer]
+        - button "Kanban" [ref=f2e76] [cursor=pointer]
+        - button "Watchlists" [ref=f2e78] [cursor=pointer]
+      - generic [ref=f2e83]:
+        - button "Open Notes Dock" [ref=f2e84] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f2e89] [cursor=pointer]
+        - button "Settings" [ref=f2e92] [cursor=pointer]
+    - main [ref=f2e96]:
+      - generic [ref=f2e97]:
+        - generic [ref=f2e100]:
+          - generic [ref=f2e101]:
+            - button "Expand sidebar" [ref=f2e102] [cursor=pointer]
+            - generic [ref=f2e104]:
+              - img "tldw Assistant" [ref=f2e105]
+              - generic [ref=f2e106]: tldw Assistant
+              - button "Companion Home" [ref=f2e107] [cursor=pointer]
+              - button "Show shortcuts" [ref=f2e111] [cursor=pointer]
+          - generic [ref=f2e114]:
+            - button "Search - Open command palette" [ref=f2e115] [cursor=pointer]:
+              - generic [ref=f2e119]: Search
+              - generic [ref=f2e120]: ⌘K
+            - button "Open settings" [ref=f2e121] [cursor=pointer]
+            - generic [ref=f2e133]:
+              - button "Notifications, 0 unread" [ref=f2e134] [cursor=pointer]
+              - status [ref=f2e138]: Notifications are active
+            - button "Switch to light theme" [ref=f2e139] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f2e146] [cursor=pointer]:
+              - generic [ref=f2e147]: "?"
+        - generic [ref=f2e404]:
+          - generic [ref=f2e406]:
+            - generic [ref=f2e408]:
+              - generic [ref=f2e409]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f2e410]
+            - navigation "Flashcards modes" [ref=f2e411]:
+              - generic [ref=f2e412]: Study
+              - generic [ref=f2e413]: Manage
+              - generic [ref=f2e414]: Import / Export
+              - generic [ref=f2e415]: Templates
+              - generic [ref=f2e416]: Scheduler
+          - generic [ref=f2e419]:
+            - tablist [ref=f2e420]:
+              - generic [ref=f2e422]:
+                - tab "Study" [active] [selected] [ref=f2e424] [cursor=pointer]
+                - tab "Manage" [ref=f2e426] [cursor=pointer]
+                - tab "Import / Export" [ref=f2e428] [cursor=pointer]
+                - tab "Templates" [ref=f2e430] [cursor=pointer]
+                - tab "Scheduler" [ref=f2e432] [cursor=pointer]
+              - generic [ref=f2e434]:
+                - button "Test with Quiz" [disabled] [ref=f2e436]
+                - button "Keyboard Shortcuts" [ref=f2e437] [cursor=pointer]
+            - generic [ref=f2e443]:
+              - tabpanel "Study" [ref=f2e730]:
+                - generic [ref=f2e731]:
+                  - generic [ref=f2e732]:
+                    - generic [ref=f2e733] [cursor=pointer]:
+                      - generic [ref=f2e734]:
+                        - generic: Select deck
+                        - combobox [ref=f2e735]
+                      - img "down" [ref=f2e737]
+                    - radiogroup "segmented control" [ref=f2e740]:
+                      - generic [ref=f2e741]:
+                        - generic [ref=f2e742] [cursor=pointer]:
+                          - radio "Due only" [checked]
+                          - generic "Due only" [ref=f2e743]
+                        - generic [ref=f2e744] [cursor=pointer]:
+                          - radio "Cram"
+                          - generic "Cram" [ref=f2e745]
+                    - radiogroup "segmented control" [ref=f2e746]:
+                      - generic [ref=f2e747]:
+                        - generic [ref=f2e748] [cursor=pointer]:
+                          - radio "Front first" [checked]
+                          - generic "Front first" [ref=f2e749]
+                        - generic [ref=f2e750] [cursor=pointer]:
+                          - radio "Back first"
+                          - generic "Back first" [ref=f2e751]
+                  - region [ref=f2e752]:
+                    - generic [ref=f2e753]:
+                      - generic [ref=f2e759]:
+                        - strong [ref=f2e761]: Source reviews
+                        - generic [ref=f2e762]: No source reviews due
+                      - button "Schedule" [ref=f2e763] [cursor=pointer]
+                  - generic [ref=f2e768]:
+                    - generic [ref=f2e769]:
+                      - strong [ref=f2e771]: Choose a study path
+                      - text: Start with all due cards, or pick a specific deck below.
+                    - button "Review all due" [ref=f2e772] [cursor=pointer]
+                  - generic [ref=f2e774]:
+                    - generic [ref=f2e776]:
+                      - strong [ref=f2e778]: Deck study dashboard
+                      - text: Choose the right deck and study mode without opening each deck first.
+                    - generic [ref=f2e781]:
+                      - generic [ref=f2e782]:
+                        - strong [ref=f2e785]: Biology Basics Repair PGsingle 20260917
+                        - generic [ref=f2e786]:
+                          - generic [ref=f2e787]: "Due: 0"
+                          - generic [ref=f2e788]: "New: 5"
+                          - generic [ref=f2e789]: "Learning: 0"
+                          - generic [ref=f2e790]: "Mature: 0"
+                        - generic "Biology Basics Repair PGsingle 20260917 reviewed share" [ref=f2e791]
+                      - generic [ref=f2e792]:
+                        - button "Review 5 ready" [ref=f2e793] [cursor=pointer]
+                        - button "Cram" [ref=f2e798] [cursor=pointer]
+                        - button "Edit" [ref=f2e803] [cursor=pointer]
+                        - button "Scheduler" [ref=f2e809] [cursor=pointer]
+                        - button "Export" [ref=f2e816] [cursor=pointer]
+                  - generic [ref=f2e823]:
+                    - generic [ref=f2e824]:
+                      - generic [ref=f2e825]:
+                        - generic [ref=f2e826]: Reviewed today
+                        - strong [ref=f2e828]: "0"
+                      - generic [ref=f2e829]:
+                        - generic [ref=f2e830]: Retention rate
+                        - strong [ref=f2e832]: —
+                      - generic [ref=f2e833]:
+                        - generic [ref=f2e834]: Lapse rate
+                        - strong [ref=f2e836]: —
+                      - generic [ref=f2e837]:
+                        - generic [ref=f2e838]: Avg answer time
+                        - strong [ref=f2e840]: —
+                      - generic [ref=f2e841]:
+                        - generic [ref=f2e842]: Study streak
+                        - strong [ref=f2e844]: 0 days
+                    - generic [ref=f2e845]:
+                      - strong [ref=f2e847]: Deck progress
+                      - generic [ref=f2e848]:
+                        - generic [ref=f2e849]:
+                          - strong [ref=f2e851]: Biology Basics Repair PGsingle 20260917
+                          - generic [ref=f2e852]:
+                            - generic [ref=f2e853]: "Total: 5"
+                            - generic [ref=f2e854]: "New: 5"
+                            - generic [ref=f2e855]: "Learning: 0"
+                            - generic [ref=f2e856]: "Due: 0"
+                            - generic [ref=f2e857]: "Mature: 0"
+                        - progressbar [ref=f2e858]
+                  - status [ref=f2e861]:
+                    - generic [ref=f2e862]: "5 cards remaining, 0 reviewed, Available now: 5, new: 5, learning: 0, due: 0"
+                    - generic [ref=f2e863]:
+                      - generic [aria-hidden] [ref=f2e864]: Study queue
+                      - generic [aria-hidden] [ref=f2e865]: "5"
+                      - generic [aria-hidden] [ref=f2e866]: cards remaining
+                    - generic [aria-hidden] [ref=f2e868]: 0 reviewed
+                    - generic [aria-hidden] [ref=f2e870]: "Available now: 5"
+                    - generic [aria-hidden] [ref=f2e872]: "new: 5"
+                    - generic [aria-hidden] [ref=f2e874]: "learning: 0"
+                    - generic [aria-hidden] [ref=f2e876]: "due: 0"
+                    - generic [aria-hidden] [ref=f2e878]: ~2 min left
+                  - generic [ref=f2e880]:
+                    - generic [ref=f2e881]: Recent study sessions
+                    - heading "No completed study sessions yet." [level=2] [ref=f2e887]
+              - text: ": : : : : : : : : : : : : : :"
+  - alert [ref=f2e14]: Flashcards | tldw
+```
+
