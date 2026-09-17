@@ -1,0 +1,71 @@
+{
+  "source_hashes_stable": true,
+  "inputs": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+      "sha256": "cc3f242d2c115a324db2f2ed180256c32408c1cb53a9515e7b795bea4183b107",
+      "before_sha256": "cc3f242d2c115a324db2f2ed180256c32408c1cb53a9515e7b795bea4183b107",
+      "after_sha256": "cc3f242d2c115a324db2f2ed180256c32408c1cb53a9515e7b795bea4183b107"
+    },
+    {
+      "path": "tldw_Server_API/tests/StudyPacks/test_study_pack_endpoints_api.py",
+      "sha256": "23f70bc66507aa54d04b866bd20dbf174e6c9cc4ea1efd1048e4adf04ca41168",
+      "before_sha256": "23f70bc66507aa54d04b866bd20dbf174e6c9cc4ea1efd1048e4adf04ca41168",
+      "after_sha256": "23f70bc66507aa54d04b866bd20dbf174e6c9cc4ea1efd1048e4adf04ca41168"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".tmp/uat215-independent-20260917/REVIEW215.md",
+      "sha256": "b833d34f24a4c9dd4c8683825eecf5c462f5ac33088e43441e989872a35f3fd0"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/author-DESIGN215.md",
+      "sha256": "17c0fadc546b9c4faafc0a018899cb68bffe254e851a32030789549919db2015"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/author-IMPLEMENTATION215.md",
+      "sha256": "f2cea98f0b6308eaf26fe2ada7c1720763d9a10f555c39851ebfaa1ee505472c"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/author-owned-manifest.json",
+      "sha256": "e498fb6e5394d21582e4000e8c80fc3903bc524dc835cdaa4dc1a4d7f846086e"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/author-owned.patch",
+      "sha256": "7de1db43623dafbde6bcc8f1fdbe061fae6a9a4f9fa3db6ab4432bc6fe7ed50d"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/bandit-production.json",
+      "sha256": "7ca638086f8925eb1e6c1011d311d4d697e821d57b011fdc49ee84525c96091d"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/bandit-production.log",
+      "sha256": "e8f0621c85a2eb889a1ef52796199519903ff5fcc7a35e96dd1c5de3c4e6aa21"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/bandit-tests.json",
+      "sha256": "370c7c899c6e3ab7490923d9ae8641ec889221a77f67167d8238d1eb3eb0cc0c"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/bandit-tests.log",
+      "sha256": "22f2447a019d1ed3197497c4ae07784f2b1e1e708129fb6ca584c2127dec7b70"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/runner-review.json",
+      "sha256": "5ac2462afe89ca5e61914347b3d3f93670ced8020db4a025b10ae547393eb64a"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/source-after.json",
+      "sha256": "abe0238d56adf0b3946e9ee11c8bb263d3562e40a0e82e83659decefc8f89c77"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/source-before.json",
+      "sha256": "05cd9d2872c8ac8e5e8ce5947f2883dc5909051a10f5da638b4cffc070a3cc4d"
+    },
+    {
+      "path": ".tmp/uat215-independent-20260917/uat215-sidebar-independent.redacted.log",
+      "sha256": "fe6d7941345ff7ef97598ac9d90dd05b7ea337afcaf9dbf4e6a12eef5ba795f4"
+    }
+  ]
+}

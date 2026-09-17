@@ -1,6 +1,14 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint:209 unique findings —187 verified,18 awaiting targeted acceptance,4 unresolved (205/207/208/209).** Study Pack startup206 committed8cb76473a8; UI205 review correction underway. Native202 restore passed pending audit. Persona207 shared default-ID conflict and private Notes209 are proven with actual PostgreSQL fixtures. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-209-notes-open.json).
+- **Latest checkpoint: 218 unique findings — 201 verified, 12 awaiting targeted acceptance, 5 unresolved (209, 210, 216, 217, 218).** Alice and Bob Persona catalogues, optional visual fallback, and the singular Character announcement passed native acceptance. Notes isolation and shared PostgreSQL schema repairs remain under review. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-profile-visual-accepted.json). The full fresh SQLite/PostgreSQL single-user and multi-user matrix has not restarted.
+
+- **Prior checkpoint:218 unique findings —198 verified,15 awaiting targeted acceptance,5 unresolved (209/210/216/217/218).** Reviewgap211, Charactercontext213/214 andStudyPackstatus215 arecommittedafterindependentreview. AliceRetryreload and212one-characterannouncementpassnativeobservations; Bob207defaultcoldcreate/reload and208fallback200observed, auditsinprogress. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-218-context-reviewed.json). Fullfreshmatrix hasnotrestarted.
+
+- **Prior checkpoint:217 unique findings —198 verified,11 awaiting targeted acceptance,8 unresolved (209/210/211/213–217).** Ten bounded native checks accepted. Persona207, visual fallback208 and Character wording212 are reviewed/committed; targeted acceptance remains. PostgreSQL Notes isolation, graph residual, review-gap display, Character context reads and Study Pack persistence/status are active repairs. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-217-context-study-open.json). Full fresh SQLite/PostgreSQL single/multi matrix has not restarted.
+
+- **Prior checkpoint:210 unique findings —188 verified,18 awaiting targeted acceptance,4 unresolved (207–210).** Study Pack UI205 committed713778d9ec after independent review; native deck restoration202 accepted. Persona207 is under independent verification; optional visual resolver208 and Notes ownership209 repairs are underway. New210 isolates PostgreSQL Notes graph row access. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-210-progress-reviewed.json).
+
+- **Prior checkpoint:209 unique findings —187 verified,18 awaiting targeted acceptance,4 unresolved (205/207/208/209).** Study Pack startup206 committed8cb76473a8; UI205 review correction underway. Native202 restore passed pending audit. Persona207 shared default-ID conflict and private Notes209 are proven with actual PostgreSQL fixtures. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-209-notes-open.json).
 
 - **Prior checkpoint:208 unique findings —187 verified,17 awaiting targeted acceptance,4 unresolved (205–208).** Account151/198/201 and exemplar195 acceptance retained; Study Pack UI/startup repairs and Persona/visual-expression diagnosis are underway. Bob original-chat Retry and greeting saves succeed, pending complete acceptance audit. Full fresh matrix has not started. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-208-account-accepted.json).
 
@@ -182,6 +190,8 @@
 
 ## UAT-180 — P1: PostgreSQL Flashcard soft delete reads named results positionally
 
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
+
 - Real PostgreSQL regression setup calls soft_delete_flashcard and raises KeyError0 while reading id/version/deleted. This occurs before analytics and is distinct from177. The adjacent reset path contains the same positional-access pattern but needs its own failing test before repair.
 - Status: implemented, TASK13260.117; native acceptance pending. Real PostgreSQL RED confirms both delete and scheduling reset. Exactly two named-column reads preserve optimistic-lock conflicts, missing rows, repeated-delete semantics and caller rollback. Independent22 tests across2 files pass with zero skips; author33/3 and8existing endpoint checks pass separately. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup180/README.md).
 
@@ -202,6 +212,8 @@
 
 ## UAT-176 — P1: PostgreSQL character creation fails initializing world books
 
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
+
 - Required actual-router PostgreSQL tests advance past173's quota count, then both global and workspace character creation return500. WorldBookService._init_tables uses the connection as a context manager; PostgreSQL BackendConnectionWrapper does not implement that protocol.
 - Status: implemented, TASK13260.112; native acceptance pending. Existing DB transaction ownership replaces the unsupported context and premature commit. Independent combined173/176 tests pass22 with zero skips; existing world-book tests pass94. [Repair, original failures and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup176/README.md).
 
@@ -220,6 +232,8 @@
 - Status: implemented, TASK13260.111; native acceptance pending. A payload-free uniqueness category preserves generic diagnostics and maps the real duplicate to409. Independent29 tests pass with zero skips, including privacy, transaction and non-unique500 controls. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup174-175-native-failures/README.md).
 
 ## UAT-173 — P1: PostgreSQL conversation quota count prevents Chat creation
+
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
 - Alice's actual Characters → Chat → Send returns503 from POST /chats at23:06:05UTC: `Quota enforcement unavailable. Please try again later.` The backend logs a count failure `0`; count_conversations_for_user reads row[0] although PostgreSQL returns the named cnt column. No complete-v2 request is sent.
 - Status: implemented, TASK13260.110; native acceptance pending. Named cnt access preserves owner/workspace/deleted/character filters and fail-closed quota enforcement. Independent combined173/176 real PostgreSQL/SQLite tests pass22 with zero skips; adjacent regressions pass35. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup173-native-failure/README.md).
@@ -2048,12 +2062,16 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 ## UAT-189 — P3, implemented; native acceptance pending — one-card Cram completion uses plural grammar
 
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
+
 - Current acceptance: reviewed commit2274e64ff9, independent64tests/6files0skip; native final completion remains pending191.
 
 - Actual filtered scheduled Cram completes session2/cards_reviewed1, but the visible celebration says `1 cards practiced in this cram session`. This is a separate completion message from137 remaining-card wording. TASK13260.127 owns localized singular/plural correction without count changes.
 - Evidence: `.tmp/uat-study-native-20260917/disposable-rating-real-retry.txt`, `disposable-completed-session.png`, and `disposable-rating-success-evidence.txt`. Actual rating/end/session-list responses all200. New causal tests and design precede production changes.
 
 ## UAT-190 — P2, implemented; native acceptance pending — completed filtered Cram reports no matching cards
+
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
 - Current acceptance: reviewed commit2274e64ff9, independent64tests/6files0skip; native final completion remains pending191.
 
@@ -2062,12 +2080,16 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 ## UAT-191 — P2, implemented; native acceptance pending — scheduled Cram previews one day but saves ten minutes
 
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
+
 - Current status: independently reviewed and committed; durable followup191-reviewed retains tests/source limits. Native exact scenario remains pending. Earlier diagnosis below is historical.
 
 - New disposable card, Update schedule on: the Good button displays1 day. Actual successful rating at02:09:54.135UTC sets due02:19:54.135UTC, a ten-minute gap; the saved toast accurately reports10minutes. The controlled preceding invalid-rating422 did not write a review. The final successful response is version3/repetitions1/session2.
 - TASK13260.129 owns diagnosis of the displayed interval source versus active scheduler output. Evidence: `.tmp/uat-study-native-20260917/disposable-answer-visible.txt` and `disposable-rating-success-evidence.txt`. Preserve the scheduler algorithm and practice-only behavior; do not change scheduling merely to fit the stale preview. The original Citrine card is unchanged.
 
 ## UAT-192 — P1, implemented; native acceptance pending — PostgreSQL Flashcard tag writes read named rows as tuples
+
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
 - Current status: independently reviewed and committed; durable followup192-reviewed retains tests/source limits. Native exact scenario remains pending. Earlier diagnosis below is historical.
 
@@ -2129,11 +2151,15 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 
 ## UAT-199 — P1, implemented; native acceptance pending — PostgreSQL conversation updates query nonexistent rowid
 
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
+
 - Current status: committed dd5104799a, independently reviewed22PASS/0skip. Actual message-triggered update acceptance awaits new runtime. [Review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup199-conversation-update-reviewed/README.md).
 
 - Bob’s owned default3 creates conversationc0d85261-ecd0-4c78-af71-47c88dab9d1d and greeting/user messages201. Both message-triggered conversation updates then log PostgreSQL column rowid does not exist (04:35:17.993/18.085UTC). The function selects rowid but never uses it. TASK13260.137 owns causal real-backend tests and the minimal projection correction; preserve version/deleted/search behavior.
 
 ## UAT-200 — P1, implemented; native acceptance pending — Persona Memory boolean filter aborts PostgreSQL Chat completion
+
+- Current checkpoint: verified. Root accepted independent original-scenario native audit; full matrix remains pending. Earlier status statements below are historical.
 
 - Current status: committed aa3f692657. Root independent44PASS/0skip includes actual optional-memory/WorldBook and caller transaction controls; native completion/Retry pending. [Review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup200-203-persona-memory-reviewed/README.md).
 
@@ -2189,12 +2215,20 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - Read-only source/history diagnosis and no-I/O policy truth table: `.tmp/uat-study-pack-queued-20260917/DIAGNOSIS.md`. TASK13260.144 owns the bounded StudyPack predicate repair using the existing startup policy. No producer rejection or global worker-policy changes. Root will load reviewed source, preserve queued job2 and separately record any real provider/persistence failure.
 
 
-## UAT-207 — P1, unresolved — Authenticated PostgreSQL Persona profile catalogue returns500
+## UAT-207 — P1, verified — Authenticated PostgreSQL Persona profile catalogue returns500
+
+- Current status: **verified**. Alice legacy and Bob owner-specific populated Persona defaults survive actual load and reload with stable identity and version. See the current ledger for retained audit evidence. Earlier status statements below are historical.
+
+- Current checkpoint: implemented-awaiting-acceptance. Owner-specific Persona defaults reviewed; Alice native200 observed, Bob cold replay pending. Earlier status statements below are historical.
 
 - Driver-confirmed root cause: shared PostgreSQL default persona ID research_assistant collides across owners (23505), leaving an aborted transaction; Bob retry then fails25P02. Official actual route Alice200/Bob500, SQLiteboth200; causal1FAIL/19PASS/0skip. No boolean repair is indicated.
 - Normal Bob Character chat load and reload produce repeated GET /api/v1/persona/profiles500. Backend reports list persona profiles query execution failure. Initial integer-predicate suspicion was not causal:18 direct PostgreSQL/SQLite list/get/batch controls pass unchanged because existing translation handles those columns. Actual route/cold-default failure remains under official-fixture diagnosis. Separate from200 memory archived predicate and159 anonymous calls. TASK13260.145 owns causal reproduction and minimal reviewed repair. Native evidence: `.playwright-cli/console-2026-09-17T06-00-25-674Z.log`; owned API30793 log.
 
-## UAT-208 — P2, unresolved — Optional visual-expression lookup raises unhandled500 on PostgreSQL
+## UAT-208 — P2, verified — Optional visual-expression lookup raises unhandled500 on PostgreSQL
+
+- Current status: **verified**. Six successful optional resolver responses across Alice and Bob load, Retry and reload truthfully report the unsupported-metadata placeholder. See the current ledger for retained audit evidence. Earlier status statements below are historical.
+
+- Current checkpoint: implemented-awaiting-acceptance. Optional visual metadata fallback reviewed; Alice200 observed, reload/Bob acceptance pending. Earlier status statements below are historical.
 
 - Normal authenticated Bob Character chat load, Retry and reload call visual-identities/bindings/resolve for neutral/thinking. Backend raises NotImplementedError: Visual identity metadata currently supports SQLite ChaChaNotes databases only. Core model completion/persistence succeed, but optional expression requests log server exceptions and console errors. TASK13260.146 owns a truthful capability/fallback boundary, preserving supported SQLite behavior; no PostgreSQL visual-metadata support is claimed. Original console and owned runtime evidence are preserved with207.
 
@@ -2203,3 +2237,74 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - Normal auth/me identifies Bob3 at06:08:42UTC. GET /api/v1/notes/?page=1&results_per_page=20&sort_by=last_modified&sort_order=desc returns200 with Alice owner2 Note b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8/title/content and two Bob owner3 greeting Notes. Actual visible Notes list corroborates the foreign fixture. Keyword catalogue also contains owner2 keyword; intended keyword ownership remains under diagnosis.
 - Native role is the already qualified privileged/BYPASSRLS service setup. No ordinary-role leakage or native foreign mutation is claimed. Private evidence `.tmp/uat198-181-native-20260917/bob-greeting-notes-events.txt`, `bob-notes-foreign-visible.png`. Task13260.147 precedes any repair, preserving SQLite per-file semantics, sharing, rollback/version and current-owner boundaries.
+
+## UAT-210 — P2, unresolved — PostgreSQL Notes graph seed reads named rows positionally
+
+- Current checkpoint: unresolved. Five-method repair committed47e23bd5f3; residual get_note_tag_edges literal keyword table reproduced and approved for bounded mapper substitution. Native graph remains gated by209. Earlier status statements below are historical.
+
+- TASK13260.148 tracks the actual official-fixture `get_all_note_ids_for_graph` KeyError(0), found during expanded209 regression. Equivalent SQLite case passes. Adjacent graph count/tag/source accesses remain under individual diagnosis; no native graph failure or repaired acceptance is claimed. Separate from209 ownership predicates.
+
+### 06:33 UTC targeted checkpoint
+
+- UAT202 is verified: own Bob3 deck8v1 → deletedv2 → same-ID restoredv3, canonical read exact, previous deck7 unchanged and newly issued API session logged out. [Audited native API evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/native202-deleted-deck-restoration-accepted/README.md).
+- UAT205 is implemented, native acceptance pending: independently34/4PASS0skip, accessible pending status and resubmission guard; completed-without-deck review finding corrected. [Reviewed repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup205-study-pack-progress-reviewed/README.md). Compiler90 baseline/current identical; Bandit cannot parse TSX.
+- Alice disposable-card scheduled Cram now shows Good10min, saves due10min, completes one-card session with singular wording and no false no-match message. Canonical reload and192tag replacement/180delete checks continue; no acceptance closure yet. Original Citrine card was not re-rated.
+- UAT209 expanded fixture diagnosis proves foreign edit/delete/restore and linked organization paths under the privileged service role. A verified restricted-role control passes existing RLS. Three-file application ownership repair is approved; no ordinary-role exposure claim or generic transaction rewrite.
+
+## UAT-211 — P2, implemented; targeted acceptance pending — Subday Flashcard review gaps round to zero days
+
+- Current checkpoint: implemented-awaiting-acceptance. Independent96/4PASS0skip; native savedsubdaydisplay remains pending.
+
+- Task: TASK13260.149. Frozen author repair has96focused+112adjacent passing, independent review pending.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-212 — P3, verified — Character result announcement says one characters found
+
+- Current status: **verified**. The actual one-result Character live announcement uses singular wording. See the current ledger for retained audit evidence. Earlier status statements below are historical.
+
+- Task: TASK13260.150. Committed938aab72d6, independent18/3 pass, scoped lint0errors44baselinewarnings. Native acceptance pending.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-213 — P1, implemented; targeted acceptance pending — PostgreSQL conversation settings read uses nonexistent QueryResult.fetchone
+
+- Current checkpoint: implemented-awaiting-acceptance. Settings reader reviewed; independent30actualPG/SQLite0skip across213/214. Nativepostrestartpending.
+
+- Task: TASK13260.152. Observed real Character completion log; reader drops settings. Bounded backend result adaptation approved with causal tests.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-214 — P1, implemented; targeted acceptance pending — PostgreSQL Character world-book read enters unsupported connection context
+
+- Current checkpoint: implemented-awaiting-acceptance. WorldBook two pure reads reviewed; independent30actualPG/SQLite0skip. LegacyCRUD outside verifiedscope. Nativepostrestartpending.
+
+- Task: TASK13260.153. Observed real Character completion log; read and entry-count methods under bounded diagnosis.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-215 — P1, implemented; targeted acceptance pending — Quarantined Study Pack job is reported as queued with no error
+
+- Current checkpoint: implemented-awaiting-acceptance. Quarantined maps tofailed withsafeerror; independent13actualbackendcases0skip and21frontendcontrols. Originaljob2 postrestartGETpending.
+
+- Task: TASK13260.154. Original job2 rawstatusquarantined06:45:55, ownedAPI06:48:47 queued/errornull. Status map omits quarantine.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-216 — P1, unresolved — PostgreSQL Study Pack creation fails and job is quarantined
+
+- Task: TASK13260.155. Worker56113 starts and processes job2; create study pack raises PostgreSQL query execution failed. Driver cause unconfirmed.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-217 — P1, unresolved — PostgreSQL keyword literal search leaves a driver placeholder unconverted
+
+- Current checkpoint: unresolved. Corrected diagnosis: ILIKE ? operand followedbyESCAPE misclassified asJSONB; LIMIT convertscorrectly. InitialESCAPE! candidatefailed, bothnative%s andparenthesized(?) privateproposals22PASS. Chosenlocalparenthesesonly; reviewpending.
+
+- Task: TASK13260.151. Unchanged baseline and209 source reproduce ESCAPE backslash parsing edge; bounded local parameterized ESCAPE ! correction approved.
+- Evidence: targeted native .tmp/uat198-181-native-20260917 or separately attributed actual-backend causal packets; retain redacted durable package before final checkpoint.
+- Acceptance: causal regression, reviewed minimal repair, relevant mandatory PostgreSQL/SQLite controls and original-scenario verification before full rerun.
+
+## UAT-218 — P1, unresolved — Media initialization assumes its own shared PostgreSQL sync-log column
+
+- TASK13260.156. Real ChaCha-first thenMedia bootstrap fails creating idx_sync_log_entity_uuid on entity_uuid when existingtable usesentity_id. Official216both-ordersRED retainsfailure beforeworker. Separatefrom216StudyPacktriggers; exactschema/readwritecontract diagnosis underway, nofixturebypass. Bothinitializationorders andSQLite mustpassafterreviewedrepair.

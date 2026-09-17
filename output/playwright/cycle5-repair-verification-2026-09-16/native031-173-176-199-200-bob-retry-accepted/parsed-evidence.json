@@ -1,0 +1,954 @@
+{
+  "original_create_and_real_failure": [
+    {
+      "event": "request",
+      "at": "2026-09-17T04:35:17.785Z",
+      "method": "POST",
+      "path": "/api/v1/chats/",
+      "body": {
+        "character_id": "3",
+        "source": "webui-character-chat",
+        "scope_type": "global"
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T04:35:17.885Z",
+      "method": "POST",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages",
+      "body": {}
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T04:35:17.887Z",
+      "status": 201,
+      "path": "/api/v1/chats/",
+      "body": {
+        "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "scope_type": "global",
+        "character_id": 3,
+        "assistant_kind": "character",
+        "assistant_id": "3",
+        "source": "webui-character-chat",
+        "last_modified": "2026-09-17T04:35:17.832000Z",
+        "message_count": 0,
+        "version": 1
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T04:35:18.050Z",
+      "method": "POST",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages",
+      "body": {}
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T04:35:18.050Z",
+      "status": 201,
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages",
+      "body": {
+        "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "version": 1
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T04:35:18.215Z",
+      "method": "POST",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/complete-v2",
+      "body": {
+        "include_character_context": true,
+        "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        "provider": "llama",
+        "save_to_db": true,
+        "stream": true
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T04:35:18.217Z",
+      "status": 201,
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages",
+      "body": {
+        "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "version": 1
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T04:35:18.363Z",
+      "status": 500,
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/complete-v2",
+      "body": {
+        "error": {
+          "code": "internal_server_error",
+          "message": "Internal server error",
+          "request_id": "71df096e-92b6-4ff9-afba-7aba1118647e"
+        }
+      }
+    }
+  ],
+  "retry_and_greeting_saves": [
+    {
+      "event": "request",
+      "at": "2026-09-17T06:01:03.598Z",
+      "method": "POST",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/complete-v2",
+      "body": {
+        "include_character_context": true,
+        "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        "provider": "llama",
+        "save_to_db": true,
+        "stream": true
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:01:03.928Z",
+      "status": 200,
+      "bodyReadAt": "2026-09-17T06:01:15.980Z",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/complete-v2"
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:01:16.037Z",
+      "method": "POST",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/completions/persist",
+      "body": {
+        "assistant_message_id": "pa_2350-1e7b-4e2-b300",
+        "speaker_character_id": 3,
+        "speaker_character_name": "Helpful AI Assistant"
+      },
+      "assistant_content_sha256": "9738c4bf7c64e545fcb187b0a1c605b02fc3711b04cfa2d4e3f6c787e27cdf9a"
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:01:16.101Z",
+      "status": 200,
+      "bodyReadAt": "2026-09-17T06:01:16.127Z",
+      "path": "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/completions/persist",
+      "body": {
+        "chat_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "assistant_message_id": "pa_2350-1e7b-4e2-b300",
+        "saved": true
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:03:14.133Z",
+      "method": "POST",
+      "path": "/api/v1/chat/knowledge/save",
+      "body": {
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+        "snippet": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+        "make_flashcard": false,
+        "scope_type": "global"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:03:14.181Z",
+      "status": 201,
+      "bodyReadAt": "2026-09-17T06:03:14.188Z",
+      "path": "/api/v1/chat/knowledge/save",
+      "body": {
+        "note_id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+        "flashcard_id": null,
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667"
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:06:32.516Z",
+      "method": "POST",
+      "path": "/api/v1/chat/knowledge/save",
+      "body": {
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+        "snippet": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+        "make_flashcard": true,
+        "flashcard_front": "Bob UAT031: What did the original Helpful greeting say?",
+        "flashcard_back": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+        "scope_type": "global"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:06:32.581Z",
+      "status": 201,
+      "bodyReadAt": "2026-09-17T06:06:32.588Z",
+      "path": "/api/v1/chat/knowledge/save",
+      "body": {
+        "note_id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+        "flashcard_id": "72fcc656-452a-4e80-adc6-4b66ddc42cb4",
+        "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+        "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667"
+      }
+    }
+  ],
+  "reload_canonical_receipts": [
+    {
+      "at": "2026-09-17T06:00:27.232Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:00:27.468Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:00:27.642Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:00:27.794Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:00:27.840Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:00:27.889Z",
+      "status": 200,
+      "total": 2,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:11.798Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:12.067Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:12.184Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:12.206Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:12.206Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:02:12.248Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.204Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.450Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.610Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.719Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.883Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    },
+    {
+      "at": "2026-09-17T06:04:14.955Z",
+      "status": 200,
+      "total": 3,
+      "rows": [
+        {
+          "id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "assistant",
+          "timestamp": "2026-09-17T04:35:17.989000Z",
+          "version": 1,
+          "content_sha256": "a7c38837c5ec3a76eb3f5afce37b6d8e4d0d90c9784fffa3278a0b7070d8e848",
+          "visible_answer_suffix": false
+        },
+        {
+          "id": "126aec81-f0e8-41a6-b932-373dc36cee17",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "user",
+          "timestamp": "2026-09-17T04:35:18.084000Z",
+          "version": 1,
+          "content_sha256": "918666fdffdd590d2b1c339bd1c636a24cbedf2f63b0047dd48208a1672adfd3",
+          "visible_answer_suffix": true
+        },
+        {
+          "id": "pa_2350-1e7b-4e2-b300",
+          "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+          "sender": "Helpful AI Assistant",
+          "timestamp": "2026-09-17T06:01:16.079000Z",
+          "version": 1,
+          "content_sha256": "f2419b981185b7b075cbcda6425fb97185a9ab1011d3c8e6ad4501544ce03f10",
+          "visible_answer_suffix": true
+        }
+      ]
+    }
+  ],
+  "conversation_versions": [
+    {
+      "at": "2026-09-17T06:00:27.028Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:00:27.213Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:00:27.468Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:00:27.663Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:00:27.744Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:00:27.794Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 1,
+      "last_modified": "2026-09-17T04:35:18.085000Z",
+      "message_count": 2
+    },
+    {
+      "at": "2026-09-17T06:02:11.691Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:02:11.791Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:02:11.949Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:02:12.068Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:02:12.068Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:02:12.068Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    },
+    {
+      "at": "2026-09-17T06:09:36.284Z",
+      "status": 200,
+      "id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "version": 4,
+      "last_modified": "2026-09-17T06:01:16.174000Z",
+      "message_count": 3
+    }
+  ],
+  "owned_note_fresh_read": [
+    {
+      "at": "2026-09-17T06:09:36.201Z",
+      "status": 200,
+      "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+      "client_id": "3",
+      "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+      "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "version": 1,
+      "last_modified": "2026-09-17T06:03:14.175000Z"
+    },
+    {
+      "at": "2026-09-17T06:09:36.310Z",
+      "status": 200,
+      "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+      "client_id": "3",
+      "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+      "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "version": 1,
+      "last_modified": "2026-09-17T06:03:14.175000Z"
+    },
+    {
+      "at": "2026-09-17T06:10:06.296Z",
+      "status": 200,
+      "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+      "client_id": "3",
+      "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+      "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "version": 1,
+      "last_modified": "2026-09-17T06:03:14.175000Z"
+    },
+    {
+      "at": "2026-09-17T06:10:36.275Z",
+      "status": 200,
+      "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+      "client_id": "3",
+      "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+      "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "version": 1,
+      "last_modified": "2026-09-17T06:03:14.175000Z"
+    },
+    {
+      "at": "2026-09-17T06:11:06.258Z",
+      "status": 200,
+      "id": "4f8aeb6e-eeab-4a1e-9bbf-895f843d007e",
+      "client_id": "3",
+      "conversation_id": "c0d85261-ecd0-4c78-af71-47c88dab9d1d",
+      "message_id": "42959e8f-b87f-470d-a0b4-436ee0e07667",
+      "content": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "version": 1,
+      "last_modified": "2026-09-17T06:03:14.175000Z"
+    }
+  ],
+  "owned_card_fresh_read": [
+    {
+      "at": "2026-09-17T06:07:28.554Z",
+      "status": 200,
+      "uuid": "72fcc656-452a-4e80-adc6-4b66ddc42cb4",
+      "client_id": "3",
+      "version": 1,
+      "front": "Bob UAT031: What did the original Helpful greeting say?",
+      "back": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "source_ref_type": "note",
+      "source_ref_id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+      "source_conversation_id": null,
+      "source_message_id": null
+    },
+    {
+      "at": "2026-09-17T06:07:28.573Z",
+      "status": 200,
+      "uuid": "72fcc656-452a-4e80-adc6-4b66ddc42cb4",
+      "client_id": "3",
+      "version": 1,
+      "front": "Bob UAT031: What did the original Helpful greeting say?",
+      "back": "Hello! I'm your Helpful AI Assistant. How can I support you today?",
+      "source_ref_type": "note",
+      "source_ref_id": "8dd346a3-ac97-42aa-be86-df4fcc39ff3a",
+      "source_conversation_id": null,
+      "source_message_id": null
+    }
+  ],
+  "checks": {
+    "same_three_canonical_rows_across_reloaded_responses": 12,
+    "retry_post_paths": [
+      "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/complete-v2",
+      "/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/completions/persist"
+    ],
+    "no_new_chat_branch_greeting_or_user_post_in_retry_window": true,
+    "no_raw_SSE_body_retained": true
+  }
+}

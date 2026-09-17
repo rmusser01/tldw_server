@@ -1,0 +1,33 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:63783) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63780) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63782) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:63781) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Flashcards/utils/__tests__/review-gap.test.ts (58 tests) 17ms
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx (10 tests) 1281ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx (8 tests) 3620ms
+     ✓ Drawer 'learning' confirmation=true reports the saved ten-minute gap  705ms
+     ✓ Drawer 'relearning' confirmation=true reports the saved ten-minute gap  650ms
+     ✓ Drawer 'review' confirmation=true reports the saved ten-minute gap  605ms
+     ✓ confirms and invokes reset scheduling callback  1227ms
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx (20 tests) 6597ms
+     ✓ Manage 'learning' expanded=false reports the saved ten-minute gap  392ms
+     ✓ preserves the pending-delete countdown and Undo without deprecated List warnings  1419ms
+     ✓ supports multi-tag filter chips with suggestions  1268ms
+     ✓ hides workspace decks by default and reveals them when the toggle is enabled  497ms
+     ✓ resets workspace filters for a non-workspace create handoff  546ms
+     ✓ moves deck scope by patching workspace_id in the update payload  1067ms
+
+ Test Files  4 passed (4)
+      Tests  96 passed (96)
+   Start at  00:05:33
+   Duration  7.69s (transform 1.46s, setup 355ms, import 2.87s, tests 11.52s, environment 904ms)

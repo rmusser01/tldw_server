@@ -1,0 +1,264 @@
+{
+  "at": "2026-09-17T06:56:40.461Z",
+  "files": [
+    {
+      "file": "input-source-before-start.json",
+      "source": ".tmp/uat198-181-native-20260917/source-before-start.json",
+      "original_sha256": "b3b96a731d8d38d2ab65fcca2402ec37fcb95b0f11a03c43f0ef7c6eb91cd7e1",
+      "retained_sha256": "b3b96a731d8d38d2ab65fcca2402ec37fcb95b0f11a03c43f0ef7c6eb91cd7e1",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-final-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-final-events.txt",
+      "original_sha256": "e10e4c57cb768fc2ca8e3e0749a762921e68736b8f80d024b91f005311379c98",
+      "retained_sha256": "3c28cc5037b005e2f97bf3e09e1761755254a2805050b035b648b5608f19756c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-preview.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-preview.txt",
+      "original_sha256": "33ed9b34bd88d5a26296e1689629624d467afffa7607cf1d33e657da9e032536",
+      "retained_sha256": "33ed9b34bd88d5a26296e1689629624d467afffa7607cf1d33e657da9e032536",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-good-rating.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-good-rating.txt",
+      "original_sha256": "21496fefb5cdfff931b4d421e6e64384d3b0548090b1a318124239f276502340",
+      "retained_sha256": "21496fefb5cdfff931b4d421e6e64384d3b0548090b1a318124239f276502340",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-rated-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-rated-reload.txt",
+      "original_sha256": "76bacfb0134c7d39eb218e8c11666d3468332c6bebc217eb5f1be2440e7cc56e",
+      "retained_sha256": "76bacfb0134c7d39eb218e8c11666d3468332c6bebc217eb5f1be2440e7cc56e",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-rated-reload-final.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-rated-reload-final.txt",
+      "original_sha256": "b391e8984de6c36ed2526cf2f536e8473433f2916290f26ef58bb4612d85f700",
+      "retained_sha256": "124b1f291d34a65d069b905a45fc13652b4d6e39965187fd83b2732b857a3814",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-tag-editor.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-tag-editor.txt",
+      "original_sha256": "7ec7f6c7c80a5affc73a4c81589c1eda477e801e0078c9e432d6fc9269cea3e3",
+      "retained_sha256": "7ec7f6c7c80a5affc73a4c81589c1eda477e801e0078c9e432d6fc9269cea3e3",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-tag-saved.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-tag-saved.txt",
+      "original_sha256": "64f01c2ec732b1425483855d3cbff4688b6d22df69d94645298a0e1f567a7ab7",
+      "retained_sha256": "64f01c2ec732b1425483855d3cbff4688b6d22df69d94645298a0e1f567a7ab7",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-tag-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-tag-reload.txt",
+      "original_sha256": "503c2b90a7d60dfcd2f7deffdafe38f7f46b9df9698df3f02ba6a7368d15b0d3",
+      "retained_sha256": "503c2b90a7d60dfcd2f7deffdafe38f7f46b9df9698df3f02ba6a7368d15b0d3",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-tag-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-tag-reload-settled.txt",
+      "original_sha256": "164cc1f692a34c4c81161e8e1070d0b9710b4a7d7c045bc65408d20def032bd2",
+      "retained_sha256": "3e71ae780b92c1d194b4e21a3bfed12fc19b1c9a43745cf4a2a82159733cbef3",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-old-tag-filter.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-old-tag-filter.txt",
+      "original_sha256": "b5453dac089f3be2169d9bd1d79d0c07db2ffa6d20fe53f331332953ffa0ad19",
+      "retained_sha256": "b615a20da100804af93590b3c03c07aae63239458eb99e8f83677208648bc5eb",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-old-tag-empty.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-old-tag-empty.txt",
+      "original_sha256": "d24ec8a2021e1cdb9151b98aa39521a47fb5e127dc50f65b73046c5c38c18ca0",
+      "retained_sha256": "fac78b8b5da653721c1d1bf232c07f2342137f39e7cf76d2092215b9761e932f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-new-tag-filter.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-new-tag-filter.txt",
+      "original_sha256": "74207b1d4c375dcd5c416e501dd2365daa2af04a7b44d1bd96848f65ad94e521",
+      "retained_sha256": "3593f5477f48e5609c8b90b346ce83731014105eeae13b921eeeac24d229bac6",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-new-tag-member.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-new-tag-member.txt",
+      "original_sha256": "4cf9ee3c4f1cf37f16d04ed47a49fdb99bdfeac4b6e4f2ee0c9c500551c2b738",
+      "retained_sha256": "18741b355eec181690645f3239e8cf75c306fdc75bebee695977a73434c223a1",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-final-delete-editor.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-final-delete-editor.txt",
+      "original_sha256": "800a9881edaaa042c4fce556f781475351181f83f626aab4f87443f3fef4e0bc",
+      "retained_sha256": "800a9881edaaa042c4fce556f781475351181f83f626aab4f87443f3fef4e0bc",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-delete-click.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-delete-click.txt",
+      "original_sha256": "4bbeb6f2156abb2effe2a06ebe5201aa8602583f2cae47ed5272b9c98bedfea9",
+      "retained_sha256": "4bbeb6f2156abb2effe2a06ebe5201aa8602583f2cae47ed5272b9c98bedfea9",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-delete-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-delete-reload.txt",
+      "original_sha256": "f8b42b97bb26dc72fb9f81fadae48a635ad4e6b97ff6543533cffbfeedcd4019",
+      "retained_sha256": "f8b42b97bb26dc72fb9f81fadae48a635ad4e6b97ff6543533cffbfeedcd4019",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-deleted-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-deleted-reload-settled.txt",
+      "original_sha256": "15034135ebb7ee444bf1aa5be2e1591d79a0ce52ac632bd96aec83d8b17cf49d",
+      "retained_sha256": "dbb25ef8d1eec1350525c6995a258ee02e03e87fe04f881704c2b309e598b563",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-alice-d-deleted-manage.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-deleted-manage.txt",
+      "original_sha256": "8cae5f3e9b46792d6605cce09bcc5bd412b43151e601012f71f46a256f0d6a7d",
+      "retained_sha256": "8cae5f3e9b46792d6605cce09bcc5bd412b43151e601012f71f46a256f0d6a7d",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-completed-session-reopened.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-completed-session-reopened.txt",
+      "original_sha256": "3af5583e046e00b2f332ecc4c90af958fd67611b2fd4b5970cfec2ff1fb87940",
+      "retained_sha256": "3af5583e046e00b2f332ecc4c90af958fd67611b2fd4b5970cfec2ff1fb87940",
+      "normalization": "none"
+    },
+    {
+      "file": "input-alice-d-completed-session.png",
+      "source": ".tmp/uat198-181-native-20260917/alice-d-completed-session.png",
+      "original_sha256": "cd5f130d53204b3685ec1f938e7c5f0a1093059cc557bf06b8e80c60acad410e",
+      "retained_sha256": "cd5f130d53204b3685ec1f938e7c5f0a1093059cc557bf06b8e80c60acad410e",
+      "normalization": "none"
+    },
+    {
+      "file": "input-disposable-reset-confirmation.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-confirmation.txt",
+      "original_sha256": "22ff9cdeef1d165d234576f235b54e95b858b6d63d9e66d14e787198ad5a6c50",
+      "retained_sha256": "22ff9cdeef1d165d234576f235b54e95b858b6d63d9e66d14e787198ad5a6c50",
+      "normalization": "none"
+    },
+    {
+      "file": "input-disposable-reset-submitted.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-submitted.txt",
+      "original_sha256": "e9da20b75b0e49e84051faf035575604f8dcd70c43807eb21b4f8e9e584f79d3",
+      "retained_sha256": "e9da20b75b0e49e84051faf035575604f8dcd70c43807eb21b4f8e9e584f79d3",
+      "normalization": "none"
+    },
+    {
+      "file": "input-disposable-reset-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-evidence.txt",
+      "original_sha256": "46c8f04de3051aaf3b6fde2246e98bcde827f9047dbfd09d0b754677d9b7a434",
+      "retained_sha256": "7d05f0103218e7fc180afb63b3a068699db0e829ff1f892ed605c8aeb1a17a34",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-disposable-reset-reload.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-reload.txt",
+      "original_sha256": "3c05846f7b36a7bab96348919b6a70b88cb2aa244a45b23e3295352571bd69f2",
+      "retained_sha256": "3c05846f7b36a7bab96348919b6a70b88cb2aa244a45b23e3295352571bd69f2",
+      "normalization": "none"
+    },
+    {
+      "file": "input-disposable-reset-reloaded-list-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-reloaded-list-evidence.txt",
+      "original_sha256": "3a2ec6d7100ddd19a6f5ddb674b6e1c8b62320a238a08dcd0af2ef14c776f696",
+      "retained_sha256": "f9b9200a8efa24e4f31c84922345bf54f41af73c14b271d76d9051a39ead6ae8",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-disposable-reset-reloaded-editor.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-reloaded-editor.txt",
+      "original_sha256": "f9020639c8a75769eee7cdebdf330f87bfe3c71546f870b43f99be74d98f2925",
+      "retained_sha256": "f9020639c8a75769eee7cdebdf330f87bfe3c71546f870b43f99be74d98f2925",
+      "normalization": "none"
+    },
+    {
+      "file": "input-task13260.117.txt",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.117.txt",
+      "original_sha256": "85c70f22d23ef24d34b3d2136b3000642b6823a97202b50f1740c979f98c453c",
+      "retained_sha256": "e2bb86ff640d2d471db46e7c1abbc006523880101e739655a7e7f9dff98435c9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task13260.127.txt",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.127.txt",
+      "original_sha256": "0ebdb57d1f7fa3387980773332644c0a7e0b5f5728326bf2eab4049bc606aa7e",
+      "retained_sha256": "f52b8ff5ff7162001ed69fb3d2b637ba14508f7a3b037b623ed151f799fb3200",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task13260.128.txt",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.128.txt",
+      "original_sha256": "1f06843fdc3e0e02963ddad87e661315baf33a84665fc963d26d2f587975c84e",
+      "retained_sha256": "b12cdc7c2678b1d324bb1377b3ffbce42c7f355d96cfdff78c237cf25146b064",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task13260.129.txt",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.129.txt",
+      "original_sha256": "cf3f7b2b9bfd03e9d9ad79188024c710d82306e91007f800916cf8e018806923",
+      "retained_sha256": "4769c34df2b8321f52b311cd9669630359bf9bad128c94eb670efaa0ac27e724",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task13260.130.txt",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.130.txt",
+      "original_sha256": "e1162a1e12c7d36a9ea0a387b0bae761a3f081364bf4621cbcc493d88bec1a0c",
+      "retained_sha256": "2d2dbb39b4c834533645b4ad60f55f719baaead52f1b2f8da825185dcbe41673",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "ACCEPTANCE.md",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/ACCEPTANCE.md",
+      "original_sha256": "80e65c30882c780673a1bc765f6b7dfd336b60ebf236b2760581ed8ecbe60ee5",
+      "retained_sha256": "80e65c30882c780673a1bc765f6b7dfd336b60ebf236b2760581ed8ecbe60ee5",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest.json",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/input-manifest.json",
+      "original_sha256": "046660f1a4029a6c84aaddf28cef5fac1e446e37fa67f24823ae986364c43c38",
+      "retained_sha256": "046660f1a4029a6c84aaddf28cef5fac1e446e37fa67f24823ae986364c43c38",
+      "normalization": "none"
+    },
+    {
+      "file": "parsed-evidence.json",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/parsed-evidence.json",
+      "original_sha256": "dfd3cb3af4bdc9a7030d2d5472f8c777f5299dcc6988beeeb3a2ef942bf06041",
+      "retained_sha256": "dfd3cb3af4bdc9a7030d2d5472f8c777f5299dcc6988beeeb3a2ef942bf06041",
+      "normalization": "none"
+    },
+    {
+      "file": "source-attribution.json",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/source-attribution.json",
+      "original_sha256": "9d1ffee17fba3c7a10d486599901a78ee7ff667f36d40813c5ac12c1c860dfa9",
+      "retained_sha256": "9d1ffee17fba3c7a10d486599901a78ee7ff667f36d40813c5ac12c1c860dfa9",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest.json",
+      "source": ".tmp/uat180-189-190-191-192-acceptance-20260917/audit-manifest.json",
+      "original_sha256": "97789b77869af9e6e4782ea84a0c73eaea0458e2eb35485e202075a0b15b5a71",
+      "retained_sha256": "97789b77869af9e6e4782ea84a0c73eaea0458e2eb35485e202075a0b15b5a71",
+      "normalization": "none"
+    }
+  ]
+}

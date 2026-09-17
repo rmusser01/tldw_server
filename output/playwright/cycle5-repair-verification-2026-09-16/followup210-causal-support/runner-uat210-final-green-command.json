@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-17T06:39:46.722Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_note_graph_query_backends.py",
+    "tldw_Server_API/tests/Notes_Graph/unit/test_graph_db_queries.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

@@ -1,0 +1,54 @@
+{
+  "task": "TASK13260.146",
+  "permanentRed": {
+    "failed": 20,
+    "passed": 24,
+    "skipped": 0
+  },
+  "finalBaselineReplay": {
+    "failed": 20,
+    "passed": 24,
+    "skipped": 0,
+    "seconds": 45.0
+  },
+  "finalGreen": {
+    "passed": 44,
+    "skipped": 0,
+    "seconds": 45.28
+  },
+  "adjacentGreen": {
+    "passed": 107,
+    "skipped": 0,
+    "seconds": 71.12
+  },
+  "hookGreen": {
+    "passed": 13,
+    "files": 2,
+    "skipped": 0
+  },
+  "compiler": {
+    "baseline": 90,
+    "current": 90,
+    "byteIdentical": true,
+    "ownedErrors": 0
+  },
+  "ruff": {
+    "baseline": 2,
+    "current": 2,
+    "added": 0,
+    "newTest": 0
+  },
+  "eslint": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "bandit": {
+    "findings": 0,
+    "pythonParseErrors": 0,
+    "typeScriptParseErrors": 2,
+    "testAssertionsExcluded": "B101",
+    "limit": "No TypeScript security assurance"
+  },
+  "sourceSnapshotsMatch": true,
+  "nativeAcceptance": "pending parent"
+}

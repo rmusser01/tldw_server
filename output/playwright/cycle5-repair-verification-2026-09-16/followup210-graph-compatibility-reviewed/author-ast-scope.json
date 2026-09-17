@@ -1,0 +1,10 @@
+{
+  "changedFunctions": [
+    "count_notes_per_tag",
+    "count_user_notes",
+    "get_all_note_ids_for_graph",
+    "get_note_ids_by_source_for_graph",
+    "get_note_ids_by_tag_for_graph"
+  ],
+  "allOtherFunctionASTsIdentical": true
+}

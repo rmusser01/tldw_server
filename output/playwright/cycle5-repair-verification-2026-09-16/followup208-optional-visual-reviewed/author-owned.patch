@@ -1,0 +1,557 @@
+--- a/tldw_Server_API/app/api/v1/endpoints/visual_identities.py
++++ b/tldw_Server_API/app/api/v1/endpoints/visual_identities.py
+@@ -32,6 +32,7 @@
+     VisualIdentityResolveResponse,
+ )
+ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
++from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+ from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
+@@ -54,6 +55,7 @@
+ from tldw_Server_API.app.core.Visual_Identities.service import (
+     VisualIdentityService,
+     VisualIdentityServiceError,
++    validate_visual_identity_actor,
+ )
+ from tldw_Server_API.app.core.Visual_Identities.source_context import canonicalize_source_context
+ from tldw_Server_API.app.core.Visual_Identities.storage import (
+@@ -72,6 +74,7 @@
+ _IMMUTABLE_ASSET_CACHE_CONTROL = "private, max-age=31536000, immutable"
+ _UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+ _API_PREFIX = "/api/v1/visual-identities"
++_UNSUPPORTED_METADATA_BACKEND = "visual_identity_metadata_backend_unsupported"
+ _READ_LIMIT = Depends(rbac_rate_limit("visual-identities.read"))
+ _WRITE_LIMIT = Depends(rbac_rate_limit("visual-identities.write"))
+ _DELETE_LIMIT = Depends(rbac_rate_limit("visual-identities.delete"))
+@@ -87,6 +90,8 @@
+     jobs_manager: JobManager = Depends(_job_manager),
+ ) -> VisualIdentityService:
+     owner_user_id = _current_user_id(current_user)
++    if db.backend_type == BackendType.POSTGRESQL:
++        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_UNSUPPORTED_METADATA_BACKEND)
+     return VisualIdentityService(db, owner_user_id=owner_user_id, jobs_manager=jobs_manager)
+
+
+@@ -445,9 +450,15 @@
+ )
+ async def get_visual_identity_capabilities(
+     current_user: User = Depends(get_request_user),
++    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+ ) -> VisualIdentityCapabilitiesResponse:
+     _current_user_id(current_user)
+-    return VisualIdentityCapabilitiesResponse.model_validate(build_visual_identity_capabilities())
++    metadata_supported = db.backend_type == BackendType.SQLITE
++    return VisualIdentityCapabilitiesResponse(
++        **build_visual_identity_capabilities(),
++        metadata_supported=metadata_supported,
++        metadata_unavailable_reason=None if metadata_supported else _UNSUPPORTED_METADATA_BACKEND,
++    )
+
+
+ @router.get(
+@@ -1092,10 +1103,30 @@
+     override_pack_id: int | None = Query(default=None, ge=1),
+     override_pack_version_id: int | None = Query(default=None, ge=1),
+     allow_override_fallback: bool = Query(default=False),
+-    service: VisualIdentityService = Depends(_service),
++    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
++    current_user: User = Depends(get_request_user),
++    jobs_manager: JobManager = Depends(_job_manager),
+ ) -> VisualIdentityResolveResponse:
+     normalized_expression = _normalize_expression_or_422(expression_key)
+-    try:
++    owner_user_id = _current_user_id(current_user)
++    try:
++        if db.backend_type == BackendType.POSTGRESQL:
++            normalized_actor_id = validate_visual_identity_actor(db, owner_user_id, actor_kind, actor_id)
++            if override_pack_id is not None or override_pack_version_id is not None:
++                raise HTTPException(
++                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
++                    detail=_UNSUPPORTED_METADATA_BACKEND,
++                )
++            return VisualIdentityResolveResponse(
++                actor_kind=actor_kind,
++                actor_id=normalized_actor_id,
++                requested_expression_key=normalized_expression,
++                fallback_reason="metadata_backend_unsupported",
++                role_id=role_id,
++                role_label=role_label,
++                resolution_source="placeholder",
++            )
++        service = VisualIdentityService(db, owner_user_id=owner_user_id, jobs_manager=jobs_manager)
+         resolved = service.resolve_expression_asset(
+             actor_kind=actor_kind,
+             actor_id=actor_id,
+--- a/tldw_Server_API/app/core/Visual_Identities/service.py
++++ b/tldw_Server_API/app/core/Visual_Identities/service.py
+@@ -17,6 +17,38 @@
+
+ class VisualIdentityServiceError(BadRequestError):
+     """Raised when Visual Identity service input violates the domain contract."""
++
++
++def validate_visual_identity_actor(
++    db: CharactersRAGDB,
++    owner_user_id: int,
++    actor_kind: str,
++    actor_id: ActorId,
++) -> ActorId:
++    """Validate an actor without requiring optional visual metadata storage."""
++    if actor_kind == "character":
++        try:
++            character_id = int(actor_id)
++        except (TypeError, ValueError) as exc:
++            raise VisualIdentityServiceError("visual_identity_character_not_found") from exc
++        if db.get_character_card_by_id(character_id) is None:
++            raise VisualIdentityServiceError("visual_identity_character_not_found")
++        return character_id
++
++    if actor_kind == "persona":
++        persona_id = str(actor_id).strip()
++        if not persona_id:
++            raise VisualIdentityServiceError("visual_identity_persona_not_found")
++        persona = db.get_persona_profile(
++            persona_id,
++            user_id=str(owner_user_id),
++            include_deleted=False,
++        )
++        if persona is None:
++            raise VisualIdentityServiceError("visual_identity_persona_not_found")
++        return persona_id
++
++    raise VisualIdentityServiceError("visual_identity_actor_kind_invalid")
+
+
+ @dataclass(frozen=True)
+@@ -572,29 +604,7 @@
+         actor_id: ActorId,
+     ) -> ActorId:
+         """Validate that an actor exists and is owned by the current user."""
+-        if actor_kind == "character":
+-            try:
+-                character_id = int(actor_id)
+-            except (TypeError, ValueError) as exc:
+-                raise VisualIdentityServiceError("visual_identity_character_not_found") from exc
+-            if self.db.get_character_card_by_id(character_id) is None:
+-                raise VisualIdentityServiceError("visual_identity_character_not_found")
+-            return character_id
+-
+-        if actor_kind == "persona":
+-            persona_id = str(actor_id).strip()
+-            if not persona_id:
+-                raise VisualIdentityServiceError("visual_identity_persona_not_found")
+-            persona = self.db.get_persona_profile(
+-                persona_id,
+-                user_id=str(self.owner_user_id),
+-                include_deleted=False,
+-            )
+-            if persona is None:
+-                raise VisualIdentityServiceError("visual_identity_persona_not_found")
+-            return persona_id
+-
+-        raise VisualIdentityServiceError("visual_identity_actor_kind_invalid")
++        return validate_visual_identity_actor(self.db, self.owner_user_id, actor_kind, actor_id)
+
+     def _resolved_asset(
+         self,
+--- a/tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py
++++ b/tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py
+@@ -18,6 +18,8 @@
+     max_frame_count: int = Field(..., ge=1)
+     supported_mime_types: list[str] = Field(default_factory=list)
+     avif_enabled: bool
++    metadata_supported: bool
++    metadata_unavailable_reason: str | None = None
+
+
+ class VisualIdentityExpressionSlotResponse(BaseModel):
+--- a/apps/packages/ui/src/types/visual-identities.ts
++++ b/apps/packages/ui/src/types/visual-identities.ts
+@@ -15,6 +15,8 @@
+   max_frame_count: number
+   supported_mime_types: string[]
+   avif_enabled: boolean
++  metadata_supported?: boolean
++  metadata_unavailable_reason?: string | null
+ }
+
+ export interface VisualIdentityExpressionSlotResponse {
+--- /dev/null
++++ b/tldw_Server_API/tests/Visual_Identities/test_visual_identity_backend_support.py
+@@ -0,0 +1,231 @@
++"""Real database/router controls for optional visual metadata support (UAT208)."""
++
++from collections.abc import Iterator
++from dataclasses import dataclass
++from pathlib import Path
++
++import pytest
++from fastapi import FastAPI, HTTPException
++from fastapi.testclient import TestClient
++
++from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
++from tldw_Server_API.app.api.v1.endpoints import visual_identities as api
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
++
++PREFIX = "/api/v1/visual-identities"
++UNSUPPORTED = "visual_identity_metadata_backend_unsupported"
++
++
++@dataclass
++class Route:
++    """Actual router and selected database; only external request context is replaced."""
++
++    app: FastAPI
++    client: TestClient
++    db: CharactersRAGDB
++    backend_name: str
++    character_id: int
++    persona_id: str
++
++    def resolve(self, **params):
++        """Issue an ordinary optional lookup unless a test supplies override fields."""
++        return self.client.get(
++            f"{PREFIX}/bindings/resolve",
++            params={"actor_kind": "character", "actor_id": self.character_id, **params},
++        )
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def route(request, tmp_path: Path) -> Iterator[Route]:
++    backend = (
++        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++        if request.param == "postgres"
++        else None
++    )
++    db = CharactersRAGDB(tmp_path / "visual.db", client_id="2", backend=backend)
++    character = db.add_character_card({"name": "Owned optional visual actor"})
++    assert character is not None
++    persona = db.create_persona_profile({"name": "Owned persona", "user_id": "2"})
++    app = FastAPI()
++    app.include_router(api.router, prefix=PREFIX)
++    app.dependency_overrides[api.get_request_user] = lambda: User(
++        id=2, username="visual-fixture-owner", roles=["user"], permissions=[]
++    )
++    app.dependency_overrides[api.get_chacha_db_for_user] = lambda: db
++    app.dependency_overrides[api._job_manager] = lambda: object()
++    app.dependency_overrides[api._READ_LIMIT.dependency] = lambda: None
++    app.dependency_overrides[api._WRITE_LIMIT.dependency] = lambda: None
++    try:
++        with TestClient(app, raise_server_exceptions=False) as client:
++            yield Route(app, client, db, request.param, character, persona)
++    finally:
++        db.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("actor_kind", ["character", "persona"])
++@pytest.mark.parametrize("expression,normalized", [("neutral", "neutral"), ("thoughtful", "thinking")])
++def test_owned_optional_resolution_returns_explicit_no_asset(route, actor_kind, expression, normalized):
++    actor_id = route.character_id if actor_kind == "character" else route.persona_id
++    response = route.resolve(
++        actor_kind=actor_kind,
++        actor_id=actor_id,
++        expression_key=expression,
++        role_id="narrator",
++        role_label="Narrator",
++    )
++    assert response.status_code == 200, response.text
++    payload = response.json()
++    assert payload["actor_id"] == actor_id
++    assert payload["requested_expression_key"] == normalized
++    assert payload["role_id"] == "narrator"
++    assert payload["role_label"] == "Narrator"
++    assert payload["fallback_reason"] == (
++        "metadata_backend_unsupported" if route.backend_name == "postgres" else "placeholder"
++    )
++    assert payload["resolution_source"] == "placeholder"
++    assert all(
++        payload[key] is None
++        for key in (
++            "pack_id",
++            "pack_version_id",
++            "asset_id",
++            "asset_url",
++            "storage_relpath",
++            "preview_url",
++        )
++    )
++
++
++def test_capabilities_report_selected_backend_without_changing_formats(route):
++    response = route.client.get(f"{PREFIX}/capabilities")
++    assert response.status_code == 200
++    payload = response.json()
++    assert payload["metadata_supported"] is (route.backend_name == "sqlite")
++    assert payload["metadata_unavailable_reason"] == (UNSUPPORTED if route.backend_name == "postgres" else None)
++    assert {"image/gif", "image/jpeg", "image/png", "image/webp"} <= set(payload["supported_mime_types"])
++    assert payload["upload_max_bytes"] > 0
++    assert payload["archive_max_bytes"] > 0
++
++
++@pytest.mark.parametrize("actor_kind", ["character", "persona"])
++def test_missing_actor_is_not_hidden_by_optional_fallback(route, actor_kind):
++    response = route.resolve(actor_kind=actor_kind, actor_id="999999")
++    assert response.status_code == 404
++    assert response.json()["detail"] == f"visual_identity_{actor_kind}_not_found"
++
++
++@pytest.mark.parametrize("actor_kind", ["character", "persona"])
++def test_deleted_actor_is_not_hidden_by_optional_fallback(route, actor_kind):
++    if actor_kind == "character":
++        actor_id = route.character_id
++        assert route.db.soft_delete_character_card(actor_id, expected_version=1)
++    else:
++        actor_id = route.persona_id
++        assert route.db.soft_delete_persona_profile(persona_id=actor_id, user_id="2", expected_version=1)
++    response = route.resolve(actor_kind=actor_kind, actor_id=actor_id)
++    assert response.status_code == 404
++    assert response.json()["detail"] == f"visual_identity_{actor_kind}_not_found"
++
++
++def test_foreign_persona_is_not_hidden_by_optional_fallback(route):
++    actor_id = route.db.create_persona_profile({"name": "Foreign persona", "user_id": "3"})
++    response = route.resolve(actor_kind="persona", actor_id=actor_id)
++    assert response.status_code == 404
++    assert response.json()["detail"] == "visual_identity_persona_not_found"
++
++
++def test_character_owner_filter_preserves_backend_contract(route, tmp_path):
++    other = CharactersRAGDB(
++        route.db.db_path if route.backend_name == "sqlite" else tmp_path / "other.db",
++        client_id="3",
++        backend=route.db.backend if route.backend_name == "postgres" else None,
++    )
++    try:
++        actor_id = other.add_character_card({"name": "Other client actor"})
++    finally:
++        # The route fixture owns the shared backend pool; release only this checkout.
++        other.close_connection()
++    response = route.resolve(actor_id=actor_id)
++    # SQLite client IDs are sync devices within one user's file; PG shares owner-scoped rows.
++    assert response.status_code == (404 if route.backend_name == "postgres" else 200)
++
++
++@pytest.mark.parametrize(
++    "params",
++    [
++        {"expression_key": "!!!"},
++        {"actor_kind": "invalid"},
++        {"override_pack_id": 0},
++    ],
++)
++def test_invalid_query_remains_validation_failure(route, params):
++    assert route.resolve(**params).status_code == 422
++
++
++@pytest.mark.parametrize(
++    "params",
++    [
++        {"override_pack_id": 999999},
++        {"override_pack_version_id": 999999, "allow_override_fallback": "true"},
++    ],
++)
++def test_explicit_override_never_becomes_ordinary_placeholder(route, params):
++    response = route.resolve(**params)
++    assert response.status_code == (501 if route.backend_name == "postgres" else 404)
++    assert response.json()["detail"] == (UNSUPPORTED if route.backend_name == "postgres" else "pack_not_found")
++
++
++@pytest.mark.parametrize("method", ["get", "post"])
++def test_metadata_authoring_stays_explicitly_unsupported(route, method):
++    response = getattr(route.client, method)(
++        f"{PREFIX}/packs", **({"json": {"title": "Expressions"}} if method == "post" else {})
++    )
++    if route.backend_name == "postgres":
++        assert response.status_code == 501
++        assert response.json()["detail"] == UNSUPPORTED
++    else:
++        assert response.status_code == (201 if method == "post" else 200)
++        if method == "post":
++            assert response.json()["title"] == "Expressions"
++
++
++@pytest.mark.parametrize("dependency,code", [(api.get_request_user, 401), (api._READ_LIMIT.dependency, 429)])
++def test_auth_and_rate_failures_are_not_optional_success(route, dependency, code):
++    def deny():
++        raise HTTPException(status_code=code, detail="request_denied")
++
++    route.app.dependency_overrides[dependency] = deny
++    response = route.resolve()
++    assert response.status_code == code
++    assert response.json()["detail"] == "request_denied"
++
++
++def test_real_lookup_database_failure_is_not_a_no_asset_result(route, monkeypatch):
++    failures = []
++
++    def broken_lookup(_actor_id):
++        try:
++            return route.db.execute_query(
++                "SELECT * FROM visual_identity_missing_fixture_relation",
++                read_only=True,
++            ).fetchone()
++        except Exception as exc:
++            failures.append(type(exc).__name__)
++            raise
++
++    monkeypatch.setattr(route.db, "get_character_card_by_id", broken_lookup)
++    response = route.resolve()
++    assert response.status_code == 500
++    assert len(failures) == 1  # The real lookup failed; an early repository failure cannot satisfy this.
++
++
++def test_direct_repository_support_guard_is_preserved(route):
++    if route.backend_name == "postgres":
++        with pytest.raises(NotImplementedError, match="SQLite ChaChaNotes"):
++            VisualIdentityRepository(route.db)
++    else:
++        assert isinstance(VisualIdentityRepository(route.db), VisualIdentityRepository)
+--- /dev/null
++++ b/apps/packages/ui/src/hooks/__tests__/useVisualIdentityResolver.backend-support.test.tsx
+@@ -0,0 +1,141 @@
++import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import type { VisualIdentityResolveResponse } from "@/types/visual-identities";
++import {
++  clearVisualIdentityResolverCaches,
++  useVisualIdentityResolver,
++} from "../useVisualIdentityResolver";
++
++const unavailable: VisualIdentityResolveResponse = {
++  actor_kind: "character",
++  actor_id: 42,
++  pack_id: null,
++  pack_version_id: null,
++  expression_key: null,
++  requested_expression_key: "neutral",
++  asset_id: null,
++  storage_relpath: null,
++  fallback_reason: "metadata_backend_unsupported",
++  is_animated: false,
++  content_type: null,
++  asset_url: null,
++  preview_url: null,
++  role_id: null,
++  role_label: null,
++  resolution_source: "placeholder",
++};
++
++const options = { actorKind: "character" as const, actorId: 42 };
++
++// These are compatibility controls for the unchanged real hook, not a frontend fix.
++describe("optional unsupported visual metadata", () => {
++  beforeEach(clearVisualIdentityResolverCaches);
++  afterEach(cleanup);
++
++  it("coalesces and caches a successful unavailable result without an asset or error", async () => {
++    let finish!: (value: VisualIdentityResolveResponse) => void;
++    const client = {
++      resolveVisualIdentityBinding: vi.fn(
++        () =>
++          new Promise<VisualIdentityResolveResponse>((resolve) => {
++            finish = resolve;
++          }),
++      ),
++    };
++    const first = renderHook(() =>
++      useVisualIdentityResolver({ ...options, client }),
++    );
++    const second = renderHook(() =>
++      useVisualIdentityResolver({ ...options, client }),
++    );
++    expect(first.result.current.isLoading).toBe(true);
++    expect(second.result.current.isLoading).toBe(true);
++    await act(async () => {
++      finish(unavailable);
++    });
++    for (const hook of [first, second]) {
++      expect(hook.result.current.resolution?.fallback_reason).toBe(
++        "metadata_backend_unsupported",
++      );
++      expect(hook.result.current.resolution?.asset_url).toBeNull();
++      expect(hook.result.current.error).toBeNull();
++      expect(hook.result.current.isLoading).toBe(false);
++      hook.unmount();
++    }
++    const remounted = renderHook(() =>
++      useVisualIdentityResolver({ ...options, client }),
++    );
++    expect(remounted.result.current.resolution?.fallback_reason).toBe(
++      "metadata_backend_unsupported",
++    );
++    expect(client.resolveVisualIdentityBinding).toHaveBeenCalledTimes(1);
++  });
++
++  it("explicit refresh replaces an unavailable cached result after support changes", async () => {
++    const client = {
++      resolveVisualIdentityBinding: vi
++        .fn()
++        .mockResolvedValueOnce(unavailable)
++        .mockResolvedValueOnce({
++          ...unavailable,
++          pack_id: 7,
++          pack_version_id: 8,
++          asset_id: 9,
++          asset_url: "/api/v1/visual-identities/packs/7/assets/9/content",
++          expression_key: "neutral",
++          storage_relpath: "fixture/neutral.png",
++          content_type: "image/png",
++          fallback_reason: null,
++          resolution_source: "binding",
++        }),
++    };
++    const { result } = renderHook(() =>
++      useVisualIdentityResolver({ ...options, client }),
++    );
++    await waitFor(() =>
++      expect(result.current.resolution?.fallback_reason).toBe(
++        "metadata_backend_unsupported",
++      ),
++    );
++    act(() => result.current.refresh());
++    await waitFor(() => expect(result.current.resolution?.asset_id).toBe(9));
++    expect(result.current.resolution?.asset_url).toBe(
++      "/api/v1/visual-identities/packs/7/assets/9/content",
++    );
++    expect(result.current.error).toBeNull();
++    expect(client.resolveVisualIdentityBinding).toHaveBeenCalledTimes(2);
++  });
++
++  it.each([401, 500])(
++    "keeps a real HTTP%s failure visible and permits a fresh request",
++    async (status) => {
++      const error = Object.assign(new Error("Resolution request failed"), {
++        status,
++      });
++      const client = {
++        resolveVisualIdentityBinding: vi
++          .fn()
++          .mockRejectedValueOnce(error)
++          .mockResolvedValueOnce(unavailable),
++      };
++      const first = renderHook(() =>
++        useVisualIdentityResolver({ ...options, client }),
++      );
++      await waitFor(() => expect(first.result.current.error).toBe(error));
++      expect(first.result.current.resolution).toBeNull();
++      expect(first.result.current.isLoading).toBe(false);
++      first.unmount();
++      const second = renderHook(() =>
++        useVisualIdentityResolver({ ...options, client }),
++      );
++      await waitFor(() =>
++        expect(second.result.current.resolution?.fallback_reason).toBe(
++          "metadata_backend_unsupported",
++        ),
++      );
++      expect(second.result.current.error).toBeNull();
++      expect(client.resolveVisualIdentityBinding).toHaveBeenCalledTimes(2);
++    },
++  );
++});

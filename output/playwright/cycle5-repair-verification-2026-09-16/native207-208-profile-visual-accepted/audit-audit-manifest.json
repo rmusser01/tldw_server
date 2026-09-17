@@ -1,0 +1,26 @@
+{
+  "ACCEPTANCE207-208.md": {
+    "bytes": 5435,
+    "sha256": "ecd61919fd4f627d9d5d518a46a26646c6a3c930f79262a82346ae42e3ebc23d"
+  },
+  "audit_inputs.py": {
+    "bytes": 5297,
+    "sha256": "bbc4eef53666ecd30236bc2ad67cc7a44e7d71497236fc3d39f4622496972c21"
+  },
+  "input-manifest.json": {
+    "bytes": 3737,
+    "sha256": "3c2c0a13b1e74c64a9e59377bf5ad0054d0d8eedb864cd10beed29569e32aa8a"
+  },
+  "task13260.145.txt": {
+    "bytes": 2444,
+    "sha256": "46746a86997a6e40a8344f15f47db23e62398d3b83b373930c81f95e276db04e"
+  },
+  "task13260.146.txt": {
+    "bytes": 2910,
+    "sha256": "b47ff59827ca84590d40c1b0c5d027a9f1f95004be0821b0bd5ab4a36627b764"
+  },
+  "verified-facts.json": {
+    "bytes": 11790,
+    "sha256": "e726a7581b1479719af59ddf0879326f671e17a20e6d2a1e68431b5c12bd2ddc"
+  }
+}

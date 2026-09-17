@@ -1,0 +1,32 @@
+[
+  {
+    "path": "tldw_Server_API/app/api/v1/endpoints/visual_identities.py",
+    "sha256": "745a1897db4004ed457e6d036110f28614292131ce3a972bc4ad05b45c649664",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/tldw_Server_API/app/api/v1/endpoints/visual_identities.py"
+  },
+  {
+    "path": "tldw_Server_API/app/core/Visual_Identities/service.py",
+    "sha256": "463e4d68bf2f742572c51ec59e701cb8122b50062a18c738728b44c3b051e05a",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/tldw_Server_API/app/core/Visual_Identities/service.py"
+  },
+  {
+    "path": "tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py",
+    "sha256": "a14ec5cbe305d9045d6a1498badcff72a4b9a79994758fe4af1c1cdcdc52780b",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/tldw_Server_API/app/api/v1/schemas/visual_identity_schemas.py"
+  },
+  {
+    "path": "apps/packages/ui/src/types/visual-identities.ts",
+    "sha256": "fe8fd9f8490e0805fc66a7ee63950b025e8c7c10bf64125364eff212ccf15671",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/apps/packages/ui/src/types/visual-identities.ts"
+  },
+  {
+    "path": "tldw_Server_API/tests/Visual_Identities/test_visual_identity_backend_support.py",
+    "sha256": "793f823af8f488dde4c29b4ea8b320febf236c82d7c4d5826f8800b306b454f9",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/tldw_Server_API/tests/Visual_Identities/test_visual_identity_backend_support.py"
+  },
+  {
+    "path": "apps/packages/ui/src/hooks/__tests__/useVisualIdentityResolver.backend-support.test.tsx",
+    "sha256": "78df85814015be78718e98eeb84f7717f1e8c9128c54f868ee2b932b06b0325b",
+    "snapshot": ".tmp/uat208-repair-20260917/review-snapshot/apps/packages/ui/src/hooks/__tests__/useVisualIdentityResolver.backend-support.test.tsx"
+  }
+]

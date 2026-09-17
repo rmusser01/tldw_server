@@ -1,0 +1,33 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.112 - Initialize-character-world-books-through-PostgreSQL-compatible-transactions.md
+
+Task TASK-13260.112 - Initialize character world books through PostgreSQL compatible transactions
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-16 23:13
+Updated: 2026-09-16 23:28
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT-176: Required PostgreSQL actual character-create router regression advances past repaired173 quota count and returns500: Failed to initialize world book tables: BackendConnectionWrapper object does not support context manager protocol. Both global and workspace creation fail. Preserve real worldbook initialization in tests; do not mock it away.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Actual PostgreSQL global and workspace character creation initializes world books successfully; SQLite and nested/rollback controls remain valid.
+- [x] #2 Repair uses supported DB transaction ownership with minimal scope; required tests execute without PostgreSQL skips, independent review, lint and Bandit pass.
+- [ ] #3 Native PostgreSQL character creation and subsequent original Retry acceptance advance through the repaired initialization; evidence retained.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Independent combined173/176 suite22 pass0skip; supported transaction context and no premature commit reviewed. Author existing world-book94 pass. No new lint/Bandit findings. Retained followup176. Native character creation/Retry remains pending.

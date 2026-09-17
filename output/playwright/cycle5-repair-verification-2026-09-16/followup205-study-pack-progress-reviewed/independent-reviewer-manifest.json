@@ -1,0 +1,141 @@
+{
+  "source": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/StudyPackCreateDrawer.tsx",
+      "sha256": "90b8e5a09e095c5d1c9e0ed4a73dc09362f89b34b66b163502d1877716dd85d4",
+      "snapshot": ".tmp/uat205-repair-20260917/review-snapshot/StudyPackCreateDrawer.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "2ddab94fd3260dc5b3f0de4cd72c643148cc78caee47ce27bd37dcf4a40c832f",
+      "snapshot": ".tmp/uat205-repair-20260917/review-snapshot/option.json"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx",
+      "sha256": "ec1edff0ef4bc4f7ca35df30886b561decda3fe5a76bf2764fab6b66426e673a",
+      "snapshot": ".tmp/uat205-repair-20260917/review-snapshot/StudyPackCreateDrawer.pending-job.test.tsx"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".tmp/uat205-independent-20260917/REVIEW205-initial.md",
+      "sha256": "8b7640f6e0cd8afff990ab696740cb68b44f08ceedbb8c456c2c853969723724"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/REVIEW205.md",
+      "sha256": "bfbe09c58fd0c8e799862028626975ce32d767e34353a52a676d5ad0988b6d09"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/bandit.json",
+      "sha256": "23ba131d7bd751ffc2f05c293c5bc3273af68f49b0b4f8296ad46dad8310a5fe"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/bandit.log",
+      "sha256": "1669bc5a989fef13cc0b58b76a8ce3a4c834d872f58f898f9aea29024da3e7d1"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/baseline-red.log",
+      "sha256": "c3c1ee268be7350d7f1f41e3698225e65f75649bd7426d24b8f157c089d5df1a"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/completed-missing-result-green.log",
+      "sha256": "dea43998f1250fb2117d8e6cb02489baf55c1bd3038fa1247a7423502de0cac2"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/completed-missing-result-red.log",
+      "sha256": "57247f7043b27091104dd09d0760ce44fa743bcd427b1df9f293366ee2fe60f0"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/completed-missing-result.final-probe.txt",
+      "sha256": "43ace91e6005fdfe9f12a710195c9bde3c4a1e0c94e81596710305a591076fed"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/completed-missing-result.probe.txt",
+      "sha256": "96f33fddb0488ea88c07a2aaf0d624d6be6b65d697e5f5e0dcacbd22edbd01c8"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/eslint.json",
+      "sha256": "c1b5d90dec6ced18adcc1c1e260cd12d2f05abc51ab959ebf45c6095029e5127"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/eslint.stderr",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-bandit.json",
+      "sha256": "bd14e7a91ef03a308ebbc5f8550900d254644ebeed4b48fff25f557705b1dc9b"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-bandit.log",
+      "sha256": "07c6ff1f311778e1b868f28d73eb8a415bf2269704488699606e6323247d89f4"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-eslint.json",
+      "sha256": "c1b5d90dec6ced18adcc1c1e260cd12d2f05abc51ab959ebf45c6095029e5127"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-eslint.stderr",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-focused.log",
+      "sha256": "db7f0ec59c190bc53750e3d68512698929baef797a1c94b4c9f3a534956af05f"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-probe.config.ts",
+      "sha256": "2ce31430e3f0603f266524db42658fbdeee0fe78e5a33f7d08c6b71a904a827a"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-tsc-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/final-verification.json",
+      "sha256": "ca854c7edd42433a90348a9112020b7cc50d9b0ae5340b4d6f5fe5a352b37b1c"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/focused.log",
+      "sha256": "61492d3e0f00d1e8cc09f999e5d42d302ddb8ab9d02a22b24561dd1c84dc7916"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-artifact-manifest.json",
+      "sha256": "83aaedf1d7462b21a30ac7d15065cf8915f8969d60efb3c78bfce867ca575de0"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-author-manifest.json",
+      "sha256": "d69d0b9a97821c3928e5e1b07494121dc28ba2cdd5459f0d9780025f7c2060b3"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-command-path-error.log",
+      "sha256": "37250bc20a53ef3f3c38490a96a864c0832f309a1f52cc3f934356d00f0b79ab"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-commands.json",
+      "sha256": "ac9a1b38511324126e6d28e4df0c2620d06ae3e518fc94fa7cc592f61dbc85d9"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-review-snapshot/StudyPackCreateDrawer.pending-job.test.tsx",
+      "sha256": "64b49bab151ff3fefacd82bc6c606fde9c3ee86537ba5bc95ac14cb2e9dc3a9e"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-review-snapshot/StudyPackCreateDrawer.tsx",
+      "sha256": "4e54b3feca9399913885470b27e5db9ef8d210552c32149c1b59085bc5c3775f"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/initial-review-snapshot/option.json",
+      "sha256": "26da042bc1d5a39f0942a6c327022d2b0b5e2f5f45cfe2ee81b67b9ff413fce0"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/probe.config.ts",
+      "sha256": "2dd9783d3aca9fd2abd81150716ffe751a9adf314e5d87a4c2caa0016e347756"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/tsc-current.log",
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e"
+    },
+    {
+      "path": ".tmp/uat205-independent-20260917/verification-provisional.json",
+      "sha256": "7de8f9bc5c4ce6d0a198d8bb0d3f3ce9a1c42b1d6a021602bd674a2cf08f083c"
+    }
+  ]
+}

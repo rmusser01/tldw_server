@@ -1,0 +1,94 @@
+{
+  "captured_at": "2026-09-17T07:32:57.541393+00:00",
+  "scope": "15 explicit safe native inputs plus two official read-only task snapshots",
+  "normalization": "none; original bytes hashed; native inputs not copied or changed",
+  "inputs": [
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-account-switch-reviewed-events.txt",
+      "bytes": 68461,
+      "sha256": "dcf17e91a3654f968bcd2980b953527e6733d9f7381e991041af26bb381238e0"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-characters-open.txt",
+      "bytes": 1267,
+      "sha256": "1955989fcc8f0e90ba3a0bfbb2619b89ee82c3b3832aa323929747ffbf427ef8"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-characters-settled.txt",
+      "bytes": 9121,
+      "sha256": "8c99ea3a2a95a8fb1c10fa23d71a5f7034405bd4cd313f985e6c951af5a13704"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-open.txt",
+      "bytes": 15734,
+      "sha256": "1b37de6143bb927f4610973d36a664ee4eb603e0b5155808aadbcd33836cf07b"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-settled.txt",
+      "bytes": 15566,
+      "sha256": "43005091d8b1ac2e55bbf14e017026225c7c7041b8fe1a61826f997ba987148b"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-events.txt",
+      "bytes": 76721,
+      "sha256": "36e337b1aa847da52f638de459cc2edfcd71afd43b757b3a2ccd14b259934342"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload.txt",
+      "bytes": 1554,
+      "sha256": "691fe9287eae0d21fe261137adb204c74f1a7207c11d16feaa2a807c1e0d6a4e"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload-settled.txt",
+      "bytes": 15563,
+      "sha256": "8c8de10a63ff6f3fab312ab02d3f391248ea6414c643fbea00b0982c2530a085"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload-events.txt",
+      "bytes": 86514,
+      "sha256": "7ea6b4f49a74c4996713a737e390e4b372e48ffc1918b084b3c1e5378cf21088"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry.txt",
+      "bytes": 17981,
+      "sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-settled.txt",
+      "bytes": 18079,
+      "sha256": "3262042ee1dd5deb9cea877d9034a1aa3a93cc39d4dfc1510a7c6c55127b8f0f"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-events.txt",
+      "bytes": 46929,
+      "sha256": "3524808821a67076329fcae57bc8ef9d1b9c619fe359892a05cbb1b7f3a00f19"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload.txt",
+      "bytes": 1644,
+      "sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-settled.txt",
+      "bytes": 17735,
+      "sha256": "2fe8fabbec301aaef5f28b0cec1ca3fc5f7586bb4ec8c68fb7e5d800821a9dbf"
+    },
+    {
+      "path": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-events.txt",
+      "bytes": 58233,
+      "sha256": "2deda95a09613484b8e8fc61ea4f8a422a89119f5415b6530d95db1764bb6e29"
+    }
+  ],
+  "task_snapshots": [
+    {
+      "path": ".tmp/uat207-208-native-audit-20260917/task13260.145.txt",
+      "bytes": 2444,
+      "sha256": "46746a86997a6e40a8344f15f47db23e62398d3b83b373930c81f95e276db04e"
+    },
+    {
+      "path": ".tmp/uat207-208-native-audit-20260917/task13260.146.txt",
+      "bytes": 2910,
+      "sha256": "b47ff59827ca84590d40c1b0c5d027a9f1f95004be0821b0bd5ab4a36627b764"
+    }
+  ]
+}

@@ -1,0 +1,897 @@
+{
+  "reviewed_at": "2026-09-17T06:47:26.562335+00:00",
+  "capture_at": "2026-09-17T06:37:47.358Z",
+  "event_count": 557,
+  "disposable_uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+  "original_uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+  "rating_due_seconds": 600.0,
+  "only_rating_request_targets_disposable": true,
+  "selected_events": [
+    {
+      "event": "response",
+      "at": "2026-09-17T06:26:11.856Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards?deck_id=1&tag=uat180-disposable-20260917&due_status=all&include_workspace_items=false&include_scheduler_preview=true&limit=200&offset=0&order_by=due_at",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+            "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"uat180-disposable-20260917\"]",
+            "tags": [
+              "uat180-disposable-20260917"
+            ],
+            "source_ref_type": "manual",
+            "source_ref_id": null,
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": "2026-09-17T02:15:22.390000+00:00",
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T01:00:22.338000+00:00",
+            "last_modified": "2026-09-17T02:15:22.390000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 4,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": "sm2_plus",
+            "next_intervals": {
+              "again": "1 min",
+              "hard": "6 min",
+              "good": "10 min",
+              "easy": "4 days"
+            }
+          }
+        ],
+        "count": 1,
+        "total": 1,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 200,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:26:35.042Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/review",
+      "method": "POST",
+      "body": {
+        "card_uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+        "rating": 3,
+        "answer_time_ms": 9966,
+        "review_context": {
+          "review_mode": "cram",
+          "deck_id": 1,
+          "tag_filter": "uat180-disposable-20260917"
+        }
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:26:35.084Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/review",
+      "status": 200,
+      "body": {
+        "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 1,
+        "lapses": 0,
+        "due_at": "2026-09-17T06:36:35.074000+00:00",
+        "last_reviewed_at": "2026-09-17T06:26:35.074000+00:00",
+        "last_modified": "2026-09-17T06:26:35.074000+00:00",
+        "version": 5,
+        "scheduler_type": "sm2_plus",
+        "queue_state": "learning",
+        "step_index": 1,
+        "suspended_reason": null,
+        "next_intervals": {
+          "again": "1 min",
+          "hard": "15 min",
+          "good": "1 day",
+          "easy": "4 days"
+        },
+        "review_session_id": 3
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:26:35.441Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/review-sessions/end",
+      "status": 200,
+      "body": {
+        "id": 3,
+        "deck_id": 1,
+        "deck_name_snapshot": "Alice UAT151 Citrine Deck",
+        "review_mode": "cram",
+        "tag_filter": "uat180-disposable-20260917",
+        "scope_key": "cram:deck:1:tag:uat180-disposable-20260917",
+        "status": "completed",
+        "started_at": "2026-09-17T06:26:35.075000+00:00",
+        "last_activity_at": "2026-09-17T06:26:35.422000+00:00",
+        "completed_at": "2026-09-17T06:26:35.422000+00:00",
+        "cards_reviewed": 1,
+        "client_id": "2"
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:29:34.829Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21",
+      "method": "PATCH",
+      "body": {
+        "deck_id": 1,
+        "model_type": "basic",
+        "tags": [
+          "uat192-replaced-20260917"
+        ],
+        "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+        "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+        "expected_version": 5,
+        "reverse": false,
+        "is_cloze": false
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:29:34.878Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21",
+      "status": 200,
+      "body": {
+        "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+        "deck_id": 1,
+        "deck_name": "Alice UAT151 Citrine Deck",
+        "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+        "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": "[\"uat192-replaced-20260917\"]",
+        "tags": [
+          "uat192-replaced-20260917"
+        ],
+        "source_ref_type": "manual",
+        "source_ref_id": null,
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 1,
+        "lapses": 0,
+        "due_at": "2026-09-17T06:36:35.074000+00:00",
+        "last_reviewed_at": "2026-09-17T06:26:35.074000+00:00",
+        "queue_state": "learning",
+        "step_index": 1,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T01:00:22.338000+00:00",
+        "last_modified": "2026-09-17T06:29:34.865000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 6,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": "sm2_plus",
+        "next_intervals": null
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:31:04.589Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards?due_status=all&include_workspace_items=false&limit=20&offset=0&order_by=due_at",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "When do Citrine study volunteers meet?",
+            "back": "Citrine study volunteers meet every Tuesday at 14:00.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 1,
+            "lapses": 0,
+            "due_at": "2026-09-17T01:01:18.308000+00:00",
+            "last_reviewed_at": "2026-09-17T00:51:18.308000+00:00",
+            "queue_state": "learning",
+            "step_index": 1,
+            "suspended_reason": null,
+            "created_at": "2026-09-16T23:18:59.592000+00:00",
+            "last_modified": "2026-09-17T00:51:18.308000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 2,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+            "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"uat192-replaced-20260917\"]",
+            "tags": [
+              "uat192-replaced-20260917"
+            ],
+            "source_ref_type": "manual",
+            "source_ref_id": null,
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 1,
+            "lapses": 0,
+            "due_at": "2026-09-17T06:36:35.074000+00:00",
+            "last_reviewed_at": "2026-09-17T06:26:35.074000+00:00",
+            "queue_state": "learning",
+            "step_index": 1,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T01:00:22.338000+00:00",
+            "last_modified": "2026-09-17T06:29:34.865000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 6,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "bfc3be29-fce9-439e-ad56-26e3fbecc30e",
+            "deck_id": 6,
+            "deck_name": "Alice UAT196 concise recovery 20260917",
+            "front": "What color is the Citrine study marker?",
+            "back": "The Citrine study marker is amber.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T04:09:50.978000+00:00",
+            "last_modified": "2026-09-17T04:09:50.978000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "b59f0819-47a7-4284-b78e-7805015430b0",
+            "deck_id": 4,
+            "deck_name": "Alice UAT167 recovery 20260917",
+            "front": "What color is the Citrine study marker?",
+            "back": "The Citrine study marker is amber.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T03:50:18.827000+00:00",
+            "last_modified": "2026-09-17T03:50:18.827000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "5ad3f8eb-e106-4c73-bc29-1d16431a6a63",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "What color is the Citrine study marker and when do its volunteers meet?",
+            "back": "The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[]",
+            "tags": [],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T03:31:53.012000+00:00",
+            "last_modified": "2026-09-17T03:31:53.012000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          }
+        ],
+        "count": 5,
+        "total": 5,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 20,
+          "offset": 0,
+          "total": 5,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:34:29.825Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards?deck_id=1&tag=uat180-disposable-20260917&due_status=all&include_workspace_items=false&include_scheduler_preview=true&limit=200&offset=0&order_by=due_at",
+      "status": 200,
+      "body": {
+        "items": [],
+        "count": 0,
+        "total": 0,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 200,
+          "offset": 0,
+          "total": 0,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:35:12.392Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards?deck_id=1&tag=uat192-replaced-20260917&due_status=all&include_workspace_items=false&include_scheduler_preview=true&limit=200&offset=0&order_by=due_at",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+            "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"uat192-replaced-20260917\"]",
+            "tags": [
+              "uat192-replaced-20260917"
+            ],
+            "source_ref_type": "manual",
+            "source_ref_id": null,
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 1,
+            "lapses": 0,
+            "due_at": "2026-09-17T06:36:35.074000+00:00",
+            "last_reviewed_at": "2026-09-17T06:26:35.074000+00:00",
+            "queue_state": "learning",
+            "step_index": 1,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T01:00:22.338000+00:00",
+            "last_modified": "2026-09-17T06:29:34.865000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 6,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": "sm2_plus",
+            "next_intervals": {
+              "again": "1 min",
+              "hard": "15 min",
+              "good": "1 day",
+              "easy": "4 days"
+            }
+          }
+        ],
+        "count": 1,
+        "total": 1,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 200,
+          "offset": 0,
+          "total": 1,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    },
+    {
+      "event": "request",
+      "at": "2026-09-17T06:36:05.242Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21?expected_version=6",
+      "method": "DELETE",
+      "body": null
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:36:05.275Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21?expected_version=6",
+      "status": 200,
+      "body": {
+        "deleted": true
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:37:46.172Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards?due_status=all&include_workspace_items=false&limit=20&offset=0&order_by=due_at",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "When do Citrine study volunteers meet?",
+            "back": "Citrine study volunteers meet every Tuesday at 14:00.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 1,
+            "lapses": 0,
+            "due_at": "2026-09-17T01:01:18.308000+00:00",
+            "last_reviewed_at": "2026-09-17T00:51:18.308000+00:00",
+            "queue_state": "learning",
+            "step_index": 1,
+            "suspended_reason": null,
+            "created_at": "2026-09-16T23:18:59.592000+00:00",
+            "last_modified": "2026-09-17T00:51:18.308000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 2,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "bfc3be29-fce9-439e-ad56-26e3fbecc30e",
+            "deck_id": 6,
+            "deck_name": "Alice UAT196 concise recovery 20260917",
+            "front": "What color is the Citrine study marker?",
+            "back": "The Citrine study marker is amber.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T04:09:50.978000+00:00",
+            "last_modified": "2026-09-17T04:09:50.978000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "b59f0819-47a7-4284-b78e-7805015430b0",
+            "deck_id": 4,
+            "deck_name": "Alice UAT167 recovery 20260917",
+            "front": "What color is the Citrine study marker?",
+            "back": "The Citrine study marker is amber.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[\"Citrine study\"]",
+            "tags": [
+              "Citrine study"
+            ],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T03:50:18.827000+00:00",
+            "last_modified": "2026-09-17T03:50:18.827000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          },
+          {
+            "uuid": "5ad3f8eb-e106-4c73-bc29-1d16431a6a63",
+            "deck_id": 1,
+            "deck_name": "Alice UAT151 Citrine Deck",
+            "front": "What color is the Citrine study marker and when do its volunteers meet?",
+            "back": "The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+            "notes": null,
+            "extra": null,
+            "is_cloze": false,
+            "tags_json": "[]",
+            "tags": [],
+            "source_ref_type": "note",
+            "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+            "conversation_id": null,
+            "message_id": null,
+            "ef": 2.5,
+            "interval_days": 0,
+            "repetitions": 0,
+            "lapses": 0,
+            "due_at": null,
+            "last_reviewed_at": null,
+            "queue_state": "new",
+            "step_index": null,
+            "suspended_reason": null,
+            "created_at": "2026-09-17T03:31:53.012000+00:00",
+            "last_modified": "2026-09-17T03:31:53.012000+00:00",
+            "deleted": false,
+            "client_id": "2",
+            "version": 1,
+            "model_type": "basic",
+            "reverse": false,
+            "scheduler_type": null,
+            "next_intervals": null
+          }
+        ],
+        "count": 4,
+        "total": 4,
+        "has_more": false,
+        "next_offset": null,
+        "pagination": {
+          "mode": "offset",
+          "limit": 20,
+          "offset": 0,
+          "total": 4,
+          "has_more": false,
+          "next_offset": null
+        }
+      }
+    }
+  ],
+  "earlier_reset_events": [
+    {
+      "event": "request",
+      "at": "2026-09-17T02:15:22.373Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21/reset-scheduling",
+      "method": "POST",
+      "body": {
+        "expected_version": 3
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T02:15:22.448Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21/reset-scheduling",
+      "status": 200,
+      "body": {
+        "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+        "deck_id": 1,
+        "deck_name": "Alice UAT151 Citrine Deck",
+        "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+        "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+        "notes": null,
+        "extra": null,
+        "is_cloze": false,
+        "tags_json": "[\"uat180-disposable-20260917\"]",
+        "tags": [
+          "uat180-disposable-20260917"
+        ],
+        "source_ref_type": "manual",
+        "source_ref_id": null,
+        "conversation_id": null,
+        "message_id": null,
+        "ef": 2.5,
+        "interval_days": 0,
+        "repetitions": 0,
+        "lapses": 0,
+        "due_at": "2026-09-17T02:15:22.390000+00:00",
+        "last_reviewed_at": null,
+        "queue_state": "new",
+        "step_index": null,
+        "suspended_reason": null,
+        "created_at": "2026-09-17T01:00:22.338000+00:00",
+        "last_modified": "2026-09-17T02:15:22.390000+00:00",
+        "deleted": false,
+        "client_id": "2",
+        "version": 4,
+        "model_type": "basic",
+        "reverse": false,
+        "scheduler_type": "sm2_plus",
+        "next_intervals": null
+      }
+    }
+  ],
+  "earlier_reset_reloaded_card": {
+    "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+    "deck_id": 1,
+    "deck_name": "Alice UAT151 Citrine Deck",
+    "front": "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917",
+    "back": "Edited disposable lifecycle check: preserve the original Citrine source card.",
+    "notes": null,
+    "extra": null,
+    "is_cloze": false,
+    "tags_json": "[\"uat180-disposable-20260917\"]",
+    "tags": [
+      "uat180-disposable-20260917"
+    ],
+    "source_ref_type": "manual",
+    "source_ref_id": null,
+    "conversation_id": null,
+    "message_id": null,
+    "ef": 2.5,
+    "interval_days": 0,
+    "repetitions": 0,
+    "lapses": 0,
+    "due_at": "2026-09-17T02:15:22.390000+00:00",
+    "last_reviewed_at": null,
+    "queue_state": "new",
+    "step_index": null,
+    "suspended_reason": null,
+    "created_at": "2026-09-17T01:00:22.338000+00:00",
+    "last_modified": "2026-09-17T02:15:22.390000+00:00",
+    "deleted": false,
+    "client_id": "2",
+    "version": 4,
+    "model_type": "basic",
+    "reverse": false,
+    "scheduler_type": null,
+    "next_intervals": null
+  },
+  "original_final_observed_card": {
+    "uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+    "deck_id": 1,
+    "deck_name": "Alice UAT151 Citrine Deck",
+    "front": "When do Citrine study volunteers meet?",
+    "back": "Citrine study volunteers meet every Tuesday at 14:00.",
+    "notes": null,
+    "extra": null,
+    "is_cloze": false,
+    "tags_json": "[\"Citrine study\"]",
+    "tags": [
+      "Citrine study"
+    ],
+    "source_ref_type": "note",
+    "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+    "conversation_id": null,
+    "message_id": null,
+    "ef": 2.5,
+    "interval_days": 0,
+    "repetitions": 1,
+    "lapses": 0,
+    "due_at": "2026-09-17T01:01:18.308000+00:00",
+    "last_reviewed_at": "2026-09-17T00:51:18.308000+00:00",
+    "queue_state": "learning",
+    "step_index": 1,
+    "suspended_reason": null,
+    "created_at": "2026-09-16T23:18:59.592000+00:00",
+    "last_modified": "2026-09-17T00:51:18.308000+00:00",
+    "deleted": false,
+    "client_id": "2",
+    "version": 2,
+    "model_type": "basic",
+    "reverse": false,
+    "scheduler_type": null,
+    "next_intervals": null
+  },
+  "non_2xx_responses": [
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:27.507Z",
+      "url": "http://127.0.0.1:18583/api/v1/persona/profiles",
+      "status": 500,
+      "body": {
+        "detail": "Failed to list persona profiles"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:27.589Z",
+      "url": "http://127.0.0.1:18583/api/v1/persona/profiles",
+      "status": 500,
+      "body": {
+        "detail": "Failed to list persona profiles"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:27.923Z",
+      "url": "http://127.0.0.1:18583/api/v1/persona/profiles",
+      "status": 500,
+      "body": {
+        "detail": "Failed to list persona profiles"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:28.184Z",
+      "url": "http://127.0.0.1:18583/api/v1/persona/profiles",
+      "status": 500,
+      "body": {
+        "detail": "Failed to list persona profiles"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:28.455Z",
+      "url": "http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=neutral",
+      "status": 500,
+      "body": {
+        "error": {
+          "code": "internal_server_error",
+          "message": "Internal server error",
+          "request_id": "b1d86b6a-8383-47cc-84d8-46962d82529c"
+        }
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:16:28.848Z",
+      "url": "http://127.0.0.1:18583/api/v1/visual-identities/bindings/resolve?actor_kind=character&actor_id=3&expression_key=thinking&mood_expression_key=thinking",
+      "status": 500,
+      "body": {
+        "error": {
+          "code": "internal_server_error",
+          "message": "Internal server error",
+          "request_id": "46cccc3e-4e89-4c01-a712-97ec6bb3b3de"
+        }
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:19:57.630Z",
+      "url": "http://127.0.0.1:18583/api/v1/characters/3",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 3 not found."
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:19:57.636Z",
+      "url": "http://127.0.0.1:18583/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=true&limit=200&offset=0",
+      "status": 403,
+      "body": {
+        "detail": "You don't have access to this chat session"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:19:57.664Z",
+      "url": "http://127.0.0.1:18583/api/v1/chats/c0d85261-ecd0-4c78-af71-47c88dab9d1d/messages?scope_type=global&include_deleted=false&include_metadata=true&include_images=true&render_placeholders=true&limit=200&offset=0",
+      "status": 403,
+      "body": {
+        "detail": "You don't have access to this chat session"
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:19:57.666Z",
+      "url": "http://127.0.0.1:18583/api/v1/characters/3",
+      "status": 404,
+      "body": {
+        "detail": "Character with ID 3 not found."
+      }
+    },
+    {
+      "event": "response",
+      "at": "2026-09-17T06:36:05.394Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/f2a61712-8d3e-45df-bfb9-0527f86cda21/assistant",
+      "status": 404,
+      "body": {
+        "detail": "Flashcard not found"
+      }
+    }
+  ],
+  "mechanical_assertions": "passed; parsing/checks of retained evidence only, no browser or backend rerun"
+}

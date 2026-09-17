@@ -1,0 +1,26 @@
+{
+  "fields": [
+    "quarantine_threshold",
+    "no_attempt_recovery_fingerprint",
+    "error_message",
+    "error_code",
+    "error_class",
+    "error_stack",
+    "last_error",
+    "quarantined_at",
+    "updated_at",
+    "completed_at"
+  ],
+  "job": {
+    "quarantine_threshold": null,
+    "no_attempt_recovery_fingerprint": null,
+    "error_message": "Failed to create study pack: PostgreSQL query execution failed",
+    "error_code": "worker_exception",
+    "error_class": "CharactersRAGDBError",
+    "error_stack": null,
+    "last_error": "worker_exception",
+    "quarantined_at": "2026-09-17 06:45:55",
+    "updated_at": "2026-09-17 06:45:55",
+    "completed_at": null
+  }
+}

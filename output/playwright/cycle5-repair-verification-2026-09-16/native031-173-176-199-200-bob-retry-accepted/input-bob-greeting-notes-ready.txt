@@ -1,0 +1,69 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Notes | tldw](http://127.0.0.1:18583/notes)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/notes
+- Page Title: Notes | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f24e11]:
+  - generic [ref=f24e14]:
+    - link "Skip to main content" [ref=f24e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f24e16]:
+      - button "Expand sidebar" [ref=f24e17] [cursor=pointer]
+      - button "New Chat" [ref=f24e21] [cursor=pointer]
+      - generic [ref=f24e24]:
+        - button "Quick Ingest" [ref=f24e25] [cursor=pointer]
+        - button "Chat" [ref=f24e29] [cursor=pointer]
+        - button "Prompts" [ref=f24e32] [cursor=pointer]
+        - button "Characters" [ref=f24e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f24e41] [cursor=pointer]
+        - button "World Books" [ref=f24e45] [cursor=pointer]
+        - button "Notes" [ref=f24e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f24e52] [cursor=pointer]
+        - button "Media" [ref=f24e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f24e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f24e69] [cursor=pointer]
+        - button "Kanban" [ref=f24e75] [cursor=pointer]
+        - button "Watchlists" [ref=f24e77] [cursor=pointer]
+      - generic [ref=f24e82]:
+        - button "Open Notes Dock" [ref=f24e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f24e88] [cursor=pointer]
+        - button "Settings" [ref=f24e91] [cursor=pointer]
+    - main [ref=f24e95]:
+      - generic [ref=f24e99]:
+        - generic [ref=f24e100]:
+          - button "Expand sidebar" [ref=f24e101] [cursor=pointer]
+          - generic [ref=f24e103]:
+            - img "tldw Assistant" [ref=f24e104]
+            - generic [ref=f24e105]: tldw Assistant
+            - button "Companion Home" [ref=f24e106] [cursor=pointer]
+            - button "Show shortcuts" [ref=f24e110] [cursor=pointer]
+        - generic [ref=f24e113]:
+          - button "Search - Open command palette" [ref=f24e114] [cursor=pointer]:
+            - generic [ref=f24e118]: Search
+            - generic [ref=f24e119]: ⌘K
+          - button "Open settings" [ref=f24e120] [cursor=pointer]
+          - generic [ref=f24e132]:
+            - button "Notifications, sign-in required" [ref=f24e133] [cursor=pointer]
+            - status [ref=f24e136]: Notifications require sign in
+          - button "Switch to light theme" [ref=f24e137] [cursor=pointer]
+          - button "Show keyboard shortcuts" [ref=f24e144] [cursor=pointer]:
+            - generic [ref=f24e145]: "?"
+  - alert [ref=f24e10]
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T06-08-41-916Z.log#L3-L4

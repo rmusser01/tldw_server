@@ -1,0 +1,10 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+    "sha256": "3d5257702ddb15b4ba887b326c5a40c3d083bb8f257753e1f77b6ccdac15f0ef"
+  },
+  {
+    "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+    "sha256": "726d55a2ee2d0a9f7916f93a5945dc21e89d0244d66e54bac9242c7772038d38"
+  }
+]

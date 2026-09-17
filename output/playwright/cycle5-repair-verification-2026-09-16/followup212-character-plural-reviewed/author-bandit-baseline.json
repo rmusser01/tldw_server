@@ -1,0 +1,101 @@
+{
+  "errors": [
+    {
+      "filename": "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/components/Option/Characters/CharacterListContent.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T06:53:41Z",
+  "metrics": {
+    "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/assets/locale/en/settings.json": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 2,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2807,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/components/Option/Characters/CharacterListContent.tsx": {
+      "loc": 1633,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx": {
+      "loc": 129,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 2,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 4569,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "2365       \"magic\": \"Magic link\",\n2366       \"password\": \"Password\"\n2367     },\n2368     \"apiKey\": {\n2369       \"label\": \"API Key\",\n2370       \"placeholder\": \"Enter your API key (or use the default demo key THIS-IS-A-SECURE-KEY-123-REPLACE-ME for local single-user setups)\"\n2371     },\n",
+      "col_offset": 6,
+      "end_col_offset": 16,
+      "filename": "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/assets/locale/en/settings.json",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'Password'",
+      "line_number": 2366,
+      "line_range": [
+        2363,
+        2364,
+        2365,
+        2366,
+        2367
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "2597       \"magic\": \"Magic link\",\n2598       \"password\": \"Password\"\n2599     },\n2600     \"magicLink\": {\n2601       \"missingEmail\": \"Enter your email to receive a magic link.\",\n2602       \"sent\": \"Magic link sent. Check your inbox.\",\n2603       \"missingToken\": \"Paste the magic link token to continue.\",\n",
+      "col_offset": 6,
+      "end_col_offset": 16,
+      "filename": "./.tmp/uat212-repair-20260917/baseline/apps/packages/ui/src/assets/locale/en/settings.json",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'Password'",
+      "line_number": 2598,
+      "line_range": [
+        2595,
+        2596,
+        2597,
+        2598,
+        2599
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    }
+  ]
+}

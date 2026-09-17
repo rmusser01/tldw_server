@@ -1,0 +1,320 @@
+{
+  "at": "2026-09-17T06:56:40.412Z",
+  "files": [
+    {
+      "file": "input-source-before-start.json",
+      "source": ".tmp/uat198-181-native-20260917/source-before-start.json",
+      "original_sha256": "b3b96a731d8d38d2ab65fcca2402ec37fcb95b0f11a03c43f0ef7c6eb91cd7e1",
+      "retained_sha256": "b3b96a731d8d38d2ab65fcca2402ec37fcb95b0f11a03c43f0ef7c6eb91cd7e1",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-retry-click.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-click.txt",
+      "original_sha256": "f6a4b3851a95803ede755cc0a0ca041b0d5ea9e09dfc7c234e13edead9565c90",
+      "retained_sha256": "f6a4b3851a95803ede755cc0a0ca041b0d5ea9e09dfc7c234e13edead9565c90",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-retry-initial.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-initial.txt",
+      "original_sha256": "c2efcfc4e3dbd6a1c098b119ba305926b50ea8d5494ae1caa257dd01424aea07",
+      "retained_sha256": "1333cdd4a7c01540488fcd84cca41e441debd8a0349c0f551c3c71835e5a28f2",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-retry-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-events.txt",
+      "original_sha256": "78dcfbde579bfe57a57a383be2b26274524e5030f6a1704f1a51671811f2ff49",
+      "retained_sha256": "7782cfe3fb28ec08cfacaa38979e034caf7b1620e0ebf521b4b52fe7e997a208",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-retry-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-settled.txt",
+      "original_sha256": "f5600c5327856965c20ac75f220df9113e596df120cef7ad881967ff5cb17841",
+      "retained_sha256": "8be038275acf4353561a084337b01bc0ba349849921b44fbf737f048c360ecf2",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-retry-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-reload.txt",
+      "original_sha256": "820dabeec490f9599b5328195b86dfdd057c0022ee855ae85953b1ad2bba485b",
+      "retained_sha256": "820dabeec490f9599b5328195b86dfdd057c0022ee855ae85953b1ad2bba485b",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-retry-reload-ready.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-reload-ready.txt",
+      "original_sha256": "74c07cc064bc2cfb1d364dd2e889a3a514470202ba3391c641c03454e89522ec",
+      "retained_sha256": "fa4ead94a241ddd6063af2c836e937b75d2300ccc3428b631c802de5de0e6cf5",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-retry-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-reload-settled.txt",
+      "original_sha256": "d142f096fe779300177ec30465523d8c0bbcf5eefe0539474ac17b87376e20a9",
+      "retained_sha256": "61dd4348195ad814733334adb1792cfc097b2a1308be4425b8e2677c64c9bc24",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-retry-reload-final-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-retry-reload-final-events.txt",
+      "original_sha256": "afa004bc887eaf509e488449697cdd5e2618ff0e2c40ab8def0fc76ca56cec99",
+      "retained_sha256": "7ede615b214fa5797ce7bb866cb47485fe2e47aa00b59f09e1e3d3d8c4db5feb",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-greeting-menu.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-menu.txt",
+      "original_sha256": "6dd740672e59cb63174cb4a9459311b822ab898b24bd37a94d767b50e607a700",
+      "retained_sha256": "6dd740672e59cb63174cb4a9459311b822ab898b24bd37a94d767b50e607a700",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-menu-fresh.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-menu-fresh.txt",
+      "original_sha256": "d835d89acf7d15106f8f3226cec163a94b4952fe358359ada87807fbc21d7b6a",
+      "retained_sha256": "d835d89acf7d15106f8f3226cec163a94b4952fe358359ada87807fbc21d7b6a",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-menu-again.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-menu-again.txt",
+      "original_sha256": "77c43376e143b0e9a13244bd73e31263e13cfbf5ee6a4e30e151d505261c022d",
+      "retained_sha256": "77c43376e143b0e9a13244bd73e31263e13cfbf5ee6a4e30e151d505261c022d",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-note-click.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-note-click.txt",
+      "original_sha256": "10b0ea39e79181ea8d00e316a413d1bb94e9361f00b471beba323a7df1160f64",
+      "retained_sha256": "10b0ea39e79181ea8d00e316a413d1bb94e9361f00b471beba323a7df1160f64",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-flashcard-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-flashcard-open.txt",
+      "original_sha256": "564eca9e946be093f7e2fd579abca51b1076456ea54466bed4fd2897125543df",
+      "retained_sha256": "564eca9e946be093f7e2fd579abca51b1076456ea54466bed4fd2897125543df",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-flashcard-dialog.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-flashcard-dialog.txt",
+      "original_sha256": "481b5e0963a67ac07a72de600d6811077f8a74e566fe031f40d6a7d002d919f6",
+      "retained_sha256": "6b644236964ef8fa0307761d1a953565f1587d6edb794dde9c62f3880b66e94e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-greeting-card-question.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-card-question.txt",
+      "original_sha256": "7373661b1bde85081421d1a24d6c1f8e2f39300b722463dbe6855d69c95abb2f",
+      "retained_sha256": "7b6b423514457a10a1cf2511b48d152d15a8beccc7a22038b732477d37aa94a4",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-greeting-card-save.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-card-save.txt",
+      "original_sha256": "187a364fb36cfba035ecf2ff79484f9b40440f5aff5bd112ee59740e7d6e2415",
+      "retained_sha256": "187a364fb36cfba035ecf2ff79484f9b40440f5aff5bd112ee59740e7d6e2415",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-saved-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-saved-events.txt",
+      "original_sha256": "45fe6585fc3bf415db4883d61d4a9b18f6f1adf607da66ae2fe1994cad8ebbaf",
+      "retained_sha256": "dba2681efad0fb5a4369eb6a0aa3a496aa24d12cc8a9941b70c0e65c53364740",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-saved-card-route.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-saved-card-route.txt",
+      "original_sha256": "9bbec9e420f684208ac6b690b28db07ea19387791dcb6fc6f3d7ec55eff52045",
+      "retained_sha256": "9bbec9e420f684208ac6b690b28db07ea19387791dcb6fc6f3d7ec55eff52045",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-saved-card-ready.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-saved-card-ready.txt",
+      "original_sha256": "dd5a3b76cc70f2a94dc1ab3c87b61fed0fbc3a9f4e979366a5f08a09d51178b9",
+      "retained_sha256": "08637ea3f7ec66c67071251e3c2744a879a79ef3b7369ac897ffb7baa0223133",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-saved-card-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-saved-card-settled.txt",
+      "original_sha256": "ab083daaa3d1b415b479baa0db674e5e07c9265174309e6a45f85cfbfc26fe1f",
+      "retained_sha256": "bf9cb4e08cf30b8c0972ebde6d1d1e55c9b859285e979fe99764c0a24353fa7e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-saved-card-reload-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-saved-card-reload-events.txt",
+      "original_sha256": "d116aff8b3a6507bb907b8befcfbf14816c6d76dedbe0f4427ee66f1c6bb476d",
+      "retained_sha256": "7c7c6de0029b652f88808a247e25645240d2ab4f4379c9c4f4e8dfab4c2be453",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-greeting-notes-route.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-notes-route.txt",
+      "original_sha256": "724c545f0831d48efb616d61eee253816426c820e25671f1130101447e2397b1",
+      "retained_sha256": "724c545f0831d48efb616d61eee253816426c820e25671f1130101447e2397b1",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-greeting-notes-ready.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-notes-ready.txt",
+      "original_sha256": "abb6abb3bae06f5af9feba06934f9cab3f5ad5a27317782eed33a01f834bd8f6",
+      "retained_sha256": "086b53848b2cea51d93f4cd741243f80caa3b5dd932f534db58ed9891369d677",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-greeting-notes-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-greeting-notes-settled.txt",
+      "original_sha256": "c23cccc4fe43f39123b701d858799545f58591f38b9c05dfa61a71be1028eefa",
+      "retained_sha256": "13cf6cee4db2d5d7c420fb934a8e7e04df58f9abb4ceb837ee8759431ff08513",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-owned-greeting-note-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-owned-greeting-note-open.txt",
+      "original_sha256": "84b2ff6e8ef825edd93e1686c670d5bad11a3971acbdb300137024c7a351c348",
+      "retained_sha256": "84b2ff6e8ef825edd93e1686c670d5bad11a3971acbdb300137024c7a351c348",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-owned-greeting-note-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-owned-greeting-note-settled.txt",
+      "original_sha256": "1096173898c65ab197692b6a7a741a214492b218b1810725423c5cfabd6a679b",
+      "retained_sha256": "cdc96043fc81e10566d80a8ddd772991cfc7ca3ab903215c70d204a27e6b696f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-owned-greeting-note-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-owned-greeting-note-events.txt",
+      "original_sha256": "698620c676f9b293c8b0d53519742b7c6d5e4c81841e5c84e4edc978c074d880",
+      "retained_sha256": "7c0af6e2fecc14da03fa42ab13814b5b0823e4bb35709ea8e4e7c2d532e6880e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-owned-greeting-note-screenshot.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-owned-greeting-note-screenshot.txt",
+      "original_sha256": "b1bd1f1ef7d49b2ea427fad7453d10271e76bd17e419bf8e6a447b31986ba8d8",
+      "retained_sha256": "2b0357ef1b0a58bfa8e58bb6ed8f6e5b79dd8cbe03fc9f9a11430abc0d39c6e0",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-owned-greeting-note.png",
+      "source": ".tmp/uat198-181-native-20260917/bob-owned-greeting-note.png",
+      "original_sha256": "a87b455b0d2d50ad54ddb3125037352c8254c8cb0a917cab719d7a397cb8bf66",
+      "retained_sha256": "a87b455b0d2d50ad54ddb3125037352c8254c8cb0a917cab719d7a397cb8bf66",
+      "normalization": "none"
+    },
+    {
+      "file": "input-metadata-after-bob-retry-notes.json",
+      "source": ".tmp/uat198-181-native-20260917/metadata-after-bob-retry-notes.json",
+      "original_sha256": "f17430ad829261921002fe8d9dd2d8872caf6b071b64938a1ef4712fef55e63b",
+      "retained_sha256": "f17430ad829261921002fe8d9dd2d8872caf6b071b64938a1ef4712fef55e63b",
+      "normalization": "none"
+    },
+    {
+      "file": "input-bob-events.txt",
+      "source": ".tmp/uat193-031-native-20260917/bob-events.txt",
+      "original_sha256": "d00b499064d701e402c889729a0f5a334d0b582c190173d0624b756a48fe7e9e",
+      "retained_sha256": "9a1dea83d469e269fe7d3f0db0ea37ceb7a5a856b02e6874c37937ce8426b18c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-bob-response.txt",
+      "source": ".tmp/uat193-031-native-20260917/bob-response.txt",
+      "original_sha256": "30d1b74ab2b3cc72c0f1e4c84db8d924dc823b417dc994db19c6ce21c88582f8",
+      "retained_sha256": "72e8a3b3c4320ab406b3b7354c57d107a9d5d626a9b402e021c26a766da34943",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md",
+      "source": "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md",
+      "original_sha256": "908e621a296f113f41c99ac8f3226c6e96d2ff3bf03957af06f5090f56f8c65e",
+      "retained_sha256": "908e621a296f113f41c99ac8f3226c6e96d2ff3bf03957af06f5090f56f8c65e",
+      "normalization": "none"
+    },
+    {
+      "file": "input-task-13260.7-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.7-criteria.txt",
+      "original_sha256": "6b39c0000bea25248c07c9a044b32a003d456f623496a3755611da22183638fe",
+      "retained_sha256": "7fbf761b2fc12fa3c9afe4bc85df9f966f9cbba12c64a2e8daabd297aeb2eafe",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task-13260.110-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.110-criteria.txt",
+      "original_sha256": "ceb1948f58a3afaedcdc374127aa78243daaf1cb5f5ad1f614ec5613f1b71da2",
+      "retained_sha256": "c71436b2f701aeb69c6aef493258a0f3e089dacc49dc8e0bdcde8bd32da76cfc",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task-13260.112-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.112-criteria.txt",
+      "original_sha256": "8614559d0826a647ff008e61e9ffcf4f0abd31b2f1416ca4c8ef184e4ff492f9",
+      "retained_sha256": "72ff1070e9a34bef3f1bee8cc2220fe420dbdf75783b296bf48643fd7641660c",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task-13260.131-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.131-criteria.txt",
+      "original_sha256": "08f023efc6a257e70fe5cb8398ae9b6fc3de07af39734cc4bd8adbf24f79ed0d",
+      "retained_sha256": "3a79ad66b76c0c1543430a6ad7e602d0b5927eb5e3268fc81d162615d6c92f53",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task-13260.137-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.137-criteria.txt",
+      "original_sha256": "4037abb0fc946d00f7a6738fd915c4f0328ed2416fd2a3aa288c42f62295f519",
+      "retained_sha256": "0d8722706974e2bfad3efdf117127ec9464ae06619c8d4a3d3a5ceacd8e38392",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "input-task-13260.138-criteria.txt",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/task-13260.138-criteria.txt",
+      "original_sha256": "aad17f9ea2ec8e7e173b7047e313f4b25b73273afe16d6b662567b96027a715c",
+      "retained_sha256": "faf8d69da76fc5c3a9c59b493e61e8f17f2261e9895d0c0dd2a968aa58fee1fc",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "ACCEPTANCE.md",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/ACCEPTANCE.md",
+      "original_sha256": "ab293269e8cf06be60f91a1b0042d5d457e9429117c67a920d29dbba4503cb26",
+      "retained_sha256": "ab293269e8cf06be60f91a1b0042d5d457e9429117c67a920d29dbba4503cb26",
+      "normalization": "none"
+    },
+    {
+      "file": "input-manifest.json",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/input-manifest.json",
+      "original_sha256": "f93cd49889f654a6cd965e4dcc81f583ba0a281ff7f716c4175bc3952081a22b",
+      "retained_sha256": "f93cd49889f654a6cd965e4dcc81f583ba0a281ff7f716c4175bc3952081a22b",
+      "normalization": "none"
+    },
+    {
+      "file": "parsed-evidence.json",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/parsed-evidence.json",
+      "original_sha256": "f965cb074f84ba31995c272926870eaada32270335ce48c550c6de56e6ffb9f0",
+      "retained_sha256": "f965cb074f84ba31995c272926870eaada32270335ce48c550c6de56e6ffb9f0",
+      "normalization": "none"
+    },
+    {
+      "file": "source-attribution.json",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/source-attribution.json",
+      "original_sha256": "c831dd07b0f307a407f60ddab9ef356aad33b782e46d45c5afc05b05063181b2",
+      "retained_sha256": "c831dd07b0f307a407f60ddab9ef356aad33b782e46d45c5afc05b05063181b2",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-manifest.json",
+      "source": ".tmp/uat031-173-176-193-199-200-acceptance-20260917/audit-manifest.json",
+      "original_sha256": "427a0c4c93820bfef3b0e9b362367c616dde0af9c3c8404af821eb8768da99db",
+      "retained_sha256": "427a0c4c93820bfef3b0e9b362367c616dde0af9c3c8404af821eb8768da99db",
+      "normalization": "none"
+    }
+  ]
+}

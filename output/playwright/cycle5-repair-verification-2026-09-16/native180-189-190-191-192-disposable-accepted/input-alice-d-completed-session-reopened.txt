@@ -1,0 +1,265 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'View completed session' }).first().click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=review)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=review
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T06-28-44-069Z.yml)
+
+- generic [ref=f27e11]:
+  - generic [ref=f27e14]:
+    - link "Skip to main content" [ref=f27e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f27e16]:
+      - button "Expand sidebar" [ref=f27e17] [cursor=pointer]
+      - button "New Chat" [ref=f27e21] [cursor=pointer]
+      - generic [ref=f27e24]:
+        - button "Quick Ingest" [ref=f27e25] [cursor=pointer]
+        - button "Chat" [ref=f27e29] [cursor=pointer]
+        - button "Prompts" [ref=f27e32] [cursor=pointer]
+        - button "Characters" [ref=f27e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f27e41] [cursor=pointer]
+        - button "World Books" [ref=f27e45] [cursor=pointer]
+        - button "Notes" [ref=f27e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f27e52] [cursor=pointer]
+        - button "Media" [ref=f27e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f27e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f27e69] [cursor=pointer]
+        - button "Kanban" [ref=f27e75] [cursor=pointer]
+        - button "Watchlists" [ref=f27e77] [cursor=pointer]
+      - generic [ref=f27e82]:
+        - button "Open Notes Dock" [ref=f27e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f27e88] [cursor=pointer]
+        - button "Settings" [ref=f27e91] [cursor=pointer]
+    - main [ref=f27e95]:
+      - generic [ref=f27e96]:
+        - generic [ref=f27e99]:
+          - generic [ref=f27e100]:
+            - button "Expand sidebar" [ref=f27e101] [cursor=pointer]
+            - generic [ref=f27e103]:
+              - img "tldw Assistant" [ref=f27e104]
+              - generic [ref=f27e105]: tldw Assistant
+              - button "Companion Home" [ref=f27e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f27e110] [cursor=pointer]
+          - generic [ref=f27e113]:
+            - button "Search - Open command palette" [ref=f27e114] [cursor=pointer]:
+              - generic [ref=f27e118]: Search
+              - generic [ref=f27e119]: ⌘K
+            - button "Open settings" [ref=f27e120] [cursor=pointer]
+            - generic [ref=f27e132]:
+              - button "Notifications, 0 unread" [ref=f27e147] [cursor=pointer]
+              - status [ref=f27e136]: Notifications are active
+            - button "Switch to light theme" [ref=f27e137] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f27e144] [cursor=pointer]:
+              - generic [ref=f27e145]: "?"
+        - generic [ref=f27e151]:
+          - generic [ref=f27e153]:
+            - generic [ref=f27e155]:
+              - generic [ref=f27e156]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f27e157]
+            - navigation "Flashcards modes" [ref=f27e158]:
+              - generic [ref=f27e159]: Study
+              - generic [ref=f27e160]: Manage
+              - generic [ref=f27e161]: Import / Export
+              - generic [ref=f27e162]: Templates
+              - generic [ref=f27e163]: Scheduler
+          - generic [ref=f27e166]:
+            - tablist [ref=f27e167]:
+              - generic [ref=f27e169]:
+                - tab "Study" [selected] [ref=f27e171] [cursor=pointer]
+                - tab "Manage" [ref=f27e173] [cursor=pointer]
+                - tab "Import / Export" [ref=f27e175] [cursor=pointer]
+                - tab "Templates" [ref=f27e177] [cursor=pointer]
+                - tab "Scheduler" [ref=f27e179] [cursor=pointer]
+              - generic [ref=f27e181]:
+                - button "Test with Quiz" [disabled] [ref=f27e183]
+                - button "Keyboard Shortcuts" [ref=f27e184] [cursor=pointer]
+            - tabpanel "Study" [ref=f27e191]:
+              - generic [ref=f27e192]:
+                - generic [ref=f27e193]:
+                  - generic [ref=f27e194] [cursor=pointer]:
+                    - generic [ref=f27e195]:
+                      - generic: Select deck
+                      - combobox [ref=f27e196]
+                    - img "down" [ref=f27e198]
+                  - radiogroup "segmented control" [ref=f27e201]:
+                    - generic [ref=f27e202]:
+                      - generic [ref=f27e203] [cursor=pointer]:
+                        - radio "Due only" [checked]
+                        - generic "Due only" [ref=f27e204]
+                      - generic [ref=f27e205] [cursor=pointer]:
+                        - radio "Cram"
+                        - generic "Cram" [ref=f27e206]
+                  - radiogroup "segmented control" [ref=f27e207]:
+                    - generic [ref=f27e208]:
+                      - generic [ref=f27e209] [cursor=pointer]:
+                        - radio "Front first" [checked]
+                        - generic "Front first" [ref=f27e210]
+                      - generic [ref=f27e211] [cursor=pointer]:
+                        - radio "Back first"
+                        - generic "Back first" [ref=f27e212]
+                - region [ref=f27e213]:
+                  - generic [ref=f27e214]:
+                    - generic [ref=f27e220]:
+                      - strong [ref=f27e222]: Source reviews
+                      - generic [ref=f27e223]: No source reviews due
+                    - button "Schedule" [ref=f27e224] [cursor=pointer]
+                - generic [ref=f27e229]:
+                  - generic [ref=f27e230]:
+                    - strong [ref=f27e232]: Choose a study path
+                    - text: Start with all due cards, or pick a specific deck below.
+                  - button "Review all due" [ref=f27e233] [cursor=pointer]
+                - generic [ref=f27e235]:
+                  - generic [ref=f27e237]:
+                    - strong [ref=f27e239]: Deck study dashboard
+                    - text: Choose the right deck and study mode without opening each deck first.
+                  - generic [ref=f27e240]:
+                    - generic [ref=f27e242]:
+                      - generic [ref=f27e243]:
+                        - strong [ref=f27e246]: Alice UAT151 Citrine Deck
+                        - generic [ref=f27e247]:
+                          - generic [ref=f27e248]: "Due: 1"
+                          - generic [ref=f27e249]: "New: 1"
+                          - generic [ref=f27e250]: "Learning: 2"
+                          - generic [ref=f27e251]: "Mature: 0"
+                        - generic "Alice UAT151 Citrine Deck reviewed share" [ref=f27e252]
+                      - generic [ref=f27e254]:
+                        - button "Review 2 ready" [ref=f27e255] [cursor=pointer]
+                        - button "Cram" [ref=f27e260] [cursor=pointer]
+                        - button "Edit" [ref=f27e265] [cursor=pointer]
+                        - button "Scheduler" [ref=f27e271] [cursor=pointer]
+                        - button "Export" [ref=f27e278] [cursor=pointer]
+                    - generic [ref=f27e285]:
+                      - generic [ref=f27e286]:
+                        - strong [ref=f27e289]: Alice UAT167 recovery 20260917
+                        - generic [ref=f27e290]:
+                          - generic [ref=f27e291]: "Due: 0"
+                          - generic [ref=f27e292]: "New: 1"
+                          - generic [ref=f27e293]: "Learning: 0"
+                          - generic [ref=f27e294]: "Mature: 0"
+                        - generic "Alice UAT167 recovery 20260917 reviewed share" [ref=f27e295]
+                      - generic [ref=f27e296]:
+                        - button "Review 1 ready" [ref=f27e297] [cursor=pointer]
+                        - button "Cram" [ref=f27e302] [cursor=pointer]
+                        - button "Edit" [ref=f27e307] [cursor=pointer]
+                        - button "Scheduler" [ref=f27e313] [cursor=pointer]
+                        - button "Export" [ref=f27e320] [cursor=pointer]
+                    - generic [ref=f27e327]:
+                      - generic [ref=f27e328]:
+                        - strong [ref=f27e331]: Alice UAT196 concise recovery 20260917
+                        - generic [ref=f27e332]:
+                          - generic [ref=f27e333]: "Due: 0"
+                          - generic [ref=f27e334]: "New: 1"
+                          - generic [ref=f27e335]: "Learning: 0"
+                          - generic [ref=f27e336]: "Mature: 0"
+                        - generic "Alice UAT196 concise recovery 20260917 reviewed share" [ref=f27e337]
+                      - generic [ref=f27e338]:
+                        - button "Review 1 ready" [ref=f27e339] [cursor=pointer]
+                        - button "Cram" [ref=f27e344] [cursor=pointer]
+                        - button "Edit" [ref=f27e349] [cursor=pointer]
+                        - button "Scheduler" [ref=f27e355] [cursor=pointer]
+                        - button "Export" [ref=f27e362] [cursor=pointer]
+                - generic [ref=f27e369]:
+                  - generic [ref=f27e370]:
+                    - generic [ref=f27e371]:
+                      - generic [ref=f27e372]: Reviewed today
+                      - strong [ref=f27e374]: "3"
+                    - generic [ref=f27e375]:
+                      - generic [ref=f27e376]: Retention rate
+                      - strong [ref=f27e378]: 100.0%
+                    - generic [ref=f27e379]:
+                      - generic [ref=f27e380]: Lapse rate
+                      - strong [ref=f27e382]: 0.0%
+                    - generic [ref=f27e383]:
+                      - generic [ref=f27e384]: Avg answer time
+                      - strong [ref=f27e386]: 34.6s
+                    - generic [ref=f27e387]:
+                      - generic [ref=f27e388]: Study streak
+                      - strong [ref=f27e390]: 1 day
+                  - generic [ref=f27e391]:
+                    - strong [ref=f27e393]: Deck progress
+                    - generic [ref=f27e394]:
+                      - generic [ref=f27e395]:
+                        - strong [ref=f27e397]: Alice UAT151 Citrine Deck
+                        - generic [ref=f27e398]:
+                          - generic [ref=f27e399]: "Total: 3"
+                          - generic [ref=f27e400]: "New: 1"
+                          - generic [ref=f27e401]: "Learning: 2"
+                          - generic [ref=f27e402]: "Due: 1"
+                          - generic [ref=f27e403]: "Mature: 0"
+                      - progressbar [ref=f27e404]
+                    - generic [ref=f27e408]:
+                      - generic [ref=f27e409]:
+                        - strong [ref=f27e411]: Alice UAT167 recovery 20260917
+                        - generic [ref=f27e412]:
+                          - generic [ref=f27e413]: "Total: 1"
+                          - generic [ref=f27e414]: "New: 1"
+                          - generic [ref=f27e415]: "Learning: 0"
+                          - generic [ref=f27e416]: "Due: 0"
+                          - generic [ref=f27e417]: "Mature: 0"
+                      - progressbar [ref=f27e418]
+                    - generic [ref=f27e421]:
+                      - generic [ref=f27e422]:
+                        - strong [ref=f27e424]: Alice UAT196 concise recovery 20260917
+                        - generic [ref=f27e425]:
+                          - generic [ref=f27e426]: "Total: 1"
+                          - generic [ref=f27e427]: "New: 1"
+                          - generic [ref=f27e428]: "Learning: 0"
+                          - generic [ref=f27e429]: "Due: 0"
+                          - generic [ref=f27e430]: "Mature: 0"
+                      - progressbar [ref=f27e431]
+                - status [ref=f27e434]:
+                  - generic [ref=f27e435]: "4 cards remaining, 0 reviewed, Available now: 4, new: 3, learning: 1, due: 0"
+                  - generic [ref=f27e436]:
+                    - generic [aria-hidden] [ref=f27e437]: Study queue
+                    - generic [aria-hidden] [ref=f27e438]: "4"
+                    - generic [aria-hidden] [ref=f27e439]: cards remaining
+                  - generic [aria-hidden] [ref=f27e441]: 0 reviewed
+                  - generic [aria-hidden] [ref=f27e443]: "Available now: 4"
+                  - generic [aria-hidden] [ref=f27e445]: "new: 3"
+                  - generic [aria-hidden] [ref=f27e447]: "learning: 1"
+                  - generic [aria-hidden] [ref=f27e449]: "due: 0"
+                  - generic [aria-hidden] [ref=f27e451]: ~1 min left
+                - generic [ref=f27e484]:
+                  - generic [ref=f27e485]: Study suggestions
+                  - generic [ref=f27e488]: Loading study suggestions...
+                - generic [ref=f27e453]:
+                  - generic [ref=f27e454]: Recent study sessions
+                  - list "Recent study sessions" [ref=f27e458]:
+                    - listitem [ref=f27e459]:
+                      - generic [ref=f27e460]:
+                        - generic [ref=f27e461]:
+                          - strong [ref=f27e463]: Alice UAT151 Citrine Deck
+                          - button "Viewing completed session" [active] [ref=f27e493] [cursor=pointer]
+                        - generic [ref=f27e466]:
+                          - generic [ref=f27e467]: Completed
+                          - generic [ref=f27e468]: Cram review
+                          - generic [ref=f27e469]: 1 card reviewed
+                        - generic [ref=f27e470]: Completed 2026-09-16 23:26
+                    - listitem [ref=f27e471]:
+                      - generic [ref=f27e472]:
+                        - generic [ref=f27e473]:
+                          - strong [ref=f27e475]: Alice UAT151 Citrine Deck
+                          - button "View completed session" [ref=f27e476] [cursor=pointer]
+                        - generic [ref=f27e478]:
+                          - generic [ref=f27e479]: Completed
+                          - generic [ref=f27e480]: Cram review
+                          - generic [ref=f27e481]: 1 card reviewed
+                        - generic [ref=f27e482]: Completed 2026-09-16 19:09
+  - alert [ref=f27e10]

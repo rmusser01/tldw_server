@@ -1,0 +1,146 @@
+--- a/tldw_Server_API/app/core/DB_Management/chacha/note_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/note_store.py
+@@ -1817,7 +1817,7 @@
+             params.insert(0, self._deleted_value(False))
+         query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
+         cur = self._db.execute_query(query, tuple(params))
+-        return [row[0] for row in cur.fetchall()]
++        return [row["id"] for row in cur.fetchall()]
+
+     @staticmethod
+     def _normalize_graph_tag_filter(tag: str) -> str:
+@@ -1847,12 +1847,13 @@
+         if not normalized_tag or limit <= 0:
+             return []
+
++        keyword_table = self._db._map_table_for_backend("keywords")
+         if include_deleted:
+             query = (
+                 "SELECT DISTINCT n.id, n.last_modified "
+                 "FROM notes n "
+                 "JOIN note_keywords nk ON nk.note_id = n.id "
+-                "JOIN keywords k ON k.id = nk.keyword_id "
++                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
+                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
+                 "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+             )
+@@ -1862,7 +1863,7 @@
+                 "SELECT DISTINCT n.id, n.last_modified "
+                 "FROM notes n "
+                 "JOIN note_keywords nk ON nk.note_id = n.id "
+-                "JOIN keywords k ON k.id = nk.keyword_id "
++                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
+                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
+                 "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+             )
+@@ -1873,7 +1874,7 @@
+                 limit,
+             ]
+         cur = self._db.execute_query(query, tuple(params))
+-        return [row[0] for row in cur.fetchall()]
++        return [row["id"] for row in cur.fetchall()]
+
+     def get_note_ids_by_source_for_graph(
+         self,
+@@ -1923,7 +1924,7 @@
+             )
+             params = [src, limit]
+         cur = self._db.execute_query(query, tuple(params))
+-        return [row[0] for row in cur.fetchall()]
++        return [row["id"] for row in cur.fetchall()]
+
+     def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
+         """Return (note_id, keyword_id, keyword) for notes with active keywords."""
+@@ -1981,25 +1982,26 @@
+     def count_user_notes(self, include_deleted: bool = True) -> int:
+         """Count total notes for seedless query gate."""
+         if include_deleted:
+-            query = "SELECT COUNT(*) FROM notes"
++            query = "SELECT COUNT(*) AS cnt FROM notes"
+             params: tuple[Any, ...] | None = None
+         else:
+-            query = "SELECT COUNT(*) FROM notes WHERE deleted = ?"
++            query = "SELECT COUNT(*) AS cnt FROM notes WHERE deleted = ?"
+             params = (self._deleted_value(False),)
+         cur = self._db.execute_query(query, params)
+-        return cur.fetchone()[0]
++        return cur.fetchone()["cnt"]
+
+     def count_notes_per_tag(self) -> dict[int, int]:
+         """Return {keyword_id: note_count} for popularity cutoff."""
++        keyword_table = self._db._map_table_for_backend("keywords")
+         query = (
+             "SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt "
+             "FROM note_keywords nk "
+             "JOIN notes n ON n.id = nk.note_id AND n.deleted = ? "
+-            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? "
++            f"JOIN {keyword_table} k ON k.id = nk.keyword_id AND k.deleted = ? "  # nosec B608
+             "GROUP BY nk.keyword_id"
+         )
+         cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
+-        return {row[0]: row[1] for row in cur.fetchall()}
++        return {row["keyword_id"]: row["cnt"] for row in cur.fetchall()}
+
+     def get_note_source_info(self, note_ids: list[str]) -> list[dict[str, Any]]:
+         """Return source info for notes that have a conversation with source set."""
+--- /dev/null
++++ b/tldw_Server_API/tests/DB_Management/test_note_graph_query_backends.py
+@@ -0,0 +1,58 @@
++"""Notes graph query results preserve behavior across supported backends."""
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def graph_db(request, tmp_path):
++    backend = (
++        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++        if request.param == "postgres"
++        else None
++    )
++    db = CharactersRAGDB(tmp_path / "notes.db", client_id="3", backend=backend)
++    try:
++        yield db
++    finally:
++        db.close_all_connections()
++        if backend:
++            backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("populated", [False, True], ids=["empty", "populated"])
++@pytest.mark.parametrize("operation", ["all-ids", "tag-ids", "source-ids", "count-notes", "counts-per-tag"])
++def test_graph_mapping_rows(graph_db, populated, operation):
++    db = graph_db
++    live = None
++    deleted = None
++    kw = None
++    if populated:
++        char = db.add_character_card({"name": "Graph probe character"})
++        conv = db.add_conversation(
++            {"character_id": char, "title": "Source fixture", "source": "youtube", "external_ref": "fixture-1"}
++        )
++        live = db.add_note("Live graph note", "body", conversation_id=conv)
++        deleted = db.add_note("Deleted graph note", "body", conversation_id=conv)
++        kw = db.add_keyword("graph-tag")
++        db.link_note_to_keyword(live, kw)
++        db.link_note_to_keyword(deleted, kw)
++        db.soft_delete_note(deleted, expected_version=1)
++    if operation == "all-ids":
++        assert db.get_all_note_ids_for_graph(include_deleted=False) == ([live] if populated else [])
++        assert set(db.get_all_note_ids_for_graph()) == ({live, deleted} if populated else set())
++    elif operation == "tag-ids":
++        assert db.get_note_ids_by_tag_for_graph("graph-tag", include_deleted=False) == ([live] if populated else [])
++        assert set(db.get_note_ids_by_tag_for_graph("tag:graph-tag")) == ({live, deleted} if populated else set())
++    elif operation == "source-ids":
++        assert db.get_note_ids_by_source_for_graph("source:youtube:fixture-1", include_deleted=False) == (
++            [live] if populated else []
++        )
++        assert set(db.get_note_ids_by_source_for_graph("youtube")) == ({live, deleted} if populated else set())
++    elif operation == "count-notes":
++        assert db.count_user_notes() == (2 if populated else 0)
++        assert db.count_user_notes(include_deleted=False) == (1 if populated else 0)
++    else:
++        assert db.count_notes_per_tag() == ({kw: 1} if populated else {})

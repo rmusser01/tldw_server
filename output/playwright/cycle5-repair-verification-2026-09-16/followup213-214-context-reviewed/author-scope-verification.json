@@ -1,0 +1,18 @@
+{
+  "changed_production_methods": {
+    "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": [
+      "get_conversation_settings"
+    ],
+    "tldw_Server_API/app/core/Character_Chat/world_book_manager.py": [
+      "get_entry_counts_for_world_books",
+      "get_character_world_books"
+    ]
+  },
+  "ruff_baseline_findings": 9,
+  "ruff_current_findings": 9,
+  "ruff_findings_by_file_rule_message_identical": true,
+  "new_test_findings": 0,
+  "compilation": "four owned Python files compile successfully",
+  "bandit_production": "zero findings/errors",
+  "bandit_tests": "zero findings/errors with B101 assert exclusion"
+}

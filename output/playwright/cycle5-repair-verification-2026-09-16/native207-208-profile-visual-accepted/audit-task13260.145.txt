@@ -1,0 +1,36 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.145 - Repair-PostgreSQL-Persona-profile-catalogue-reads-exposed-by-Chat.md
+
+Task TASK-13260.145 - Repair PostgreSQL Persona profile catalogue reads exposed by Chat
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 06:04
+Updated: 2026-09-17 06:34
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT207: authenticated Bob normal Character chat load/reload on current PostgreSQL returns500 from GET /api/v1/persona/profiles repeatedly. Backend reports Persona DB error during list persona profiles. Distinct from repaired UAT200 memory filtering and UAT159 anonymous requests. Exact query cause under diagnosis; do not substitute empty success or disable tests.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Reproduce exact owned PostgreSQL profile catalogue failure with official fixture and SQLite positive control; preserve deleted/owner/filter semantics.
+- [x] #2 Minimal reviewed repair passes required PostgreSQL and adjacent Persona controls with scoped Ruff/Bandit and native authenticated profile catalogue acceptance.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+
+Implementation Plan:
+--------------------------------------------------
+Trace actual list_persona_profiles query and driver cause, add causal regression before changing minimal backend-dependent syntax, then independent review and original UI reload.
+
+Implementation Notes:
+--------------------------------------------------
+Independent root review clear:36 officialPG/SQLite cases pass0skip56.68s; Bandit0 production/test; hashes match author frozen manifest16d8c03d. Author183 total pass0skip; Ruff5baseline5current unchanged. Three production paths: shared core ensure helper with endpoint delegation, owner-specific newPG defaults preserving legacy/tombstones, local savepoint creation preserving caller ownership. Native AC remains pending on accepted runtime restart.

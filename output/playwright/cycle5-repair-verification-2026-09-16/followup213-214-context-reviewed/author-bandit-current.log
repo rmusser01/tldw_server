@@ -1,0 +1,29 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 814
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 814
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 902
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1460
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 871
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 911
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 941
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1003
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1188
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1188
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1500
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1622
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1622
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1622
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1942
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1942
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1942
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1942
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1950
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1979
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 1985
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2025
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2025
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 2025
+[json]	INFO	JSON output written to file: .tmp/uat213-214-repair-20260917/bandit-current.json

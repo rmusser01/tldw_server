@@ -1,0 +1,1001 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:46805) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx (12 tests | 7 failed) 3592ms
+     × keeps an accepted request pending before the first status response 553ms
+     × blocks duplicate submission while queued between polls 200ms
+     × blocks duplicate submission while running between polls 199ms
+     × keeps the same job pending across queued, active fetch and running gaps 191ms
+     × keeps the accepted job locked on a poll error and recovers on the same query 1108ms
+     ✓ allows deliberate retry after failed with the same inputs 210ms
+     ✓ allows deliberate retry after cancelled with the same inputs 232ms
+     ✓ navigates once to the returned deck on successful completion 135ms
+     × releases an unusable completed result (missing-pack) for deliberate retry 202ms
+     × releases an unusable completed result (missing-deck) for deliberate retry 185ms
+     ✓ allows retry of a rejected creation request without losing sources 186ms
+     ✓ does not attach a late old-account acceptance to a freshly keyed drawer 190ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > keeps an accepted request pending before the first status response
+TestingLibraryElementError: Unable to find an accessible element with the role "status"
+
+Here are the accessible roles:
+
+  dialog:
+
+  Name "Create study pack":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"test-id"[39m
+    [33maria-modal[39m=[32m"true"[39m
+    [33mclass[39m=[32m"ant-drawer-section"[39m
+    [33mrole[39m=[32m"dialog"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Close":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Close"[39m
+    [33mclass[39m=[32m"ant-drawer-close"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Add source":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-compact-item ant-btn-compact-last-item"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Remove":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Remove"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-icon-only"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Cancel":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "loadingCreate study pack":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ant-btn-loading"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  img:
+
+  Name "close":
+  [36m<span[39m
+    [33maria-label[39m=[32m"close"[39m
+    [33mclass[39m=[32m"anticon anticon-close"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  Name "down":
+  [36m<span[39m
+    [33maria-label[39m=[32m"down"[39m
+    [33mclass[39m=[32m"anticon anticon-down"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  Name "loading":
+  [36m<span[39m
+    [33maria-label[39m=[32m"loading"[39m
+    [33mclass[39m=[32m"anticon anticon-loading anticon-spin"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  strong:
+
+  Name "":
+  [36m<strong />[39m
+
+  Name "":
+  [36m<strong />[39m
+
+  --------------------------------------------------
+  textbox:
+
+  Name "Title":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Title"[39m
+    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+    [33mplaceholder[39m=[32m"Study pack title"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m"Citrine study pack"[39m
+  [36m/>[39m
+
+  Name "Source ID (advanced/manual)":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Source ID (advanced/manual)"[39m
+    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+    [33mplaceholder[39m=[32m"Source ID (advanced/manual)"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Source Title":
+  [36m<input[39m
+    [33maria-label[39m=[32m"Source Title"[39m
+    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+    [33mplaceholder[39m=[32m"Optional title"[39m
+    [33mtype[39m=[32m"text"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Source Type":
+  [36m<input[39m
+    [33maria-autocomplete[39m=[32m"list"[39m
+    [33maria-expanded[39m=[32m"false"[39m
+    [33maria-haspopup[39m=[32m"listbox"[39m
+    [33maria-label[39m=[32m"Source Type"[39m
+    [33mautocomplete[39m=[32m"off"[39m
+    [33mclass[39m=[32m"ant-select-input"[39m
+    [33mid[39m=[32m"test-id"[39m
+    [33mreadonly[39m=[32m""[39m
+    [33mrole[39m=[32m"combobox"[39m
+    [33mtype[39m=[32m"search"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"ant-drawer ant-drawer-right css-dev-only-do-not-override-3uaqrl css-var-root ant-drawer-open"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-drawer-mask ant-drawer-mask-motion-appear ant-drawer-mask-motion-appear-start ant-drawer-mask-motion ant-drawer-mask-blur"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-drawer-content-wrapper ant-drawer-panel-motion-right-appear ant-drawer-panel-motion-right-appear-start ant-drawer-panel-motion-right"[39m
+        [33mstyle[39m=[32m"width: 736px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-labelledby[39m=[32m"test-id"[39m
+          [33maria-modal[39m=[32m"true"[39m
+          [33mclass[39m=[32m"ant-drawer-section"[39m
+          [33mrole[39m=[32m"dialog"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-header"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-drawer-header-title"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Close"[39m
+                [33mclass[39m=[32m"ant-drawer-close"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"close"[39m
+                  [33mclass[39m=[32m"anticon anticon-close"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"close"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfill-rule[39m=[32m"evenodd"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-drawer-title"[39m
+                [33mid[39m=[32m"test-id"[39m
+              [36m>[39m
+                [0mCreate study pack[0m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-4"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-1"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                [36m>[39m
+                  [36m<strong>[39m
+                    [0mTitle[0m
+                  [36m</strong>[39m
+                [36m</span>[39m
+                [36m<input[39m
+                  [33maria-label[39m=[32m"Title"[39m
+                  [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                  [33mplaceholder[39m=[32m"Study pack title"[39m
+                  [33mtype[39m=[32m"text"[39m
+                  [33mvalue[39m=[32m"Citrine study pack"[39m
+                [36m/>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded border border-border bg-surface p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mb-3 flex items-center justify-between gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [36m>[39m
+                    [36m<strong>[39m
+                      [0mSources[0m
+                    [36m</strong>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [36m>[39m
+                    [0m1 selected[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-compact css-dev-only-do-not-override-3uaqrl w-full"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-select ant-select-outlined ant-select-compact-item ant-select-compact-first-item min-w-[120px] css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-show-arrow"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-select-content"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-select-content-value"[39m
+                        [33mstyle[39m=[32m"visibility: visible;"[39m
+                        [33mtitle[39m=[32m"Media"[39m
+                      [36m>[39m
+                        [0mMedia[0m
+                      [36m</div>[39m
+                      [36m<input[39m
+                        [33maria-autocomplete[39m=[32m"list"[39m
+                        [33maria-expanded[39m=[32m"false"[39m
+                        [33maria-haspopup[39m=[32m"listbox"[39m
+                        [33maria-label[39m=[32m"Source Type"[39m
+                        [33mautocomplete[39m=[32m"off"[39m
+                        [33mclass[39m=[32m"ant-select-input"[39m
+                        [33mid[39m=[32m"test-id"[39m
+                        [33mreadonly[39m=[32m""[39m
+                        [33mrole[39m=[32m"combobox"[39m
+                        [33mtype[39m=[32m"search"[39m
+                        [33mvalue[39m=[32m""[39m
+                      [36m/>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-select-suffix"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33maria-label[39m=[32m"down"[39m
+                        [33mclass[39m=[32m"anticon anticon-down"[39m
+                        [33mrole[39m=[32m"img"[39m
+                      [36m>[39m
+                        [36m<svg[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mdata-icon[39m=[32m"down"[39m
+                          [33mfill[39m=[32m"currentColor"[39m
+                          [33mfocusable[39m=[32m"false"[39m
+                          [33mheight[39m=[32m"1em"[39m
+                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                          [33mwidth[39m=[32m"1em"[39m
+                        [36m>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                          [36m/>[39m
+                        [36m</svg>[39m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"Source ID (advanced/manual)"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+                    [33mplaceholder[39m=[32m"Source ID (advanced/manual)"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"Source Title"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+                    [33mplaceholder[39m=[32m"Optional title"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-compact-item ant-btn-compact-last-item"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mAdd source[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary mt-2 block text-xs css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [33mdata-testid[39m=[32m"study-pack-source-id-guidance"[39m
+                [36m>[39m
+                  [0mAdvanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source.[0m
+                [36m</span>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-3 space-y-2"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"flex items-start justify-between gap-3 rounded border border-border bg-background p-2"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"min-w-0"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-typography block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                      [36m>[39m
+                        [0mmedia[0m
+                        [0m · [0m
+                        [0m42[0m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-typography ant-typography-secondary block truncate css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                      [36m>[39m
+                        [0mCitrine source[0m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                    [36m<button[39m
+                      [33maria-label[39m=[32m"Remove"[39m
+                      [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-icon-only"[39m
+                      [33mtype[39m=[32m"button"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-btn-icon"[39m
+                      [36m>[39m
+                        [36m<svg[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 size-4"[39m
+                          [33mfill[39m=[32m"none"[39m
+                          [33mheight[39m=[32m"24"[39m
+                          [33mstroke[39m=[32m"currentColor"[39m
+                          [33mstroke-linecap[39m=[32m"round"[39m
+                          [33mstroke-linejoin[39m=[32m"round"[39m
+                          [33mstroke-width[39m=[32m"2"[39m
+                          [33mviewBox[39m=[32m"0 0 24 24"[39m
+                          [33mwidth[39m=[32m"24"[39m
+                          [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                        [36m>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M10 11v6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M14 11v6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M3 6h18"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                          [36m/>[39m
+                        [36m</svg>[39m
+                      [36m</span>[39m
+                    [36m</button>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-footer"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mCancel[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ant-btn-loading"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-btn-icon ant-btn-loading-icon ant-btn-loading-icon-motion-enter ant-btn-loading-icon-motion-enter-start ant-btn-loading-icon-motion"[39m
+                    [33mstyle[39m=[32m"width: 0px; opacity: 0; transform: scale(0);"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"loading"[39m
+                      [33mclass[39m=[32m"anticon anticon-loading anticon-spin"[39m
+                      [33mrole[39m=[32m"img"[39m
+                    [36m>[39m
+                      [36m<svg[39m
+                        [33maria-hidden[39m=[32m"true"[39m
+                        [33mdata-icon[39m=[32m"loading"[39m
+                        [33mfill[39m=[32m"currentColor"[39m
+                        [33mfocusable[39m=[32m"false"[39m
+                        [33mheight[39m=[32m"1em"[39m
+                        [33mviewBox[39m=[32m"0 0 1024 1024"[39m
+                        [33mwidth[39m=[32m"1em"[39m
+                      [36m>[39m
+                        [36m<path[39m
+                          [33md[39m=[32m"M988 548c-19.9 0-36-16.1-36-36 0-59.4-11.6-117-34.6-171.3a440.45 440.45 0 00-94.3-139.9 437.71 437.71 0 00-139.9-94.3C629 83.6 571.4 72 512 72c-19.9 0-36-16.1-36-36s16.1-36 36-36c69.1 0 136.2 13.5 199.3 40.3C772.3 66 827 103 874 150c47 47 83.9 101.8 109.7 162.7 26.7 63.1 40.2 130.2 40.2 199.3.1 19.9-16 36-35.9 36z"[39m
+                        [36m/>[39m
+                      [36m</svg>[39m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0mCreate study pack[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx:176:19
+    174|     fireEvent.click(button());
+    175|     await waitFor(() => expect(getStudyPackJob).toHaveBeenCalledWith(9…
+    176|     expect(screen.getByRole("status")).toHaveTextContent(/accepted/i);
+       |                   ^
+    177|     expect(button()).toBeDisabled();
+    178|     fireEvent.click(button());
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > blocks duplicate submission while queued between polls
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > blocks duplicate submission while running between polls
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"
+  type="button"
+/>
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx:192:24
+    190|       await submit(client);
+    191|       expect(client.getQueryState(jobKey)?.fetchStatus).toBe("idle");
+    192|       expect(button()).toBeDisabled();
+       |                        ^
+    193|       expect(screen.getByRole("status")).toHaveAttribute("aria-live", …
+    194|       expect(screen.getByRole("status")).toHaveTextContent(
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > keeps the same job pending across queued, active fetch and running gaps
+Error: expect(element).toBeDisabled()
+
+Received element is not disabled:
+  <button
+  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"
+  type="button"
+/>
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx:215:22
+    213|       refresh = client.refetchQueries({ queryKey: jobKey });
+    214|     });
+    215|     expect(button()).toBeDisabled();
+       |                      ^
+    216|     await act(async () => {
+    217|       nextPoll.resolve(response("running"));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > keeps the accepted job locked on a poll error and recovers on the same query
+TestingLibraryElementError: Unable to find role="status"
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"ant-drawer ant-drawer-right css-dev-only-do-not-override-3uaqrl css-var-root ant-drawer-open"[39m
+      [33mtabindex[39m=[32m"-1"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-drawer-mask ant-drawer-mask-blur"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-drawer-content-wrapper"[39m
+        [33mstyle[39m=[32m"width: 736px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-labelledby[39m=[32m"test-id"[39m
+          [33maria-modal[39m=[32m"true"[39m
+          [33mclass[39m=[32m"ant-drawer-section"[39m
+          [33mrole[39m=[32m"dialog"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-header"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-drawer-header-title"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Close"[39m
+                [33mclass[39m=[32m"ant-drawer-close"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"close"[39m
+                  [33mclass[39m=[32m"anticon anticon-close"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"close"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfill-rule[39m=[32m"evenodd"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-drawer-title"[39m
+                [33mid[39m=[32m"test-id"[39m
+              [36m>[39m
+                [0mCreate study pack[0m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-body"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"space-y-4"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-1"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                [36m>[39m
+                  [36m<strong>[39m
+                    [0mTitle[0m
+                  [36m</strong>[39m
+                [36m</span>[39m
+                [36m<input[39m
+                  [33maria-label[39m=[32m"Title"[39m
+                  [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                  [33mplaceholder[39m=[32m"Study pack title"[39m
+                  [33mtype[39m=[32m"text"[39m
+                  [33mvalue[39m=[32m"Citrine study pack"[39m
+                [36m/>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"rounded border border-border bg-surface p-3"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mb-3 flex items-center justify-between gap-2"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [36m>[39m
+                    [36m<strong>[39m
+                      [0mSources[0m
+                    [36m</strong>[39m
+                  [36m</span>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [36m>[39m
+                    [0m1 selected[0m
+                  [36m</span>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-space-compact css-dev-only-do-not-override-3uaqrl w-full"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-select ant-select-outlined ant-select-compact-item ant-select-compact-first-item min-w-[120px] css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-show-arrow"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-select-content"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-select-content-value"[39m
+                        [33mstyle[39m=[32m"visibility: visible;"[39m
+                        [33mtitle[39m=[32m"Media"[39m
+                      [36m>[39m
+                        [0mMedia[0m
+                      [36m</div>[39m
+                      [36m<input[39m
+                        [33maria-autocomplete[39m=[32m"list"[39m
+                        [33maria-expanded[39m=[32m"false"[39m
+                        [33maria-haspopup[39m=[32m"listbox"[39m
+                        [33maria-label[39m=[32m"Source Type"[39m
+                        [33mautocomplete[39m=[32m"off"[39m
+                        [33mclass[39m=[32m"ant-select-input"[39m
+                        [33mid[39m=[32m"test-id"[39m
+                        [33mreadonly[39m=[32m""[39m
+                        [33mrole[39m=[32m"combobox"[39m
+                        [33mtype[39m=[32m"search"[39m
+                        [33mvalue[39m=[32m""[39m
+                      [36m/>[39m
+                    [36m</div>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-select-suffix"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33maria-label[39m=[32m"down"[39m
+                        [33mclass[39m=[32m"anticon anticon-down"[39m
+                        [33mrole[39m=[32m"img"[39m
+                      [36m>[39m
+                        [36m<svg[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mdata-icon[39m=[32m"down"[39m
+                          [33mfill[39m=[32m"currentColor"[39m
+                          [33mfocusable[39m=[32m"false"[39m
+                          [33mheight[39m=[32m"1em"[39m
+                          [33mviewBox[39m=[32m"64 64 896 896"[39m
+                          [33mwidth[39m=[32m"1em"[39m
+                        [36m>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M884 256h-75c-5.1 0-9.9 2.5-12.9 6.6L512 654.2 227.9 262.6c-3-4.1-7.8-6.6-12.9-6.6h-75c-6.5 0-10.3 7.4-6.5 12.7l352.6 486.1c12.8 17.6 39 17.6 51.7 0l352.6-486.1c3.9-5.3.1-12.7-6.4-12.7z"[39m
+                          [36m/>[39m
+                        [36m</svg>[39m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                  [36m</div>[39m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"Source ID (advanced/manual)"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+                    [33mplaceholder[39m=[32m"Source ID (advanced/manual)"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"Source Title"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var ant-input-compact-item"[39m
+                    [33mplaceholder[39m=[32m"Optional title"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                  [36m<button[39m
+                    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-compact-item ant-btn-compact-last-item"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span>[39m
+                      [0mAdd source[0m
+                    [36m</span>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<span[39m
+                  [33mclass[39m=[32m"ant-typography ant-typography-secondary mt-2 block text-xs css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [33mdata-testid[39m=[32m"study-pack-source-id-guidance"[39m
+                [36m>[39m
+                  [0mAdvanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source.[0m
+                [36m</span>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"mt-3 space-y-2"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"flex items-start justify-between gap-3 rounded border border-border bg-background p-2"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"min-w-0"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-typography block css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                      [36m>[39m
+                        [0mmedia[0m
+                        [0m · [0m
+                        [0m42[0m
+                      [36m</span>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-typography ant-typography-secondary block truncate css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                      [36m>[39m
+                        [0mCitrine source[0m
+                      [36m</span>[39m
+                    [36m</div>[39m
+                    [36m<button[39m
+                      [33maria-label[39m=[32m"Remove"[39m
+                      [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-text ant-btn-color-default ant-btn-variant-text ant-btn-icon-only"[39m
+                      [33mtype[39m=[32m"button"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"ant-btn-icon"[39m
+                      [36m>[39m
+                        [36m<svg[39m
+                          [33maria-hidden[39m=[32m"true"[39m
+                          [33mclass[39m=[32m"lucide lucide-trash2 lucide-trash-2 size-4"[39m
+                          [33mfill[39m=[32m"none"[39m
+                          [33mheight[39m=[32m"24"[39m
+                          [33mstroke[39m=[32m"currentColor"[39m
+                          [33mstroke-linecap[39m=[32m"round"[39m
+                          [33mstroke-linejoin[39m=[32m"round"[39m
+                          [33mstroke-width[39m=[32m"2"[39m
+                          [33mviewBox[39m=[32m"0 0 24 24"[39m
+                          [33mwidth[39m=[32m"24"[39m
+                          [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                        [36m>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M10 11v6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M14 11v6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M3 6h18"[39m
+                          [36m/>[39m
+                          [36m<path[39m
+                            [33md[39m=[32m"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"[39m
+                          [36m/>[39m
+                        [36m</svg>[39m
+                      [36m</span>[39m
+                    [36m</button>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-drawer-footer"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-space css-dev-only-do-not-override-3uaqrl ant-space-horizontal ant-space-align-center ant-space-gap-row-small ant-space-gap-col-small css-var-root"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span>[39m
+                    [0mCancel[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-space-item"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-btn-icon ant-btn-loading-icon ant-btn-loading-icon-motion-leave ant-btn-loading-icon-motion-leave-active ant-btn-loading-icon-motion"[39m
+                    [33mstyle[39m=[32m"width: 0px; opacity: 0; transform: scale(0);"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33maria-label[39m=[32m"loading"[39m
+                      [33mclass[39m=[32m"anticon anticon-loading anticon-spin"[39m
+                      [33mrole[39m=[32m"img"[39m
+                    [36m>[39m
+                      [36m<svg[39m
+                        [33maria-hidden[39m=[32m"true"[39m
+                        [33mdata-icon[39m=[32m"loading"[39m
+                        [33mfill[39m=[32m"currentColor"[39m
+                        [33mfocusable[39m=[32m"false"[39m
+                        [33mheight[39m=[32m"1em"[39m
+                        [33mviewBox[39m=[32m"0 0 1024 1024"[39m
+                        [33mwidth[39m=[32m"1em"[39m
+                      [36m>[39m
+                        [36m<path[39m
+                          [33md[39m=[32m"M988 548c-19.9 0-36-16.1-36-36 0-59.4-11.6-117-34.6-171.3a440.45 440.45 0 00-94.3-139.9 437.71 437.71 0 00-139.9-94.3C629 83.6 571.4 72 512 72c-19.9 0-36-16.1-36-36s16.1-36 36-36c69.1 0 136.2 13.5 199.3 40.3C772.3 66 827 103 874 150c47 47 83.9 101.8 109.7 162.7 26.7 63.1 40.2 130.2 40.2 199.3.1 19.9-16 36-35.9 36z"[39m
+                        [36m/>[39m
+                      [36m</svg>[39m
+                    [36m</span>[39m
+                  [36m</span>[39m
+                  [36m<span>[39m
+                    [0mCreate study pack[0m
+                  [36m</span>[39m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div />[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-drawer ant-drawer-right css-dev-only-do-not-override-3uaqrl css-var-root ant-drawer-open"[39m
+        [33mtabindex[39m=[32m"-1"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-drawer-mask ant-drawer-mask-blur"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"ant-drawer-content-wrapper"[39m
+          [33mstyle[39m=[32m"width: 736px;"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33maria-labelledby[39m=[32m"test-id"[39m
+            [33maria-modal[39m=[32m"true"[39m
+            [33mclass[39m=[32m"ant-drawer-section"[39m
+            [33mrole[39m=[32m"dialog"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-drawer-header"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-drawer-header-title"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-label[39m=[32m"Close"[39m
+                  [33mclass[39m=[32m"ant-drawer-close"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33maria-label[39m=[32m"close"[39m
+                    [33mclass[39m=[32m"anticon anticon-close"[39m
+                    [33mrole[39m=[32m"img"[39m
+                  [36m>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mdata-icon[39m=[32m"close"[39m
+                      [33mfill[39m=[32m"currentColor"[39m
+                      [33mfill-rule[39m=[32m"evenodd"[39m
+                      [33mfocusable[39m=[32m"false"[39m
+                      [33mheight[39m=[32m"1em"[39m
+                      [33mviewBox[39m=[32m"64 64 896 896"[39m
+                      [33mwidth[39m=[32m"1em"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</span>[39m
+                [36m</button>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"ant-drawer-title"[39m
+                  [33mid[39m=[32m"test-id"[39m
+                [36m>[39m
+                  [0mCreate study pack[0m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-drawer-body"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-4"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"space-y-1"[39m
+                [36m>[39m
+                  [36m<span[39m
+                    [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                  [36m>[39m
+                    [36m<strong>[39m
+                      [0mTitle[0m
+                    [36m</strong>[39m
+                  [36m</span>[39m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"Title"[39m
+                    [33mclass[39m=[32m"ant-input css-dev-only-do-not-override-3uaqrl ant-input-outlined css-var-root ant-input-css-var"[39m
+                    [33mplaceholder[39m=[32m"Study pack title"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m"Citrine study pack"[39m
+                  [36m/>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"rounded border border-border bg-surface p-3"[39m
+                [36m>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"mb-3 flex items-center justify-between gap-2"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [36m<strong>[39m
+                        [0mSources[0m
+                      [36m</strong>[39m
+                    [36m</span>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"[39m
+                    [36m>[39m
+                      [0m1 selected[0m
+                    [36m</span>[39m
+                  [36m</div>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"ant-space-compact css-dev-only-do-not-override-3uaqrl w-full"[39m
+                  [36m>[39m
+                    [36m<div[39m
+                      [33mclass[39m=[32m"ant-select ant-select-outlined ant-select-compact-item ant-select-compact-first-item min-w-[120px] css-var-root ant-select-css-var css-dev-only-do-not-override-3uaqrl ant-select-single ant-select-show-arrow"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"ant-select-content"[39m
+                      [36m>[39m
+                        [36m<div[39m
+                          [33mclass[39m=[32m"ant-select-content-value"[39m
+                          [33mstyle[39m=[32m"visibility: visible;"[39m
+                          [33mtitle[39m=[32m"Media"[39m
+                        [36m>[39m
+                          [0mMedia[0m
+                        [36m</div>[39m
+                        [36m<input[39m
+                          [33maria-autocomplete[39m=[32m"list"[39m
+                          [33maria-expanded[39m=[32m"false"[39m
+                          [33maria-haspopup[39m=[32m"listbox"[39m
+                          [33maria-label[39m=[32m"Source Type"[39m
+                          [33mautocomplete[39m=[32m"off"[39m
+                          [33mclass[39m=[32m"ant-select-input"[39m
+                          [33mid[39m=[32m"test-id"[39m
+                          [33mreadonly[39m=[32m""[39m
+                ...
+ ❯ Proxy.waitForWrapper ../node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx:239:11
+    237|       await client.refetchQueries({ queryKey: jobKey });
+    238|     });
+    239|     await waitFor(() =>
+       |           ^
+    240|       expect(screen.getByRole("status")).toHaveTextContent(/unable to …
+    241|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > releases an unusable completed result (missing-pack) for deliberate retry
+ FAIL  ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx > StudyPackCreateDrawer accepted job lifecycle > releases an unusable completed result (missing-deck) for deliberate retry
+AssertionError: expected "vi.fn()" to be called with arguments: [ Array(1) ]
+
+Number of calls: 0
+
+ ❯ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx:330:29
+    328|       });
+    329|       await waitFor(() => expect(button()).toBeEnabled());
+    330|       expect(message.error).toHaveBeenCalledWith(
+       |                             ^
+    331|         "Study pack completed, but its review deck is unavailable.",
+    332|       );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 5 passed (12)
+   Start at  23:15:38
+   Duration  4.50s (transform 150ms, setup 84ms, import 529ms, tests 3.59s, environment 208ms)

@@ -1,0 +1,31 @@
+{
+  "native_backend_source_receipt_at": "2026-09-17T05:29:59.276Z",
+  "revision": "a130b8e5507ff2f1ec6a930a7aa12183a44b5d44",
+  "relevant_files": [
+    {
+      "path": "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py",
+      "sha256": "deab1710097b472b595ccad93f22862e30ffb299a5df39eacae0f9e5cba19bef"
+    },
+    {
+      "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "sha256": "726d55a2ee2d0a9f7916f93a5945dc21e89d0244d66e54bac9242c7772038d38"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "6089c5e0cac45fd0dd2c5253ad906b20108746e35a9189bf3934fc1eca9506b7"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+      "sha256": "93ed045b9561eb119d1ce279e643c8ebf819989f54e2e40135cb7be8a7fdc952"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+      "sha256": "3d5257702ddb15b4ba887b326c5a40c3d083bb8f257753e1f77b6ccdac15f0ef"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "sha256": "52652fa347b2d945abcdf01674a16f2f76d997875bc6a56995457656dee9cfea"
+    }
+  ],
+  "frontend_limit": "Source receipt is backend-only. This audit does not claim a frozen frontend bundle hash."
+}

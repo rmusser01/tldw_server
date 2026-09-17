@@ -1,0 +1,35 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.137 - Repair-PostgreSQL-conversation-updates-querying-SQLite-rowid.md
+
+Task TASK-13260.137 - Repair PostgreSQL conversation updates querying SQLite rowid
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 04:37
+Updated: 2026-09-17 04:45
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT199: Actual Bob character-chat send on reviewed48f89447fc creates chat201 and two messages201, but each message-triggered conversation update logs PostgreSQL column rowid does not exist. Owned Postgres04:35:17.993 and04:35:18.085 SQL is SELECT rowid,title,version,deleted,character_id,assistant_kind,assistant_id,persona_memory_mode FROM conversations WHERE id=$1. Diagnose actual update behavior and repair PostgreSQL selection while preserving SQLite FTS and transaction/version semantics.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Official PostgreSQL regression reproduces actual update failure with positive SQLite controls; no mock database hides SQL dialect errors.
+- [x] #2 Minimal repair preserves conversation ownership, optimistic version behavior, title/character/settings updates and SQLite search synchronization.
+- [ ] #3 Independent review and relevant PostgreSQL tests pass without skips; native conversation updates succeed with retained evidence.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Notes:
+--------------------------------------------------
+Causal real-backend12-case suite:6 PostgreSQL failures/6 SQLite passes. Minimal unused-rowid projection removal now passes22tests with0skips including10adjacent. Source/tests frozen in .tmp/uat199-repair-20260917; independent review requested. Ruff6baseline/current0added; Banditproduction0/test0excludingpytestassertions. Native still on oldloaded48f89447fc; no acceptance claim.
+
+Independent review clear:22tests0skip17.84s; exact full-file comparison proves only unused rowid column removed. Ruff6baseline/current0added and Bandit0. Reviewer packet .tmp/uat199-independent-20260917; native update acceptance remains.

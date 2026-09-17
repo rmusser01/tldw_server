@@ -1,0 +1,93 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/utils/__tests__/review-gap.test.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/utils/date-display.ts",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T07:07:05Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx": {
+      "loc": 856,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx": {
+      "loc": 151,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx": {
+      "loc": 2876,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx": {
+      "loc": 1976,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx": {
+      "loc": 752,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx": {
+      "loc": 150,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/utils/__tests__/review-gap.test.ts": {
+      "loc": 198,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/utils/date-display.ts": {
+      "loc": 182,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 7141,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

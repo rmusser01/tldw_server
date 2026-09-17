@@ -1,0 +1,37 @@
+{
+  "eslint_baseline": {
+    "errors": 0,
+    "warnings": 44,
+    "rules": {
+      "@typescript-eslint/no-unused-vars": 2,
+      "@typescript-eslint/no-explicit-any": 41,
+      "@next/next/no-img-element": 1
+    }
+  },
+  "tsc_baseline": {
+    "diagnostic_count": 90
+  },
+  "eslint_current": {
+    "errors": 0,
+    "warnings": 44,
+    "rules": {
+      "@typescript-eslint/no-unused-vars": 2,
+      "@typescript-eslint/no-explicit-any": 41,
+      "@next/next/no-img-element": 1
+    }
+  },
+  "tsc_current": {
+    "diagnostic_count": 90
+  },
+  "tsc_identical": true,
+  "tsc_diagnostic_messages_identical": true,
+  "tsc_owned_diagnostics": [],
+  "bandit": {
+    "baseline_results": 2,
+    "current_results": 2,
+    "same_results": true,
+    "baseline_parse_errors": 2,
+    "current_parse_errors": 2,
+    "limitation": "Bandit cannot parse TSX; JSON translation labels Password trigger unchanged B105. Not meaningful TypeScript security coverage."
+  }
+}

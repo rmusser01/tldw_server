@@ -1,0 +1,612 @@
+--- a/apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
++++ b/apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx
+@@ -59,6 +59,7 @@
+ import { calculateIntervals } from "../utils/calculateIntervals"
+ import {
+   formatFlashcardLongDateTime,
++  formatFlashcardReviewGap,
+   formatFlashcardRelativeTime
+ } from "../utils/date-display"
+ import { formatCardType } from "../utils/model-type-labels"
+@@ -660,13 +661,7 @@
+           t("option:flashcards.nextReviewUnknown", {
+             defaultValue: "soon"
+           })
+-        const intervalLabel =
+-          reviewResult.interval_days === 1
+-            ? t("option:flashcards.intervalOneDay", { defaultValue: "1 day" })
+-            : t("option:flashcards.intervalManyDays", {
+-                defaultValue: "{{count}} days",
+-                count: reviewResult.interval_days
+-              })
++        const intervalLabel = formatFlashcardReviewGap(reviewResult, t)
+
+         message.success(
+           t("option:flashcards.reviewSavedWithSchedule", {
+--- a/apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx
++++ b/apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx
+@@ -65,6 +65,7 @@
+ import {
+   formatFlashcardAbsoluteDateTime,
+   formatFlashcardRelativeTime,
++  formatFlashcardReviewGap,
+   isFlashcardTimestampBefore
+ } from "../utils/date-display"
+ import {
+@@ -886,8 +887,8 @@
+         value: card.ef.toFixed(2)
+       }),
+       nextReviewGap: t("option:flashcards.schedulingNextReviewGapCompact", {
+-        defaultValue: "Next gap {{count}}d",
+-        count: Math.max(0, card.interval_days)
++        defaultValue: "Next gap {{interval}}",
++        interval: formatFlashcardReviewGap(card, t, { compact: true })
+       }),
+       recallRuns: t("option:flashcards.schedulingRecallRunsCompact", {
+         defaultValue: "Recall runs {{count}}",
+@@ -908,8 +909,8 @@
+         value: card.ef.toFixed(2)
+       }),
+       nextReviewGap: t("option:flashcards.schedulingNextReviewGapExpanded", {
+-        defaultValue: "Next review gap {{count}}d",
+-        count: Math.max(0, card.interval_days)
++        defaultValue: "Next review gap {{interval}}",
++        interval: formatFlashcardReviewGap(card, t, { compact: true })
+       }),
+       recallRuns: t("option:flashcards.schedulingRecallRunsExpanded", {
+         defaultValue: "Recall runs {{count}}",
+--- a/apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx
++++ b/apps/packages/ui/src/components/Flashcards/components/FlashcardEditDrawer.tsx
+@@ -17,7 +17,7 @@
+ import { useAntdMessage } from "@/hooks/useAntdMessage"
+ import { useDebouncedFormField } from "../hooks"
+ import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
+-import { formatFlashcardTimestampWithRelative } from "../utils/date-display"
++import { formatFlashcardReviewGap, formatFlashcardTimestampWithRelative } from "../utils/date-display"
+ import { normalizeFlashcardTemplateFields } from "../utils/template-helpers"
+ import { normalizeOptionalFlashcardTags } from "../utils/tag-normalization"
+ import {
+@@ -441,7 +441,7 @@
+                 <Text type="secondary" className="block text-[11px]">
+                   <Tooltip
+                     title={t("option:flashcards.schedulingNextGapHelp", {
+-                      defaultValue: "SM-2 interval (days until next review)."
++                      defaultValue: "Scheduled gap after the last review. Learning steps may use minutes or hours."
+                     })}
+                   >
+                     <span>
+@@ -452,10 +452,7 @@
+                   </Tooltip>
+                 </Text>
+                 <Text>
+-                  {t("option:flashcards.intervalDaysShort", {
+-                    defaultValue: "{{count}}d",
+-                    count: Math.max(0, card.interval_days)
+-                  })}
++                  {formatFlashcardReviewGap(card, t, { compact: true })}
+                 </Text>
+               </div>
+               <div>
+@@ -856,8 +853,8 @@
+             </Text>
+             <Text className="block">
+               {t("option:flashcards.resetSchedulingCurrentInterval", {
+-                defaultValue: "Next review gap: {{count}} day(s)",
+-                count: Math.max(0, card.interval_days)
++                defaultValue: "Next review gap: {{interval}}",
++                interval: formatFlashcardReviewGap(card, t)
+               })}
+             </Text>
+             <Text className="block">
+--- a/apps/packages/ui/src/components/Flashcards/utils/date-display.ts
++++ b/apps/packages/ui/src/components/Flashcards/utils/date-display.ts
+@@ -1,3 +1,5 @@
++import type { TFunction } from "i18next"
++
+ const SECONDS_TO_MS = 1000
+ // Epoch seconds remain below this until 2286; millisecond timestamps exceed it after 1970.
+ const SECOND_TIMESTAMP_CUTOFF = 10_000_000_000
+@@ -151,3 +153,56 @@
+     timestamp
+   }
+ }
++
++
++type FlashcardReviewGapSchedule = {
++  interval_days: number
++  queue_state?: string | null
++  due_at?: unknown
++  last_reviewed_at?: unknown
++}
++
++/** Describe the saved schedule, never the remaining time from the current clock. */
++export const formatFlashcardReviewGap = (
++  schedule: FlashcardReviewGapSchedule,
++  t: TFunction,
++  { compact = false }: { compact?: boolean } = {}
++): string => {
++  const unavailable = () => t(
++    compact ? "option:flashcards.reviewGapUnavailableShort" : "option:flashcards.reviewGapUnavailable",
++    { defaultValue: compact ? "—" : "not available" }
++  )
++  if (schedule.queue_state === "new" || schedule.queue_state === "suspended") return unavailable()
++
++  const isLearning = schedule.queue_state === "learning" || schedule.queue_state === "relearning"
++  let count = schedule.interval_days
++  let unit: "Days" | "Hours" | "Minutes" = "Days"
++  if (isLearning || count === 0) {
++    const due = parseFlashcardTimestamp(schedule.due_at)
++    const reviewed = parseFlashcardTimestamp(schedule.last_reviewed_at)
++    if (due == null || reviewed == null || due <= reviewed) return unavailable()
++    const minutes = Math.ceil((due - reviewed) / MINUTES_TO_MS)
++    // Keep non-whole hours in minutes: a 90-minute step is not a two-hour gap.
++    if (minutes % (24 * 60) === 0) {
++      count = minutes / (24 * 60)
++    } else if (minutes % 60 === 0) {
++      count = minutes / 60
++      unit = "Hours"
++    } else {
++      count = minutes
++      unit = "Minutes"
++    }
++  } else if (!Number.isFinite(count) || count <= 0) {
++    return unavailable()
++  }
++
++  const labels = {
++    Days: { short: "{{count}}d", full: "{count, plural, one {# day} other {# days}}" },
++    Hours: { short: "{{count}} hr", full: "{count, plural, one {# hour} other {# hours}}" },
++    Minutes: { short: "{{count}} min", full: "{count, plural, one {# minute} other {# minutes}}" }
++  }
++  return t(`option:flashcards.reviewGap${unit}${compact ? "Short" : ""}`, {
++    defaultValue: compact ? labels[unit].short : labels[unit].full,
++    count
++  })
++}
+--- a/apps/packages/ui/src/assets/locale/en/option.json
++++ b/apps/packages/ui/src/assets/locale/en/option.json
+@@ -1838,6 +1838,18 @@
+     "lapseRate": "Lapse rate",
+     "averageAnswerTime": "Avg answer time",
+     "studyStreak": "Study streak",
++    "reviewGapMinutes": "{count, plural, one {# minute} other {# minutes}}",
++    "reviewGapHours": "{count, plural, one {# hour} other {# hours}}",
++    "reviewGapDays": "{count, plural, one {# day} other {# days}}",
++    "reviewGapMinutesShort": "{{count}} min",
++    "reviewGapHoursShort": "{{count}} hr",
++    "reviewGapDaysShort": "{{count}}d",
++    "reviewGapUnavailable": "not available",
++    "reviewGapUnavailableShort": "—",
++    "schedulingNextReviewGapCompact": "Next gap {{interval}}",
++    "schedulingNextReviewGapExpanded": "Next review gap {{interval}}",
++    "resetSchedulingCurrentInterval": "Next review gap: {{interval}}",
++    "schedulingNextGapHelp": "Scheduled gap after the last review. Learning steps may use minutes or hours.",
+     "studyStreakDays": "{count, plural, one {# day} other {# days}}",
+     "deckProgress": "Deck progress",
+     "deckTotal": "Total: {{count}}",
+--- a/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx
++++ b/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx
+@@ -7,7 +7,7 @@
+ import { FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING } from "@/services/settings/ui-settings"
+ import { ReviewTab } from "../ReviewTab"
+
+-const state = vi.hoisted(() => ({ review: vi.fn(), end: vi.fn(), previewAlwaysPresent: false }))
++const state = vi.hoisted(() => ({ review: vi.fn(), end: vi.fn(), toast: vi.fn(), previewAlwaysPresent: false }))
+ vi.mock("@/services/background-proxy", () => ({ bgRequest: vi.fn(), bgUpload: vi.fn() }))
+ vi.mock("@/services/service-prompts", async importOriginal => ({
+   ...await importOriginal<typeof import("@/services/service-prompts")>(),
+@@ -25,10 +25,12 @@
+   const { default: ICU } = await import("@/i18n/icu-format")
+   const instance = createInstance().use(ICU)
+   await instance.init({ lng: "en", fallbackLng: false, resources: {} })
+-  return { useTranslation: () => ({ t: instance.t.bind(instance) }) }
++  const t = instance.t.bind(instance)
++  return { useTranslation: () => ({ t }) }
+ })
++
+ vi.mock("@/hooks/useAntdMessage", () => ({
+-  useAntdMessage: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() })
++  useAntdMessage: () => ({ success: state.toast, error: vi.fn(), info: vi.fn(), warning: vi.fn() })
+ }))
+ vi.mock("@/hooks/useTTS", () => ({ useTTS: () => ({ speak: vi.fn(), cancel: vi.fn(), isSpeaking: false }) }))
+ vi.mock("@/hooks/useSpeechRecognition", () => ({
+@@ -107,6 +109,22 @@
+
+ describe("Cram authoritative scheduler previews", () => {
+   it.each([
++    { queue: "learning", days: 0, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
++    { queue: "relearning", days: 7, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
++    { queue: "review", days: 0, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
++    { queue: "review", days: 2, due: "2026-09-19T06:26:35.074Z", gap: "2 days" }
++  ])("saved-gap toast $queue reports the saved gap", async ({ queue, days, due, gap }) => {
++    state.review.mockResolvedValue({ uuid: card.uuid, interval_days: days, queue_state: queue,
++      due_at: due, last_reviewed_at: "2026-09-17T06:26:35.074Z", review_session_id: 77 })
++    await mountCram()
++    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
++    await waitFor(() => expect(state.toast).toHaveBeenCalledWith(expect.stringContaining("next review gap:")))
++    const saved = state.toast.mock.calls.map(([text]) => String(text)).find(text => text.includes("next review gap:"))
++    expect(saved).toContain(`next review gap: ${gap}`)
++    expect(state.review.mock.calls[0][0]).toMatchObject({ cardUuid: card.uuid, rating: 3 })
++  })
++
++  it.each([
+     { rating: 0, key: 1, label: "1 min" }, { rating: 2, key: 2, label: "6 min" },
+     { rating: 3, key: 3, label: "10 min" }, { rating: 5, key: 4, label: "4 days" }
+   ])("requests and displays the real scheduler label for rating $rating", async ({ rating, key, label }) => {
+--- a/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx
++++ b/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.scheduling-metadata.test.tsx
+@@ -56,28 +56,14 @@
+   ))
+ }))
+
+-vi.mock("react-i18next", () => ({
+-  useTranslation: () => ({
+-    t: (
+-      key: string,
+-      defaultValueOrOptions?:
+-        | string
+-        | {
+-            defaultValue?: string
+-          }
+-    ) => {
+-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+-      if (defaultValueOrOptions?.defaultValue) {
+-        return defaultValueOrOptions.defaultValue.replace(
+-          /\{\{(\w+)\}\}/g,
+-          (_match, token: string) =>
+-            String((defaultValueOrOptions as Record<string, unknown>)[token] ?? `{{${token}}}`)
+-        )
+-      }
+-      return key
+-    }
+-  })
+-}))
++vi.mock("react-i18next", async () => {
++  const { createInstance } = await import("i18next")
++  const { default: ICU } = await import("@/i18n/icu-format")
++  const instance = createInstance().use(ICU)
++  await instance.init({ lng: "en", fallbackLng: false, resources: {} })
++  const t = instance.t.bind(instance)
++  return { useTranslation: () => ({ t }) }
++})
+
+ vi.mock("@tanstack/react-query", async () => {
+   const actual = await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query")
+@@ -290,6 +276,34 @@
+     } as any)
+     vi.mocked(useCardsKeyboardNav).mockImplementation(() => undefined)
+     vi.mocked(getManageServerOrderBy).mockReturnValue("due_at")
++  })
++
++  it.each([
++    { queue: "learning", days: 0, expanded: false },
++    { queue: "learning", days: 0, expanded: true },
++    { queue: "relearning", days: 7, expanded: false },
++    { queue: "relearning", days: 7, expanded: true }
++  ])("Manage $queue expanded=$expanded reports the saved ten-minute gap", ({ queue, days, expanded }) => {
++    const scheduledCard = { ...sampleCard, interval_days: days, queue_state: queue,
++      last_reviewed_at: "2026-09-17T06:26:35.074Z", due_at: "2026-09-17T06:36:35.074Z" }
++    vi.mocked(useManageQuery).mockReturnValue({ data: { items: [scheduledCard], count: 1, total: 1 }, isFetching: false } as ReturnType<typeof useManageQuery>)
++    render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive={false} />)
++    if (expanded) fireEvent.click(screen.getByTestId("flashcards-density-toggle"))
++    expect(screen.getByText(expanded ? "Next review gap 10 min" : "Next gap 10 min")).toBeVisible()
++  })
++
++  it("updates the saved gap in the same mounted Manage view", () => {
++    let card = { ...sampleCard, interval_days: 1 }
++    vi.mocked(useManageQuery).mockImplementation(() => ({
++      data: { items: [card], count: 1, total: 1 }, isFetching: false
++    } as ReturnType<typeof useManageQuery>))
++    const props = { onNavigateToImport: vi.fn(), onReviewCard: vi.fn(), isActive: false }
++    const view = render(<ManageTab {...props} />)
++    expect(screen.getByText("Next gap 1d")).toBeInTheDocument()
++    card = { ...card, interval_days: 0, queue_state: "learning",
++      last_reviewed_at: "2026-09-17T06:26:35.074Z", due_at: "2026-09-17T06:36:35.074Z" }
++    view.rerender(<ManageTab {...props} />)
++    expect(screen.getByText("Next gap 10 min")).toBeInTheDocument()
+   })
+
+   it("keeps compact and expanded card controls without deprecated List warnings", () => {
+--- a/apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx
++++ b/apps/packages/ui/src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx
+@@ -4,28 +4,14 @@
+ import type { Flashcard } from "@/services/flashcards"
+ import { DEFAULT_SCHEDULER_SETTINGS_ENVELOPE } from "../../utils/scheduler-settings"
+
+-vi.mock("react-i18next", () => ({
+-  useTranslation: () => ({
+-    t: (
+-      key: string,
+-      defaultValueOrOptions?:
+-        | string
+-        | {
+-            defaultValue?: string
+-          }
+-    ) => {
+-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+-      if (defaultValueOrOptions?.defaultValue) {
+-        return defaultValueOrOptions.defaultValue.replace(
+-          /\{\{(\w+)\}\}/g,
+-          (_match, token: string) =>
+-            String((defaultValueOrOptions as Record<string, unknown>)[token] ?? `{{${token}}}`)
+-        )
+-      }
+-      return key
+-    }
+-  })
+-}))
++vi.mock("react-i18next", async () => {
++  const { createInstance } = await import("i18next")
++  const { default: ICU } = await import("@/i18n/icu-format")
++  const instance = createInstance().use(ICU)
++  await instance.init({ lng: "en", fallbackLng: false, resources: {} })
++  const t = instance.t.bind(instance)
++  return { useTranslation: () => ({ t }) }
++})
+
+ vi.mock("@/hooks/useAntdMessage", () => ({
+   useAntdMessage: () => ({
+@@ -97,6 +83,39 @@
+ }
+
+ describe("FlashcardEditDrawer reset scheduling action", () => {
++  it.each([
++    { queue: "learning", days: 0, confirmation: false },
++    { queue: "learning", days: 0, confirmation: true },
++    { queue: "relearning", days: 7, confirmation: false },
++    { queue: "relearning", days: 7, confirmation: true },
++    { queue: "review", days: 17, confirmation: false },
++    { queue: "review", days: 17, confirmation: true }
++  ])("Drawer $queue confirmation=$confirmation reports the saved ten-minute gap", async ({ queue, days, confirmation }) => {
++    const scheduledCard = { ...sampleCard, interval_days: days, queue_state: queue,
++      last_reviewed_at: "2026-09-17T06:26:35.074Z", due_at: "2026-09-17T06:36:35.074Z" } as Flashcard
++    const onReset = vi.fn()
++    render(<FlashcardEditDrawer open onClose={vi.fn()} card={scheduledCard} onSave={vi.fn()}
++      onDelete={vi.fn()} onResetScheduling={onReset} decks={[]} />)
++    if (confirmation) {
++      fireEvent.click(screen.getByRole("button", { name: "Reset scheduling" }))
++      expect(screen.getByText("Reset scheduling for this card?")).toBeInTheDocument()
++    }
++    const expected = queue === "review" ? (confirmation ? "Next review gap: 17 days" : "17d") : (confirmation ? "Next review gap: 10 minutes" : "10 min")
++    expect(screen.getByText(expected)).toBeInTheDocument()
++    expect(onReset).not.toHaveBeenCalled()
++  })
++
++  it("updates the saved gap in the same mounted editor without saving", () => {
++    const props = { open: true, onClose: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(), decks: [] }
++    const view = render(<FlashcardEditDrawer {...props} card={{ ...sampleCard, interval_days: 1 }} />)
++    expect(screen.getByText("1d")).toBeInTheDocument()
++    view.rerender(<FlashcardEditDrawer {...props} card={{ ...sampleCard, interval_days: 7,
++      queue_state: "relearning", last_reviewed_at: "2026-09-17T06:26:35.074Z",
++      due_at: "2026-09-17T06:36:35.074Z" }} />)
++    expect(screen.getByText("10 min")).toBeInTheDocument()
++    expect(props.onSave).not.toHaveBeenCalled()
++  })
++
+   it("confirms and invokes reset scheduling callback", async () => {
+     const onResetScheduling = vi.fn().mockResolvedValue(undefined)
+
+@@ -124,14 +143,14 @@
+       />
+     )
+
+-    expect(screen.getByText("Message #m-12")).toBeInTheDocument()
++    expect(screen.getByText("Conversation for message #m-12")).toBeInTheDocument()
+     fireEvent.click(screen.getByRole("button", { name: "Reset scheduling" }))
+     expect(
+       screen.getByText("Reset scheduling for this card?")
+     ).toBeInTheDocument()
+     expect(screen.getByText("Current scheduling state:")).toBeInTheDocument()
+     expect(screen.getByText("Memory strength: 1.80")).toBeInTheDocument()
+-    expect(screen.getByText("Next review gap: 17 day(s)")).toBeInTheDocument()
++    expect(screen.getByText("Next review gap: 17 days")).toBeInTheDocument()
+     expect(screen.getByText("Recall runs: 6")).toBeInTheDocument()
+     expect(screen.getByText("Relearns: 4")).toBeInTheDocument()
+
+--- /dev/null
++++ b/apps/packages/ui/src/components/Flashcards/utils/__tests__/review-gap.test.ts
+@@ -0,0 +1,204 @@
++import { createInstance, type TFunction } from "i18next";
++import { beforeAll, describe, expect, it, vi } from "vitest";
++import ICU from "@/i18n/icu-format";
++import option from "@/assets/locale/en/option.json";
++import { formatFlashcardReviewGap } from "../date-display";
++
++const reviewed = "2026-09-17T06:26:35.074Z";
++const tenMinutesLater = "2026-09-17T06:36:35.074Z";
++const learning = {
++  queue_state: "learning",
++  interval_days: 0,
++  last_reviewed_at: reviewed,
++  due_at: tenMinutesLater,
++};
++
++describe.each(["resource", "fallback"] as const)(
++  "saved review gap with %s ICU messages",
++  (mode) => {
++    let t: TFunction;
++    beforeAll(async () => {
++      const instance = createInstance().use(ICU);
++      await instance.init({
++        lng: "en",
++        fallbackLng: false,
++        resources: mode === "resource" ? { en: { option } } : {},
++      });
++      t = instance.t.bind(instance);
++    });
++
++    it.each([
++      {
++        label: "one minute",
++        change: { due_at: "2026-09-17T06:27:35.074Z" },
++        full: "1 minute",
++        compact: "1 min",
++      },
++      {
++        label: "ten minutes",
++        change: {},
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "one hour",
++        change: { due_at: "2026-09-17T07:26:35.074Z" },
++        full: "1 hour",
++        compact: "1 hr",
++      },
++      {
++        label: "two hours",
++        change: { due_at: "2026-09-17T08:26:35.074Z" },
++        full: "2 hours",
++        compact: "2 hr",
++      },
++      {
++        label: "ninety minutes retain minute precision",
++        change: { due_at: "2026-09-17T07:56:35.074Z" },
++        full: "90 minutes",
++        compact: "90 min",
++      },
++      {
++        label: "one day learning step",
++        change: { due_at: "2026-09-18T06:26:35.074Z" },
++        full: "1 day",
++        compact: "1d",
++      },
++      {
++        label: "partial minute is never zero",
++        change: { due_at: "2026-09-17T06:26:45.074Z" },
++        full: "1 minute",
++        compact: "1 min",
++      },
++      {
++        label: "relearning overrides former days",
++        change: { queue_state: "relearning", interval_days: 7 },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "learning overrides former days",
++        change: { interval_days: 7 },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "zero-day legacy review",
++        change: { queue_state: "review" },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "legacy response without state",
++        change: { queue_state: undefined },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "review keeps one stored day",
++        change: { queue_state: "review", interval_days: 1 },
++        full: "1 day",
++        compact: "1d",
++      },
++      {
++        label: "review keeps stored days",
++        change: { queue_state: "review", interval_days: 7 },
++        full: "7 days",
++        compact: "7d",
++      },
++      {
++        label: "review days survive missing timestamps",
++        change: {
++          queue_state: "review",
++          interval_days: 5,
++          due_at: null,
++          last_reviewed_at: null,
++        },
++        full: "5 days",
++        compact: "5d",
++      },
++      {
++        label: "time zone offsets describe the same gap",
++        change: { last_reviewed_at: "2026-09-16T23:26:35.074-07:00" },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++      {
++        label: "epoch seconds and milliseconds",
++        change: {
++          last_reviewed_at: Date.parse(reviewed) / 1000,
++          due_at: Date.parse(tenMinutesLater),
++        },
++        full: "10 minutes",
++        compact: "10 min",
++      },
++    ])("formats $label", ({ change, full, compact }) => {
++      expect(formatFlashcardReviewGap({ ...learning, ...change }, t)).toBe(
++        full,
++      );
++      expect(
++        formatFlashcardReviewGap({ ...learning, ...change }, t, {
++          compact: true,
++        }),
++      ).toBe(compact);
++    });
++
++    it.each([
++      { queue_state: "new" },
++      { queue_state: "suspended", due_at: null },
++      { due_at: null },
++      { last_reviewed_at: null },
++      { due_at: "invalid" },
++      { last_reviewed_at: "invalid" },
++      { due_at: reviewed },
++      { due_at: "2026-09-17T06:25:35.074Z" },
++      { queue_state: "relearning", interval_days: 7, due_at: null },
++      { queue_state: "review", interval_days: Number.NaN },
++      { queue_state: "review", interval_days: -1 },
++    ])("does not invent an unavailable gap from %j", (change) => {
++      expect(formatFlashcardReviewGap({ ...learning, ...change }, t)).toBe(
++        "not available",
++      );
++      expect(
++        formatFlashcardReviewGap({ ...learning, ...change }, t, {
++          compact: true,
++        }),
++      ).toBe("—");
++    });
++
++    it("does not read the wall clock or mutate saved schedule fields", () => {
++      const schedule = Object.freeze({ ...learning });
++      const clock = vi.spyOn(Date, "now").mockImplementation(() => {
++        throw Error("Display gap must not depend on now");
++      });
++      try {
++        expect(formatFlashcardReviewGap(schedule, t)).toBe("10 minutes");
++      } finally {
++        clock.mockRestore();
++      }
++      expect(schedule).toEqual(learning);
++    });
++
++    it("updates singular and plural counts using the same translator instance", () => {
++      expect(
++        formatFlashcardReviewGap(
++          { ...learning, due_at: "2026-09-17T06:27:35.074Z" },
++          t,
++        ),
++      ).toBe("1 minute");
++      expect(formatFlashcardReviewGap(learning, t)).toBe("10 minutes");
++      expect(
++        formatFlashcardReviewGap(
++          { ...learning, queue_state: "review", interval_days: 1 },
++          t,
++        ),
++      ).toBe("1 day");
++      expect(
++        formatFlashcardReviewGap(
++          { ...learning, queue_state: "review", interval_days: 7 },
++          t,
++        ),
++      ).toBe("7 days");
++    });
++  },
++);

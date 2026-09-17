@@ -1,0 +1,59 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:59237) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ❯ ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx (10 tests | 3 failed) 606ms
+     ✓ renders load errors through the design-system Alert primitive and keeps retry behavior 123ms
+     ✓ announces 0 results with the correct noun 19ms
+     × announces 1 results with the correct noun 156ms
+     ✓ announces 2 results with the correct noun 67ms
+     ✓ announces 0 results with the correct noun 10ms
+     × announces 1 results with the correct noun 59ms
+     ✓ announces 2 results with the correct noun 62ms
+   × updates the announcement when the result count changes on one translator 76ms
+   ✓ does not announce results while pending 18ms
+   ✓ does not announce results while error 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx > Character result announcements (English resource: true) > announces 1 results with the correct noun
+ FAIL  ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx > Character result announcements (English resource: false) > announces 1 results with the correct noun
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  1 character found
+Received:
+  1 characters found
+ ❯ ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:182:26
+    180|
+    181|     const announcement = screen.getByRole("status")
+    182|     expect(announcement).toHaveTextContent(expected)
+       |                          ^
+    183|     expect(announcement).toHaveAttribute("aria-live", "polite")
+    184|     expect(announcement).toHaveAttribute("aria-atomic", "true")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx > updates the announcement when the result count changes on one translator
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  1 character found
+Received:
+  1 characters found
+ ❯ ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx:194:38
+    192|
+    193|   view.rerender(<CharacterListContent {...resultProps(translate, 1)} /…
+    194|   expect(screen.getByRole("status")).toHaveTextContent("1 character fo…
+       |                                      ^
+    195|
+    196|   view.rerender(<CharacterListContent {...resultProps(translate, 0)} /…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 7 passed (10)
+   Start at  23:51:51
+   Duration  1.76s (transform 396ms, setup 81ms, import 798ms, tests 606ms, environment 189ms)

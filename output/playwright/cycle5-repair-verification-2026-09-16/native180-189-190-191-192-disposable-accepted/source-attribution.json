@@ -1,0 +1,21 @@
+{
+  "backend_manifest_at": "2026-09-17T05:29:59.276Z",
+  "backend_revision": "a130b8e5507ff2f1ec6a930a7aa12183a44b5d44",
+  "relevant_backend_sources": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+      "sha256": "7d6933c5ed7ff06e55e2ff335c48ccf5fb93d0ff209dd98a10e92a140f5c6e1c",
+      "current_sha256": "7d6933c5ed7ff06e55e2ff335c48ccf5fb93d0ff209dd98a10e92a140f5c6e1c",
+      "current_matches_start_manifest": true
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "6089c5e0cac45fd0dd2c5253ad906b20108746e35a9189bf3934fc1eca9506b7",
+      "current_sha256": "6089c5e0cac45fd0dd2c5253ad906b20108746e35a9189bf3934fc1eca9506b7",
+      "current_matches_start_manifest": true
+    }
+  ],
+  "frontend_limit": "Existing dev server; parent reports HMR205 only. No immutable frontend bundle hash in supplied backend-only source manifest.",
+  "earlier_reset_limit": "02:15 reset/reload is an earlier retained run, not attributed to a130 by this later manifest.",
+  "tag_join_source": "ChaChaNotes_DB.py list/count tag filters JOIN flashcard_keywords and keyword table; PG joins kw.client_id=f.client_id. No direct DB observation performed."
+}

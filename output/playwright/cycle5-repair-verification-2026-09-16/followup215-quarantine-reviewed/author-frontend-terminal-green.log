@@ -1,0 +1,21 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:67177) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67178) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:67176) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/components/Flashcards/hooks/__tests__/useStudyPackQueries.test.tsx (5 tests) 119ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.test.tsx (4 tests) 829ms
+     ✓ requires a title and at least one source before enabling submit  488ms
+ ✓ ../packages/ui/src/components/Flashcards/components/__tests__/StudyPackCreateDrawer.pending-job.test.tsx (12 tests) 3057ms
+     ✓ keeps an accepted request pending before the first status response  383ms
+     ✓ releases an unusable completed result (missing-pack) for deliberate retry  412ms
+     ✓ releases an unusable completed result (missing-deck) for deliberate retry  427ms
+
+ Test Files  3 passed (3)
+      Tests  21 passed (21)
+   Start at  00:14:25
+   Duration  4.03s (transform 624ms, setup 311ms, import 1.51s, tests 4.00s, environment 735ms)

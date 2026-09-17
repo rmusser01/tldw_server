@@ -1,0 +1,56 @@
+{
+  "scope": "independent native evidence review only",
+  "input_manifest_sha256": "046660f1a4029a6c84aaddf28cef5fac1e446e37fa67f24823ae986364c43c38",
+  "credential_pattern_scan": {
+    "files": 9,
+    "hits": 0,
+    "limit": "Content patterns only; no credential/session material accessed."
+  },
+  "files": [
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/ACCEPTANCE.md",
+      "sha256": "80e65c30882c780673a1bc765f6b7dfd336b60ebf236b2760581ed8ecbe60ee5",
+      "bytes": 7822
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/input-manifest.json",
+      "sha256": "046660f1a4029a6c84aaddf28cef5fac1e446e37fa67f24823ae986364c43c38",
+      "bytes": 6591
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/parsed-evidence.json",
+      "sha256": "dfd3cb3af4bdc9a7030d2d5472f8c777f5299dcc6988beeeb3a2ef942bf06041",
+      "bytes": 31022
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/source-attribution.json",
+      "sha256": "9d1ffee17fba3c7a10d486599901a78ee7ff667f36d40813c5ac12c1c860dfa9",
+      "bytes": 1217
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.117.txt",
+      "sha256": "85c70f22d23ef24d34b3d2136b3000642b6823a97202b50f1740c979f98c453c",
+      "bytes": 2266
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.127.txt",
+      "sha256": "0ebdb57d1f7fa3387980773332644c0a7e0b5f5728326bf2eab4049bc606aa7e",
+      "bytes": 2200
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.128.txt",
+      "sha256": "1f06843fdc3e0e02963ddad87e661315baf33a84665fc963d26d2f587975c84e",
+      "bytes": 2268
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.129.txt",
+      "sha256": "cf3f7b2b9bfd03e9d9ad79188024c710d82306e91007f800916cf8e018806923",
+      "bytes": 2430
+    },
+    {
+      "path": ".tmp/uat180-189-190-191-192-acceptance-20260917/task13260.130.txt",
+      "sha256": "e1162a1e12c7d36a9ea0a387b0bae761a3f081364bf4621cbcc493d88bec1a0c",
+      "bytes": 2923
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:54919) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:54920) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/hooks/__tests__/useVisualIdentityResolver.backend-support.test.tsx (4 tests) 325ms
+ ✓ ../packages/ui/src/hooks/__tests__/useVisualIdentityResolver.test.tsx (9 tests) 595ms
+
+ Test Files  2 passed (2)
+      Tests  13 passed (13)
+   Start at  23:39:39
+   Duration  1.49s (transform 808ms, setup 181ms, import 979ms, tests 920ms, environment 453ms)

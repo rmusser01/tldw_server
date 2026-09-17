@@ -1,0 +1,17 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:59688) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:59687) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:59686) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ ../packages/ui/src/i18n/__tests__/icu-format.test.ts (5 tests) 14ms
+ ✓ ../packages/ui/src/i18n/__tests__/sources-locale.test.ts (3 tests) 4ms
+ ✓ ../packages/ui/src/components/Option/Characters/__tests__/CharacterListContent.design-system.test.tsx (10 tests) 658ms
+
+ Test Files  3 passed (3)
+      Tests  18 passed (18)
+   Start at  23:52:40
+   Duration  2.00s (transform 565ms, setup 282ms, import 1.06s, tests 677ms, environment 702ms)

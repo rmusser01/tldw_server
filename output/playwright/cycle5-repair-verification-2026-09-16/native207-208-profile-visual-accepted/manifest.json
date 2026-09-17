@@ -1,0 +1,159 @@
+{
+  "at": "2026-09-17T07:36:00.432Z",
+  "files": [
+    {
+      "file": "1-bob-account-switch-reviewed-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-account-switch-reviewed-events.txt",
+      "original_sha256": "dcf17e91a3654f968bcd2980b953527e6733d9f7381e991041af26bb381238e0",
+      "retained_sha256": "265e1ac98f462cd6fd0c68bc2ddd8d8879b945ef4e52ed4a7267a9bde7fa5aad",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "2-bob-reviewed-characters-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-characters-open.txt",
+      "original_sha256": "1955989fcc8f0e90ba3a0bfbb2619b89ee82c3b3832aa323929747ffbf427ef8",
+      "retained_sha256": "9733bfa88be41015718b06ef5fa7051963338134b1d77ac43707aad0f1d103a7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "3-bob-reviewed-characters-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-characters-settled.txt",
+      "original_sha256": "8c99ea3a2a95a8fb1c10fa23d71a5f7034405bd4cd313f985e6c951af5a13704",
+      "retained_sha256": "bd1cd26f4899c150cdcd9c35a85553291a31027b4d8f3b4f1a94ab47a433f95a",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "4-bob-reviewed-character-chat-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-open.txt",
+      "original_sha256": "1b37de6143bb927f4610973d36a664ee4eb603e0b5155808aadbcd33836cf07b",
+      "retained_sha256": "1b37de6143bb927f4610973d36a664ee4eb603e0b5155808aadbcd33836cf07b",
+      "normalization": "none"
+    },
+    {
+      "file": "5-bob-reviewed-character-chat-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-settled.txt",
+      "original_sha256": "43005091d8b1ac2e55bbf14e017026225c7c7041b8fe1a61826f997ba987148b",
+      "retained_sha256": "fd991322edd5ddca1981ca933a0864e4ada8f58c5691c934e7bf89380067385e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "6-bob-reviewed-character-chat-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-chat-events.txt",
+      "original_sha256": "36e337b1aa847da52f638de459cc2edfcd71afd43b757b3a2ccd14b259934342",
+      "retained_sha256": "6a6e53e00edbecae4489169d75d68efc60166ee1806f3113a7a820a295a18a7f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "7-bob-reviewed-character-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload.txt",
+      "original_sha256": "691fe9287eae0d21fe261137adb204c74f1a7207c11d16feaa2a807c1e0d6a4e",
+      "retained_sha256": "691fe9287eae0d21fe261137adb204c74f1a7207c11d16feaa2a807c1e0d6a4e",
+      "normalization": "none"
+    },
+    {
+      "file": "8-bob-reviewed-character-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload-settled.txt",
+      "original_sha256": "8c8de10a63ff6f3fab312ab02d3f391248ea6414c643fbea00b0982c2530a085",
+      "retained_sha256": "9cc57c7715d73b68799ad9fed808450d650b3d51454e59df49f21486fe2efea9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "9-bob-reviewed-character-reload-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/bob-reviewed-character-reload-events.txt",
+      "original_sha256": "7ea6b4f49a74c4996713a737e390e4b372e48ffc1918b084b3c1e5378cf21088",
+      "retained_sha256": "f8fd3cbbcdb7d63dc454e8bff7c3fbf608569cec325117012162c81128a40917",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "10-alice-controlled-provider-retry.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry.txt",
+      "original_sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72",
+      "retained_sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72",
+      "normalization": "none"
+    },
+    {
+      "file": "11-alice-controlled-provider-retry-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-settled.txt",
+      "original_sha256": "3262042ee1dd5deb9cea877d9034a1aa3a93cc39d4dfc1510a7c6c55127b8f0f",
+      "retained_sha256": "0517a483a3a50056dac64befb00eb86a2d3c1aae0fb59fc5d1d7a5502ef1d8b7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "12-alice-controlled-provider-retry-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-events.txt",
+      "original_sha256": "3524808821a67076329fcae57bc8ef9d1b9c619fe359892a05cbb1b7f3a00f19",
+      "retained_sha256": "0b2b44dd9bf66161657375b29a5c7d4752039fd5f46dc42248fd6a37116b9c7d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "13-alice-controlled-retry-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload.txt",
+      "original_sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863",
+      "retained_sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863",
+      "normalization": "none"
+    },
+    {
+      "file": "14-alice-controlled-retry-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-settled.txt",
+      "original_sha256": "2fe8fabbec301aaef5f28b0cec1ca3fc5f7586bb4ec8c68fb7e5d800821a9dbf",
+      "retained_sha256": "079be30ccada8a8a03648adc2ca0c3d98bd817223bfe2719f09780a61b2ffffa",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "15-alice-controlled-retry-reload-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-events.txt",
+      "original_sha256": "2deda95a09613484b8e8fc61ea4f8a422a89119f5415b6530d95db1764bb6e29",
+      "retained_sha256": "5c8570658df1236ae7c91565c6b3de295be76b364456183744180210658aaa4f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-ACCEPTANCE207-208.md",
+      "source": ".tmp/uat207-208-native-audit-20260917/ACCEPTANCE207-208.md",
+      "original_sha256": "ecd61919fd4f627d9d5d518a46a26646c6a3c930f79262a82346ae42e3ebc23d",
+      "retained_sha256": "ecd61919fd4f627d9d5d518a46a26646c6a3c930f79262a82346ae42e3ebc23d",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-audit-manifest.json",
+      "source": ".tmp/uat207-208-native-audit-20260917/audit-manifest.json",
+      "original_sha256": "be55b4a33606accb709103199e2b9feba47755d2416e1def4aeb8e0094927c2b",
+      "retained_sha256": "be55b4a33606accb709103199e2b9feba47755d2416e1def4aeb8e0094927c2b",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-audit_inputs.py",
+      "source": ".tmp/uat207-208-native-audit-20260917/audit_inputs.py",
+      "original_sha256": "bbc4eef53666ecd30236bc2ad67cc7a44e7d71497236fc3d39f4622496972c21",
+      "retained_sha256": "bbc4eef53666ecd30236bc2ad67cc7a44e7d71497236fc3d39f4622496972c21",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-input-manifest.json",
+      "source": ".tmp/uat207-208-native-audit-20260917/input-manifest.json",
+      "original_sha256": "3c2c0a13b1e74c64a9e59377bf5ad0054d0d8eedb864cd10beed29569e32aa8a",
+      "retained_sha256": "3c2c0a13b1e74c64a9e59377bf5ad0054d0d8eedb864cd10beed29569e32aa8a",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-task13260.145.txt",
+      "source": ".tmp/uat207-208-native-audit-20260917/task13260.145.txt",
+      "original_sha256": "46746a86997a6e40a8344f15f47db23e62398d3b83b373930c81f95e276db04e",
+      "retained_sha256": "b514b21da672799e8284851e7696f6f22fa8aa49456f27eb507a16c7e580f281",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-task13260.146.txt",
+      "source": ".tmp/uat207-208-native-audit-20260917/task13260.146.txt",
+      "original_sha256": "b47ff59827ca84590d40c1b0c5d027a9f1f95004be0821b0bd5ab4a36627b764",
+      "retained_sha256": "0e41a9eb5b3e2d79a8e687d8afcc6bb02e8f05c535450f2bd48ec17afcc2c398",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-verified-facts.json",
+      "source": ".tmp/uat207-208-native-audit-20260917/verified-facts.json",
+      "original_sha256": "e726a7581b1479719af59ddf0879326f671e17a20e6d2a1e68431b5c12bd2ddc",
+      "retained_sha256": "e726a7581b1479719af59ddf0879326f671e17a20e6d2a1e68431b5c12bd2ddc",
+      "normalization": "none"
+    }
+  ]
+}

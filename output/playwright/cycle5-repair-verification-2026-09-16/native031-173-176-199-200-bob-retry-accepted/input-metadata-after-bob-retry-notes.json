@@ -1,0 +1,91 @@
+{
+  "observedAt": "2026-09-17T06:11:43.977126+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 16132,
+      "state": "idle"
+    },
+    {
+      "pid": 16156,
+      "state": "idle"
+    },
+    {
+      "pid": 16157,
+      "state": "idle"
+    },
+    {
+      "pid": 16188,
+      "state": "idle"
+    },
+    {
+      "pid": 16224,
+      "state": "idle"
+    },
+    {
+      "pid": 16327,
+      "state": "idle"
+    },
+    {
+      "pid": 16363,
+      "state": "idle"
+    },
+    {
+      "pid": 16371,
+      "state": "idle"
+    },
+    {
+      "pid": 17036,
+      "state": "idle"
+    },
+    {
+      "pid": 17261,
+      "state": "idle"
+    },
+    {
+      "pid": 17685,
+      "state": "idle"
+    },
+    {
+      "pid": 19301,
+      "state": "idle"
+    },
+    {
+      "pid": 19302,
+      "state": "idle"
+    },
+    {
+      "pid": 19537,
+      "state": "idle"
+    },
+    {
+      "pid": 19570,
+      "state": "idle"
+    },
+    {
+      "pid": 19607,
+      "state": "idle"
+    },
+    {
+      "pid": 20210,
+      "state": "idle"
+    },
+    {
+      "pid": 20269,
+      "state": "idle"
+    },
+    {
+      "pid": 21581,
+      "state": "idle"
+    },
+    {
+      "pid": 29784,
+      "state": "idle"
+    }
+  ],
+  "locks": [],
+  "transactionReadOnlyVerified": true,
+  "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+}

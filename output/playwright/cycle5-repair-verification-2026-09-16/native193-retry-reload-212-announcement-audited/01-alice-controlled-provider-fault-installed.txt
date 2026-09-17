@@ -1,0 +1,16 @@
+### Result
+{"at":"2026-09-17T06:47:01.503Z","installed":true,"scope":"First actual complete-v2 request only: override provider/model to unavailable Ollama; real backend response remains unmodified. Retry uses original configured Gemma."}
+### Ran Playwright code
+```js
+await (async page => {
+ page.__uat031Faults=[];
+ await page.route('**/api/v1/chats/*/complete-v2*',async route=>{
+  const original=route.request().postDataJSON();
+  const changed={...original,provider:'ollama',model:'uat031-unavailable'};
+  page.__uat031Faults.push({at:new Date().toISOString(),url:route.request().url(),originalProvider:original.provider,originalModel:original.model,faultProvider:changed.provider,faultModel:changed.model});
+  await route.continue({postData:JSON.stringify(changed)});
+ },{times:1});
+ return {at:new Date().toISOString(),installed:true,scope:'First actual complete-v2 request only: override provider/model to unavailable Ollama; real backend response remains unmodified. Retry uses original configured Gemma.'};
+}
+)(page);
+```

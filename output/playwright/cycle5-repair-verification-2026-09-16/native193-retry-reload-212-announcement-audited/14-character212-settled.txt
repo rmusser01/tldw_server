@@ -1,0 +1,160 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Characters | tldw](http://127.0.0.1:18583/characters)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/characters
+- Page Title: Characters | tldw
+- Console: 2 errors, 0 warnings
+### Snapshot
+```yaml
+- generic [ref=f30e11]:
+  - generic [ref=f30e12]:
+    - generic [ref=f30e14]:
+      - link "Skip to main content" [ref=f30e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f30e16]:
+        - button "Expand sidebar" [ref=f30e17] [cursor=pointer]
+        - button "New Chat" [ref=f30e21] [cursor=pointer]
+        - generic [ref=f30e24]:
+          - button "Quick Ingest" [ref=f30e25] [cursor=pointer]
+          - button "Chat" [ref=f30e29] [cursor=pointer]
+          - button "Prompts" [ref=f30e32] [cursor=pointer]
+          - button "Characters" [active] [ref=f30e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f30e41] [cursor=pointer]
+          - button "World Books" [ref=f30e45] [cursor=pointer]
+          - button "Notes" [ref=f30e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f30e52] [cursor=pointer]
+          - button "Media" [ref=f30e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f30e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f30e69] [cursor=pointer]
+          - button "Kanban" [ref=f30e75] [cursor=pointer]
+          - button "Watchlists" [ref=f30e77] [cursor=pointer]
+        - generic [ref=f30e82]:
+          - button "Open Notes Dock" [ref=f30e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f30e88] [cursor=pointer]
+          - button "Settings" [ref=f30e91] [cursor=pointer]
+      - main [ref=f30e95]:
+        - generic [ref=f30e96]:
+          - generic [ref=f30e99]:
+            - generic [ref=f30e100]:
+              - button "Expand sidebar" [ref=f30e101] [cursor=pointer]
+              - generic [ref=f30e103]:
+                - img "tldw Assistant" [ref=f30e104]
+                - generic [ref=f30e105]: tldw Assistant
+                - button "Companion Home" [ref=f30e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f30e110] [cursor=pointer]
+            - generic [ref=f30e123]:
+              - button "Search - Open command palette" [ref=f30e124] [cursor=pointer]:
+                - generic [ref=f30e128]: Search
+                - generic [ref=f30e129]: ⌘K
+              - button "Open settings" [ref=f30e143] [cursor=pointer]
+              - generic [ref=f30e155]:
+                - button "Notifications, 0 unread" [ref=f30e156] [cursor=pointer]
+                - status [ref=f30e160]: Notifications are active
+              - button "Switch to light theme" [ref=f30e161] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f30e168] [cursor=pointer]:
+                - generic [ref=f30e169]: "?"
+          - generic [ref=f30e556]:
+            - generic [ref=f30e557]:
+              - heading "Characters" [level=1] [ref=f30e558]
+              - paragraph [ref=f30e559]: Create reusable characters you can pick from the chat header and reuse across conversations.
+            - generic [ref=f30e560]:
+              - link "Skip to characters content" [ref=f30e561] [cursor=pointer]:
+                - /url: "#characters-main-content"
+              - main [ref=f30e562]:
+                - button [aria-hidden] [ref=f30e567] [cursor=pointer]: Upload character
+                - generic [ref=f30e568]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+                - generic [ref=f30e570]:
+                  - button "New character" [ref=f30e571] [cursor=pointer]
+                  - button "Import character" [ref=f30e573] [cursor=pointer]
+                  - generic [ref=f30e578]:
+                    - textbox "Search characters" [ref=f30e579]
+                    - generic [ref=f30e580]: /
+                  - radiogroup "View mode" [ref=f30e582]:
+                    - generic [ref=f30e583]:
+                      - generic [ref=f30e584] [cursor=pointer]:
+                        - radio [checked]
+                        - generic "Table view" [ref=f30e585]
+                      - generic [ref=f30e588] [cursor=pointer]:
+                        - radio
+                        - generic "Gallery view" [ref=f30e589]
+                  - radiogroup "Character list view" [ref=f30e596]:
+                    - generic [ref=f30e597]:
+                      - generic [ref=f30e598] [cursor=pointer]:
+                        - radio "Active" [checked]
+                        - generic "Active characters" [ref=f30e599]: Active
+                      - generic [ref=f30e600] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic "Recently deleted characters" [ref=f30e601]: Trash
+                  - button "Filters" [ref=f30e602] [cursor=pointer]
+                  - button "Display options" [ref=f30e607] [cursor=pointer]:
+                    - generic [ref=f30e608]: Display
+                - status [ref=f30e611]: 1 character found
+                - generic [ref=f30e616]:
+                  - table [ref=f30e620]:
+                    - rowgroup [ref=f30e628]:
+                      - row [ref=f30e629]:
+                        - columnheader "Select all on page" [ref=f30e630]:
+                          - checkbox "Select all on page" [ref=f30e633] [cursor=pointer]
+                        - columnheader "Name" [ref=f30e635] [cursor=pointer]
+                        - columnheader "Tags" [ref=f30e646]
+                        - columnheader "Creator" [ref=f30e647] [cursor=pointer]
+                        - columnheader "Activity" [ref=f30e658] [cursor=pointer]
+                        - columnheader "Actions" [ref=f30e669]
+                    - rowgroup [ref=f30e670]:
+                      - row [ref=f30e671]:
+                        - cell "Select Helpful AI Assistant" [ref=f30e672]:
+                          - checkbox "Select Helpful AI Assistant" [ref=f30e675] [cursor=pointer]
+                        - cell [ref=f30e677]:
+                          - generic [ref=f30e684]:
+                            - generic [ref=f30e685]:
+                              - button "Edit name inline for Helpful AI Assistant" [ref=f30e687]: Helpful AI Assistant
+                              - generic [ref=f30e690]: "1"
+                            - button "Edit description inline for Helpful AI Assistant" [ref=f30e694]: A default, friendly assistant created automatically by the system.
+                        - cell [ref=f30e697]:
+                          - generic [ref=f30e698]:
+                            - button "default" [ref=f30e699] [cursor=pointer]
+                            - button "neutral" [ref=f30e701] [cursor=pointer]
+                            - button "Show and filter +1 hidden tags" [ref=f30e703]: "+1"
+                        - cell "System" [ref=f30e704]
+                        - cell "2h ago Updated 2h ago" [ref=f30e706]:
+                          - generic [ref=f30e707]:
+                            - generic [ref=f30e708]: 2h ago
+                            - generic [ref=f30e709]: Updated 2h ago
+                        - cell [ref=f30e710]:
+                          - generic [ref=f30e711]:
+                            - button "Chat as Helpful AI Assistant" [ref=f30e712] [cursor=pointer]
+                            - button "Edit character Helpful AI Assistant" [ref=f30e715] [cursor=pointer]
+                            - button "Delete character Helpful AI Assistant" [ref=f30e718] [cursor=pointer]
+                            - button "Add Helpful AI Assistant to favorites" [ref=f30e722] [cursor=pointer]
+                            - button "More actions for Helpful AI Assistant" [ref=f30e725] [cursor=pointer]
+                  - list [ref=f30e730]:
+                    - listitem "Previous Page" [ref=f30e731]:
+                      - button [disabled] [ref=f30e732]:
+                        - img "left" [ref=f30e733]
+                    - listitem "1" [ref=f30e736] [cursor=pointer]
+                    - listitem "Next Page" [ref=f30e738]:
+                      - button [disabled] [ref=f30e739]:
+                        - img "right" [ref=f30e740]
+                    - listitem [ref=f30e743]:
+                      - generic [ref=f30e744]:
+                        - generic [ref=f30e745]:
+                          - generic "10 / page" [ref=f30e746]
+                          - combobox "Page Size" [ref=f30e747]
+                        - img "down" [ref=f30e749]
+    - tooltip "Characters" [ref=f30e753]
+  - alert [ref=f30e10]: Characters | tldw
+```
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T06-20-03-295Z.log#L63-L64

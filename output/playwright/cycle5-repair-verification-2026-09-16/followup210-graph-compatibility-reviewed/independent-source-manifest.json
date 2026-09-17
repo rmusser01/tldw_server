@@ -1,0 +1,12 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+    "sha256": "b92ee2e69786957822bb7a66365fcdbec7169c93b13f8d464f4b473d195b34db",
+    "snapshot": ".tmp/uat210-repair-20260917/review-snapshot/note_store.py"
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_note_graph_query_backends.py",
+    "sha256": "1dac2aa5601c81a271831b5fd2095b47c0eec7f3e4bb6cc6f6ebd3c4e4f96b68",
+    "snapshot": ".tmp/uat210-repair-20260917/review-snapshot/test_note_graph_query_backends.py"
+  }
+]

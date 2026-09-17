@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T06:53:44.064744+00:00",
+  "mode": "read-only existing owned profile Jobs SQLite database",
+  "jobs": [
+    {
+      "id": 2,
+      "domain": "study_packs",
+      "queue": "default",
+      "job_type": "study_pack_generate",
+      "status": "quarantined",
+      "owner_user_id": "2",
+      "available_at": "2026-09-17 06:45:11",
+      "created_at": "2026-09-17 05:54:01"
+    }
+  ],
+  "queueControls": []
+}

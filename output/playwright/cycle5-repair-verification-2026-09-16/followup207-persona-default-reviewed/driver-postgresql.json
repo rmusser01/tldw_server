@@ -1,0 +1,16 @@
+[
+  {
+    "type": "UniqueViolation",
+    "sqlstate": "23505",
+    "constraint": "persona_profiles_pkey",
+    "query": "INSERT INTO persona_profiles(id, user_id, name, character_card_id, origin_character_id, origin_character_name, origin_character_snapshot_at, mode, system_prompt, voice_defaults_json, setup_json, is_active, use_persona_state_context_default, created_at, last_modified, deleted, version) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+    "transaction_status": "INERROR"
+  },
+  {
+    "type": "InFailedSqlTransaction",
+    "sqlstate": "25P02",
+    "constraint": null,
+    "query": "SELECT * FROM persona_profiles WHERE user_id = %s AND deleted = FALSE ORDER BY last_modified DESC, name ASC LIMIT %s OFFSET %s",
+    "transaction_status": "INERROR"
+  }
+]

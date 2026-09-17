@@ -1,0 +1,341 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=1984813159
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 20 items
+
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py F.F..F....F [ 55%]
+.F.FF..F.                                                                [100%]
+
+=================================== FAILURES ===================================
+_______________ test_graph_mapping_rows[postgres-tag-ids-empty] ________________
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8306: in execute_query
+    cursor.execute(prepared_query, prepared_params or ())
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:506: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:536: in execute
+    self._result = self._backend.execute(
+tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py:1100: in execute
+    raise DatabaseError("PostgreSQL query execution failed")
+E   tldw_Server_API.app.core.DB_Management.backends.base.DatabaseError: PostgreSQL query execution failed
+
+The above exception was the direct cause of the following exception:
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:32: in test_graph_mapping_rows
+    assert db.get_note_ids_by_tag_for_graph('graph-tag',include_deleted=False)==([live] if populated else [])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1875: in get_note_ids_by_tag_for_graph
+    cur = self._db.execute_query(query, tuple(params))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:492: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8360: in execute_query
+    raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDBError: Query execution failed: PostgreSQL query execution failed
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:16.817 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:16.817 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 23:32:16.817 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 23:32:16.822 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 23:32:16.825 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 23:32:16.825 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 23:32:16.829 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 23:32:16.832 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 23:32:16.834 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 23:32:16.844 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 23:32:16.844 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 23:32:16.844 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:16.864 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr0/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:18.283 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr0/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:18.285 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:18.285 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT DISTINCT n.id, n.last_modified FROM notes n JOIN note_keywords nk ON nk.note_id = n.id JOIN keywords k ON k.id = nk.keyword_id WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? ORDER BY n.last_modified DESC, n.id ASC LIMIT ?... Params: ('graph-tag', False, False, 500)...
+2026-09-16 23:32:18.286 | ERROR    | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1089 - PostgreSQL query execution failed
+2026-09-16 23:32:18.286 | ERROR    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8354 - Backend query execution failed (postgresql): PostgreSQL query execution failed
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:18.904 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_____________ test_graph_mapping_rows[postgres-tag-ids-populated] ______________
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8306: in execute_query
+    cursor.execute(prepared_query, prepared_params or ())
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:506: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:536: in execute
+    self._result = self._backend.execute(
+tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py:1100: in execute
+    raise DatabaseError("PostgreSQL query execution failed")
+E   tldw_Server_API.app.core.DB_Management.backends.base.DatabaseError: PostgreSQL query execution failed
+
+The above exception was the direct cause of the following exception:
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:32: in test_graph_mapping_rows
+    assert db.get_note_ids_by_tag_for_graph('graph-tag',include_deleted=False)==([live] if populated else [])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1875: in get_note_ids_by_tag_for_graph
+    cur = self._db.execute_query(query, tuple(params))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:492: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8360: in execute_query
+    raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDBError: Query execution failed: PostgreSQL query execution failed
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:19.700 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:19.700 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:19.700 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr1/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:20.967 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr1/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:20.969 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:20.970 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Graph probe character' with ID: 2.
+2026-09-16 23:32:20.971 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: f57984ca-8380-483e-821b-4fd22a781e7e.
+2026-09-16 23:32:20.973 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Live graph note' with ID: 2192cd77-d1ea-4555-8bd7-00f0fb26e9c6.
+2026-09-16 23:32:20.975 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Deleted graph note' with ID: aaa27cb6-5a02-4467-9300-2828721e81ec.
+2026-09-16 23:32:20.976 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'graph-tag' with ID: 1.
+2026-09-16 23:32:20.979 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on 2192cd77-d1ea-4555-8bd7-00f0fb26e9c6_1
+2026-09-16 23:32:20.980 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=2192cd77-d1ea-4555-8bd7-00f0fb26e9c6, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:20.981 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on aaa27cb6-5a02-4467-9300-2828721e81ec_1
+2026-09-16 23:32:20.982 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=aaa27cb6-5a02-4467-9300-2828721e81ec, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:20.984 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID aaa27cb6-5a02-4467-9300-2828721e81ec (was v1), new version 2.
+2026-09-16 23:32:20.984 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT DISTINCT n.id, n.last_modified FROM notes n JOIN note_keywords nk ON nk.note_id = n.id JOIN keywords k ON k.id = nk.keyword_id WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? ORDER BY n.last_modified DESC, n.id ASC LIMIT ?... Params: ('graph-tag', False, False, 500)...
+2026-09-16 23:32:20.985 | ERROR    | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1089 - PostgreSQL query execution failed
+2026-09-16 23:32:20.985 | ERROR    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8354 - Backend query execution failed (postgresql): PostgreSQL query execution failed
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:21.460 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+__________ test_graph_mapping_rows[postgres-counts-per-tag-populated] __________
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8306: in execute_query
+    cursor.execute(prepared_query, prepared_params or ())
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:506: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:536: in execute
+    self._result = self._backend.execute(
+tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py:1100: in execute
+    raise DatabaseError("PostgreSQL query execution failed")
+E   tldw_Server_API.app.core.DB_Management.backends.base.DatabaseError: PostgreSQL query execution failed
+
+The above exception was the direct cause of the following exception:
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:40: in test_graph_mapping_rows
+    else: assert db.count_notes_per_tag()==({kw:1} if populated else {})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:2001: in count_notes_per_tag
+    cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:492: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8360: in execute_query
+    raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDBError: Query execution failed: PostgreSQL query execution failed
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:22.634 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:22.634 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:22.634 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr2/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:23.893 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr2/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:23.895 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:23.896 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Graph probe character' with ID: 2.
+2026-09-16 23:32:23.897 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 3432cdb5-f29f-476b-8c9c-5217c18efeff.
+2026-09-16 23:32:23.899 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Live graph note' with ID: d8ecf7a6-f2a5-42b2-9afa-bda61dc5c22f.
+2026-09-16 23:32:23.901 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Deleted graph note' with ID: e70b1fc9-5e56-4b82-b4cd-23364629de2e.
+2026-09-16 23:32:23.902 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'graph-tag' with ID: 1.
+2026-09-16 23:32:23.906 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on d8ecf7a6-f2a5-42b2-9afa-bda61dc5c22f_1
+2026-09-16 23:32:23.906 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=d8ecf7a6-f2a5-42b2-9afa-bda61dc5c22f, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:23.908 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on e70b1fc9-5e56-4b82-b4cd-23364629de2e_1
+2026-09-16 23:32:23.908 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=e70b1fc9-5e56-4b82-b4cd-23364629de2e, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:23.911 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID e70b1fc9-5e56-4b82-b4cd-23364629de2e (was v1), new version 2.
+2026-09-16 23:32:23.911 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt FROM note_keywords nk JOIN notes n ON n.id = nk.note_id AND n.deleted = ? JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? GROUP BY nk.keyword_id... Params: (False, False)...
+2026-09-16 23:32:23.911 | ERROR    | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1089 - PostgreSQL query execution failed
+2026-09-16 23:32:23.911 | ERROR    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8354 - Backend query execution failed (postgresql): PostgreSQL query execution failed
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:24.404 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_____________ test_graph_mapping_rows[postgres-count-notes-empty] ______________
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:38: in test_graph_mapping_rows
+    assert db.count_user_notes()==(2 if populated else 0)
+           ^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1990: in count_user_notes
+    return cur.fetchone()[0]
+           ^^^^^^^^^^^^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:26.727 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:26.727 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:26.728 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr3/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:27.948 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr3/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:27.949 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:27.950 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) FROM notes... Params: None...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:28.172 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+____________ test_graph_mapping_rows[postgres-counts-per-tag-empty] ____________
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8306: in execute_query
+    cursor.execute(prepared_query, prepared_params or ())
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:506: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:536: in execute
+    self._result = self._backend.execute(
+tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py:1100: in execute
+    raise DatabaseError("PostgreSQL query execution failed")
+E   tldw_Server_API.app.core.DB_Management.backends.base.DatabaseError: PostgreSQL query execution failed
+
+The above exception was the direct cause of the following exception:
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:40: in test_graph_mapping_rows
+    else: assert db.count_notes_per_tag()==({kw:1} if populated else {})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:2001: in count_notes_per_tag
+    cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:492: in guarded
+    return method(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:8360: in execute_query
+    raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDBError: Query execution failed: PostgreSQL query execution failed
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:29.694 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:29.694 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:29.695 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr5/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:31.037 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr5/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:31.038 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:31.038 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt FROM note_keywords nk JOIN notes n ON n.id = nk.note_id AND n.deleted = ? JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? GROUP BY nk.keyword_id... Params: (False, False)...
+2026-09-16 23:32:31.039 | ERROR    | tldw_Server_API.app.core.DB_Management.backends.postgresql_backend:execute:1089 - PostgreSQL query execution failed
+2026-09-16 23:32:31.039 | ERROR    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8354 - Backend query execution failed (postgresql): PostgreSQL query execution failed
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:31.537 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+___________ test_graph_mapping_rows[postgres-count-notes-populated] ____________
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:38: in test_graph_mapping_rows
+    assert db.count_user_notes()==(2 if populated else 0)
+           ^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1990: in count_user_notes
+    return cur.fetchone()[0]
+           ^^^^^^^^^^^^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:32.164 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:32.164 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:32.164 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr6/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:33.835 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr6/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:33.837 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:33.838 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Graph probe character' with ID: 2.
+2026-09-16 23:32:33.840 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: be5fab05-f190-4181-8176-e8ea976faeb3.
+2026-09-16 23:32:33.843 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Live graph note' with ID: f5d50d91-84ec-40fc-bba1-4dd9747e4199.
+2026-09-16 23:32:33.844 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Deleted graph note' with ID: d8f8c984-e2c0-44d0-9586-acac5ceb881d.
+2026-09-16 23:32:33.846 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'graph-tag' with ID: 1.
+2026-09-16 23:32:33.850 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on f5d50d91-84ec-40fc-bba1-4dd9747e4199_1
+2026-09-16 23:32:33.850 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=f5d50d91-84ec-40fc-bba1-4dd9747e4199, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:33.852 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on d8f8c984-e2c0-44d0-9586-acac5ceb881d_1
+2026-09-16 23:32:33.853 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=d8f8c984-e2c0-44d0-9586-acac5ceb881d, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:33.856 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID d8f8c984-e2c0-44d0-9586-acac5ceb881d (was v1), new version 2.
+2026-09-16 23:32:33.856 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT COUNT(*) FROM notes... Params: None...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:34.099 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+_____________ test_graph_mapping_rows[postgres-all-ids-populated] ______________
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:29: in test_graph_mapping_rows
+    assert db.get_all_note_ids_for_graph(include_deleted=False)==([live] if populated else [])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1820: in get_all_note_ids_for_graph
+    return [row[0] for row in cur.fetchall()]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1820: in <listcomp>
+    return [row[0] for row in cur.fetchall()]
+            ^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:34.137 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:34.137 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:34.137 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr7/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:35.619 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr7/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:35.620 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:35.621 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Graph probe character' with ID: 2.
+2026-09-16 23:32:35.623 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: 5283c150-1622-41ee-aa87-a4cb9f485029.
+2026-09-16 23:32:35.625 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Live graph note' with ID: e798954b-67c8-458e-acb0-3452a197bb68.
+2026-09-16 23:32:35.626 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Deleted graph note' with ID: 8fab249d-f80f-45c4-b74e-2518dc4a37b1.
+2026-09-16 23:32:35.628 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'graph-tag' with ID: 1.
+2026-09-16 23:32:35.631 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on e798954b-67c8-458e-acb0-3452a197bb68_1
+2026-09-16 23:32:35.631 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=e798954b-67c8-458e-acb0-3452a197bb68, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:35.633 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on 8fab249d-f80f-45c4-b74e-2518dc4a37b1_1
+2026-09-16 23:32:35.633 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=8fab249d-f80f-45c4-b74e-2518dc4a37b1, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:35.636 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 8fab249d-f80f-45c4-b74e-2518dc4a37b1 (was v1), new version 2.
+2026-09-16 23:32:35.636 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT id FROM notes WHERE deleted = ? ORDER BY last_modified DESC, id ASC LIMIT ?... Params: (False, 500)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:35.927 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+____________ test_graph_mapping_rows[postgres-source-ids-populated] ____________
+.tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py:35: in test_graph_mapping_rows
+    assert db.get_note_ids_by_source_for_graph('source:youtube:fixture-1',include_deleted=False)==([live] if populated else [])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:44599: in _delegated
+    return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1926: in get_note_ids_by_source_for_graph
+    return [row[0] for row in cur.fetchall()]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/chacha/note_store.py:1926: in <listcomp>
+    return [row[0] for row in cur.fetchall()]
+            ^^^^^^
+E   KeyError: 0
+---------------------------- Captured stderr setup -----------------------------
+2026-09-16 23:32:38.053 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 23:32:38.054 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-2af2ef46
+2026-09-16 23:32:38.054 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr9/notes.db [Client ID: 3] (backend=postgresql)
+2026-09-16 23:32:39.419 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-608/test_graph_mapping_rows_postgr9/notes.db
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:32:39.420 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 23:32:39.421 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Graph probe character' with ID: 2.
+2026-09-16 23:32:39.423 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.conversation_store:add_conversation:483 - Added conversation ID: f2d36435-ff83-4bdd-ba94-94c1adb1f900.
+2026-09-16 23:32:39.425 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Live graph note' with ID: 04c15b91-82fb-4f8e-b4fc-e96bc2cfb878.
+2026-09-16 23:32:39.426 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Deleted graph note' with ID: 3505c833-e720-499b-af65-b62b175ac541.
+2026-09-16 23:32:39.428 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_add_generic_item:32615 - Added chacha_keywords 'graph-tag' with ID: 1.
+2026-09-16 23:32:39.431 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on 04c15b91-82fb-4f8e-b4fc-e96bc2cfb878_1
+2026-09-16 23:32:39.432 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=04c15b91-82fb-4f8e-b4fc-e96bc2cfb878, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:39.433 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34345 - Logged sync event for note_keywords: create on 3505c833-e720-499b-af65-b62b175ac541_1
+2026-09-16 23:32:39.434 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_manage_link:34347 - Linked note_keywords: note_id=3505c833-e720-499b-af65-b62b175ac541, keyword_id=1. Rows affected: 1
+2026-09-16 23:32:39.436 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:soft_delete_note:2219 - Soft-deleted note ID 3505c833-e720-499b-af65-b62b175ac541 (was v1), new version 2.
+2026-09-16 23:32:39.437 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT DISTINCT n.id, n.last_modified FROM notes n JOIN conversations c ON c.id = n.conversation_id WHERE c.source = ? AND c.external_ref = ? AND n.deleted = ? ORDER BY n.last_modified DESC, n.id ASC LIMIT ?... Params: ('youtube', 'fixture-1', False, 500)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 23:32:39.711 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8110 - Returned backend connection (postgresql) for thread 8346099072.
+=========================== short test summary info ============================
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-tag-ids-empty]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-tag-ids-populated]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-counts-per-tag-populated]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-count-notes-empty]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-counts-per-tag-empty]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-count-notes-populated]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-all-ids-populated]
+FAILED .tmp/uat210-diagnosis-20260917/test_note_graph_rows_probe.py::test_graph_mapping_rows[postgres-source-ids-populated]
+=================== 8 failed, 12 passed, 1 warning in 23.88s ===================

@@ -1,0 +1,38 @@
+{
+  "eslint": {
+    "baseline_errors": 0,
+    "baseline_warnings": 28,
+    "current_errors": 0,
+    "current_warnings": 28,
+    "added": [],
+    "removed": [],
+    "comparison": "path/rule/severity/message multiset; line offsets excluded"
+  },
+  "compiler": {
+    "baseline_errors": 90,
+    "current_errors": 90,
+    "byte_identical": true
+  },
+  "locale": {
+    "added_flashcards_keys": [
+      "resetSchedulingCurrentInterval",
+      "reviewGapDays",
+      "reviewGapDaysShort",
+      "reviewGapHours",
+      "reviewGapHoursShort",
+      "reviewGapMinutes",
+      "reviewGapMinutesShort",
+      "reviewGapUnavailable",
+      "reviewGapUnavailableShort",
+      "schedulingNextGapHelp",
+      "schedulingNextReviewGapCompact",
+      "schedulingNextReviewGapExpanded"
+    ],
+    "all_original_values_unchanged": true
+  },
+  "bandit": {
+    "findings": 0,
+    "parse_errors": 8,
+    "limitation": "Bandit cannot parse the eight TS/TSX files; zero findings is not TypeScript security validation."
+  }
+}

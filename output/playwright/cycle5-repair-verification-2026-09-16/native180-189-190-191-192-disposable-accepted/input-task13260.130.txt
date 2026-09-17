@@ -1,0 +1,39 @@
+File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.130 - Read-the-Flashcard-tag-update-identity-by-its-named-PostgreSQL-column.md
+
+Task TASK-13260.130 - Read the Flashcard tag-update identity by its named PostgreSQL column
+==================================================
+
+Status: ◒ In Progress
+Priority: High
+Created: 2026-09-17 02:22
+Updated: 2026-09-17 02:39
+Parent: TASK-13260 - Run fresh single-user and multi-user UAT across core workflow loops
+
+Description:
+--------------------------------------------------
+UAT192: required PostgreSQL scheduler-preview tests expose a separate set_flashcard_tags KeyError0 at card_id=int(row[0]) before reaching191. This method selects id and receives named PostgreSQL rows. Retain causal actualdb proof and SQLite/transaction/tag membership semantics. No native tag-update failure is claimed yet; separate from181 transaction ownership.
+
+Acceptance Criteria:
+--------------------------------------------------
+- [x] #1 Actual official PostgreSQL and SQLite tag replacement preserves normalized keywords, membership, tags_json, missing/deleted behavior and transaction rollback.
+- [x] #2 Minimal named-column correction passes causal regressions, relevant existing tests, independent review and scoped security checks with zero PostgreSQL skips.
+- [ ] #3 Native PostgreSQL Manage saves an existing tagged card with changed tags and reload preserves actual tag membership without a server error.
+
+Definition of Done:
+--------------------------------------------------
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+
+Implementation Plan:
+--------------------------------------------------
+Isolate actual set_flashcard_tags failure before editing; write focused real-db RED and controls, minimal named-column fix, targeted requiredPG/SQLite checks and independent review; native acceptance where exposed.
+
+Implementation Notes:
+--------------------------------------------------
+Causal real-db RED8 PostgreSQL failures/12 controls/0skip; initial nonexistent-method harness error retained separately. Minimal two named reads and one synthetic row fixture correction; officialPG/SQLite28PASS/0skip. Ruff0/Bandit0 for exact frozen scope. Private plan and review packet .tmp/uat192-repair-20260917/PLAN192.md and IMPLEMENTATION192.md; independent review/native acceptance pending.
+
+Independent review clear: fresh28PASS/0skip22.66s, exact frozen192 source hashes before/after. Source013 held ownership edits during validation. Final testAST equals causalRED, only formatting changed. ExistingFTS12 lint diagnostics equal baseline; production/newtestRuff0. Durable followup192-reviewed; nativeAC3 remains pending.

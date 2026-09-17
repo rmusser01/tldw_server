@@ -1,0 +1,180 @@
+{
+  "at": "2026-09-17T07:31:09.811Z",
+  "files": [
+    {
+      "file": "01-alice-controlled-provider-fault-installed.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-fault-installed.txt",
+      "original_sha256": "fa6cda8a25e69b7144e92602e9108b8d38789ff27db6def7337e13364cb46849",
+      "retained_sha256": "366aa0013b261918d3b12550f127febf20aa05204d7e73ebdd934c30edfda5c1",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "02-alice-controlled-provider-prompt.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-prompt.txt",
+      "original_sha256": "efd2687727c52e491f0df0b7860d7da2787a312d8db7928997c585a17b1b77b0",
+      "retained_sha256": "623439e1a32859ed4bd7f5a24bbe8241350114a504335b8910d731a73f3465bb",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "03-alice-controlled-provider-send.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-send.txt",
+      "original_sha256": "6d7bc6ac2e0faf7ab88c49290661cfbbb1c35355a21df3f0d23531939d937e54",
+      "retained_sha256": "6d7bc6ac2e0faf7ab88c49290661cfbbb1c35355a21df3f0d23531939d937e54",
+      "normalization": "none"
+    },
+    {
+      "file": "04-alice-controlled-provider-error.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-error.txt",
+      "original_sha256": "f01cfaf384d1efa10a26cf8b873ea65cd54ab702f655f4f5b79fed76dd6b0154",
+      "retained_sha256": "f87f2707405edfff3d255b8820111bab59657a1e68d36da6dfcf28e1208044b1",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "05-alice-controlled-provider-error-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-error-events.txt",
+      "original_sha256": "a33a08c1b7e303025594705ae858feb7e4be24c4c4bf4d947cdb7cb7e425ca6b",
+      "retained_sha256": "0ee1ccff6cff1f09e66c0a532c6360495a33f1e4869555260ce9bec0e1827cd7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "06-alice-controlled-provider-retry.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry.txt",
+      "original_sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72",
+      "retained_sha256": "fb31c0a7235075f9edfe8c0713739b2323c7fdc25730351968da2cfff589cf72",
+      "normalization": "none"
+    },
+    {
+      "file": "07-alice-controlled-provider-fault-receipt.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-fault-receipt.txt",
+      "original_sha256": "93815da48dcc34167ef20bee91760d3f2676988fa283d3d6269c689d41afd45f",
+      "retained_sha256": "f6ad626b771ffbe24d90c4e90d070a5cd3b1473f678037db8c521e417d7bdfd3",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "08-alice-controlled-provider-retry-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-settled.txt",
+      "original_sha256": "3262042ee1dd5deb9cea877d9034a1aa3a93cc39d4dfc1510a7c6c55127b8f0f",
+      "retained_sha256": "0517a483a3a50056dac64befb00eb86a2d3c1aae0fb59fc5d1d7a5502ef1d8b7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "09-alice-controlled-provider-retry-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-provider-retry-events.txt",
+      "original_sha256": "3524808821a67076329fcae57bc8ef9d1b9c619fe359892a05cbb1b7f3a00f19",
+      "retained_sha256": "0b2b44dd9bf66161657375b29a5c7d4752039fd5f46dc42248fd6a37116b9c7d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "10-alice-controlled-retry-reload.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload.txt",
+      "original_sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863",
+      "retained_sha256": "e4473df83b94a93a576f25686a48625e70a8fe0cb1477d4c98a8cc2d0662b863",
+      "normalization": "none"
+    },
+    {
+      "file": "11-alice-controlled-retry-reload-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-settled.txt",
+      "original_sha256": "2fe8fabbec301aaef5f28b0cec1ca3fc5f7586bb4ec8c68fb7e5d800821a9dbf",
+      "retained_sha256": "079be30ccada8a8a03648adc2ca0c3d98bd817223bfe2719f09780a61b2ffffa",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "12-alice-controlled-retry-reload-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-controlled-retry-reload-events.txt",
+      "original_sha256": "2deda95a09613484b8e8fc61ea4f8a422a89119f5415b6530d95db1764bb6e29",
+      "retained_sha256": "5c8570658df1236ae7c91565c6b3de295be76b364456183744180210658aaa4f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "13-character212-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/character212-open.txt",
+      "original_sha256": "dadaf8655203fa7fffe9d4965bd69c787abc6173ba605d9b3ef067ca8d26a0db",
+      "retained_sha256": "dadaf8655203fa7fffe9d4965bd69c787abc6173ba605d9b3ef067ca8d26a0db",
+      "normalization": "none"
+    },
+    {
+      "file": "14-character212-settled.txt",
+      "source": ".tmp/uat198-181-native-20260917/character212-settled.txt",
+      "original_sha256": "41fec11c3f7fdbf277f4ed017c25aa274063821e4387bce68b1cabaeedb68384",
+      "retained_sha256": "8885a5093cb8a4171309162a3692224362f4ade2753716520939b6b22811b7a7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "15-character212-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/character212-events.txt",
+      "original_sha256": "b0100b0d65d2f6206e06379bb0b71c2c3dc7479e565b942642545137b6fe3bb5",
+      "retained_sha256": "904f1c5f9722661ce147be4addeab3008f9aae4ee911b12d413a42653dc77dde",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "16-alice-reviewed-characters.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-reviewed-characters.txt",
+      "original_sha256": "5af50af635eda29c4d391655726ab3bfb0d5fb6461881e4f56ae3bbf23b209dd",
+      "retained_sha256": "5af50af635eda29c4d391655726ab3bfb0d5fb6461881e4f56ae3bbf23b209dd",
+      "normalization": "none"
+    },
+    {
+      "file": "17-alice-reviewed-chat-open.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-reviewed-chat-open.txt",
+      "original_sha256": "9edc0efe203975fb282ef20c55aa7b2405e9cb6b35380775c73cd3a5bc4fa8ed",
+      "retained_sha256": "9edc0efe203975fb282ef20c55aa7b2405e9cb6b35380775c73cd3a5bc4fa8ed",
+      "normalization": "none"
+    },
+    {
+      "file": "18-alice-reviewed-chat-initial-events.txt",
+      "source": ".tmp/uat198-181-native-20260917/alice-reviewed-chat-initial-events.txt",
+      "original_sha256": "8972a12b2e934458d470cb81a3bf5aba9d3599e3d08dcf19e1dd07ef384f2f21",
+      "retained_sha256": "549b0cd3fb57b29f7cfcec8ee916c6de54e33b3437695cbcd0fa6f045735454f",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-ACCEPTANCE193-212.md",
+      "source": ".tmp/uat193-212-native-audit-20260917/ACCEPTANCE193-212.md",
+      "original_sha256": "d74fd8ac60842664bc1ff7a1d202a957af6772f8ca9fe594a416f42ee38e972b",
+      "retained_sha256": "d74fd8ac60842664bc1ff7a1d202a957af6772f8ca9fe594a416f42ee38e972b",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-audit-manifest.json",
+      "source": ".tmp/uat193-212-native-audit-20260917/audit-manifest.json",
+      "original_sha256": "7332ba495abc322708c3f80fad5b972e01c4566519340afea1e3d0671b907218",
+      "retained_sha256": "7332ba495abc322708c3f80fad5b972e01c4566519340afea1e3d0671b907218",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-audit_inputs.py",
+      "source": ".tmp/uat193-212-native-audit-20260917/audit_inputs.py",
+      "original_sha256": "f50010d13e45dab94771389c68997df1da2cd2f66aa4c10f4258a6a8e19ff701",
+      "retained_sha256": "f50010d13e45dab94771389c68997df1da2cd2f66aa4c10f4258a6a8e19ff701",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-input-manifest.json",
+      "source": ".tmp/uat193-212-native-audit-20260917/input-manifest.json",
+      "original_sha256": "16c6c6f17fbe7b61980859dcca547965179083e6b1b37bbce899f52c7d805a81",
+      "retained_sha256": "16c6c6f17fbe7b61980859dcca547965179083e6b1b37bbce899f52c7d805a81",
+      "normalization": "none"
+    },
+    {
+      "file": "audit-task13260.131.txt",
+      "source": ".tmp/uat193-212-native-audit-20260917/task13260.131.txt",
+      "original_sha256": "08f023efc6a257e70fe5cb8398ae9b6fc3de07af39734cc4bd8adbf24f79ed0d",
+      "retained_sha256": "3a79ad66b76c0c1543430a6ad7e602d0b5927eb5e3268fc81d162615d6c92f53",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-task13260.150.txt",
+      "source": ".tmp/uat193-212-native-audit-20260917/task13260.150.txt",
+      "original_sha256": "d9491eb140426a125905154b3d4f12a543316e5625a8baa85ac702d6585d8319",
+      "retained_sha256": "e2b56fb3e24c6a28a0ab09017096a58f61aa1e0887c085689d6ff9e40a4e0688",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "audit-verified-facts.json",
+      "source": ".tmp/uat193-212-native-audit-20260917/verified-facts.json",
+      "original_sha256": "a05c5de387f435f5effee5c56d599e13cad39350511c60b5a023215e4b30dec4",
+      "retained_sha256": "a05c5de387f435f5effee5c56d599e13cad39350511c60b5a023215e4b30dec4",
+      "normalization": "none"
+    }
+  ]
+}

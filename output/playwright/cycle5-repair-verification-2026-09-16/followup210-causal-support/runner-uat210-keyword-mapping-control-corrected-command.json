@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T06:35:13.304Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    ".tmp/uat210-diagnosis-20260917/test_mapped_keyword_table_probe.py",
+    "-k",
+    "tag",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

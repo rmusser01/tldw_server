@@ -1,0 +1,249 @@
+### Ran Playwright code
+```js
+await page.getByRole('tab', { name: 'Manage' }).click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Sign in | tldw](http://127.0.0.1:18583/login)
+- 11: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=cards)
+- 12: [Sign in | tldw](http://127.0.0.1:18583/login)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=cards
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T06-37-47-179Z.yml)
+
+- generic [ref=f29e11]:
+  - generic [ref=f29e14]:
+    - link "Skip to main content" [ref=f29e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f29e16]:
+      - button "Expand sidebar" [ref=f29e17] [cursor=pointer]
+      - button "New Chat" [ref=f29e21] [cursor=pointer]
+      - generic [ref=f29e24]:
+        - button "Quick Ingest" [ref=f29e25] [cursor=pointer]
+        - button "Chat" [ref=f29e29] [cursor=pointer]
+        - button "Prompts" [ref=f29e32] [cursor=pointer]
+        - button "Characters" [ref=f29e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f29e41] [cursor=pointer]
+        - button "World Books" [ref=f29e45] [cursor=pointer]
+        - button "Notes" [ref=f29e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=f29e52] [cursor=pointer]
+        - button "Media" [ref=f29e60] [cursor=pointer]
+        - button "Document Workspace" [ref=f29e63] [cursor=pointer]
+        - button "Research Workspace" [ref=f29e69] [cursor=pointer]
+        - button "Kanban" [ref=f29e75] [cursor=pointer]
+        - button "Watchlists" [ref=f29e77] [cursor=pointer]
+      - generic [ref=f29e82]:
+        - button "Open Notes Dock" [ref=f29e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f29e88] [cursor=pointer]
+        - button "Settings" [ref=f29e91] [cursor=pointer]
+    - main [ref=f29e95]:
+      - generic [ref=f29e96]:
+        - generic [ref=f29e99]:
+          - generic [ref=f29e100]:
+            - button "Expand sidebar" [ref=f29e101] [cursor=pointer]
+            - generic [ref=f29e103]:
+              - img "tldw Assistant" [ref=f29e104]
+              - generic [ref=f29e105]: tldw Assistant
+              - button "Companion Home" [ref=f29e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=f29e110] [cursor=pointer]
+          - generic [ref=f29e113]:
+            - button "Search - Open command palette" [ref=f29e114] [cursor=pointer]:
+              - generic [ref=f29e118]: Search
+              - generic [ref=f29e119]: ⌘K
+            - button "Open settings" [ref=f29e120] [cursor=pointer]
+            - generic [ref=f29e132]:
+              - button "Notifications, 0 unread" [ref=f29e133] [cursor=pointer]
+              - status [ref=f29e137]: Notifications are active
+            - button "Switch to light theme" [ref=f29e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f29e145] [cursor=pointer]:
+              - generic [ref=f29e146]: "?"
+        - generic [ref=f29e148]:
+          - generic [ref=f29e150]:
+            - generic [ref=f29e152]:
+              - generic [ref=f29e153]: Study workspace
+              - heading "Flashcards" [level=1] [ref=f29e154]
+            - navigation "Flashcards modes" [ref=f29e155]:
+              - generic [ref=f29e156]: Study
+              - generic [ref=f29e157]: Manage
+              - generic [ref=f29e158]: Import / Export
+              - generic [ref=f29e159]: Templates
+              - generic [ref=f29e160]: Scheduler
+          - generic [ref=f29e163]:
+            - tablist [ref=f29e164]:
+              - generic [ref=f29e166]:
+                - tab "Study" [ref=f29e168] [cursor=pointer]
+                - tab "Manage" [active] [selected] [ref=f29e170] [cursor=pointer]
+                - tab "Import / Export" [ref=f29e172] [cursor=pointer]
+                - tab "Templates" [ref=f29e174] [cursor=pointer]
+                - tab "Scheduler" [ref=f29e176] [cursor=pointer]
+              - generic [ref=f29e178]:
+                - button "Test with Quiz" [disabled] [ref=f29e180]
+                - button "Keyboard Shortcuts" [ref=f29e181] [cursor=pointer]
+            - tabpanel "Manage" [ref=f29e480]:
+              - generic [ref=f29e481]:
+                - generic [ref=f29e483]:
+                  - radiogroup "segmented control" [ref=f29e484]:
+                    - generic [ref=f29e485]:
+                      - generic [ref=f29e486] [cursor=pointer]:
+                        - radio "Cards" [checked]
+                        - generic "Cards" [ref=f29e487]
+                      - generic [ref=f29e488] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic [ref=f29e489]: Trash
+                  - generic [ref=f29e491]:
+                    - generic [ref=f29e492]: "?"
+                    - generic [ref=f29e496]: J/K Navigate
+                    - generic [ref=f29e497]: Enter Edit
+                    - generic [ref=f29e498]: Space Select
+                    - generic [ref=f29e499]: Delete Remove
+                    - button "Compact hints" [ref=f29e500] [cursor=pointer]
+                - generic [ref=f29e502]:
+                  - generic [ref=f29e503]:
+                    - generic [ref=f29e504]:
+                      - searchbox "Search" [ref=f29e506]
+                      - button [ref=f29e508] [cursor=pointer]:
+                        - img "search" [ref=f29e510]
+                    - generic [ref=f29e513] [cursor=pointer]:
+                      - generic [ref=f29e514]:
+                        - generic: Deck
+                        - combobox [ref=f29e515]
+                      - img "down" [ref=f29e517]
+                    - button "Move scope" [disabled] [ref=f29e520]
+                    - generic [ref=f29e521] [cursor=pointer]:
+                      - checkbox "Show workspace decks" [ref=f29e523]
+                      - generic [ref=f29e525]: Show workspace decks
+                    - generic [ref=f29e526]:
+                      - generic [ref=f29e527]:
+                        - generic: Filter workspace
+                        - combobox [disabled] [ref=f29e528]
+                      - img "down" [ref=f29e530]
+                    - button "More" [ref=f29e534] [cursor=pointer]
+                  - generic [ref=f29e539]:
+                    - radiogroup "segmented control" [ref=f29e540]:
+                      - generic [ref=f29e541]:
+                        - generic [ref=f29e542] [cursor=pointer]:
+                          - radio "All" [checked]
+                          - generic "All" [ref=f29e543]
+                        - generic [ref=f29e544] [cursor=pointer]:
+                          - radio "Due"
+                          - generic "Due" [ref=f29e545]
+                        - generic [ref=f29e546] [cursor=pointer]:
+                          - radio "New"
+                          - generic "New" [ref=f29e547]
+                        - generic [ref=f29e548] [cursor=pointer]:
+                          - radio "Learning"
+                          - generic "Learning" [ref=f29e549]
+                    - generic [ref=f29e550]:
+                      - generic [ref=f29e552] [cursor=pointer]:
+                        - generic [ref=f29e553]:
+                          - 'generic "Sort: Due date" [ref=f29e554]'
+                          - combobox [ref=f29e555]
+                        - img "down" [ref=f29e557]
+                      - generic "Presentation mode" [ref=f29e560]:
+                        - button [ref=f29e561] [cursor=pointer]
+                        - button [ref=f29e564] [cursor=pointer]
+                        - button "Doc" [ref=f29e569] [cursor=pointer]
+                - generic [ref=f29e571]:
+                  - checkbox "Select all on page" [ref=f29e575] [cursor=pointer]
+                  - generic [ref=f29e577]: 4 cards
+                - list "Flashcards" [ref=f29e581]:
+                  - listitem [ref=f29e582] [cursor=pointer]:
+                    - generic [ref=f29e584]:
+                      - paragraph [ref=f29e591]: When do Citrine study volunteers meet?
+                      - generic [ref=f29e593]:
+                        - generic [ref=f29e594]:
+                          - generic [ref=f29e595]: Alice UAT151 Citrine Deck
+                          - generic [ref=f29e596]: 6 hours ago
+                          - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f29e597]':
+                            - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                        - generic [ref=f29e598]:
+                          - generic [ref=f29e599]: Memory 2.50
+                          - generic [ref=f29e600]: Next gap 0d
+                          - generic [ref=f29e601]: Recall runs 1
+                          - generic [ref=f29e602]: Relearns 0
+                    - generic [ref=f29e603]:
+                      - 'checkbox "Select card: When do Citrine study volunteers meet?" [ref=f29e607]'
+                      - generic [ref=f29e609]:
+                        - button "Edit" [ref=f29e610]
+                        - button "More actions" [ref=f29e614]
+                  - listitem [ref=f29e620] [cursor=pointer]:
+                    - generic [ref=f29e622]:
+                      - paragraph [ref=f29e628]: What color is the Citrine study marker?
+                      - generic [ref=f29e630]:
+                        - generic [ref=f29e631]:
+                          - generic [ref=f29e632]: Alice UAT196 concise recovery 20260917
+                          - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f29e633]':
+                            - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                        - generic [ref=f29e634]:
+                          - generic [ref=f29e635]: Memory 2.50
+                          - generic [ref=f29e636]: Next gap 0d
+                          - generic [ref=f29e637]: Recall runs 0
+                          - generic [ref=f29e638]: Relearns 0
+                    - generic [ref=f29e639]:
+                      - 'checkbox "Select card: What color is the Citrine study marker?" [ref=f29e643]'
+                      - generic [ref=f29e645]:
+                        - button "Edit" [ref=f29e646]
+                        - button "More actions" [ref=f29e650]
+                  - listitem [ref=f29e656] [cursor=pointer]:
+                    - generic [ref=f29e658]:
+                      - paragraph [ref=f29e664]: What color is the Citrine study marker?
+                      - generic [ref=f29e666]:
+                        - generic [ref=f29e667]:
+                          - generic [ref=f29e668]: Alice UAT167 recovery 20260917
+                          - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f29e669]':
+                            - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                        - generic [ref=f29e670]:
+                          - generic [ref=f29e671]: Memory 2.50
+                          - generic [ref=f29e672]: Next gap 0d
+                          - generic [ref=f29e673]: Recall runs 0
+                          - generic [ref=f29e674]: Relearns 0
+                    - generic [ref=f29e675]:
+                      - 'checkbox "Select card: What color is the Citrine study marker?" [ref=f29e679]'
+                      - generic [ref=f29e681]:
+                        - button "Edit" [ref=f29e682]
+                        - button "More actions" [ref=f29e686]
+                  - listitem [ref=f29e692] [cursor=pointer]:
+                    - generic [ref=f29e694]:
+                      - paragraph [ref=f29e700]: What color is the Citrine study marker and when do its volunteers meet?
+                      - generic [ref=f29e702]:
+                        - generic [ref=f29e703]:
+                          - generic [ref=f29e704]: Alice UAT151 Citrine Deck
+                          - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f29e705]':
+                            - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                        - generic [ref=f29e706]:
+                          - generic [ref=f29e707]: Memory 2.50
+                          - generic [ref=f29e708]: Next gap 0d
+                          - generic [ref=f29e709]: Recall runs 0
+                          - generic [ref=f29e710]: Relearns 0
+                    - generic [ref=f29e711]:
+                      - 'checkbox "Select card: What color is the Citrine study marker and when do its volunteers meet?" [ref=f29e715]'
+                      - generic [ref=f29e717]:
+                        - button "Edit" [ref=f29e718]
+                        - button "More actions" [ref=f29e722]
+                - list [ref=f29e729]:
+                  - listitem "Previous Page" [ref=f29e730]:
+                    - button [disabled] [ref=f29e731]:
+                      - img "left" [ref=f29e732]
+                  - listitem "1" [ref=f29e735] [cursor=pointer]
+                  - listitem "Next Page" [ref=f29e737]:
+                    - button [disabled] [ref=f29e738]:
+                      - img "right" [ref=f29e739]
+                  - listitem [ref=f29e742]:
+                    - generic [ref=f29e743]:
+                      - generic [ref=f29e744]:
+                        - generic "20 / page" [ref=f29e745]
+                        - combobox "Page Size" [ref=f29e746]
+                      - img "down" [ref=f29e748]
+              - button "Create Flashcard" [ref=f29e751] [cursor=pointer]
+  - alert [ref=f29e10]: Flashcards | tldw

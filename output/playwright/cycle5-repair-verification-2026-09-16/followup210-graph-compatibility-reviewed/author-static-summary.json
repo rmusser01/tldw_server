@@ -1,0 +1,13 @@
+{
+  "ruffBaseline": 0,
+  "ruffCurrent": 0,
+  "ruffTest": 0,
+  "banditcurrent": {
+    "findings": 0,
+    "errors": 0
+  },
+  "bandittest": {
+    "findings": 0,
+    "errors": 0
+  }
+}

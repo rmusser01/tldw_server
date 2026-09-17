@@ -1,0 +1,76 @@
+{
+  "files": [
+    {
+      "path": ".tmp/uat213-214-repair-20260917/DESIGN213-214.md",
+      "sha256": "8e0635d4421168c79fccf2ce262ddd444bf5b29b00dafb636b23557a8303eeea"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/IMPLEMENTATION213-214.md",
+      "sha256": "6497ee22952b262c1a996471d12f584261b6db5a650e6e42deeeab3a621075a5"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-baseline.json",
+      "sha256": "e8b65f30a58bb301436c3e89b5c7a76a265392d8391e7fce3fb5bc7de41b7664"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-baseline.log",
+      "sha256": "e66b38791fe57008a5c6d346455539ae0470085cadfa8e1928df525beb3eb662"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-current.json",
+      "sha256": "b11bc23446af97b0415ed1c6248fd53c7fbbae81acd208cbbbe5c2a64be118ad"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-current.log",
+      "sha256": "df4193c206fd910e043bcc063b6e19e364a41f3c131964a4eb0d758fcaa6d80b"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-tests.json",
+      "sha256": "ecefd7fdc8600d7089731338f15a429f806a2654fd1eba9714068dcaa3edb834"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/bandit-tests.log",
+      "sha256": "a3b873e97afc10600a4459f106f575c3cae48f01881b9ab01f2b2f146424815d"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/baseline-manifest.json",
+      "sha256": "ef6d70d48cf69f7a8a57e793dd374e8b4fa14faae7ad4a549b9da44904a02f92"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/native-error-lines.txt",
+      "sha256": "42bf6a71b3ffb5da6edcaf7b750de581abe81160f31976c57a5ea32366bf68fe"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/owned-manifest.json",
+      "sha256": "5c17224c525df6abd51706452f9542f54bf7dd1751e7e7eca3ac1ff39b130a6c"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/owned.patch",
+      "sha256": "4c678c01870104e2cd65648b96be3a675c64c7937c4b6acb92f6c155fc04191e"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/ruff-baseline.json",
+      "sha256": "101204e0e60af3cb46e6f7777e7e0391cda78ab7f496c65f97b0f4ee864765f1"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/ruff-current.json",
+      "sha256": "761cf274fddeed2005d0d39b51a362725bd3a21741f9f047bcea49b314a352a8"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/scope-verification.json",
+      "sha256": "70fc2a883c6966984bead1079c6c1a29945bd64c45c3bc526edb945132c8825e"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/uat213-214-adjacent-green.redacted.log",
+      "sha256": "d47c65eff0476669d589fb72ac6c60c7f44bece3bc54928bcc1ee3ea083ec6ac"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/uat213-214-causal-red.redacted.log",
+      "sha256": "c874f81c6d11337e92bbc5541745b532bd820c85ee8e3b6751390ee9beb08c10"
+    },
+    {
+      "path": ".tmp/uat213-214-repair-20260917/uat213-214-focused-green.redacted.log",
+      "sha256": "fa8257e53df79ae8c8b277e95c4d4e5bf5b59d8f8957ca83f5fce1b6674ee00f"
+    }
+  ]
+}
