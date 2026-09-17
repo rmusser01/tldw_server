@@ -1667,6 +1667,11 @@
     "append": "Append"
   },
   "flashcards": {
+    "studyPackJobAccepted": "Study pack request accepted. Waiting for a status update.",
+    "studyPackJobQueued": "Study pack queued. Waiting for generation to start.",
+    "studyPackJobRunning": "Creating your study pack.",
+    "studyPackJobStatusUnavailable": "Unable to check study pack progress. Checking again shortly.",
+    "studyPackResultUnavailable": "Study pack completed, but its review deck is unavailable.",
     "review": "Review",
     "cards": "Cards",
     "manageCardCount": "{count, plural, one {# card} other {# cards}}",
