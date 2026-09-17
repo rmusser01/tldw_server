@@ -56,28 +56,14 @@ const {
   ))
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      defaultValueOrOptions?:
-        | string
-        | {
-            defaultValue?: string
-          }
-    ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) {
-        return defaultValueOrOptions.defaultValue.replace(
-          /\{\{(\w+)\}\}/g,
-          (_match, token: string) =>
-            String((defaultValueOrOptions as Record<string, unknown>)[token] ?? `{{${token}}}`)
-        )
-      }
-      return key
-    }
-  })
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const { default: ICU } = await import("@/i18n/icu-format")
+  const instance = createInstance().use(ICU)
+  await instance.init({ lng: "en", fallbackLng: false, resources: {} })
+  const t = instance.t.bind(instance)
+  return { useTranslation: () => ({ t }) }
+})
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query")
@@ -290,6 +276,34 @@ describe("ManageTab scheduling metadata visibility", () => {
     } as any)
     vi.mocked(useCardsKeyboardNav).mockImplementation(() => undefined)
     vi.mocked(getManageServerOrderBy).mockReturnValue("due_at")
+  })
+
+  it.each([
+    { queue: "learning", days: 0, expanded: false },
+    { queue: "learning", days: 0, expanded: true },
+    { queue: "relearning", days: 7, expanded: false },
+    { queue: "relearning", days: 7, expanded: true }
+  ])("Manage $queue expanded=$expanded reports the saved ten-minute gap", ({ queue, days, expanded }) => {
+    const scheduledCard = { ...sampleCard, interval_days: days, queue_state: queue,
+      last_reviewed_at: "2026-09-17T06:26:35.074Z", due_at: "2026-09-17T06:36:35.074Z" }
+    vi.mocked(useManageQuery).mockReturnValue({ data: { items: [scheduledCard], count: 1, total: 1 }, isFetching: false } as ReturnType<typeof useManageQuery>)
+    render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive={false} />)
+    if (expanded) fireEvent.click(screen.getByTestId("flashcards-density-toggle"))
+    expect(screen.getByText(expanded ? "Next review gap 10 min" : "Next gap 10 min")).toBeVisible()
+  })
+
+  it("updates the saved gap in the same mounted Manage view", () => {
+    let card = { ...sampleCard, interval_days: 1 }
+    vi.mocked(useManageQuery).mockImplementation(() => ({
+      data: { items: [card], count: 1, total: 1 }, isFetching: false
+    } as ReturnType<typeof useManageQuery>))
+    const props = { onNavigateToImport: vi.fn(), onReviewCard: vi.fn(), isActive: false }
+    const view = render(<ManageTab {...props} />)
+    expect(screen.getByText("Next gap 1d")).toBeInTheDocument()
+    card = { ...card, interval_days: 0, queue_state: "learning",
+      last_reviewed_at: "2026-09-17T06:26:35.074Z", due_at: "2026-09-17T06:36:35.074Z" }
+    view.rerender(<ManageTab {...props} />)
+    expect(screen.getByText("Next gap 10 min")).toBeInTheDocument()
   })
 
   it("keeps compact and expanded card controls without deprecated List warnings", () => {

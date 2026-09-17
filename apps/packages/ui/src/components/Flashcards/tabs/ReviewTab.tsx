@@ -59,6 +59,7 @@ import { RecentStudySessions } from "../components/RecentStudySessions"
 import { calculateIntervals } from "../utils/calculateIntervals"
 import {
   formatFlashcardLongDateTime,
+  formatFlashcardReviewGap,
   formatFlashcardRelativeTime
 } from "../utils/date-display"
 import { formatCardType } from "../utils/model-type-labels"
@@ -660,13 +661,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           t("option:flashcards.nextReviewUnknown", {
             defaultValue: "soon"
           })
-        const intervalLabel =
-          reviewResult.interval_days === 1
-            ? t("option:flashcards.intervalOneDay", { defaultValue: "1 day" })
-            : t("option:flashcards.intervalManyDays", {
-                defaultValue: "{{count}} days",
-                count: reviewResult.interval_days
-              })
+        const intervalLabel = formatFlashcardReviewGap(reviewResult, t)
 
         message.success(
           t("option:flashcards.reviewSavedWithSchedule", {

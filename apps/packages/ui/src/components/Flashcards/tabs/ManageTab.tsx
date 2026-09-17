@@ -65,6 +65,7 @@ import {
 import {
   formatFlashcardAbsoluteDateTime,
   formatFlashcardRelativeTime,
+  formatFlashcardReviewGap,
   isFlashcardTimestampBefore
 } from "../utils/date-display"
 import {
@@ -886,8 +887,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         value: card.ef.toFixed(2)
       }),
       nextReviewGap: t("option:flashcards.schedulingNextReviewGapCompact", {
-        defaultValue: "Next gap {{count}}d",
-        count: Math.max(0, card.interval_days)
+        defaultValue: "Next gap {{interval}}",
+        interval: formatFlashcardReviewGap(card, t, { compact: true })
       }),
       recallRuns: t("option:flashcards.schedulingRecallRunsCompact", {
         defaultValue: "Recall runs {{count}}",
@@ -908,8 +909,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         value: card.ef.toFixed(2)
       }),
       nextReviewGap: t("option:flashcards.schedulingNextReviewGapExpanded", {
-        defaultValue: "Next review gap {{count}}d",
-        count: Math.max(0, card.interval_days)
+        defaultValue: "Next review gap {{interval}}",
+        interval: formatFlashcardReviewGap(card, t, { compact: true })
       }),
       recallRuns: t("option:flashcards.schedulingRecallRunsExpanded", {
         defaultValue: "Recall runs {{count}}",

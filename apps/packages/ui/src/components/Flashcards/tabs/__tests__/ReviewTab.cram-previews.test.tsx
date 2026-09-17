@@ -7,7 +7,7 @@ import { clearSetting } from "@/services/settings/registry"
 import { FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING } from "@/services/settings/ui-settings"
 import { ReviewTab } from "../ReviewTab"
 
-const state = vi.hoisted(() => ({ review: vi.fn(), end: vi.fn(), previewAlwaysPresent: false }))
+const state = vi.hoisted(() => ({ review: vi.fn(), end: vi.fn(), toast: vi.fn(), previewAlwaysPresent: false }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: vi.fn(), bgUpload: vi.fn() }))
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
@@ -25,10 +25,12 @@ vi.mock("react-i18next", async () => {
   const { default: ICU } = await import("@/i18n/icu-format")
   const instance = createInstance().use(ICU)
   await instance.init({ lng: "en", fallbackLng: false, resources: {} })
-  return { useTranslation: () => ({ t: instance.t.bind(instance) }) }
+  const t = instance.t.bind(instance)
+  return { useTranslation: () => ({ t }) }
 })
+
 vi.mock("@/hooks/useAntdMessage", () => ({
-  useAntdMessage: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() })
+  useAntdMessage: () => ({ success: state.toast, error: vi.fn(), info: vi.fn(), warning: vi.fn() })
 }))
 vi.mock("@/hooks/useTTS", () => ({ useTTS: () => ({ speak: vi.fn(), cancel: vi.fn(), isSpeaking: false }) }))
 vi.mock("@/hooks/useSpeechRecognition", () => ({
@@ -106,6 +108,22 @@ async function mountCram(scheduled = true) {
 }
 
 describe("Cram authoritative scheduler previews", () => {
+  it.each([
+    { queue: "learning", days: 0, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
+    { queue: "relearning", days: 7, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
+    { queue: "review", days: 0, due: "2026-09-17T06:36:35.074Z", gap: "10 minutes" },
+    { queue: "review", days: 2, due: "2026-09-19T06:26:35.074Z", gap: "2 days" }
+  ])("saved-gap toast $queue reports the saved gap", async ({ queue, days, due, gap }) => {
+    state.review.mockResolvedValue({ uuid: card.uuid, interval_days: days, queue_state: queue,
+      due_at: due, last_reviewed_at: "2026-09-17T06:26:35.074Z", review_session_id: 77 })
+    await mountCram()
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await waitFor(() => expect(state.toast).toHaveBeenCalledWith(expect.stringContaining("next review gap:")))
+    const saved = state.toast.mock.calls.map(([text]) => String(text)).find(text => text.includes("next review gap:"))
+    expect(saved).toContain(`next review gap: ${gap}`)
+    expect(state.review.mock.calls[0][0]).toMatchObject({ cardUuid: card.uuid, rating: 3 })
+  })
+
   it.each([
     { rating: 0, key: 1, label: "1 min" }, { rating: 2, key: 2, label: "6 min" },
     { rating: 3, key: 3, label: "10 min" }, { rating: 5, key: 4, label: "4 days" }
