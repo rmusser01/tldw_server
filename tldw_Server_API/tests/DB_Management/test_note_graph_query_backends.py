@@ -56,3 +56,15 @@ def test_graph_mapping_rows(graph_db, populated, operation):
         assert db.count_user_notes(include_deleted=False) == (1 if populated else 0)
     else:
         assert db.count_notes_per_tag() == ({kw: 1} if populated else {})
+
+
+@pytest.mark.parametrize("populated", [False, True], ids=["empty-edges", "populated-edges"])
+def test_graph_tag_edge_keyword_table_mapping(graph_db, populated):
+    db = graph_db
+    note = db.add_note("Tag edge fixture", "body")
+    keyword = db.add_keyword("edge-tag")
+    if populated:
+        db.link_note_to_keyword(note, keyword)
+    assert db.get_note_tag_edges([note]) == (
+        [{"note_id": note, "keyword_id": keyword, "keyword": "edge-tag"}] if populated else []
+    )
