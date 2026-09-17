@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-17T20:24:39.747Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+    "tldw_Server_API/tests/Setup/test_first_run_mcp_tools_service.py",
+    "tldw_Server_API/tests/Setup/test_first_run_mcp_tools_catalog.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

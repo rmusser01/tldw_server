@@ -1,0 +1,202 @@
+"""Real setup/repository nullable-filter contracts on SQLite and PostgreSQL."""
+
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+import pytest_asyncio
+
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.Setup.first_run_state import FirstRunState, FirstRunStatus
+from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+from tldw_Server_API.app.services.setup_mcp_tools_service import (
+    McpToolsApplyRequest,
+    SetupMcpToolsService,
+)
+
+pytestmark = pytest.mark.asyncio
+
+
+@pytest_asyncio.fixture(params=["sqlite", "postgres"])
+async def repo(request, tmp_path, monkeypatch):
+    """Official fixture owns the PG database; each pool is explicitly closed."""
+    if request.param == "postgres":
+        url = request.getfixturevalue("pg_temp_db")["dsn"]
+        monkeypatch.setenv("TLDW_USER_DB_BACKEND", "postgres")
+    else:
+        url = f"sqlite:///{tmp_path / 'users.db'}"
+        monkeypatch.setenv("TLDW_USER_DB_BACKEND", "sqlite")
+    settings = Settings(
+        _env_file=None,
+        AUTH_MODE="single_user",
+        DATABASE_URL=url,
+        JWT_SECRET_KEY="mcp-setup-test-signing-key-at-least-32-characters",
+        DATABASE_POOL_MIN_SIZE=1,
+        DATABASE_POOL_MAX_SIZE=5,
+    )
+    pool = DatabasePool(settings)
+    try:
+        await pool.initialize()
+        if request.param == "sqlite":
+            ensure_authnz_tables(tmp_path / "users.db")
+        result = McpHubRepo(pool)
+        await result.ensure_tables()
+        yield result
+    finally:
+        await pool.close()
+
+
+async def _profile(repo, *, scope="global", owner=None, name="First-run default", conn=None):
+    return await repo.create_permission_profile(
+        name=name,
+        owner_scope_type=scope,
+        owner_scope_id=owner,
+        mode="custom",
+        policy_document={"allow_capabilities": ["knowledge.search"]},
+        actor_id=None,
+        conn=conn,
+    )
+
+
+async def _assignment(repo, *, profile_id=None, scope="global", owner=None,
+                      target="default", target_id=None, conn=None):
+    return await repo.create_policy_assignment(
+        target_type=target,
+        target_id=target_id,
+        owner_scope_type=scope,
+        owner_scope_id=owner,
+        profile_id=profile_id,
+        inline_policy_document={},
+        approval_policy_id=None,
+        actor_id=None,
+        conn=conn,
+    )
+
+
+@pytest.mark.parametrize("filters", [
+    {},
+    {"owner_scope_type": "global", "owner_scope_id": None},
+    {"owner_scope_type": "user", "owner_scope_id": 7},
+    {"owner_scope_id": 7},
+])
+async def test_empty_permission_profile_nullable_filters(repo, filters):
+    assert await repo.list_permission_profiles(**filters) == []
+
+
+@pytest.mark.parametrize("filters", [
+    {},
+    {"owner_scope_type": "global", "owner_scope_id": None,
+     "target_type": "default", "target_id": None},
+    {"owner_scope_type": "user", "owner_scope_id": 7,
+     "target_type": "tool", "target_id": "knowledge.search"},
+    {"target_id": "knowledge.search"},
+])
+async def test_empty_policy_assignment_nullable_filters(repo, filters):
+    assert await repo.list_policy_assignments(**filters) == []
+
+
+async def test_missing_policy_assignment_get_has_typed_override_default(repo):
+    assert await repo.get_policy_assignment(999) is None
+
+
+@pytest.mark.parametrize("scope,owner", [("global", None), ("user", 7)])
+@pytest.mark.parametrize("caller_transaction", [False, True])
+async def test_create_profile_readback_matches_nullable_owner(repo, scope, owner, caller_transaction):
+    if caller_transaction:
+        async with repo.db_pool.transaction() as conn:
+            created = await _profile(repo, scope=scope, owner=owner, conn=conn)
+    else:
+        created = await _profile(repo, scope=scope, owner=owner)
+    assert (created["owner_scope_type"], created["owner_scope_id"]) == (scope, owner)
+    assert await repo.get_permission_profile(created["id"]) == created
+
+
+@pytest.mark.parametrize("scope,owner,target,target_id", [
+    ("global", None, "default", None),
+    ("user", 7, "tool", "knowledge.search"),
+])
+@pytest.mark.parametrize("caller_transaction", [False, True])
+async def test_create_assignment_readback_matches_nullable_owner_and_target(
+    repo, scope, owner, target, target_id, caller_transaction,
+):
+    kwargs = dict(scope=scope, owner=owner, target=target, target_id=target_id)
+    if caller_transaction:
+        async with repo.db_pool.transaction() as conn:
+            created = await _assignment(repo, conn=conn, **kwargs)
+    else:
+        created = await _assignment(repo, **kwargs)
+    assert (created["owner_scope_type"], created["owner_scope_id"],
+            created["target_type"], created["target_id"]) == (scope, owner, target, target_id)
+    assert created["has_override"] is False
+    assert created["override_active"] is False
+
+
+async def test_lists_preserve_owner_target_filters_order_and_none_semantics(repo):
+    profiles = [await _profile(repo, scope=scope, owner=owner, name=name)
+                for scope, owner, name in [
+                    ("global", None, "A"), ("user", 7, "B"),
+                    ("user", 8, "C"), ("org", 7, "D"),
+                ]]
+    assignments = [await _assignment(repo, profile_id=profile["id"], scope=scope,
+                                     owner=owner, target=target, target_id=target_id)
+                   for profile, (scope, owner, target, target_id) in zip(profiles, [
+                       ("global", None, "default", None),
+                       ("user", 7, "tool", "knowledge.search"),
+                       ("user", 8, "tool", "knowledge.search"),
+                       ("org", 7, "tool", "knowledge.get"),
+                   ])]
+    assert await repo.list_permission_profiles() == profiles
+    assert await repo.list_permission_profiles(owner_scope_type="user") == profiles[1:3]
+    assert await repo.list_permission_profiles(owner_scope_type="user", owner_scope_id=7) == profiles[1:2]
+    assert await repo.list_permission_profiles(owner_scope_id=7) == [profiles[1], profiles[3]]
+    assert await repo.list_permission_profiles(owner_scope_type="user", owner_scope_id=99) == []
+    assert await repo.list_policy_assignments() == [assignments[i] for i in (0, 3, 1, 2)]
+    assert await repo.list_policy_assignments(owner_scope_type="user", owner_scope_id=7) == assignments[1:2]
+    assert await repo.list_policy_assignments(target_id="knowledge.search") == assignments[1:3]
+    assert await repo.list_policy_assignments(owner_scope_type="user", target_type="tool") == assignments[1:3]
+    assert await repo.list_policy_assignments(owner_scope_type="global", target_type="tool") == []
+
+
+async def test_setup_apply_repeats_reuse_global_profile_and_assignment_preserving_foreign_rows(repo, monkeypatch):
+    # External audit emission and inventory are independent of policy persistence.
+    monkeypatch.setattr("tldw_Server_API.app.services.mcp_hub_service.emit_mcp_hub_audit", AsyncMock())
+    registry = SimpleNamespace(list_entries=AsyncMock(return_value=[{
+        "tool_name": "knowledge.search", "module": "knowledge",
+        "risk_class": "low", "mutates_state": False,
+    }]))
+    service = SetupMcpToolsService(hub=McpHubService(repo), tool_registry=registry)
+    now = datetime(2026, 9, 17, tzinfo=timezone.utc)
+    state = FirstRunState(status=FirstRunStatus.IN_PROGRESS, current_step="mcp_tools",
+                         created_at=now, updated_at=now)
+    request = McpToolsApplyRequest(selected_pack_ids=["research"], selected_addon_ids=[])
+    first = await service.apply_selection(state=state, request=request)
+    # A same-name private profile and default must never replace the global pair.
+    foreign = await _profile(repo, scope="user", owner=8)
+    foreign_assignment = await _assignment(repo, scope="user", owner=8, profile_id=foreign["id"])
+    second = await service.apply_selection(state=state, request=request)
+    assert (second.profile_id, second.assignment_id) == (first.profile_id, first.assignment_id)
+    profiles = await repo.list_permission_profiles(owner_scope_type="global")
+    assignments = await repo.list_policy_assignments(owner_scope_type="global", target_type="default")
+    assert len(profiles) == len(assignments) == 1
+    assert profiles[0]["owner_scope_id"] is None
+    assert profiles[0]["policy_document"]["first_run_mcp_tools"]["selected_pack_ids"] == ["research"]
+    assert assignments[0]["owner_scope_id"] is None
+    assert assignments[0]["target_id"] is None
+    assert assignments[0]["profile_id"] == first.profile_id
+    assert await repo.get_permission_profile(foreign["id"]) == foreign
+    assert await repo.get_policy_assignment(foreign_assignment["id"]) == foreign_assignment
+
+
+async def test_caller_rollback_preserves_prior_setup_records(repo):
+    prior = await _profile(repo, name="committed")
+    with pytest.raises(RuntimeError, match="rollback sentinel"):
+        async with repo.db_pool.transaction() as conn:
+            pending = await _profile(repo, name="rolled back", conn=conn)
+            await _assignment(repo, profile_id=pending["id"], conn=conn)
+            raise RuntimeError("rollback sentinel")
+    assert await repo.list_permission_profiles() == [prior]
+    assert await repo.list_policy_assignments() == []

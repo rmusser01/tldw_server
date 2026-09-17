@@ -1,0 +1,8 @@
+{
+  "target": "test_repo_ensure_tables_requires_governance_pack_distribution_tables",
+  "baselineMatchesCommit": true,
+  "originalAssertionsPreserved": 89,
+  "raisesContextAndBodyUnchanged": true,
+  "wholeModuleOutsideFunctionBytesAndAstIdentical": true,
+  "compile": true
+}

@@ -1,0 +1,84 @@
+{
+  "task": "TASK13260.194",
+  "finding": "UAT252",
+  "verdict": "CLEAR",
+  "authorOwnedManifestSha256": "d71334ef156b02817bb1608a66f12b41df104efef841034f189de6947f429b88",
+  "authorEvidenceManifestSha256": "1effefd37a5374a90370d82330ab211677917dc10cf64c0224bb716f75e80ba6",
+  "files": [
+    {
+      "path": "REVIEW.json",
+      "sha256": "1461c68148ba362ba25c8bd9e0fed7ac727e7ce7e1bc7d73da23a0ca4dcfc741",
+      "bytes": 1727
+    },
+    {
+      "path": "REVIEW.md",
+      "sha256": "a42312a5555d24956484cdf8f00320a19df5a96a3a0da964cad1b69dec133ded",
+      "bytes": 2442
+    },
+    {
+      "path": "assertion-independent.json",
+      "sha256": "d090351c2981d685afa85c864e40163a8d25e0322d97f99465d44ff0aa79db37",
+      "bytes": 275
+    },
+    {
+      "path": "author-evidence-check.json",
+      "sha256": "14ccf062eebfa70fe08c6785d57bf131203519c5e2abafc9ea2fe93483d3ad9a",
+      "bytes": 134
+    },
+    {
+      "path": "bandit-baseline.json",
+      "sha256": "ffb6dbf454a1f81726887a38eb37dfde63d4643eca9edda057ca5169ddebe2a4",
+      "bytes": 6521
+    },
+    {
+      "path": "bandit-baseline.log",
+      "sha256": "597bcfd656aad687cbf53c32483d1d02c706d690f9bf945d1fd7b50969e57cb1",
+      "bytes": 152
+    },
+    {
+      "path": "bandit-current.json",
+      "sha256": "8970e974c7fe790419cb69c6eb11f7b3e56eea7cd1aeb2f775f840780d7c4ec5",
+      "bytes": 6466
+    },
+    {
+      "path": "bandit-current.log",
+      "sha256": "597bcfd656aad687cbf53c32483d1d02c706d690f9bf945d1fd7b50969e57cb1",
+      "bytes": 152
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "a80305a1e7c13d802c6c4baaf9140f58b7679c3c3171fbd451c8241bed0e8049",
+      "bytes": 2746
+    },
+    {
+      "path": "ruff-current.json",
+      "sha256": "a58f90139da56380bdd2ce7c83519b9a366f34ea68a202e9ec01c26fc299dd4e",
+      "bytes": 2702
+    },
+    {
+      "path": "source-after.json",
+      "sha256": "4448f86845c6aeb1783fd89ab27bf8374889a13d8df999a754cac3cce6afac47",
+      "bytes": 1013
+    },
+    {
+      "path": "source-before.json",
+      "sha256": "5d4a1ab922d32bd6680de2c593454e7950121686c317398a799cadbf58e0d228",
+      "bytes": 965
+    },
+    {
+      "path": "static-comparison.json",
+      "sha256": "daadcccd04129c719ec146dc681ca76d4c581a44f70061aeccd015727e4f7e68",
+      "bytes": 3126
+    },
+    {
+      "path": "uat252-sidebar-combined-command.json",
+      "sha256": "245eb3890eb27884e51221cb70216f3cc5e4075a8bd173fe7aff0645e2ad205a",
+      "bytes": 684
+    },
+    {
+      "path": "uat252-sidebar-combined.redacted.log",
+      "sha256": "4220092914cdfa406d4ba1f95858c9b682cc9828055a44945c9453ea3d35e2bd",
+      "bytes": 3871
+    }
+  ]
+}

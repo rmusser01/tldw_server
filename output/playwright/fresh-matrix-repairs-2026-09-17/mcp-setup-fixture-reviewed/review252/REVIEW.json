@@ -1,0 +1,52 @@
+{
+  "task": "TASK13260.194",
+  "finding": "UAT252",
+  "verdict": "CLEAR",
+  "scope": "Fixture-only review; no production change or native acceptance claim",
+  "ownedSourceSha256": "5fe9c0cb1232a80fa5b5c6c93a211b572e04e1317fa2c0cb0d07eec9f8026f7e",
+  "ownedManifestSha256": "d71334ef156b02817bb1608a66f12b41df104efef841034f189de6947f429b88",
+  "tests": {
+    "passed": 139,
+    "skipped": 0,
+    "warnings": 280,
+    "seconds": 67.09,
+    "postgresRequired": true,
+    "counts": {
+      "existingRepositoryAndSetup": 61,
+      "uat251SQLiteAndPostgreSQL": 44,
+      "profileWriteGuardNegatives": 34
+    },
+    "receipt": "uat252-sidebar-combined.redacted.log",
+    "command": "uat252-sidebar-combined-command.json"
+  },
+  "causalEvidence": {
+    "authorRedFailures": 1,
+    "authorFocusedGreenPassed": 1,
+    "authorEvidenceEntriesVerified": 23
+  },
+  "sourceReview": {
+    "originalAssertNodesPreserved": 89,
+    "originalRaisesContextAndBodyPreserved": true,
+    "outsideFunctionBytesAndAstIdentical": true,
+    "managedPoolAndProductionGuardsPreserved": true,
+    "sqliteFixtureConnectionCommittedAndClosed": true,
+    "uat251DependenciesStable": true
+  },
+  "static": {
+    "compilePassed": true,
+    "ruffBaseline": 4,
+    "ruffCurrent": 4,
+    "banditBaseline": 5,
+    "banditCurrent": 5,
+    "added": 0,
+    "removed": 0,
+    "banditParseErrors": 0,
+    "banditExclusion": "B101 test assertions only"
+  },
+  "findings": [],
+  "limits": [
+    "The malformed-schema fixture is SQLite-only; combined verification includes real official PostgreSQL UAT251 cases.",
+    "Existing warnings and unrelated baseline lint/Bandit findings remain.",
+    "UAT251 native Save packs acceptance remains a separate root-owned gate."
+  ]
+}

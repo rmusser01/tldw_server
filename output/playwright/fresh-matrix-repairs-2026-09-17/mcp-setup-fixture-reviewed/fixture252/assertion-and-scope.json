@@ -1,0 +1,9 @@
+{
+  "changedFunctions": [
+    "test_repo_ensure_tables_requires_governance_pack_distribution_tables"
+  ],
+  "allAssertionASTsUnchanged": true,
+  "missingTableRaisesAndBodyUnchanged": true,
+  "otherFunctionsUnchanged": true,
+  "wholeModuleOutsideTargetASTUnchanged": true
+}

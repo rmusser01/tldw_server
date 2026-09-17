@@ -2,11 +2,11 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now250), and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now253), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
-**Task:** TASK13260 and children173–192.
+**Task:** TASK13260 and children173–195.
 
 ## Global constraints
 
@@ -73,6 +73,10 @@
 - [ ] Repeat exact quota→ingest/source/owner paths, Biology5generation/draft/save/five-card Study, model selection/TestBot, Media delayed handoff/refresh/disconnect and all remaining issue-specific native checks.
 - [ ] Hash and retain evidence; update per-issue ledger with revision, tests, native acceptance and remaining limits.
 - [ ] Only release the next matrix when no identified issue remains unresolved or awaiting acceptance.
+
+- [ ]251: repair actual PostgreSQL MCP permission-profile nullable filtering; retain scope controls and native Save packs acceptance.
+- [x]252: repair the baseline-confirmed protected-pool DDL test fixture while preserving the missing governance-table assertion and production guards; independent139combined tests, zero skips and no new static findings.
+- [ ]253: repair actual PostgreSQL MediaFiles detail read; retain original persisted source, owner/soft-delete controls and native full-content handoff acceptance.
 
 ## Stage5: Repeat full fresh UAT
 

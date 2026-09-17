@@ -1,0 +1,186 @@
+{
+  "task": "TASK13260.193",
+  "files": [
+    {
+      "path": "DESIGN251.md",
+      "sha256": "37b0284513778986b5f64a635599459da14426bf9f4d7706d4f76477b32ff2b3",
+      "bytes": 2618
+    },
+    {
+      "path": "IMPLEMENTATION251.md",
+      "sha256": "fd6a6741888e660b15cf7569de00c7b119620ef89f4a76c7c7f31fef511a28cc",
+      "bytes": 5510
+    },
+    {
+      "path": "PLAN251.md",
+      "sha256": "65b7dda44b2764ed87a8781c8998e9e1b6ca92ace4d045e3577c77226a81badd",
+      "bytes": 1011
+    },
+    {
+      "path": "ast-scope.json",
+      "sha256": "e37b3df0ab93d90e8bdc57594fcbc83cede44001be8253bf912d080085c027c2",
+      "bytes": 283
+    },
+    {
+      "path": "bandit-baseline.json",
+      "sha256": "90945a8b141c485f36395071d3069657ebc39a05bd7fdbedc011e9d998134b21",
+      "bytes": 772
+    },
+    {
+      "path": "bandit-production.json",
+      "sha256": "0f30f1193078484f006c40c6eebf30f3f7e209e5983719260329fcdfedacfe02",
+      "bytes": 772
+    },
+    {
+      "path": "bandit-tests-final.json",
+      "sha256": "326814eb12a3223b99d45175a7dd8cdac556f99eefc10349685ce0cf8d477d13",
+      "bytes": 793
+    },
+    {
+      "path": "bandit-tests.json",
+      "sha256": "c5e1a8a11f2b38839dccd31b7227a0ecf9bf91bdbafba3721c118182643a4e6b",
+      "bytes": 1994
+    },
+    {
+      "path": "baseline/mcp_hub_repo.py",
+      "sha256": "ac19b92db047606d6f1a3da900a2540dc7bce57e67844c22803d65161ccfb73f",
+      "bytes": 173714
+    },
+    {
+      "path": "baseline-replay-source.json",
+      "sha256": "6200089bb5097643e12a532ac0ce0a0c1c0b43afece50de7c730280b9f41fd8b",
+      "bytes": 433
+    },
+    {
+      "path": "commands.json",
+      "sha256": "f9cb60d7cc5202be073e3e0c926f2e70070cab493ad0980667087f8e769d0a76",
+      "bytes": 975
+    },
+    {
+      "path": "initial-test-fixture.py",
+      "sha256": "8fa5444012f2e0c482c0f50bd1961f6006391763f52a2c8fe6052851e845898e",
+      "bytes": 9547
+    },
+    {
+      "path": "owned-manifest.json",
+      "sha256": "c626d10dced8c2cd7033673a26c15d28f7774b3a835032a12dab7393e71451ee",
+      "bytes": 842
+    },
+    {
+      "path": "owned.patch",
+      "sha256": "9d1267ed89f9f0cba2073d7bf94e34d7ba47b79622b604075869c4f9d30cbb19",
+      "bytes": 15592
+    },
+    {
+      "path": "receipts/uat251-adjacent-baseline-command.json",
+      "sha256": "f16827ad507181ad4ce875ea9b649a1ae5a6ee5532c2bfdd6280bc27bcc1e1e1",
+      "bytes": 449
+    },
+    {
+      "path": "receipts/uat251-adjacent-baseline.redacted.log",
+      "sha256": "1dc39fe90598d4fbd1e16f355ecc83e3f2c45debaa6465b80cba9e0ee9fa1e42",
+      "bytes": 118996
+    },
+    {
+      "path": "receipts/uat251-adjacent-green-command.json",
+      "sha256": "edb6bcff01ecc2e98ebf514dcba7b20edd3ca73b5a6e310e420ad2f3c7568395",
+      "bytes": 481
+    },
+    {
+      "path": "receipts/uat251-adjacent-green.redacted.log",
+      "sha256": "e946dd0bacc41cdc83ca3b07dd1b8c61c9b2441362525411727272c1a56abb4e",
+      "bytes": 98827
+    },
+    {
+      "path": "receipts/uat251-causal-red-command.json",
+      "sha256": "bbc05e0c3743aebcb7bde36ebae6608d7a22ad1315b6b7fb13c863508f2af2c8",
+      "bytes": 361
+    },
+    {
+      "path": "receipts/uat251-causal-red-corrected-fixture-command.json",
+      "sha256": "e014f571aea1d4e30b9b13769b10729539578a6e5cd6161777b1a921ea99edf2",
+      "bytes": 361
+    },
+    {
+      "path": "receipts/uat251-causal-red-corrected-fixture.redacted.log",
+      "sha256": "42660ad9b3ca4ee7d4dbd9428ac3b47379e36a4f421b67c98c15111534b9633a",
+      "bytes": 481028
+    },
+    {
+      "path": "receipts/uat251-causal-red.redacted.log",
+      "sha256": "ae8f30ebc26526b370b4106e67b3baea8524cede6dc0bd61a919c3dda846ceda",
+      "bytes": 46217
+    },
+    {
+      "path": "receipts/uat251-final-green-command.json",
+      "sha256": "20b7893b7df7934b8f1a40375676453871c0e1606ac7930d36ed96ebecd9a9d3",
+      "bytes": 361
+    },
+    {
+      "path": "receipts/uat251-final-green.redacted.log",
+      "sha256": "88b0568e5a896d21c6ceaa16b32a2da9f58fb24b356a6da30fa454ec4778b39d",
+      "bytes": 9622
+    },
+    {
+      "path": "receipts/uat251-first-green-command.json",
+      "sha256": "c286b6cee16b410dbe030780c71657afdbee2cbb2d05a9fbf17caff4b2fbda99",
+      "bytes": 361
+    },
+    {
+      "path": "receipts/uat251-first-green.redacted.log",
+      "sha256": "97a813b9cbf87c39065a268af32171b88e656f3d7fc2ebffd7cc5a6ccd333296",
+      "bytes": 9621
+    },
+    {
+      "path": "receipts/uat251-permanent-red-command.json",
+      "sha256": "3897e7538c3c4c66917de03d1c64a562a6664fb36934003a8ea91762aadd6c93",
+      "bytes": 361
+    },
+    {
+      "path": "receipts/uat251-permanent-red.redacted.log",
+      "sha256": "7ec884ba1ad54e31784ff98c8a6429a7a372e3f3a9e1a71e6953614744a8e5ea",
+      "bytes": 114773
+    },
+    {
+      "path": "replay_mcp251_baseline.py",
+      "sha256": "7d68e4820286301a535dfb8a476d33536ca5dc50827b0ee750ae895734144326",
+      "bytes": 822
+    },
+    {
+      "path": "review-snapshot/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "sha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "bytes": 173908
+    },
+    {
+      "path": "review-snapshot/tldw_Server_API/tests/DB_Management/test_mcp_setup_scope_filters_backends.py",
+      "sha256": "9a0b544384f7009e3d04838078987c20b1a028c1ac43c27cad0bd85ce0fcf2e9",
+      "bytes": 10501
+    },
+    {
+      "path": "ruff-baseline.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "path": "ruff-final.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "path": "ruff-first-green.json",
+      "sha256": "817c8c4b0193e0c52367932d0b94bf74d5f31302460af06875305eec61faeee5",
+      "bytes": 931
+    },
+    {
+      "path": "secret-scan.json",
+      "sha256": "56bbc899a53cc2af8468c36b5532370ca52949404793b95fb8910656f1e0f1e2",
+      "bytes": 241
+    },
+    {
+      "path": "static-checks.json",
+      "sha256": "e5eb27805979e8ac5c769a90c6f2c9789d22b8f8f0d48ab5f8903148bfda1437",
+      "bytes": 1094
+    }
+  ],
+  "excludes": "Raw *.private.log and runtime/profile/config/credential files are not retained."
+}

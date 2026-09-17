@@ -1,0 +1,174 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T20:33:37Z",
+  "metrics": {
+    "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 5,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 5,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 841,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 5,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 5,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 841,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "774 \n775     first = await repo.create_external_server_credential_slot(\n776         server_id=\"docs\",\n777         slot_name=\"token_readonly\",\n778         display_name=\"Read-only token\",\n779         secret_kind=\"bearer_token\",\n780         privilege_class=\"read\",\n781         is_required=True,\n782         actor_id=1,\n783     )\n784     assert first[\"slot_name\"] == \"token_readonly\"\n",
+      "col_offset": 18,
+      "end_col_offset": 5,
+      "filename": "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer_token'",
+      "line_number": 775,
+      "line_range": [
+        775,
+        776,
+        777,
+        778,
+        779,
+        780,
+        781,
+        782,
+        783
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "786     with pytest.raises(ValueError):\n787         await repo.create_external_server_credential_slot(\n788             server_id=\"docs\",\n789             slot_name=\"token_readonly\",\n790             display_name=\"Duplicate read-only token\",\n791             secret_kind=\"bearer_token\",\n792             privilege_class=\"read\",\n793             is_required=True,\n794             actor_id=1,\n795         )\n796 \n",
+      "col_offset": 14,
+      "end_col_offset": 9,
+      "filename": "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer_token'",
+      "line_number": 787,
+      "line_range": [
+        787,
+        788,
+        789,
+        790,
+        791,
+        792,
+        793,
+        794,
+        795
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "827     )\n828     await repo.create_external_server_credential_slot(\n829         server_id=\"docs\",\n830         slot_name=\"token_readonly\",\n831         display_name=\"Read-only token\",\n832         secret_kind=\"bearer_token\",\n833         privilege_class=\"read\",\n834         is_required=True,\n835         actor_id=1,\n836     )\n837 \n",
+      "col_offset": 10,
+      "end_col_offset": 5,
+      "filename": "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer_token'",
+      "line_number": 828,
+      "line_range": [
+        828,
+        829,
+        830,
+        831,
+        832,
+        833,
+        834,
+        835,
+        836
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "936     )\n937     await repo.create_external_server_credential_slot(\n938         server_id=\"docs\",\n939         slot_name=\"token_readonly\",\n940         display_name=\"Read-only token\",\n941         secret_kind=\"bearer_token\",\n942         privilege_class=\"read\",\n943         is_required=True,\n944         actor_id=1,\n945     )\n946 \n",
+      "col_offset": 10,
+      "end_col_offset": 5,
+      "filename": "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer_token'",
+      "line_number": 937,
+      "line_range": [
+        937,
+        938,
+        939,
+        940,
+        941,
+        942,
+        943,
+        944,
+        945
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "989     )\n990     await repo.create_external_server_credential_slot(\n991         server_id=\"docs\",\n992         slot_name=\"token_readonly\",\n993         display_name=\"Read-only token\",\n994         secret_kind=\"bearer_token\",\n995         privilege_class=\"read\",\n996         is_required=True,\n997         actor_id=1,\n998     )\n999 \n",
+      "col_offset": 10,
+      "end_col_offset": 5,
+      "filename": "./.tmp/uat-repairs-231-246/fixture252/baseline/test_mcp_hub_repo.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'bearer_token'",
+      "line_number": 990,
+      "line_range": [
+        990,
+        991,
+        992,
+        993,
+        994,
+        995,
+        996,
+        997,
+        998
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    }
+  ]
+}

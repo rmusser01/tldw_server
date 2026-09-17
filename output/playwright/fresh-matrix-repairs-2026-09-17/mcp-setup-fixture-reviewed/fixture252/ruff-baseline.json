@@ -1,0 +1,90 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 14,
+      "row": 6
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nfrom datetime import datetime, timedelta, timezone\nfrom pathlib import Path\n\nimport pytest\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 8
+          },
+          "location": {
+            "column": 1,
+            "row": 1
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 1,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "B017",
+    "end_location": {
+      "column": 34,
+      "row": 603
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+    "fix": null,
+    "location": {
+      "column": 10,
+      "row": 603
+    },
+    "message": "Do not assert blind exception: `Exception`",
+    "noqa_row": 603,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/assert-raises-exception"
+  },
+  {
+    "cell": null,
+    "code": "F811",
+    "end_location": {
+      "column": 79,
+      "row": 702
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 702
+    },
+    "message": "Redefinition of unused `test_repo_rejects_explicit_server_credential_ref_for_disable_binding` from line 659: `test_repo_rejects_explicit_server_credential_ref_for_disable_binding` redefined here",
+    "noqa_row": 702,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/redefined-while-unused"
+  },
+  {
+    "cell": null,
+    "code": "F811",
+    "end_location": {
+      "column": 77,
+      "row": 961
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+    "fix": null,
+    "location": {
+      "column": 11,
+      "row": 961
+    },
+    "message": "Redefinition of unused `test_repo_rejects_explicit_slot_credential_ref_for_disable_binding` from line 908: `test_repo_rejects_explicit_slot_credential_ref_for_disable_binding` redefined here",
+    "noqa_row": 961,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/redefined-while-unused"
+  }
+]

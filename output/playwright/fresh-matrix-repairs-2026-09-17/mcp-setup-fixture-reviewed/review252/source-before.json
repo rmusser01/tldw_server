@@ -1,0 +1,22 @@
+{
+  "ownedManifestSha256": "d71334ef156b02817bb1608a66f12b41df104efef841034f189de6947f429b88",
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+      "sha256": "5fe9c0cb1232a80fa5b5c6c93a211b572e04e1317fa2c0cb0d07eec9f8026f7e",
+      "snapshot": "review-snapshot/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py"
+    }
+  ],
+  "uat251Dependencies": [
+    {
+      "path": "tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py",
+      "sha256": "a63c6cf5c51ffa1a702894740240a4767e27f677ddf8512ed1131ad1edd02fda",
+      "snapshot": "review-snapshot/tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py"
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_mcp_setup_scope_filters_backends.py",
+      "sha256": "9a0b544384f7009e3d04838078987c20b1a028c1ac43c27cad0bd85ce0fcf2e9",
+      "snapshot": "review-snapshot/tldw_Server_API/tests/DB_Management/test_mcp_setup_scope_filters_backends.py"
+    }
+  ]
+}

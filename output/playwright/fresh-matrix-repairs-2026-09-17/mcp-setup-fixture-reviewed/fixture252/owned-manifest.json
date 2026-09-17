@@ -1,0 +1,15 @@
+{
+  "task": "TASK13260.194",
+  "finding": "UAT252",
+  "fixtureBackend": "sqlite",
+  "frozenAt": "2026-09-17T20:31:52.483101+00:00",
+  "baselineRevision": "86458ab88ce3fa62e6518c9d813c3860254ddb2c",
+  "baselineSha256": "cc0bfef6f4a35b22b104b47d2faf0868bdf6d41ff55806662e39819de2b0c2bd",
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py",
+      "sha256": "5fe9c0cb1232a80fa5b5c6c93a211b572e04e1317fa2c0cb0d07eec9f8026f7e",
+      "snapshot": "review-snapshot/tldw_Server_API/tests/AuthNZ_Unit/test_mcp_hub_repo.py"
+    }
+  ]
+}

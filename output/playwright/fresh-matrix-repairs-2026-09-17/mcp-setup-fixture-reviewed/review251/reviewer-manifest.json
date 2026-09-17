@@ -1,0 +1,76 @@
+{
+  "ownedManifestSha256": "c626d10dced8c2cd7033673a26c15d28f7774b3a835032a12dab7393e71451ee",
+  "authorEvidenceManifestSha256": "6440419c74b7723a78bab1b58cab007121ee115e812426c393a5933f79fe3f37",
+  "artifacts": [
+    {
+      "path": "REVIEW.json",
+      "sha256": "103305febd8ce7acc0285d9031c1ca7b73500e91a8f798636e244110208c0a78",
+      "bytes": 459
+    },
+    {
+      "path": "REVIEW.md",
+      "sha256": "b6dbc194e7a5ce66902a26958f343c0e1986c2f634a420b4fe359fdb0e0de438",
+      "bytes": 3793
+    },
+    {
+      "path": "ast-compile.json",
+      "sha256": "67d19d8dff412704ad5fac734cca2dc4472190ba4e6724a07d97593c17797511",
+      "bytes": 8937
+    },
+    {
+      "path": "bandit-production.json",
+      "sha256": "482a58d855fbfec56de90e90850b18fc8d0c4f10f145f69afbd2bdd00a5d1190",
+      "bytes": 772
+    },
+    {
+      "path": "bandit-production.log",
+      "sha256": "c52bd70b24f76b15010a57d93ecca8249de1c41be986b2f606c713e9ce97a996",
+      "bytes": 251
+    },
+    {
+      "path": "bandit-test.json",
+      "sha256": "72ccbf088b2439f1bc565df17c07904b3a3cf2e9b2f44c84066d8cd62bbf0787",
+      "bytes": 793
+    },
+    {
+      "path": "bandit-test.log",
+      "sha256": "a3a4c4fb822b88f73250f44c4f4a0e6d1f3cceb30ea5403d1954db7715ddea80",
+      "bytes": 245
+    },
+    {
+      "path": "ruff.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2
+    },
+    {
+      "path": "source-after.json",
+      "sha256": "9b1f899231b9ed00fa388882dd5e46b09651a40bc5f6641e99da0d8057102a4f",
+      "bytes": 858
+    },
+    {
+      "path": "source-before.json",
+      "sha256": "2eeba57deff0641ab9b3db495d8445448ba5be044655be253553765cda2b7fc8",
+      "bytes": 670
+    },
+    {
+      "path": "uat251-sidebar-adjacent-command.json",
+      "sha256": "78a7d98b9faf7a73683e71272cd65a416af0f73628d8400b66c40ca09a12b8ed",
+      "bytes": 481
+    },
+    {
+      "path": "uat251-sidebar-adjacent.redacted.log",
+      "sha256": "66a75e9f68f51753f40b1a8a60e5084040bc889e821f519dbcb7f93a92e2c557",
+      "bytes": 98828
+    },
+    {
+      "path": "uat251-sidebar-focused-command.json",
+      "sha256": "45cb74108180c79bcee76413d8a3efd3f8c080dbeea4ab10aad95487ed666591",
+      "bytes": 361
+    },
+    {
+      "path": "uat251-sidebar-focused.redacted.log",
+      "sha256": "4b62c841b9d5a2dc7b7ad7d26bc726431b69bfdc78660e06fdd6445605f63dcf",
+      "bytes": 9622
+    }
+  ]
+}

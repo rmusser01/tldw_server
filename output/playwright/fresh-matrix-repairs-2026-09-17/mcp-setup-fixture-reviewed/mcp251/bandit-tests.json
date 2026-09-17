@@ -1,0 +1,61 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T20:17:03Z",
+  "metrics": {
+    "./tldw_Server_API/tests/DB_Management/test_mcp_setup_scope_filters_backends.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 223,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 1,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 223,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "33         monkeypatch.setenv(\"TLDW_USER_DB_BACKEND\", \"sqlite\")\n34     settings = Settings(\n35         _env_file=None,\n36         AUTH_MODE=\"single_user\",\n37         DATABASE_URL=url,\n38         JWT_SECRET_KEY=\"mcp-setup-test-signing-key-at-least-32-characters\",\n39         DATABASE_POOL_MIN_SIZE=1,\n40         DATABASE_POOL_MAX_SIZE=5,\n41     )\n42     pool = DatabasePool(settings)\n",
+      "col_offset": 15,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_mcp_setup_scope_filters_backends.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'mcp-setup-test-signing-key-at-least-32-characters'",
+      "line_number": 34,
+      "line_range": [
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    }
+  ]
+}
