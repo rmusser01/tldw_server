@@ -1,0 +1,200 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:6057) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:6056) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:6055) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a generation claim-verification 422 inline, retains options, and allows another generation
+[tldw:request] POST /api/v1/flashcards/generate 422 {"code":"claim_verification_failed","claimVerification":{"verdict":"failed","report":{"numerical_error_count":1,"claims":[{"claim_id":"flashcard:1:back:c1","claim_text":"The trial response rate was 90%.","status":"numerical_error","confidence":0.85}]},"unitResults":[{"unit_id":"flashcard:1:back","verdict":"failed","statuses":["numerical_error"]}]}}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a generation claim-verification 422 inline, retains options, and allows another generation
+Failed to generate flashcards: Error: {"code":"claim_verification_failed","claimVerification":{"verdict":"failed","report":{"numerical_error_count":1,"claims":[{"claim_id":"flashcard:1:back:c1","claim_text":"The trial response rate was 90%.","status":"numerical_error","confidence":0.85}]},"unitResults":[{"unit_id":"flashcard:1:back","verdict":"failed","statuses":["numerical_error"]}]}} (POST /api/v1/flashcards/generate)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at processTimers (node:internal/timers:538:9)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at generateFlashcards (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:1005:10) {
+  status: 422,
+  details: {
+    detail: { code: 'claim_verification_failed', claimVerification: [Object] }
+  },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/GeneratePanel.deck-recovery.test.tsx (11 tests) 1934ms
+     ✓ recovers via visible Retry and saves the edited draft with its original account and source  554ms
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 409 Deck name already exists (Entity: decks, ID: New Citrine deck)
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+Failed to create deck: Error: Deck name already exists (Entity: decks, ID: New Citrine deck) (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 409,
+  details: {
+    detail: 'Deck name already exists (Entity: decks, ID: New Citrine deck)'
+  },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 500 Failed to create deck
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+Failed to create deck: Error: Failed to create deck (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create deck' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 409 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 409 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 409 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 409,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+ ✓ ../packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.deck-creation.test.tsx (5 tests) 2548ms
+     ✓ creates a new structured-import deck with scheduler settings from the selector flow  1535ms
+     ✓ creates a new generated-cards deck with scheduler settings from the selector flow  668ms
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 422 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 422,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 500 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps an assistant HTTP500 inline, retains the question and card, and accepts a successful retry
+[tldw:request] POST /api/v1/flashcards/citrine-card/assistant/respond 500 Internal server error
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps an assistant HTTP500 inline, retains the question and card, and accepts a successful retry
+Failed to respond with flashcard assistant: Error: Internal server error (POST /api/v1/flashcards/citrine-card/assistant/respond)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at respondFlashcardAssistant (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:893:10) {
+  status: 500,
+  details: { detail: 'Internal server error' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves a scheduled rating after HTTP500 and retries within the real review run without a Next overlay
+[tldw:request] POST /api/v1/flashcards/review 500 Internal server error
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves a scheduled rating after HTTP500 and retries within the real review run without a Next overlay
+Failed to submit flashcard review: Error: Internal server error (POST /api/v1/flashcards/review)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21)
+    at reviewFlashcard (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/flashcards.ts:935:10) {
+  status: 500,
+  details: { detail: 'Internal server error' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+Browserslist: browsers data (caniuse-lite) is 8 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves the deck programming error rejection and Next diagnostic
+Failed to create deck: TypeError: Cannot read properties of null (reading 'trim')
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:763:27)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:385:33
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves the card programming error rejection and Next diagnostic
+Failed to create flashcard: TypeError: Invalid draft getter
+    at Object.get front [as front] (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:389:84)
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:715:39)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:389:16
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves the generation programming error rejection and Next diagnostic
+Failed to generate flashcards: TypeError: Invalid source getter
+    at Object.get text [as text] (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:386:117)
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:1059:22)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:386:44
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves the assistant programming error rejection and Next diagnostic
+Failed to respond with flashcard assistant: TypeError: Invalid assistant request getter
+    at Object.get request [as request] (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:387:143)
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:1006:30)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:387:43
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > preserves the rating programming error rejection and Next diagnostic
+Failed to submit flashcard review: TypeError: Invalid rating card getter
+    at Object.get cardUuid [as cardUuid] (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:388:112)
+    at Object.mutationFn (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts:975:27)
+    at Object.fn (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:74:29)
+    at run (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:77:49)
+    at Object.start (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/retryer.js:119:9)
+    at Mutation.execute (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@tanstack+query-core@5.90.20/node_modules/@tanstack/query-core/build/modern/mutation.js:115:40)
+    at /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/__tests__/flashcards-generated-save-errors.test.tsx:388:40
+
+ ✓ __tests__/flashcards-generated-save-errors.test.tsx (13 tests) 4882ms
+     ✓ keeps a generation claim-verification 422 inline, retains options, and allows another generation  1136ms
+     ✓ keeps a deck HTTP 409 save failure inline and retries the edited draft  625ms
+     ✓ keeps a deck HTTP 500 save failure inline and retries the edited draft  588ms
+     ✓ keeps a card HTTP 409 save failure inline and retries the edited draft  567ms
+     ✓ keeps a card HTTP 422 save failure inline and retries the edited draft  563ms
+     ✓ keeps a card HTTP 500 save failure inline and retries the edited draft  548ms
+     ✓ keeps an assistant HTTP500 inline, retains the question and card, and accepts a successful retry  839ms
+
+ Test Files  3 passed (3)
+      Tests  29 passed (29)
+   Start at  21:05:42
+   Duration  6.75s (transform 1.77s, setup 296ms, import 3.56s, tests 9.36s, environment 739ms)

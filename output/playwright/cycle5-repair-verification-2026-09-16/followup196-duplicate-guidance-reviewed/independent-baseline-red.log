@@ -1,0 +1,111 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+(node:6552) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 409 Deck name already exists (Entity: decks, ID: New Citrine deck)
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+Failed to create deck: Error: Deck name already exists (Entity: decks, ID: New Citrine deck) (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 409,
+  details: {
+    detail: 'Deck name already exists (Entity: decks, ID: New Citrine deck)'
+  },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards/decks 500 Failed to create deck
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 500 save failure inline and retries the edited draft
+Failed to create deck: Error: Failed to create deck (POST /api/v1/flashcards/decks)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create deck' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 409 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 409 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 409 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 409,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 422 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 422 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 422,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+[tldw:request] POST /api/v1/flashcards 500 Failed to create flashcard
+
+stderr | __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a card HTTP 500 save failure inline and retries the edited draft
+Failed to create flashcard: Error: Failed to create flashcard (POST /api/v1/flashcards)
+    at buildRequestError (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1054:19)
+    at handleFailedResponse (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1200:28)
+    at bgRequestImpl (/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/background-proxy.ts:1445:21) {
+  status: 500,
+  details: { detail: 'Failed to create flashcard' },
+  headers: { 'content-type': 'application/json' },
+  retryAfterMs: null
+}
+
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx (13 tests | 1 failed | 8 skipped) 2930ms
+     ↓ keeps a generation claim-verification 422 inline, retains options, and allows another generation
+     × keeps a deck HTTP 409 save failure inline and retries the edited draft 631ms
+     ✓ keeps a deck HTTP 500 save failure inline and retries the edited draft  590ms
+     ✓ keeps a card HTTP 409 save failure inline and retries the edited draft  562ms
+     ✓ keeps a card HTTP 422 save failure inline and retries the edited draft  577ms
+     ✓ keeps a card HTTP 500 save failure inline and retries the edited draft  569ms
+     ↓ keeps an assistant HTTP500 inline, retains the question and card, and accepts a successful retry
+     ↓ preserves a scheduled rating after HTTP500 and retries within the real review run without a Next overlay
+     ↓ preserves the deck programming error rejection and Next diagnostic
+     ↓ preserves the card programming error rejection and Next diagnostic
+     ↓ preserves the generation programming error rejection and Next diagnostic
+     ↓ preserves the assistant programming error rejection and Next diagnostic
+     ↓ preserves the rating programming error rejection and Next diagnostic
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/flashcards-generated-save-errors.test.tsx > Flashcards mutations through the real request and Next Pages error paths > keeps a deck HTTP 409 save failure inline and retries the edited draft
+Error: expect(element).toHaveTextContent()
+
+Expected element to have text content:
+  A deck with this name already exists. Choose a different name or select the existing deck.
+Received:
+  Deck name already exists (Entity: decks, ID: New Citrine deck) (POST /api/v1/flashcards/decks)Generated drafts are still available. Check the deck settings and draft content, then retry saving.Retry saving remaining drafts
+ ❯ __tests__/flashcards-generated-save-errors.test.tsx:206:69
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed | 8 skipped (13)
+   Start at  21:06:36
+   Duration  4.32s (transform 551ms, setup 86ms, import 1.01s, tests 2.93s, environment 207ms)

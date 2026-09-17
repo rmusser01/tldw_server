@@ -1,5 +1,5 @@
 import React from "react"
-import { extractFlashcardsErrorStatus, mapFlashcardsUiError } from "../../utils/error-taxonomy"
+import { mapFlashcardsUiError } from "../../utils/error-taxonomy"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button, Card, Form, Input, Select, Space, Switch, Tooltip, Typography } from "antd"
@@ -400,13 +400,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
-      }).catch((error: unknown) => {
-        if (extractFlashcardsErrorStatus(error) === 409) {
-          throw new Error(t("option:flashcards.generateDeckNameConflict", {
-            defaultValue: "A deck with this name already exists. Choose a different name or select the existing deck."
-          }), { cause: error })
-        }
-        throw error
       })
       assertCurrentScope()
       setCreatedDeck({ scope: generationScope, deck: createdDeck, listUpdatedAt: latestListUpdatedAt.current })

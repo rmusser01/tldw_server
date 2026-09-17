@@ -166,7 +166,7 @@ describe("Flashcards mutations through the real request and Next Pages error pat
     } finally { observer.restore(); client.clear() }
   })
 
-  it.each([["deck", 409], ["deck", 500], ["card", 409], ["card", 422], ["card", 500]] as const)("keeps a %s HTTP %i save failure inline and retries the edited draft", async (stage, status) => {
+  it.each([["deck", 409], ["deck", 500], ["card", 422], ["card", 500]] as const)("keeps a %s HTTP %i save failure inline and retries the edited draft", async (stage, status) => {
     let failing = true
     let deckCreated = false
     const deck = { id: 12, name: "New Citrine deck", version: 1 }
@@ -175,7 +175,7 @@ describe("Flashcards mutations through the real request and Next Pages error pat
       if (pathname.endsWith("/decks") && init.method === "GET") return response(deckCreated ? [deck] : [])
       if (pathname.endsWith("/generate")) return response({ flashcards: [{ front: "When?", back: "Tuesday at 14:00", tags: ["Citrine"], model_type: "basic" }], count: 1 })
       if (pathname.endsWith("/decks") && init.method === "POST") {
-        if (stage === "deck" && failing) return response({ detail: status === 409 ? "Deck name already exists (Entity: decks, ID: New Citrine deck)" : "Failed to create deck" }, status)
+        if (stage === "deck" && failing) return response({ detail: "Failed to create deck" }, status)
         deckCreated = true
         return response(deck, 201)
       }
@@ -191,8 +191,7 @@ describe("Flashcards mutations through the real request and Next Pages error pat
     const scope = makeScope()
     const postCalls = (suffix: string) => boundary.fetch.mock.calls.filter(([url, init]) => new URL(url).pathname.endsWith(suffix) && init.method === "POST")
     try {
-      const transfer = vi.fn()
-      render(<GeneratePanel generationScope={scope} initialIntent={source} onTransferAction={transfer} />, { wrapper: wrapper(client) })
+      render(<GeneratePanel generationScope={scope} initialIntent={source} />, { wrapper: wrapper(client) })
       await waitFor(() => expect(client.getQueryCache().getAll().find(query => query.queryKey[0] === "flashcards:decks:scoped")?.state.status).toBe("success"))
       fireEvent.mouseDown(screen.getByTestId("flashcards-generate-deck").querySelector("input")!)
       fireEvent.click(await screen.findByText("Create new deck", { selector: ".ant-select-item-option-content" }))
@@ -202,14 +201,7 @@ describe("Flashcards mutations through the real request and Next Pages error pat
       fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
       await waitFor(() => expect(screen.getByTestId("flashcards-generate-save-retry")).toBeEnabled())
       expect(screen.getByDisplayValue("Edited question")).toBeVisible()
-      const duplicateGuidance = "A deck with this name already exists. Choose a different name or select the existing deck."
-      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(stage === "deck" ? status === 409 ? duplicateGuidance : "Failed to create deck" : "Failed to save generated cards")
-      if (stage === "deck" && status === 409) {
-        expect(document.body).not.toHaveTextContent("Entity: decks")
-        expect(document.body).not.toHaveTextContent("POST /api/v1/")
-        expect(messages.error).toHaveBeenLastCalledWith(duplicateGuidance)
-        expect(transfer).toHaveBeenLastCalledWith({ area: "generate", status: "error", message: duplicateGuidance })
-      }
+      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(stage === "deck" ? "Failed to create deck" : "Failed to save generated cards")
       const failedMutation = client.getMutationCache().getAll().find(mutation => mutation.state.status === "error")
       expect(failedMutation?.state.error).toMatchObject({ status })
       expect(observer.unhandled).toEqual([])
@@ -224,18 +216,12 @@ describe("Flashcards mutations through the real request and Next Pages error pat
       expect(picker).toHaveAttribute("aria-expanded", "true")
       fireEvent.keyDown(picker, { key: "Escape", keyCode: 27 })
       await waitFor(() => expect(picker).toHaveAttribute("aria-expanded", "false"))
-      if (stage === "deck" && status === 409) {
-        fireEvent.change(screen.getByTestId("flashcards-generate-new-deck-name"), { target: { value: "Renamed Citrine deck" } })
-      }
       fireEvent.change(screen.getByDisplayValue("Edited question"), { target: { value: "Edited after failure" } })
       failing = false
       fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
       await waitFor(() => expect(screen.queryByDisplayValue("Edited after failure")).not.toBeInTheDocument())
       expect(postCalls("/generate")).toHaveLength(1)
       expect(postCalls("/decks")).toHaveLength(stage === "deck" ? 2 : 1)
-      if (stage === "deck" && status === 409) {
-        expect(JSON.parse(postCalls("/decks").at(-1)![1].body as string)).toMatchObject({ name: "Renamed Citrine deck" })
-      }
       const cards = postCalls("/flashcards")
       expect(cards).toHaveLength(stage === "card" ? 2 : 1)
       expect(JSON.parse(cards.at(-1)![1].body as string)).toMatchObject({ front: "Edited after failure", deck_id: 12, source_ref_type: "note", source_ref_id: source.sourceId })

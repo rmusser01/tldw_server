@@ -1,0 +1,3 @@
+# UAT196 bounded duplicate-deck guidance
+
+TASK13260.134. Map the deck-create409 at its exact existing mutation boundary to localized actionable copy, retaining the original Error as cause and existing hook diagnostic. Keep other create/card/list failures and account/draft guards unchanged. Reuse extractFlashcardsErrorStatus; do not broaden the generic version-conflict taxonomy. Extend actual fetch/service/TanStack/Next boundary test with original raw409 detail, visible/toast/action-summary assertions, card409 counter-control and edited retry. Initial root-relative setup command accidentally ran under frontend cwd and made no source changes; corrected before causal test.

@@ -1,0 +1,17 @@
+{
+  "baseline": [
+    [
+      "@typescript-eslint/no-explicit-any",
+      1,
+      "Unexpected any. Specify a different type."
+    ]
+  ],
+  "current": [
+    [
+      "@typescript-eslint/no-explicit-any",
+      1,
+      "Unexpected any. Specify a different type."
+    ]
+  ],
+  "equal": true
+}
