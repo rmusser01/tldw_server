@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Fresh-run findings:236 total —230 previously verified,6 new unresolved (231–236).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
+- **Fresh-run findings:237 total —230 previously verified,7 new unresolved (231–237).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
 
 - **Fresh matrix running:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations; SQLite single-user setup and Chat are underway. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
 
@@ -2494,5 +2494,13 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 
 - Status: open, TASK13260.178. Exact TestBot creation succeeds but its native library Chat entry shows selected-model-missing/unavailable despite successful ordinary real Chat with the configured Gemma/llama backend. No character completion is sent.
 - Three bounded entry attempts: initial; recommended Open model settings → choose the available llama.cpp catalog entry → normal return; actual Chat picker → select same usable model → Characters/library entry. All block. The third attempt visibly changed Chat model display from Custom/qualified ID to LLaMa.cpp/raw path before the still-failing entry. No further retry or state injection.
-- Frozen source has a llama versus llama.cpp readiness alias mismatch; an independent audit is checking remaining selection/storage boundaries because the third outcome means that alias alone may not explain every attempt. Settings uses a direct-storage selection path; do not claim a proven second defect from source alone.
+- Frozen source has two llama identity gaps: setup-qualified llama.cpp fails provider comparison against actual llama; the Chat picker persists llama:<model> but qualified-ID parsers omit llama, so the whole ID fails raw-model matching. The friendly raw-path display does not prove unqualified storage. Settings direct-storage ownership remains a qualified concern, not a separately established finding.
 - Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/testbot-availability-recovery.txt`, `testbot-model-settings-snapshot.txt`, `testbot-model-reselected.txt`, `testbot-chat-model-reselected.txt`, `testbot-chat-recovery-final.txt`, `testbot-three-attempts-final.txt`. Exact BEEP BOOP, canonical Character persistence and transition acceptance are blocked.
+
+## UAT-237 — P3: Disconnected Media shows redundant search failures
+
+- TASK13260.179. Frozen fresh SQLite single-user native Disconnect, normal reload and Media entry correctly show Add your credentials to use Media, but also display three Failed to search media notifications. Evidence auth-disconnected-media-snapshot.txt. No bad credential is entered; the user intentionally disconnected.
+- Expected: credential recovery guidance without redundant search error notifications until authorized access resumes. Existing UAT047 notification polling and096 Settings form lifecycle are separate observations; source diagnosis pending.
+- Reconnect through the visible Open Settings → API Key → Save → Test Connection succeeds with Core reachable/RAG healthy. Wrong recovery-form helper timed out before mutation; retained as a harness error, not a product failure. No frozen code changes; unresolved.
+
+- UAT237 independent diagnosis SHA bf5a555ace2e0dfe22fe9213284b4503962f5fd0bdaedb266f3e074191dbd3c8: initial SEARCHING→testing bypass mounts Media search before credential readiness; manual search and uncancelled type-loader refetch callbacks can notify after the credential gate. Three UI notifications are proven, not three HTTP requests.15 frozen source/history hashes and6 native inputs. Bounded readiness/lifetime repair remains pending.

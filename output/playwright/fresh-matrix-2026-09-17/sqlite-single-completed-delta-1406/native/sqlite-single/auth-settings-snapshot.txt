@@ -1,0 +1,163 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Setup & Recovery | Settings | tldw](http://127.0.0.1:18680/settings)
+### Page
+- Page URL: http://127.0.0.1:18680/settings
+- Page Title: Setup & Recovery | Settings | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f12e1]:
+  - generic [ref=f12e7]:
+    - complementary [ref=f12e8]:
+      - navigation "Settings navigation" [ref=f12e9]:
+        - button "Switch to Sidebar" [disabled] [ref=f12e11]
+        - generic [ref=f12e12]:
+          - generic [ref=f12e13]: Filter settings
+          - textbox "Filter settings" [ref=f12e14]:
+            - /placeholder: Find a setting
+        - generic [ref=f12e15]:
+          - generic [ref=f12e16]:
+            - generic [ref=f12e17]: Setup & Recovery
+            - list [ref=f12e19]:
+              - listitem [ref=f12e20]:
+                - link "Setup & Recovery" [ref=f12e21] [cursor=pointer]:
+                  - /url: /settings
+              - listitem [ref=f12e30]:
+                - link "tldw Server" [ref=f12e31] [cursor=pointer]:
+                  - /url: /settings/tldw
+              - listitem [ref=f12e36]:
+                - link "Provider Keys" [ref=f12e37] [cursor=pointer]:
+                  - /url: /settings/provider-keys
+              - listitem [ref=f12e42]:
+                - link "Manage Models" [ref=f12e43] [cursor=pointer]:
+                  - /url: /settings/model
+              - listitem [ref=f12e57]:
+                - link "Health & Diagnostics" [ref=f12e58] [cursor=pointer]:
+                  - /url: /settings/health
+          - generic [ref=f12e62]:
+            - generic [ref=f12e63]: Preferences & Workflow
+            - list [ref=f12e65]:
+              - listitem [ref=f12e66]:
+                - link "Preferences" [ref=f12e67] [cursor=pointer]:
+                  - /url: /settings/preferences
+              - listitem [ref=f12e70]:
+                - link "Chat" [ref=f12e71] [cursor=pointer]:
+                  - /url: /settings/chat
+              - listitem [ref=f12e75]:
+                - link "Chat Macros" [ref=f12e76] [cursor=pointer]:
+                  - /url: /settings/chat-macros
+              - listitem [ref=f12e85]:
+                - link "UI customization" [ref=f12e86] [cursor=pointer]:
+                  - /url: /settings/ui
+              - listitem [ref=f12e89]:
+                - link "Splash screens" [ref=f12e90] [cursor=pointer]:
+                  - /url: /settings/splash
+              - listitem [ref=f12e95]:
+                - link "Quick Ingest" [ref=f12e96] [cursor=pointer]:
+                  - /url: /settings/quick-ingest
+              - listitem [ref=f12e101]:
+                - link "Speech" [ref=f12e102] [cursor=pointer]:
+                  - /url: /settings/speech
+              - listitem [ref=f12e107]:
+                - link "Image Generation" [ref=f12e108] [cursor=pointer]:
+                  - /url: /settings/image-generation
+              - listitem [ref=f12e114]:
+                - link "Knowledge QA" [ref=f12e115] [cursor=pointer]:
+                  - /url: /settings/knowledge
+              - listitem [ref=f12e119]:
+                - link "RAG Settings" [ref=f12e120] [cursor=pointer]:
+                  - /url: /settings/rag
+              - listitem [ref=f12e129]:
+                - link "Workflow prompts" [ref=f12e130] [cursor=pointer]:
+                  - /url: /settings/prompt
+              - listitem [ref=f12e134]:
+                - link "Prompt Studio" [ref=f12e135] [cursor=pointer]:
+                  - /url: /settings/prompt-studio
+                - generic [ref=f12e141]: Beta
+              - listitem [ref=f12e142]:
+                - link "Chatbooks settings" [ref=f12e143] [cursor=pointer]:
+                  - /url: /settings/chatbooks
+              - listitem [ref=f12e147]:
+                - link "Characters" [ref=f12e148] [cursor=pointer]:
+                  - /url: /settings/characters
+              - listitem [ref=f12e152]:
+                - link "World Books" [ref=f12e153] [cursor=pointer]:
+                  - /url: /settings/world-books
+              - listitem [ref=f12e157]:
+                - link "Chat Dictionaries" [ref=f12e158] [cursor=pointer]:
+                  - /url: /settings/chat-dictionaries
+          - generic [ref=f12e163]:
+            - generic [ref=f12e164]: Data & Administration
+            - list [ref=f12e166]:
+              - listitem [ref=f12e167]:
+                - link "Data Management" [ref=f12e168] [cursor=pointer]:
+                  - /url: /settings/data
+              - listitem [ref=f12e174]:
+                - link "Manage Share" [ref=f12e175] [cursor=pointer]:
+                  - /url: /settings/share
+              - listitem [ref=f12e180]:
+                - link "Evaluations" [ref=f12e181] [cursor=pointer]:
+                  - /url: /settings/evaluations
+              - listitem [ref=f12e185]:
+                - link "Moderation Review" [ref=f12e186] [cursor=pointer]:
+                  - /url: /moderation
+              - listitem [ref=f12e191]:
+                - link "Content Rules" [ref=f12e192] [cursor=pointer]:
+                  - /url: /moderation/rules
+              - listitem [ref=f12e197]:
+                - link "MCP Hub" [ref=f12e198] [cursor=pointer]:
+                  - /url: /settings/mcp-hub
+              - listitem [ref=f12e203]:
+                - link "About" [ref=f12e204] [cursor=pointer]:
+                  - /url: /settings/about
+        - button "Hide beta badges" [ref=f12e209] [cursor=pointer]
+    - region [ref=f12e210]:
+      - button "Close" [ref=f12e212] [cursor=pointer]
+      - generic [ref=f12e217]:
+        - heading "Settings" [level=1] [ref=f12e218]
+        - paragraph [ref=f12e220]: Current section:Setup & Recovery
+        - generic [ref=f12e221]:
+          - generic [ref=f12e222]:
+            - heading "Setup & Recovery" [level=2] [ref=f12e223]
+            - paragraph [ref=f12e224]: Check the basics first, then jump to the page that owns the fix.
+          - generic [ref=f12e226]:
+            - generic [ref=f12e228]:
+              - generic [ref=f12e229]:
+                - generic [ref=f12e230]: Server connection
+                - paragraph [ref=f12e231]: http://127.0.0.1:18680
+              - link "Edit server" [ref=f12e232] [cursor=pointer]:
+                - /url: /settings/tldw
+            - generic [ref=f12e234]:
+              - generic [ref=f12e235]:
+                - generic [ref=f12e236]: Authentication
+                - paragraph [ref=f12e237]: No auth issue detected from the current connection state.
+              - link "Fix auth" [ref=f12e238] [cursor=pointer]:
+                - /url: /settings/tldw
+            - generic [ref=f12e240]:
+              - generic [ref=f12e241]:
+                - generic [ref=f12e242]: Provider keys
+                - paragraph [ref=f12e243]: Provider key status is checked on the provider keys page.
+              - link "Provider keys" [ref=f12e244] [cursor=pointer]:
+                - /url: /settings/provider-keys
+            - generic [ref=f12e246]:
+              - generic [ref=f12e247]:
+                - generic [ref=f12e248]: Default chat model
+                - paragraph [ref=f12e249]: tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+              - link "Model settings" [ref=f12e250] [cursor=pointer]:
+                - /url: /settings/model
+            - generic [ref=f12e252]:
+              - generic [ref=f12e253]:
+                - generic [ref=f12e254]: Embedding model
+                - paragraph [ref=f12e255]: Embedding default not checked yet.
+              - link "Embedding defaults" [ref=f12e256] [cursor=pointer]:
+                - /url: /settings/rag
+            - generic [ref=f12e258]:
+              - generic [ref=f12e259]:
+                - generic [ref=f12e260]: Health checks
+                - paragraph [ref=f12e261]: Open diagnostics for detailed server and subsystem checks.
+              - link "Full diagnostics" [ref=f12e262] [cursor=pointer]:
+                - /url: /settings/health
+          - button "Restart onboarding" [ref=f12e263] [cursor=pointer]
+  - alert [ref=f12e264]: /settings
+```
+

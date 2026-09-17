@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 13:32'
+updated_date: '2026-09-17 14:03'
 labels:
   - uat
   - testing
@@ -194,6 +194,8 @@ Repair gate released for fresh preparation: all230 findings have verified bounde
 Fresh matrix released at frozen8f8774e6c868b304a96d95ab82e28389c129a78b after all230 prior findings verified. All4 archives/dependency preflights pass independent audit. SQLite single-user normal initialization/setup first-chat200/manual API-key UI handoff/ordinary Chat200 completed. Two turns and controlled real-backend unavailable-model400 to Retry200 retain one conversation/client-message identity and seven canonical messages after reload. New UAT231/TASK13260.173 console wording and UAT232/TASK13260.174 error guidance are recorded; frozen product source unchanged. Actual public PNG guard/Retry/reload is bounded text-only acceptance; no vision-success or true-hidden claim. Source ingestion now running. PostgreSQL and other cells remain pending in Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_17.md.
 
 2026-09-17 13:31UTC: Frozen fresh matrix8f877 continues. New231–235 unresolved; no product changes. SQLite single setup/Chat/source workflows recorded, row7 exact pirate Prompt save/sync/application/realARRR/reload passes. Biology generation blocked234 at30s proxy; one ordinary retry also fails. Row9 clean Note/backlink/card/practice/scheduled/reload supported; re-rate intentionally adds event but displays stale interval235. Three other cells including bothPG still pending. Partial native/preparation/audit evidence retained under output/playwright/fresh-matrix-2026-09-17/sqlite-single-checkpoint-1331;201files, known-credential scan0. Independent packet verification underway.
+
+Fresh frozen8f877 SQLite-single rows10/11 now complete with independent24-input audit SHA6dedca29d37349c38f96684504e0f3b8f38490058d1fd69b3f62fc0c00aedcb9. Analysis saves ONE/TWO, stream failure recovers THREE, both-failed controls preserve THREE/version4 with visible error and canonical reload. Sole-item Delete204, active0/0, datedTrash, Restore200 preserve source and four version records. Original mediaUUID is not re-emitted, ID1/versionUUID evidence retained. New UAT237/TASK13260.179 logs duplicate search notifications on intentionally disconnected Media.237total/230priorverified/7newunresolved. Row2 reconnect succeeds; same-profile owned API outage/restart ongoing. Other cells pending; no full signoff.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

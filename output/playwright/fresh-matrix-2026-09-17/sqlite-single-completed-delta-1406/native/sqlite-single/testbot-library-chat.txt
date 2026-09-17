@@ -1,0 +1,229 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Chat as E2E-TestBot — SQLite' }).click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Characters | tldw](http://127.0.0.1:18680/characters)
+### Page
+- Page URL: http://127.0.0.1:18680/characters
+- Page Title: Characters | tldw
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-single/browser-evidence/1789651965836-090c5cf5-948d-4e47-9f86-7cc7e1f41f92-1.snapshot.txt)
+
+- generic [ref=f4e1]:
+  - generic [ref=f4e2]:
+    - generic [ref=f4e15]:
+      - link "Skip to main content" [ref=f4e16] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f4e17]:
+        - button "Expand sidebar" [ref=f4e18] [cursor=pointer]
+        - button "New Chat" [ref=f4e22] [cursor=pointer]
+        - generic [ref=f4e25]:
+          - button "Quick Ingest" [ref=f4e26] [cursor=pointer]
+          - button "Chat" [ref=f4e30] [cursor=pointer]
+          - button "Prompts" [ref=f4e33] [cursor=pointer]
+          - button "Characters" [ref=f4e37] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f4e42] [cursor=pointer]
+          - button "World Books" [ref=f4e46] [cursor=pointer]
+          - button "Notes" [ref=f4e49] [cursor=pointer]
+          - button "Knowledge QA" [ref=f4e53] [cursor=pointer]
+          - button "Media" [ref=f4e61] [cursor=pointer]
+          - button "Document Workspace" [ref=f4e64] [cursor=pointer]
+          - button "Research Workspace" [ref=f4e70] [cursor=pointer]
+          - button "Kanban" [ref=f4e76] [cursor=pointer]
+          - button "Watchlists" [ref=f4e78] [cursor=pointer]
+        - generic [ref=f4e83]:
+          - button "Open Notes Dock" [ref=f4e84] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f4e89] [cursor=pointer]
+          - button "Settings" [ref=f4e92] [cursor=pointer]
+      - main [ref=f4e96]:
+        - generic [ref=f4e97]:
+          - generic [ref=f4e100]:
+            - generic [ref=f4e101]:
+              - button "Expand sidebar" [ref=f4e102] [cursor=pointer]
+              - generic [ref=f4e104]:
+                - img "tldw Assistant" [ref=f4e105]
+                - generic [ref=f4e106]: tldw Assistant
+                - button "Companion Home" [ref=f4e107] [cursor=pointer]
+                - button "Show shortcuts" [ref=f4e111] [cursor=pointer]
+            - generic [ref=f4e114]:
+              - button "Search - Open command palette" [ref=f4e115] [cursor=pointer]:
+                - generic [ref=f4e119]: Search
+                - generic [ref=f4e120]: ⌘K
+              - button "Open settings" [ref=f4e121] [cursor=pointer]
+              - generic [ref=f4e133]:
+                - button "Notifications, 0 unread" [ref=f4e134] [cursor=pointer]
+                - status [ref=f4e138]: Notifications are active
+              - button "Switch to light theme" [ref=f4e139] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f4e146] [cursor=pointer]:
+                - generic [ref=f4e147]: "?"
+          - generic [ref=f4e149]:
+            - generic [ref=f4e150]:
+              - heading "Characters" [level=1] [ref=f4e151]
+              - paragraph [ref=f4e152]: Create reusable characters you can pick from the chat header and reuse across conversations.
+            - generic [ref=f4e153]:
+              - link "Skip to characters content" [ref=f4e154] [cursor=pointer]:
+                - /url: "#characters-main-content"
+              - main [ref=f4e155]:
+                - button [aria-hidden] [ref=f4e160] [cursor=pointer]: Upload character
+                - generic [ref=f4e161]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+                - generic [ref=f4e163]:
+                  - button "New character" [ref=f4e164] [cursor=pointer]
+                  - button "Import character" [ref=f4e166] [cursor=pointer]
+                  - generic [ref=f4e171]:
+                    - textbox "Search characters" [ref=f4e172]
+                    - generic [ref=f4e173]: /
+                  - radiogroup "View mode" [ref=f4e175]:
+                    - generic [ref=f4e176]:
+                      - generic [ref=f4e177] [cursor=pointer]:
+                        - radio [checked]
+                        - generic "Table view" [ref=f4e178]
+                      - generic [ref=f4e181] [cursor=pointer]:
+                        - radio
+                        - generic "Gallery view" [ref=f4e182]
+                  - radiogroup "Character list view" [ref=f4e189]:
+                    - generic [ref=f4e190]:
+                      - generic [ref=f4e191] [cursor=pointer]:
+                        - radio "Active" [checked]
+                        - generic "Active characters" [ref=f4e192]: Active
+                      - generic [ref=f4e193] [cursor=pointer]:
+                        - radio "Trash"
+                        - generic "Recently deleted characters" [ref=f4e194]: Trash
+                  - button "Filters" [ref=f4e195] [cursor=pointer]
+                  - button "Display options" [ref=f4e200] [cursor=pointer]:
+                    - generic [ref=f4e201]: Display
+                - status [ref=f4e204]: 4 characters found
+                - generic [ref=f4e209]:
+                  - table [ref=f4e213]:
+                    - rowgroup [ref=f4e221]:
+                      - row [ref=f4e222]:
+                        - columnheader "Select all on page" [ref=f4e223]:
+                          - checkbox "Select all on page" [ref=f4e226] [cursor=pointer]
+                        - columnheader "Name" [ref=f4e228] [cursor=pointer]
+                        - columnheader "Tags" [ref=f4e239]
+                        - columnheader "Creator" [ref=f4e240] [cursor=pointer]
+                        - columnheader "Activity" [ref=f4e251] [cursor=pointer]
+                        - columnheader "Actions" [ref=f4e262]
+                    - rowgroup [ref=f4e263]:
+                      - row [ref=f4e683]:
+                        - cell "Select E2E-TestBot — SQLite Fresh 20260917" [ref=f4e684]:
+                          - checkbox "Select E2E-TestBot — SQLite Fresh 20260917" [ref=f4e687] [cursor=pointer]
+                        - cell [ref=f4e689]:
+                          - button "Edit name inline for E2E-TestBot — SQLite Fresh 20260917" [ref=f4e699]: E2E-TestBot — SQLite Fresh 20260917
+                        - cell [ref=f4e702]
+                        - cell [ref=f4e703]
+                        - cell "Just now Updated Just now" [ref=f4e704]:
+                          - generic [ref=f4e705]:
+                            - generic [ref=f4e706]: Just now
+                            - generic [ref=f4e707]: Updated Just now
+                        - cell [ref=f4e708]:
+                          - generic [ref=f4e709]:
+                            - button "Chat as E2E-TestBot — SQLite Fresh 20260917" [ref=f4e710] [cursor=pointer]
+                            - button "Edit character E2E-TestBot — SQLite Fresh 20260917" [ref=f4e713] [cursor=pointer]
+                            - button "Delete character E2E-TestBot — SQLite Fresh 20260917" [ref=f4e716] [cursor=pointer]
+                            - button "Add E2E-TestBot — SQLite Fresh 20260917 to favorites" [ref=f4e720] [cursor=pointer]
+                            - button "More actions for E2E-TestBot — SQLite Fresh 20260917" [ref=f4e723] [cursor=pointer]
+                      - row [ref=f4e264]:
+                        - cell "Select Helpful AI Assistant" [ref=f4e265]:
+                          - checkbox "Select Helpful AI Assistant" [ref=f4e268] [cursor=pointer]
+                        - cell [ref=f4e270]:
+                          - generic [ref=f4e277]:
+                            - generic [ref=f4e278]:
+                              - button "Edit name inline for Helpful AI Assistant" [ref=f4e280]: Helpful AI Assistant
+                              - generic [ref=f4e728]: "1"
+                            - button "Edit description inline for Helpful AI Assistant" [ref=f4e287]: A default, friendly assistant created automatically by the system.
+                        - cell [ref=f4e290]:
+                          - generic [ref=f4e291]:
+                            - button "default" [ref=f4e292] [cursor=pointer]
+                            - button "neutral" [ref=f4e294] [cursor=pointer]
+                            - button "Show and filter +1 hidden tags" [ref=f4e296]: "+1"
+                        - cell "System" [ref=f4e297]
+                        - cell "1h ago Updated 1h ago" [ref=f4e299]:
+                          - generic [ref=f4e300]:
+                            - generic [ref=f4e301]: 1h ago
+                            - generic [ref=f4e302]: Updated 1h ago
+                        - cell [ref=f4e303]:
+                          - generic [ref=f4e304]:
+                            - button "Chat as Helpful AI Assistant" [ref=f4e305] [cursor=pointer]
+                            - button "Edit character Helpful AI Assistant" [ref=f4e308] [cursor=pointer]
+                            - button "Delete character Helpful AI Assistant" [ref=f4e311] [cursor=pointer]
+                            - button "Add Helpful AI Assistant to favorites" [ref=f4e315] [cursor=pointer]
+                            - button "More actions for Helpful AI Assistant" [ref=f4e318] [cursor=pointer]
+                      - row [ref=f4e323]:
+                        - cell "Select pixel-migu" [ref=f4e324]:
+                          - checkbox "Select pixel-migu" [ref=f4e327] [cursor=pointer]
+                        - cell [ref=f4e329]:
+                          - generic [ref=f4e330]:
+                            - img "Avatar of pixel-migu" [ref=f4e332]
+                            - generic [ref=f4e333]:
+                              - button "Edit name inline for pixel-migu" [ref=f4e336]: pixel-migu
+                              - button "Edit description inline for pixel-migu" [ref=f4e340]: A tiny turquoise pixel-art robot with a rectangular face, chunky black outlines, and long twin tails. A companion for chatting, re...
+                        - cell [ref=f4e343]:
+                          - generic [ref=f4e344]:
+                            - button "pixel-art" [ref=f4e345] [cursor=pointer]
+                            - button "robot" [ref=f4e347] [cursor=pointer]
+                            - button "Show and filter +2 hidden tags" [ref=f4e349]: "+2"
+                        - cell "User-directed pixel-migu adaptation" [ref=f4e350]
+                        - cell "1h ago Updated 1h ago" [ref=f4e352]:
+                          - generic [ref=f4e353]:
+                            - generic [ref=f4e354]: 1h ago
+                            - generic [ref=f4e355]: Updated 1h ago
+                        - cell [ref=f4e356]:
+                          - generic [ref=f4e357]:
+                            - button "Chat as pixel-migu" [ref=f4e358] [cursor=pointer]
+                            - button "Edit character pixel-migu" [ref=f4e361] [cursor=pointer]
+                            - button "Delete character pixel-migu" [ref=f4e364] [cursor=pointer]
+                            - button "Add pixel-migu to favorites" [ref=f4e368] [cursor=pointer]
+                            - button "More actions for pixel-migu" [ref=f4e371] [cursor=pointer]
+                      - row [ref=f4e376]:
+                        - cell "Select Default Assistant" [ref=f4e377]:
+                          - checkbox "Select Default Assistant" [ref=f4e380] [cursor=pointer]
+                        - cell [ref=f4e382]:
+                          - generic [ref=f4e389]:
+                            - button "Edit name inline for Default Assistant" [ref=f4e392]: Default Assistant
+                            - button "Edit description inline for Default Assistant" [ref=f4e396]: A general-purpose assistant.
+                        - cell [ref=f4e399]
+                        - cell "System" [ref=f4e400]
+                        - cell "6h ago Updated 6h ago" [ref=f4e402]:
+                          - generic [ref=f4e403]:
+                            - generic [ref=f4e404]: 6h ago
+                            - generic [ref=f4e405]: Updated 6h ago
+                        - cell [ref=f4e406]:
+                          - generic [ref=f4e407]:
+                            - button "Chat as Default Assistant" [ref=f4e408] [cursor=pointer]
+                            - button "Edit character Default Assistant" [ref=f4e411] [cursor=pointer]
+                            - button "Delete character Default Assistant" [ref=f4e414] [cursor=pointer]
+                            - button "Add Default Assistant to favorites" [ref=f4e418] [cursor=pointer]
+                            - button "More actions for Default Assistant" [ref=f4e421] [cursor=pointer]
+                  - list [ref=f4e426]:
+                    - listitem "Previous Page" [ref=f4e427]:
+                      - button [disabled] [ref=f4e428]:
+                        - img "left" [ref=f4e429]
+                    - listitem "1" [ref=f4e432] [cursor=pointer]
+                    - listitem "Next Page" [ref=f4e434]:
+                      - button [disabled] [ref=f4e435]:
+                        - img "right" [ref=f4e436]
+                    - listitem [ref=f4e439]:
+                      - generic [ref=f4e440]:
+                        - generic [ref=f4e441]:
+                          - generic "10 / page" [ref=f4e442]
+                          - combobox "Page Size" [ref=f4e443]
+                        - img "down" [ref=f4e445]
+    - generic [ref=f4e731]:
+      - dialog "Character chat setup":
+        - generic [ref=f4e732]:
+          - button "Close" [active] [ref=f4e733] [cursor=pointer]:
+            - generic "Close" [ref=f4e734]:
+              - img "close" [ref=f4e735]
+          - generic [ref=f4e738]: Character chat setup
+          - alert [ref=f4e741]:
+            - generic [ref=f4e745]:
+              - paragraph [ref=f4e746]: Choose an available chat model before chatting as E2E-TestBot — SQLite Fresh 20260917
+              - generic [ref=f4e747]: Your character selection and draft are kept. Choose a model from the available chat catalog, then return here to continue with E2E-TestBot — SQLite Fresh 20260917.
+          - generic [ref=f4e748]:
+            - button "Return to character" [ref=f4e749] [cursor=pointer]
+            - button "Retry character chat" [ref=f4e751] [cursor=pointer]
+            - link "Open model settings" [ref=f4e753] [cursor=pointer]:
+              - /url: /settings/model
+  - alert [ref=f4e14]: Characters | tldw

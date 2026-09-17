@@ -1,0 +1,88 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Trash | tldw](http://127.0.0.1:18680/media-trash)
+### Page
+- Page URL: http://127.0.0.1:18680/media-trash
+- Page Title: Trash | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=f10e1]:
+  - generic [ref=f10e4]:
+    - link "Skip to main content" [ref=f10e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f10e6]:
+      - button "Expand sidebar" [ref=f10e7] [cursor=pointer]
+      - button "New Chat" [ref=f10e11] [cursor=pointer]
+      - generic [ref=f10e14]:
+        - button "Quick Ingest" [ref=f10e15] [cursor=pointer]
+        - button "Chat" [ref=f10e19] [cursor=pointer]
+        - button "Prompts" [ref=f10e22] [cursor=pointer]
+        - button "Characters" [ref=f10e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f10e31] [cursor=pointer]
+        - button "World Books" [ref=f10e35] [cursor=pointer]
+        - button "Notes" [ref=f10e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f10e42] [cursor=pointer]
+        - button "Media" [ref=f10e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f10e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f10e59] [cursor=pointer]
+        - button "Kanban" [ref=f10e65] [cursor=pointer]
+        - button "Watchlists" [ref=f10e67] [cursor=pointer]
+      - generic [ref=f10e72]:
+        - button "Open Notes Dock" [ref=f10e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f10e78] [cursor=pointer]
+        - button "Settings" [ref=f10e81] [cursor=pointer]
+    - main [ref=f10e85]:
+      - generic [ref=f10e86]:
+        - generic [ref=f10e89]:
+          - generic [ref=f10e90]:
+            - button "Expand sidebar" [ref=f10e91] [cursor=pointer]
+            - generic [ref=f10e93]:
+              - img "tldw Assistant" [ref=f10e94]
+              - generic [ref=f10e95]: tldw Assistant
+              - button "Companion Home" [ref=f10e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f10e100] [cursor=pointer]
+          - generic [ref=f10e103]:
+            - button "Search - Open command palette" [ref=f10e104] [cursor=pointer]:
+              - generic [ref=f10e108]: Search
+              - generic [ref=f10e109]: ⌘K
+            - button "Open settings" [ref=f10e110] [cursor=pointer]
+            - generic [ref=f10e122]:
+              - button "Notifications, 0 unread" [ref=f10e123] [cursor=pointer]
+              - status [ref=f10e127]: Notifications are active
+            - button "Switch to light theme" [ref=f10e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f10e135] [cursor=pointer]:
+              - generic [ref=f10e136]: "?"
+        - generic [ref=f10e547]:
+          - generic [ref=f10e548]:
+            - generic [ref=f10e549]:
+              - heading "Trash" [level=1] [ref=f10e550]
+              - paragraph [ref=f10e551]: Items moved to trash stay here until you restore or permanently delete them.
+              - paragraph [ref=f10e552]: Auto-purge policy is not configured or not reported by this server.
+              - searchbox "Search trash" [ref=f10e554]
+            - generic [ref=f10e555]:
+              - button "Refresh" [ref=f10e556] [cursor=pointer]
+              - button "Empty trash" [ref=f10e562] [cursor=pointer]
+          - generic [ref=f10e566]:
+            - generic [ref=f10e567]:
+              - checkbox "Select all visible" [ref=f10e568]
+              - generic [ref=f10e569]: Select all visible
+            - generic [ref=f10e570]:
+              - generic [ref=f10e571]: 0 selected
+              - button "Restore selected" [disabled] [ref=f10e572]
+              - button "Delete selected" [disabled] [ref=f10e576]
+          - generic [ref=f10e582]:
+            - generic [ref=f10e583]:
+              - checkbox "Select item 1" [ref=f10e584]
+              - generic [ref=f10e585]:
+                - generic [ref=f10e586]: rowan-observatory-public-20260917
+                - generic [ref=f10e587]:
+                  - generic [ref=f10e588]: document
+                  - generic [ref=f10e589]: "#1"
+                  - generic [ref=f10e590]: "Deleted: Sep 17, 2026, 6:55 AM"
+            - generic [ref=f10e591]:
+              - button "Restore" [ref=f10e592] [cursor=pointer]
+              - button "Delete permanently" [ref=f10e596] [cursor=pointer]
+          - generic [ref=f10e600]: 1 of 1 results
+  - alert [ref=f10e546]: Trash | tldw
+```
+
