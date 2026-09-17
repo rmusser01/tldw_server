@@ -1,0 +1,162 @@
+"""Cited-card assistant responses preserve real database timestamps and ownership."""
+
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import pytest
+from pydantic import ValidationError
+
+from tldw_Server_API.app.api.v1.endpoints import flashcards as endpoint
+from tldw_Server_API.app.api.v1.schemas.study_packs import FlashcardCitationResponse
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.tests.StudyPacks.test_study_pack_response_timestamps import pack_api as pack_api
+
+
+def _seed_cited_card(db, *, with_pack=False):
+    with chacha_operation(independent=True):
+        note = db.add_note(title="Citation source", content="Synthetic source evidence")
+        deck = db.add_deck("Cited card deck")
+        card = db.add_flashcard({"deck_id": deck, "front": "Synthetic question", "back": "Synthetic answer"})
+        db.add_flashcard_citations(
+            card,
+            [
+                {
+                    "source_type": "note",
+                    "source_id": note,
+                    "citation_text": "Synthetic source evidence",
+                }
+            ],
+        )
+        pack = None
+        if with_pack:
+            pack_id = db.create_study_pack(
+                title="Cited pack",
+                workspace_id=None,
+                deck_id=deck,
+                source_bundle_json={"items": [{"source_type": "note", "source_id": note}]},
+                generation_options_json={"deck_mode": "new"},
+            )
+            db.add_study_pack_cards(pack_id, [card])
+            pack = db.get_study_pack(pack_id)
+        return note, db.get_flashcard(card), db.list_flashcard_citations(card), pack
+
+
+def _wire_time(value):
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("with_pack", [False, True], ids=["citation-only", "cited-study-pack"])
+def test_assistant_http_serializes_citation_and_primary_without_rewriting_sources(pack_api, with_pack):
+    db, _jobs, client, kind = pack_api
+    note, before_card, before_citations, before_pack = _seed_cited_card(db, with_pack=with_pack)
+    for field in ("created_at", "last_modified"):
+        assert isinstance(before_citations[0][field], datetime if kind == "postgres" else str)
+    response = client.get(f"/api/v1/flashcards/{before_card['uuid']}/assistant")
+    with chacha_operation(independent=True):
+        assert db.get_flashcard(before_card["uuid"]) == before_card
+        assert db.list_flashcard_citations(before_card["uuid"]) == before_citations
+        assert db.get_note_by_id(note)["content"] == "Synthetic source evidence"
+        if before_pack is not None:
+            assert db.get_study_pack(before_pack["id"]) == before_pack
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["citations"]) == 1
+    assert body["primary_citation"] == body["citations"][0]
+    for citation in (body["citations"][0], body["primary_citation"]):
+        for field in ("created_at", "last_modified"):
+            assert citation[field] == _wire_time(before_citations[0][field])
+        assert citation["id"] == before_citations[0]["id"]
+        assert citation["flashcard_uuid"] == before_card["uuid"]
+        assert citation["source_id"] == note and citation["source_type"] == "note"
+        assert citation["citation_text"] == "Synthetic source evidence"
+        assert citation["client_id"] == "2" and citation["version"] == 1
+    if before_pack is None:
+        assert body["study_pack"] is None
+    else:
+        assert body["study_pack"]["id"] == before_pack["id"]
+        for field in ("created_at", "last_modified"):
+            assert body["study_pack"][field] == _wire_time(before_pack[field])
+
+
+@pytest.mark.integration
+def test_assistant_http_keeps_uncited_card_response(pack_api):
+    db, _jobs, client, _kind = pack_api
+    with chacha_operation(independent=True):
+        card = db.add_flashcard({"front": "Legacy question", "back": "Legacy answer"})
+    response = client.get(f"/api/v1/flashcards/{card}/assistant")
+    assert response.status_code == 200
+    assert response.json()["citations"] == []
+    assert response.json()["primary_citation"] is None
+
+
+@pytest.mark.integration
+def test_assistant_http_keeps_cited_card_private_to_its_owner(pack_api, tmp_path):
+    db, _jobs, client, kind = pack_api
+    _note, card, citations, _pack = _seed_cited_card(db)
+    foreign = CharactersRAGDB(
+        tmp_path / "foreign.db", client_id="3", backend=db.backend if kind == "postgres" else None
+    )
+    app = client.app
+    app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: foreign
+    app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id=3)
+    app.dependency_overrides[endpoint.get_auth_principal] = lambda: AuthPrincipal(
+        kind="user", user_id=3, roles=[], permissions=[]
+    )
+    try:
+        response = client.get(f"/api/v1/flashcards/{card['uuid']}/assistant")
+        assert response.status_code == 404
+        with chacha_operation(independent=True):
+            assert db.get_flashcard(card["uuid"]) == card
+            assert db.list_flashcard_citations(card["uuid"]) == citations
+    finally:
+        foreign.close_connection()
+
+
+def _payload():
+    return {
+        "id": 3,
+        "flashcard_uuid": "fixture-card",
+        "source_type": "note",
+        "source_id": "fixture-note",
+        "citation_text": "Synthetic source evidence",
+        "ordinal": 0,
+        "deleted": False,
+        "client_id": "2",
+        "version": 1,
+    }
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (datetime(2026, 9, 17, 8, 30, tzinfo=timezone.utc), "2026-09-17T08:30:00+00:00"),
+        (datetime(2026, 9, 17, 8, 30, tzinfo=timezone(timedelta(hours=5, minutes=45))), "2026-09-17T08:30:00+05:45"),
+        (datetime(2026, 9, 17, 8, 30), "2026-09-17T08:30:00"),
+        ("2026-09-17T08:30:00.123Z", "2026-09-17T08:30:00.123Z"),
+        (None, None),
+    ],
+    ids=["utc", "offset", "naive", "sqlite-string", "null"],
+)
+def test_citation_schema_preserves_timestamps_and_other_values(value, expected):
+    payload = _payload()
+    fields = ("created_at", "last_modified")
+    baseline = FlashcardCitationResponse.model_validate(payload).model_dump(mode="json")
+    result = FlashcardCitationResponse.model_validate({**payload, **dict.fromkeys(fields, value)}).model_dump(
+        mode="json"
+    )
+    assert {field: result[field] for field in fields} == dict.fromkeys(fields, expected)
+    assert {key: val for key, val in result.items() if key not in fields} == {
+        key: val for key, val in baseline.items() if key not in fields
+    }
+    assert FlashcardCitationResponse.model_validate(result).model_dump(mode="json") == result
+
+
+@pytest.mark.parametrize("value", [123, {"unexpected": "object"}, [], date(2026, 9, 17)])
+def test_citation_schema_rejects_unrelated_timestamp_types(value):
+    fields = ("created_at", "last_modified")
+    with pytest.raises(ValidationError) as error:
+        FlashcardCitationResponse.model_validate({**_payload(), **dict.fromkeys(fields, value)})
+    assert {item["loc"][0] for item in error.value.errors()} == set(fields)

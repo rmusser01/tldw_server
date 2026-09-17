@@ -141,6 +141,12 @@ class FlashcardCitationResponse(BaseModel):
     client_id: str
     version: int
 
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class FlashcardDeepDiveTarget(BaseModel):
     """Resolved deep-dive target for a provenance-backed flashcard."""
