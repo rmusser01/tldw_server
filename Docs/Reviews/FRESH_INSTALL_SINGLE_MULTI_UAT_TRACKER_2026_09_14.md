@@ -1,6 +1,10 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint:203 unique findings —183 verified,17 awaiting targeted acceptance,3 unresolved (198/201/202).** Persona200/203 and callback181 repairs are independently reviewed and committed. Root actual PostgreSQL/SQLite suites pass44 and32 cases with zero skips. Historical Persona fixtures are verified2b867ca78b (author105/independent12, zero skips); Flashcards ownership remains under review; native completion, account switching and overlapping replacement remain pending. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json). Full fresh matrix has not started.
+- **Latest checkpoint:204 unique findings —183 verified,21 awaiting targeted acceptance,0 unresolved implementations.** Flashcards198/201/202 and cold StudyPack204 are independently reviewed and committed61e5af6702/a130b8e550. New PostgreSQL native API30793 is running; targeted browser/API acceptance is underway. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-204-ownership-reviewed.json). Full fresh matrix has not started.
+
+- **Prior checkpoint:204 unique findings —183 verified,17 awaiting targeted acceptance,4 unresolved (198/201/202/204).** Cold StudyPack actual-factory checks prove wrong PostgreSQL owner identity; TASK13260.142 owns the bounded repair. Flashcards ownership fixes and review corrections are frozen for independent verification. Full fresh matrix has not started.
+
+- **Prior checkpoint:203 unique findings —183 verified,17 awaiting targeted acceptance,3 unresolved (198/201/202).** Persona200/203 and callback181 repairs are independently reviewed and committed. Root actual PostgreSQL/SQLite suites pass44 and32 cases with zero skips. Historical Persona fixtures are verified2b867ca78b (author105/independent12, zero skips); Flashcards ownership remains under review; native completion, account switching and overlapping replacement remain pending. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json). Full fresh matrix has not started.
 
 - **Prior checkpoint:203 unique findings —181 verified,15 awaiting targeted acceptance,7 unresolved (181/183/198/200–203).**199 fix is committed; background tagging still needs181 lifetime ownership, and Flashcards/Persona Memory repairs are underway. Full fresh matrix has not started.
 
@@ -2103,7 +2107,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 Alice source and both deck labels clear on Bob’s first return to Import/Export. Normal auth/me confirms Bob3, but deck/card reads fail500 ChaChaNotes DB unavailable on old backendPID63046, started02:00UTC before the reviewed ownership changes. Read-only metadata retains idle transactions and35public-table locks. UAT151 is not accepted; this is preserved old-runtime failure evidence under181, not a regression claim against the newly committed backend. Load reviewed source, warm both owners, then repeat original151 before full UAT.
 
-## UAT-198 — P1, open — Bob receives Alice’s private Flashcards data
+## UAT-198 — P1, implemented; native acceptance pending — Bob receives Alice’s private Flashcards data
 
 - On the reviewed backend48f89447fc, normal browser auth/me confirms Bob3 three times. Actual04:30:02UTC deck-list200 responses return Alice2 private decks1/4/6, and card-list200 reports all5Alice cards. The first visible selector also displays Alice’s deck because this current catalogue contains it. No native foreign writes were attempted.
 - Native service role is the previously qualified superuser/BYPASSRLS configuration. Ordinary-role behavior is being tested; no inference of ordinary-role enforcement or leakage yet. Source inspection finds missing owner predicates in the deck list and Flashcards visibility helper.
@@ -2123,11 +2127,11 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 - Actual complete-v2 request71df096e-92b6-4ff9-afba-7aba1118647e returns500 on48f89447fc, before a successful model call. PostgreSQL04:35:18.277UTC rejects persona_memory_entries archived=0 as boolean=integer; the following WorldBook CREATE TABLE fails because the transaction is already aborted. This is distinct from176’s corrected unsupported context manager. TASK13260.138 owns the primary SQL and optional-error transaction diagnosis/repair. No artificial provider fault was installed for this Bob send.
 - Both failures retained in .tmp/uat193-031-native-20260917/bob-events.txt and selected redacted backend/PostgreSQL SQL receipts. Character193 passes Bob creation only so far; Alice acceptance and successful completion remain pending.
 
-## UAT-201 — P2, open — PostgreSQL private deck names collide across users
+## UAT-201 — P2, implemented; native acceptance pending — PostgreSQL private deck names collide across users
 
 - Official two-owner fixture proves Bob cannot create a private deck with Alice’s name because of the global decks.name uniqueness constraint; SQLite per-file control passes. TASK13260.139 tracks owner-scoped atomic migration with data/catalog/rollback controls. No native same-name attempt yet.
 
-## UAT-202 — P2, open — Reusing an owned deleted PostgreSQL deck name fails
+## UAT-202 — P2, implemented; native acceptance pending — Reusing an owned deleted PostgreSQL deck name fails
 
 - Actual owned delete/add-same-name fixture raises KeyError(0) at deleted_row[0]; SQLite control passes. TASK13260.140 tracks named PostgreSQL row access preserving restoration/version semantics and198 ownership.
 
@@ -2146,3 +2150,9 @@ Alice source and both deck labels clear on Bob’s first return to Import/Export
 ## Historical Persona fixture acceptance —2026-09-17 05:09UTC
 
 UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 original assertions and seeded data survive real historical migration steps. Author105 and independent12 pass, zero skips; production guards unchanged. [Retained review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup183-persona-historical-fixtures-reviewed/README.md). Current totals203:183verified/17native acceptance pending/3unresolved198,201,202.
+
+## UAT-204 — P1, implemented; native acceptance pending — Cold Study Pack worker stores resources under a worker label
+
+- Actual runtime cache/accessor/factory plus source resolution and persistence use client_id=study-pack-worker-2 when the worker is first for owner2 after restart. The generated deck/card rows carry that label; an independent canonical owner2 DB cannot read the deck. A later canonical owner accessor reuses the same incorrectly labelled cache object. Hot numeric-owner-first and SQLite per-file controls pass.
+- Official fixture proof:1causal PostgreSQL failure/3controls, zero skips,5.47s; source hashes stable. Model output was stubbed to isolate storage identity; no real-provider/native acceptance is claimed. Initial probe prematurely closed its shared pool, a retained harness error corrected before the valid run.
+- Task13260.142 precedes production edits. Repair is bounded to the StudyPack owner accessor, preserving181 independent operation/cleanup, job identity and transaction decisions. Restricted-role qualification and SQLite sync-label compatibility must be explicit. Private evidence: .tmp/uat-study-pack-owner-diagnosis-20260917.

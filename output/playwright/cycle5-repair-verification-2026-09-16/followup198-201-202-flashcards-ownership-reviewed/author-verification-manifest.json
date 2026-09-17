@@ -1,0 +1,93 @@
+{
+  "status": "Author verification complete; independent review/native acceptance pending.",
+  "tests": {
+    "permanent": {
+      "passed": 126,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 195.9
+    },
+    "adjacent": {
+      "passed": 322,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 270.0
+    },
+    "correction": {
+      "passed": 97,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 135.74
+    }
+  },
+  "artifacts": [
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/IMPLEMENTATION198-201-202.md",
+      "sha256": "406b7a57a5820374e99b6a7e71c77cfbc5b135ebfb320327f3ac17d6e8db0f07"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/DESIGN198.md",
+      "sha256": "24ba4f6974ab86601f79536e7adcae372d55dfafd87b43b05722aec555690959"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/owned-manifest.json",
+      "sha256": "c87fe3776978277d64ebc5954657597464ac3f6c5f23c75c02429e8210d0d35b"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/owned.patch",
+      "sha256": "f7931a3f9bfd7e451a1de8a56091f03436fb20e8a6f2b75386884812a7ee5df5"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/release-hash-check.json",
+      "sha256": "df80a550c588da00f23c05cd693053471c20b8b68458912bf5c1f6cb7fab5a51"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/copied-receipt-manifest.json",
+      "sha256": "544cd272c1fefccf694d1ea55e6e27d4cc835fb2a7325973989ae070971e54c0"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/final-ruff8.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/final-bandit-production.json",
+      "sha256": "a212c7c7845e188dff2d245d8042bd02ed0c75049bbe626baa524ac800e8d3a1"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/final-bandit-tests.json",
+      "sha256": "35a4a1b4ea933dd7e59986b16a8f0d05824a3609a884f28932695aaf99d99419"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/final-diff-check.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/secret-scan.json",
+      "sha256": "a933482cc58885b769e3a8164ac17df058f378025054bb40524272a1b3b26fa8"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/changed-methods.json",
+      "sha256": "35043993d475cdea12f3dca6246675d734ee17dceb077a59566987ab7f226787"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/proposed-method-inventory.json",
+      "sha256": "094451f4941b24989628a9e5396ebe8e1ca08f68239a77ab84aff84ab398fb12"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/restricted-role-catalog.json",
+      "sha256": "7fb64f0e5b927142f5d92c653d8eca75dafe6ccdf14d65e6d141b8ef1ffe4453"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/native-allowlisted-summary.json",
+      "sha256": "d118018edece174ec8048fd4482bfcfb0145debdca8b06da0dd772230236de74"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/raw-sql-policy-diagnostic.py",
+      "sha256": "350ff4f04d260d2777ef8e1db9f7d5a359727cd65c4d29272bc5994500c593f3"
+    },
+    {
+      "path": ".tmp/uat198-diagnosis-20260917/baseline_replay.py",
+      "sha256": "139cd56d0e0b844db4433787dae30706e494646d0be7b329c44c28a44091cd73"
+    }
+  ]
+}

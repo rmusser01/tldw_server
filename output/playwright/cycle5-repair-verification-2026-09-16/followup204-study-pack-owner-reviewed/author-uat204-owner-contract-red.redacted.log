@@ -1,0 +1,662 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-8.4.1, pluggy-1.6.0
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+Using --randomly-seed=259499389
+rootdir: /Users/macbook-dev/Documents/GitHub/tldw_server2
+configfile: pyproject.toml
+plugins: anyio-4.12.1, benchmark-5.2.3, locust-2.43.3, asyncio-1.1.0, xdist-3.8.0, split-0.11.0, timeout-2.4.0, randomly-4.1.0, hypothesis-6.138.2, cov-6.2.1, mock-3.14.1
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collected 4 items
+
+tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py F [ 25%]
+.F.                                                                      [100%]
+
+=================================== FAILURES ===================================
+_____ test_worker_preserves_canonical_owner[cold-worker-first-postgresql] ______
+tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py:179: in test_worker_preserves_canonical_owner
+    asyncio.run(run())
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py:168: in run
+    assert receipt["workerClientId"] == "2", receipt
+E   AssertionError: {'backend': 'postgresql', 'canonicalOwnerCanReadDeck': False, 'laterOwnerClientId': 'study-pack-worker-2', 'restricted...ce': {'resolved': False, 'roleFlags': {'rolbypassrls': False, 'rolsuper': False}, 'scope': 'study-pack-worker-2'}, ...}
+E   assert 'study-pack-worker-2' == '2'
+E
+E     - 2
+E     + study-pack-worker-2
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 22:23:34.100 | INFO     | tldw_Server_API.app.core.DB_Management.backends.factory:create_backend:392 - Creating postgresql backend
+2026-09-16 22:23:34.101 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:34.116 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2/ChaChaNotes.db [Client ID: 2] (backend=postgresql)
+2026-09-16 22:23:35.490 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2/ChaChaNotes.db
+2026-09-16 22:23:35.492 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 22:23:35.494 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Canonical owner's source' with ID: 2533b886-c785-4599-b859-692cdd39e37e.
+2026-09-16 22:23:35.494 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_get_chacha_db_path_for_user:395 - Ensured ChaChaNotes DB directory for user 2: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2
+2026-09-16 22:23:35.495 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_create_and_prepare_db:479 - Initializing CharactersRAGDB instance for user 2 (ChaChaNotes.db)
+2026-09-16 22:23:35.495 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:35.495 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2/ChaChaNotes.db [Client ID: study-pack-worker-2] (backend=postgresql)
+2026-09-16 22:23:35.650 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2/ChaChaNotes.db
+2026-09-16 22:23:35.654 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 6171832320
+2026-09-16 22:23:35.654 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT * FROM notes WHERE id = ? AND deleted = ?... Params: ('2533b886-c785-4599-b859-692cdd39e37e', False)...
+2026-09-16 22:23:35.655 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ?  AND client_id = ? ORDER BY id LIMIT 1... Params: ('Synthetic owner proof', 'study-pack-worker-2')...
+2026-09-16 22:23:35.658 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend postgresql:
+                    INSERT INTO flashcards(
+                        uuid, deck_id, front, back, notes, extra, front_search, back_search, notes_search... with 1 sets.
+2026-09-16 22:23:35.659 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 6155005952
+2026-09-16 22:23:35.659 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT 1 FROM character_cards LIMIT 1... Params: None...
+2026-09-16 22:23:35.660 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend postgresql: INSERT INTO study_pack_cards(study_pack_id, flashcard_uuid, created_at, last_modified, deleted, client_id, version) VALUES(?, ?, ?, ?, ?, ?, ?) ON CON... with 1 sets.
+2026-09-16 22:23:35.660 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT * FROM character_cards WHERE name = ? AND deleted = ? AND client_id = ?... Params: ('Helpful AI Assistant', False, 'study-pack-worker-2')...
+2026-09-16 22:23:35.661 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:554 - Default character 'Helpful AI Assistant' not found. Creating now...
+2026-09-16 22:23:35.662 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Helpful AI Assistant' with ID: 2.
+2026-09-16 22:23:35.662 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend postgresql:
+                        INSERT INTO flashcard_citations(
+                            flashcard_uuid, source_type, source_id, citation_text, locator, ... with 1 sets.
+2026-09-16 22:23:35.663 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:577 - Successfully created default character 'Helpful AI Assistant' with ID: 2.
+2026-09-16 22:23:35.663 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql):
+            SELECT id, flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                   created_at, last_modified, deleted, client_id, version
+              FROM flashcard_citations
+             WHERE flashcard_uuid = ? AND deleted = 0
+             ORDER BY ordinal, id
+  ... Params: ('d684e89b-af4a-4612-b6cb-5bbab701d834',)...
+2026-09-16 22:23:35.666 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 6171832320
+2026-09-16 22:23:35.668 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 22:23:35.668 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT client_id FROM decks WHERE id=?... Params: (1,)...
+2026-09-16 22:23:35.669 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT client_id FROM flashcards WHERE deck_id=?... Params: (1,)...
+2026-09-16 22:23:35.669 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version FROM decks WHERE id = ? AND client_id = ?... Params: (1, '2')...
+2026-09-16 22:23:35.673 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8036 - Acquired backend connection (postgresql) for thread 8346099072
+2026-09-16 22:23:35.674 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=postgresql): SELECT * FROM notes WHERE id = ? AND deleted = ?... Params: ('2533b886-c785-4599-b859-692cdd39e37e', False)...
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 22:23:35.853 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (1)...
+2026-09-16 22:23:35.853 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:23:35.857 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:23:35.862 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 22:23:35.863 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 22:23:35.864 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:880 - Closed ChaChaNotesDB instance for user /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica0/2.
+2026-09-16 22:23:35.864 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 22:23:35.867 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 22:23:35.867 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+_______ test_worker_preserves_canonical_owner[cold-worker-first-sqlite] ________
+tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py:179: in test_worker_preserves_canonical_owner
+    asyncio.run(run())
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py:168: in run
+    assert receipt["workerClientId"] == "2", receipt
+E   AssertionError: {'backend': 'sqlite', 'canonicalOwnerCanReadDeck': True, 'laterOwnerClientId': 'study-pack-worker-2', 'sameCachedObject': True, ...}
+E   assert 'study-pack-worker-2' == '2'
+E
+E     - 2
+E     + study-pack-worker-2
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 22:23:36.733 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 22:23:36.733 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:23:36.738 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:23:36.742 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 22:23:36.742 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:23:36.747 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:23:36.751 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 22:23:36.753 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 22:23:36.755 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 22:23:36.755 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 22:23:36.755 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:36.755 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:36.755 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db [Client ID: 2] (backend=sqlite)
+2026-09-16 22:23:36.756 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 8346099072
+2026-09-16 22:23:36.756 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 22:23:36.756 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20341 - Checking DB schema 'rag_char_chat_schema'. Current version: 0. Code supports: 67
+2026-09-16 22:23:36.756 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8715 - Applying schema Version 4 for 'rag_char_chat_schema' to DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.762 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8719 - [rag_char_chat_schema V4] Full schema script executed.
+2026-09-16 22:23:36.762 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_apply_schema_v4:8725 - [rag_char_chat_schema V4] Schema 4 applied and version confirmed for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:36.762 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v4_to_v5:8772 - Migrating 'rag_char_chat_schema' schema from V4 to V5 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.765 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v4_to_v5:8779 - [rag_char_chat_schema] Migration to V5 completed.
+2026-09-16 22:23:36.765 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v5_to_v6:8793 - Migrating 'rag_char_chat_schema' schema from V5 to V6 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.767 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v5_to_v6:8800 - [rag_char_chat_schema] Migration to V6 completed.
+2026-09-16 22:23:36.767 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v6_to_v7:8812 - Migrating 'rag_char_chat_schema' schema from V6 to V7 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v6_to_v7:8819 - [rag_char_chat_schema] Migration to V7 completed.
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v7_to_v8:8831 - Migrating 'rag_char_chat_schema' schema from V7 to V8 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v7_to_v8:8838 - [rag_char_chat_schema] Migration to V8 completed.
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v8_to_v9:8850 - Migrating 'rag_char_chat_schema' schema from V8 to V9 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v8_to_v9:8857 - [rag_char_chat_schema] Migration to V9 completed.
+2026-09-16 22:23:36.769 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v9_to_v10:8869 - Migrating 'rag_char_chat_schema' schema from V9 to V10 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v9_to_v10:8877 - [rag_char_chat_schema] Migration to V10 completed.
+2026-09-16 22:23:36.778 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v10_to_v11:8889 - Migrating 'rag_char_chat_schema' schema from V10 to V11 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.784 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v10_to_v11:8908 - [rag_char_chat_schema] Migration to V11 completed.
+2026-09-16 22:23:36.784 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v11_to_v12:8920 - Migrating 'rag_char_chat_schema' schema from V11 to V12 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.785 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v11_to_v12:8928 - [rag_char_chat_schema] Migration to V12 completed.
+2026-09-16 22:23:36.785 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v12_to_v13:8940 - Migrating 'rag_char_chat_schema' schema from V12 to V13 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.785 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v12_to_v13:8948 - [rag_char_chat_schema] Migration to V13 completed.
+2026-09-16 22:23:36.785 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v13_to_v14:8960 - Migrating 'rag_char_chat_schema' schema from V13 to V14 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.793 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v13_to_v14:9026 - [rag_char_chat_schema] Migration to V14 completed.
+2026-09-16 22:23:36.793 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v14_to_v15:9038 - Migrating 'rag_char_chat_schema' schema from V14 to V15 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v14_to_v15:9046 - [rag_char_chat_schema] Migration to V15 completed.
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v15_to_v16:9058 - Migrating 'rag_char_chat_schema' schema from V15 to V16 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v15_to_v16:9066 - [rag_char_chat_schema] Migration to V16 completed.
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v16_to_v17:9078 - Migrating 'rag_char_chat_schema' schema from V16 to V17 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v16_to_v17:9105 - [rag_char_chat_schema] Migration to V17 completed.
+2026-09-16 22:23:36.795 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v17_to_v18:9117 - Migrating 'rag_char_chat_schema' schema from V17 to V18 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.796 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v17_to_v18:9125 - [rag_char_chat_schema] Migration to V18 completed.
+2026-09-16 22:23:36.796 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v18_to_v19:9137 - Migrating 'rag_char_chat_schema' schema from V18 to V19 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.796 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v18_to_v19:9145 - [rag_char_chat_schema] Migration to V19 completed.
+2026-09-16 22:23:36.796 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v19_to_v20:9157 - Migrating 'rag_char_chat_schema' schema from V19 to V20 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.797 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v19_to_v20:9165 - [rag_char_chat_schema] Migration to V20 completed.
+2026-09-16 22:23:36.797 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v20_to_v21:9177 - Migrating 'rag_char_chat_schema' schema from V20 to V21 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.797 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v20_to_v21:9185 - [rag_char_chat_schema] Migration to V21 completed.
+2026-09-16 22:23:36.797 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v21_to_v22:9197 - Migrating 'rag_char_chat_schema' schema from V21 to V22 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.798 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v21_to_v22:9205 - [rag_char_chat_schema] Migration to V22 completed.
+2026-09-16 22:23:36.798 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v22_to_v23:9217 - Migrating 'rag_char_chat_schema' schema from V22 to V23 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.806 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v22_to_v23:9225 - [rag_char_chat_schema] Migration to V23 completed.
+2026-09-16 22:23:36.806 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v23_to_v24:9237 - Migrating 'rag_char_chat_schema' schema from V23 to V24 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.814 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v23_to_v24:9245 - [rag_char_chat_schema] Migration to V24 completed.
+2026-09-16 22:23:36.814 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v24_to_v25:9257 - Migrating 'rag_char_chat_schema' schema from V24 to V25 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.819 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v24_to_v25:9283 - [rag_char_chat_schema] Migration to V25 completed.
+2026-09-16 22:23:36.819 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v25_to_v26:9295 - Migrating 'rag_char_chat_schema' schema from V25 to V26 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.822 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v25_to_v26:9303 - [rag_char_chat_schema] Migration to V26 completed.
+2026-09-16 22:23:36.822 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v26_to_v27:9315 - Migrating 'rag_char_chat_schema' schema from V26 to V27 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.827 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v26_to_v27:9343 - [rag_char_chat_schema] Migration to V27 completed.
+2026-09-16 22:23:36.827 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v27_to_v28:9355 - Migrating 'rag_char_chat_schema' schema from V27 to V28 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.829 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v27_to_v28:9376 - [rag_char_chat_schema] Migration to V28 completed.
+2026-09-16 22:23:36.829 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v28_to_v29:9388 - Migrating 'rag_char_chat_schema' schema from V28 to V29 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.830 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v28_to_v29:9396 - [rag_char_chat_schema] Migration to V29 completed.
+2026-09-16 22:23:36.830 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v29_to_v30:9408 - Migrating 'rag_char_chat_schema' schema from V29 to V30 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.832 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v29_to_v30:9426 - [rag_char_chat_schema] Migration to V30 completed.
+2026-09-16 22:23:36.832 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v30_to_v31:9438 - Migrating 'rag_char_chat_schema' schema from V30 to V31 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.838 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v30_to_v31:9460 - [rag_char_chat_schema] Migration to V31 completed.
+2026-09-16 22:23:36.838 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v31_to_v32:9472 - Migrating 'rag_char_chat_schema' schema from V31 to V32 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.845 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v31_to_v32:9516 - [rag_char_chat_schema] Migration to V32 completed.
+2026-09-16 22:23:36.845 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v32_to_v33:9528 - Migrating 'rag_char_chat_schema' schema from V32 to V33 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.845 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v32_to_v33:9536 - [rag_char_chat_schema] Migration to V33 completed.
+2026-09-16 22:23:36.845 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v33_to_v34:9548 - Migrating 'rag_char_chat_schema' schema from V33 to V34 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v33_to_v34:9568 - [rag_char_chat_schema] Migration to V34 completed.
+2026-09-16 22:23:36.847 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v34_to_v35:9580 - Migrating 'rag_char_chat_schema' schema from V34 to V35 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.850 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v34_to_v35:9600 - [rag_char_chat_schema] Migration to V35 completed.
+2026-09-16 22:23:36.850 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v35_to_v36:9612 - Migrating 'rag_char_chat_schema' schema from V35 to V36 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.854 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v35_to_v36:9663 - [rag_char_chat_schema] Migration to V36 completed.
+2026-09-16 22:23:36.854 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v36_to_v37:9675 - Migrating 'rag_char_chat_schema' schema from V36 to V37 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.911 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v36_to_v37:9686 - [rag_char_chat_schema] Migration to V37 completed.
+2026-09-16 22:23:36.911 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v37_to_v38:9698 - Migrating 'rag_char_chat_schema' schema from V37 to V38 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.912 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v37_to_v38:9707 - [rag_char_chat_schema] Migration to V38 completed.
+2026-09-16 22:23:36.912 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v38_to_v39:9719 - Migrating 'rag_char_chat_schema' schema from V38 to V39 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.914 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v38_to_v39:9728 - [rag_char_chat_schema] Migration to V39 completed.
+2026-09-16 22:23:36.914 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v39_to_v40:9740 - Migrating 'rag_char_chat_schema' schema from V39 to V40 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.915 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v39_to_v40:9748 - [rag_char_chat_schema] Migration to V40 completed.
+2026-09-16 22:23:36.915 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v40_to_v41:9760 - Migrating 'rag_char_chat_schema' schema from V40 to V41 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.918 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v40_to_v41:9768 - [rag_char_chat_schema] Migration to V41 completed.
+2026-09-16 22:23:36.919 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v41_to_v42:9780 - Migrating 'rag_char_chat_schema' schema from V41 to V42 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.925 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v41_to_v42:9788 - [rag_char_chat_schema] Migration to V42 completed.
+2026-09-16 22:23:36.925 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v42_to_v43:9800 - Migrating 'rag_char_chat_schema' schema from V42 to V43 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.926 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v42_to_v43:9808 - [rag_char_chat_schema] Migration to V43 completed.
+2026-09-16 22:23:36.926 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v43_to_v44:9820 - Migrating 'rag_char_chat_schema' schema from V43 to V44 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.927 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v43_to_v44:9841 - [rag_char_chat_schema] Migration to V44 completed.
+2026-09-16 22:23:36.927 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v44_to_v45:9853 - Migrating 'rag_char_chat_schema' schema from V44 to V45 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.938 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v44_to_v45:9862 - [rag_char_chat_schema] Migration to V45 completed.
+2026-09-16 22:23:36.938 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v45_to_v46:9874 - Migrating 'rag_char_chat_schema' schema from V45 to V46 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.939 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v45_to_v46:9882 - [rag_char_chat_schema] Migration to V46 completed.
+2026-09-16 22:23:36.939 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v46_to_v47:9894 - Migrating 'rag_char_chat_schema' schema from V46 to V47 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.945 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v46_to_v47:9909 - [rag_char_chat_schema] Migration to V47 completed.
+2026-09-16 22:23:36.945 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v47_to_v48:9921 - Migrating 'rag_char_chat_schema' schema from V47 to V48 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v47_to_v48:9929 - [rag_char_chat_schema] Migration to V48 completed.
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v48_to_v49:9941 - Migrating 'rag_char_chat_schema' schema from V48 to V49 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v48_to_v49:9950 - [rag_char_chat_schema] Migration to V49 completed.
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v49_to_v50:9962 - Migrating 'rag_char_chat_schema' schema from V49 to V50 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v49_to_v50:9971 - [rag_char_chat_schema] Migration to V50 completed.
+2026-09-16 22:23:36.947 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v50_to_v51:9983 - Migrating 'rag_char_chat_schema' schema from V50 to V51 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.949 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v50_to_v51:9999 - [rag_char_chat_schema] Migration to V51 completed.
+2026-09-16 22:23:36.949 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v51_to_v52:10011 - Migrating 'rag_char_chat_schema' schema from V51 to V52 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.953 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v51_to_v52:10023 - [rag_char_chat_schema] Migration to V52 completed.
+2026-09-16 22:23:36.953 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v52_to_v53:10037 - Migrating 'rag_char_chat_schema' schema from V52 to V53 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.964 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v52_to_v53:10050 - [rag_char_chat_schema] Migration to V53 completed.
+2026-09-16 22:23:36.965 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v53_to_v54:10064 - Migrating 'rag_char_chat_schema' schema from V53 to V54 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.965 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v53_to_v54:10076 - [rag_char_chat_schema] Migration to V54 completed.
+2026-09-16 22:23:36.965 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v54_to_v55:10090 - Migrating 'rag_char_chat_schema' schema from V54 to V55 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:36.967 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v54_to_v55:10168 - [rag_char_chat_schema] Migration to V55 completed.
+2026-09-16 22:23:36.967 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v55_to_v56:10272 - Migrating 'rag_char_chat_schema' schema from V55 to V56 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:37.261 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v64_to_v65:17796 - Migrating 'rag_char_chat_schema' schema from V64 to V65 for DB: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db...
+2026-09-16 22:23:37.272 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_migrate_from_v64_to_v65:17813 - [rag_char_chat_schema] Migration to V65 completed.
+2026-09-16 22:23:37.371 | WARNING  | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_self_heal_character_cards_fts_sqlite:24822 - character_cards_fts out of sync (active=1 indexed=0); rebuilding.
+2026-09-16 22:23:37.371 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:21121 - Database schema 'rag_char_chat_schema' successfully initialized/migrated to version 67.
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS message_metadata(
+                  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+                  tool_calls_json TEXT,
+                  extra_json TEXT,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAM... Params: None...
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  persona_id TEXT NOT NULL,
+                  session_id TEXT NOT NULL,
+                  created_at D... Params: None...
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
+                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
+                ... Params: None...
+2026-09-16 22:23:37.371 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS conversation_settings(
+                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >=... Params: None...
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 22:23:37.372 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.note_store:_execute:124 - Added note 'Canonical owner's source' with ID: 4eb59098-295c-4fbc-879f-3080bbe36ae7.
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 22:23:37.372 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8092 - Attempting WAL checkpoint (TRUNCATE) before closing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db on thread 8346099072.
+2026-09-16 22:23:37.373 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8098 - WAL checkpoint TRUNCATE executed for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.374 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8103 - Closed SQLite connection for thread 8346099072 to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.374 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:37.374 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:37.374 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db [Client ID: study-pack-worker-2] (backend=sqlite)
+2026-09-16 22:23:37.381 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 8346099072
+2026-09-16 22:23:37.381 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 22:23:37.381 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20341 - Checking DB schema 'rag_char_chat_schema'. Current version: 67. Code supports: 67
+2026-09-16 22:23:37.403 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20357 - Database schema 'rag_char_chat_schema' is up to date (Version 67).
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS message_metadata(
+                  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+                  tool_calls_json TEXT,
+                  extra_json TEXT,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAM... Params: None...
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  persona_id TEXT NOT NULL,
+                  session_id TEXT NOT NULL,
+                  created_at D... Params: None...
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
+                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
+                ... Params: None...
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS conversation_settings(
+                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >=... Params: None...
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 22:23:37.444 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8092 - Attempting WAL checkpoint (TRUNCATE) before closing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db on thread 8346099072.
+2026-09-16 22:23:37.445 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8098 - WAL checkpoint TRUNCATE executed for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.446 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8103 - Closed SQLite connection for thread 8346099072 to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.446 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_get_chacha_db_path_for_user:395 - Ensured ChaChaNotes DB directory for user 2: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2
+2026-09-16 22:23:37.447 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_create_and_prepare_db:479 - Initializing CharactersRAGDB instance for user 2 (ChaChaNotes.db)
+2026-09-16 22:23:37.454 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:37.455 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:37.455 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7657 - Initializing CharactersRAGDB for path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db [Client ID: study-pack-worker-2] (backend=sqlite)
+2026-09-16 22:23:37.461 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 6171832320
+2026-09-16 22:23:37.461 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 6171832320.
+2026-09-16 22:23:37.461 | INFO     | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20341 - Checking DB schema 'rag_char_chat_schema'. Current version: 67. Code supports: 67
+2026-09-16 22:23:37.482 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_initialize_schema_sqlite:20357 - Database schema 'rag_char_chat_schema' is up to date (Version 67).
+2026-09-16 22:23:37.521 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 6171832320.
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS message_metadata(
+                  message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+                  tool_calls_json TEXT,
+                  extra_json TEXT,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAM... Params: None...
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER NOT NULL,
+                  persona_id TEXT NOT NULL,
+                  session_id TEXT NOT NULL,
+                  created_at D... Params: None...
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
+                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
+                ... Params: None...
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                CREATE TABLE IF NOT EXISTS conversation_settings(
+                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                  settings_json TEXT NOT NULL,
+                  settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >=... Params: None...
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8313 - Committed directly by execute_query.
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__init__:7664 - CharactersRAGDB initialization completed successfully for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db
+2026-09-16 22:23:37.522 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 6171832320.
+2026-09-16 22:23:37.524 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 6171832320.
+2026-09-16 22:23:37.524 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 6171832320.
+2026-09-16 22:23:37.524 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_idempotency
+            WHERE owner_user_id = ?
+              AND scope = ?
+              AND resource_id = ?
+              AND idempotency_key = ?
+            ... Params: (2, 'builtin_character', 'pixel-migu', 'initial-install')...
+2026-09-16 22:23:37.524 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT * FROM character_cards WHERE name = ?... Params: ('pixel-migu',)...
+2026-09-16 22:23:37.524 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.524 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'pixel-migu' with ID: 2.
+2026-09-16 22:23:37.525 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.525 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.526 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.527 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.527 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (1, 2, 2, 0)...
+2026-09-16 22:23:37.528 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.529 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.529 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (2, 2, 2, 0)...
+2026-09-16 22:23:37.530 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.530 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.531 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (3, 2, 2, 0)...
+2026-09-16 22:23:37.532 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.532 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.532 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (4, 2, 2, 0)...
+2026-09-16 22:23:37.534 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.534 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.534 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (5, 2, 2, 0)...
+2026-09-16 22:23:37.535 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.535 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.535 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (6, 2, 2, 0)...
+2026-09-16 22:23:37.538 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.538 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.538 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (7, 2, 2, 0)...
+2026-09-16 22:23:37.540 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.540 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.540 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (8, 2, 2, 0)...
+2026-09-16 22:23:37.541 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.542 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.542 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (9, 2, 2, 0)...
+2026-09-16 22:23:37.543 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.543 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.543 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (10, 2, 2, 0)...
+2026-09-16 22:23:37.545 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.545 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.545 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (11, 2, 2, 0)...
+2026-09-16 22:23:37.546 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.547 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.547 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (12, 2, 2, 0)...
+2026-09-16 22:23:37.548 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.548 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.548 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (13, 2, 2, 0)...
+2026-09-16 22:23:37.550 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.550 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.550 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (14, 2, 2, 0)...
+2026-09-16 22:23:37.551 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.551 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.551 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (15, 2, 2, 0)...
+2026-09-16 22:23:37.553 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.553 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.553 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (16, 2, 2, 0)...
+2026-09-16 22:23:37.554 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.554 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.554 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (17, 2, 2, 0)...
+2026-09-16 22:23:37.556 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+                SELECT * FROM visual_identity_pack_drafts
+                WHERE id = ? AND owner_user_id = ?
+                ... Params: (1, 2)...
+2026-09-16 22:23:37.556 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.556 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_assets
+            WHERE id = ?
+              AND (? IS NULL OR owner_user_id = ?)
+              AND (? = 1 OR deleted = 0)
+            ... Params: (18, 2, 2, 0)...
+2026-09-16 22:23:37.556 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT * FROM character_cards WHERE id = ? AND deleted = 0... Params: (2,)...
+2026-09-16 22:23:37.556 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.557 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 6171832320.
+2026-09-16 22:23:37.557 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT * FROM visual_identity_idempotency
+            WHERE owner_user_id = ?
+              AND scope = ?
+              AND resource_id = ?
+              AND idempotency_key = ?
+            ... Params: (2, 'builtin_character', 'pixel-migu', 'initial-install')...
+2026-09-16 22:23:37.558 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 6171832320.
+2026-09-16 22:23:37.558 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT 1 FROM character_cards LIMIT 1... Params: None...
+2026-09-16 22:23:37.558 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT * FROM character_cards WHERE name = ? AND deleted = ?... Params: ('Helpful AI Assistant', 0)...
+2026-09-16 22:23:37.558 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:554 - Default character 'Helpful AI Assistant' not found. Creating now...
+2026-09-16 22:23:37.559 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 6171832320.
+2026-09-16 22:23:37.559 | INFO     | tldw_Server_API.app.core.DB_Management.chacha.character_store:add_character_card:199 - Added character card 'Helpful AI Assistant' with ID: 3.
+2026-09-16 22:23:37.559 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 6171832320.
+2026-09-16 22:23:37.559 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:_ensure_default_character:577 - Successfully created default character 'Helpful AI Assistant' with ID: 3.
+2026-09-16 22:23:37.564 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 6188658688
+2026-09-16 22:23:37.564 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT * FROM notes WHERE id = ? AND deleted = ?... Params: ('4eb59098-295c-4fbc-879f-3080bbe36ae7', 0)...
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 8346099072
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ?  ORDER BY id LIMIT 1... Params: ('Synthetic owner proof',)...
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45022 - Transaction started (outermost) on thread 8346099072.
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 8346099072.
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 8346099072.
+2026-09-16 22:23:37.571 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend sqlite:
+                    INSERT INTO flashcards(
+                        uuid, deck_id, front, back, notes, extra, front_search, back_search, notes_search... with 1 sets.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 8346099072.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 8346099072.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend sqlite: INSERT OR IGNORE INTO study_pack_cards(study_pack_id, flashcard_uuid, created_at, last_modified, deleted, client_id, version) VALUES(?, ?, ?, ?, ?, ?,... with 1 sets.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__enter__:45027 - Entering possibly nested transaction block on thread 8346099072.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_many:8456 - Executing Many on backend sqlite:
+                        INSERT INTO flashcard_citations(
+                            flashcard_uuid, source_type, source_id, citation_text, locator, ... with 1 sets.
+2026-09-16 22:23:37.572 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite):
+            SELECT id, flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                   created_at, last_modified, deleted, client_id, version
+              FROM flashcard_citations
+             WHERE flashcard_uuid = ? AND deleted = 0
+             ORDER BY ordinal, id
+  ... Params: ('1f88daf0-21cd-45b3-888a-a21aedda99e2',)...
+2026-09-16 22:23:37.573 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:__exit__:45050 - Transaction (outermost) committed successfully on thread 8346099072.
+2026-09-16 22:23:37.573 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8092 - Attempting WAL checkpoint (TRUNCATE) before closing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db on thread 8346099072.
+2026-09-16 22:23:37.574 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8098 - WAL checkpoint TRUNCATE executed for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.574 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8103 - Closed SQLite connection for thread 8346099072 to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.580 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:_get_connection_for_state:8015 - Opened/Reopened SQLite connection to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db for thread 8346099072
+2026-09-16 22:23:37.580 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT client_id FROM decks WHERE id=?... Params: (2,)...
+2026-09-16 22:23:37.580 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT client_id FROM flashcards WHERE deck_id=?... Params: (2,)...
+2026-09-16 22:23:37.581 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version FROM decks WHERE id = ?... Params: (2,)...
+2026-09-16 22:23:37.581 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:execute_query:8286 - Executing SQL (script=False, backend=sqlite): SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version FROM decks WHERE id = ?... Params: (1,)...
+2026-09-16 22:23:37.582 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8092 - Attempting WAL checkpoint (TRUNCATE) before closing /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db on thread 8346099072.
+2026-09-16 22:23:37.583 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8098 - WAL checkpoint TRUNCATE executed for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.
+2026-09-16 22:23:37.583 | DEBUG    | tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB:close_connection:8103 - Closed SQLite connection for thread 8346099072 to /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2/ChaChaNotes.db.2026-09-16 22:23:39.551 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 22:23:39.552 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:23:39.556 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:23:39.561 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 22:23:39.563 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 22:23:39.564 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 22:23:39.564 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:<module>:532 - Using cachetools.LRUCache for audit service instances (maxsize=20).
+2026-09-16 22:23:39.564 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-16 22:23:39.564 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-16 22:23:39.578 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 22:23:39.579 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 22:23:39.579 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 22:23:39.579 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-16 22:23:39.647 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-16 22:23:39.647 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-16 22:23:39.647 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-16 22:23:39.648 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-16 22:23:39.648 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-16 22:23:39.648 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea
+2026-09-16 22:23:39.649 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea/1/workflows/workflows_scheduler.db
+2026-09-16 22:23:39.650 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-34b4b6ea/1/workflows/workflows_scheduler.db
+2026-09-16 22:23:39.651 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-16 22:23:39.651 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 22:23:39.651 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_get_total
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_cache_put_total
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_frontmatter_duration_seconds
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_header_extract_seconds
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_chunking_duration_seconds
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_normalization_seconds
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_last_chunk_count
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_output_bytes
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_input_bytes
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.Metrics.metrics_manager:register_metric:1885 - Registered metric: chunker_process_total_seconds
+2026-09-16 22:23:39.788 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 22:23:39.790 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+
+--------------------------- Captured stderr teardown ---------------------------
+2026-09-16 22:23:37.595 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (1)...
+2026-09-16 22:23:37.595 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:880 - Closed ChaChaNotesDB instance for user /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/pytest-of-macbook-dev/pytest-575/test_worker_preserves_canonica2/2.
+2026-09-16 22:23:37.595 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 22:23:37.595 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 22:23:37.595 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+=========================== short test summary info ============================
+FAILED tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py::test_worker_preserves_canonical_owner[cold-worker-first-postgresql]
+FAILED tldw_Server_API/tests/DB_Management/test_study_pack_worker_owner_contract.py::test_worker_preserves_canonical_owner[cold-worker-first-sqlite]
+=================== 2 failed, 2 passed, 4 warnings in 6.10s ====================

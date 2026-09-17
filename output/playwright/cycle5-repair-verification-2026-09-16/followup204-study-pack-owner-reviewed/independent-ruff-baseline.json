@@ -1,0 +1,36 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 77,
+      "row": 15
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat204-repair-20260917/test_study_pack_jobs_worker.before.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from __future__ import annotations\n\nimport asyncio\nfrom contextlib import suppress\nfrom importlib import import_module\nfrom pathlib import Path\nfrom types import SimpleNamespace\nfrom typing import Any\n\nimport pytest\n\nfrom tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest, StudyPackSourceSelection\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError\nfrom tldw_Server_API.app.core.Jobs.manager import JobManager\nfrom tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 18
+          },
+          "location": {
+            "column": 1,
+            "row": 1
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 1
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 1,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

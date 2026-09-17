@@ -1,0 +1,18 @@
+{
+  "ruff-current.json": 1,
+  "bandit-production.json": {
+    "findings": 0,
+    "errors": 0
+  },
+  "bandit-tests.json": {
+    "findings": 0,
+    "errors": 0
+  },
+  "productionASTOnlyCustomClientArgumentRemoved": true,
+  "unchangedLifecycleTestSHA256": "554d98227c8884a8ba326f957a021c60df93e196d2c24736bc16d513df1c0ba4",
+  "ruffBaselineExistingTest": 1,
+  "ruffBaselineProduction": 0,
+  "newRuffFindings": 0,
+  "formatNewTestExit": 0,
+  "diffCheckExit": 0
+}

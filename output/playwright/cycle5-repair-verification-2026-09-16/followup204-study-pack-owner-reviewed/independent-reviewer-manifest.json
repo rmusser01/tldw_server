@@ -1,0 +1,52 @@
+{
+  "verdict": "clear",
+  "passed": 30,
+  "failed": 0,
+  "skipped": 0,
+  "artifacts": [
+    {
+      "path": ".tmp/uat204-independent-20260917/REVIEW204.md",
+      "sha256": "7233ac5bc32a1c60e027a1c95fca640a977e83af5eb7d9d52054e7daa4909ac9"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/ast-equivalence.json",
+      "sha256": "82797444e637e334ff941c4e578f19eb7c6d9ae3a075e876c67e38ad152df4fc"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/bandit-production.json",
+      "sha256": "c8576d2da8a111acff6b9e22e1d1c6475a017e7bac65c0b0d8d666042083f6b5"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/bandit-tests.json",
+      "sha256": "f762eb7230d4d0bc534683c49a05d69573e47c241538fddea601245f2bdc21bb"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/ruff-baseline.json",
+      "sha256": "19896f6b76f88523587a8ab621a3ba57daa9c148acfbfc2307381b6a46e727de"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/ruff-current.json",
+      "sha256": "0361a14f73c3f7f3eaf7177e20e9b44dff430b23268316371aea5c353b610144"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/secret-scan.json",
+      "sha256": "5df1bd33e53dede54844bfc1b358cbbbafd2cb4ea4fa5f3edc7e5b50a58b588c"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/source-after.json",
+      "sha256": "7370c45e9e871a039467cf663e9b76ae4bf87c38a55295807b71a07c6af029d9"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/source-before.json",
+      "sha256": "e47780ed1641e9b55a21ba3fc3f9ad3fbf26104feb6c44fd6b2d7a6d32f03a39"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/uat204-independent-sidebar-command.json",
+      "sha256": "2f7ae770b7a693d347a146be383cdbc74f3b2c60d85640ccb5b3c66ff3657080"
+    },
+    {
+      "path": ".tmp/uat204-independent-20260917/uat204-independent-sidebar.redacted.log",
+      "sha256": "43bf21e9af38b830e2cc84772c84aa1229c2c331a4aae902592434e835aede7b"
+    }
+  ]
+}

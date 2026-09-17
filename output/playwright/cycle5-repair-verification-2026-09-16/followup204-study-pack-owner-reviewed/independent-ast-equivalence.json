@@ -1,0 +1,7 @@
+{
+  "only_change_remove_optional_client_id": true,
+  "removed_keyword_count": 1,
+  "removed_keyword_ast": [
+    "keyword(arg='client_id', value=JoinedStr(values=[Constant(value='study-pack-worker-'), FormattedValue(value=Name(id='normalized_user_id', ctx=Load()), conversion=-1)]))"
+  ]
+}

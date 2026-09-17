@@ -1,0 +1,154 @@
+______ test_name_migration_rolls_back_catalog_data_and_version_on_failure ______
+tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py:140: in test_name_migration_rolls_back_catalog_data_and_version_on_failure
+    assert _version(backend) == 68
+E   assert 69 == 68
+E    +  where 69 = _version(<tldw_Server_API.app.core.DB_Management.backends.postgresql_backend.PostgreSQLBackend object at 0x111db99d0>)
+_________ test_reopening_upgraded_schema_preserves_ids_and_constraints _________
+tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py:109: in test_reopening_upgraded_schema_preserves_ids_and_constraints
+    assert _version(backend) == 68
+E   assert 69 == 68
+E    +  where 69 = _version(<tldw_Server_API.app.core.DB_Management.backends.postgresql_backend.PostgreSQLBackend object at 0x1122b1690>)
+______ test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key _______
+tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py:76: in test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key
+    assert _version(backend) == 68
+E   assert 69 == 68
+E    +  where 69 = _version(<tldw_Server_API.app.core.DB_Management.backends.postgresql_backend.PostgreSQLBackend object at 0x10df830d0>)
+______________ test_flashcard_review_sessions_postgres_round_trip ______________
+tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py:815: in test_flashcard_review_sessions_postgres_round_trip
+    test_review_session_creation_and_stale_cleanup_roll_back_with_outer_transaction(db)
+tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py:785: in test_review_session_creation_and_stale_cleanup_roll_back_with_outer_transaction
+    assert db.get_flashcard_review_session(stale["id"]) == before
+E   AssertionError: assert {'cards_revie...ount': 0, ...} == {'cards_revie...ount': 0, ...}
+E
+E     Omitting 15 identical items, use -vv to show
+E     Differing items:
+E     {'last_activity_at': datetime.datetime(2026, 9, 17, 5, 9, 32, 347000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))} != {'last_activity_at': datetime.datetime(2026, 9, 17, 4, 38, 32, 348705, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+E     Use -v to get more diff
+_____ test_named_binary_row_preserves_conversion_and_defensive_null[bytes] _____
+tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py:110: in test_named_binary_row_preserves_conversion_and_defensive_null
+    result = db.get_flashcard_asset_content("row-boundary-control")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:37540: in get_flashcard_asset_content
+    owner_filter, owner_params = self._flashcard_owner_filter()
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:34800: in _flashcard_owner_filter
+    if self.backend_type != BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7795: in backend_type
+    return self.backend.backend_type
+           ^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7764: in backend
+    pinned_backend = self._get_pinned_backend()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7739: in _get_pinned_backend
+    return getattr(self._connection_state(), "backend_ref", None)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7732: in _connection_state
+    if self._backend.backend_type == BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^
+E   AttributeError: 'CharactersRAGDB' object has no attribute '_backend'
+_____ test_named_binary_row_preserves_conversion_and_defensive_null[null] ______
+tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py:110: in test_named_binary_row_preserves_conversion_and_defensive_null
+    result = db.get_flashcard_asset_content("row-boundary-control")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:37540: in get_flashcard_asset_content
+    owner_filter, owner_params = self._flashcard_owner_filter()
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:34800: in _flashcard_owner_filter
+    if self.backend_type != BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7795: in backend_type
+    return self.backend.backend_type
+           ^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7764: in backend
+    pinned_backend = self._get_pinned_backend()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7739: in _get_pinned_backend
+    return getattr(self._connection_state(), "backend_ref", None)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7732: in _connection_state
+    if self._backend.backend_type == BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^
+E   AttributeError: 'CharactersRAGDB' object has no attribute '_backend'
+__ test_named_binary_row_preserves_conversion_and_defensive_null[memoryview] ___
+tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py:110: in test_named_binary_row_preserves_conversion_and_defensive_null
+    result = db.get_flashcard_asset_content("row-boundary-control")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:37540: in get_flashcard_asset_content
+    owner_filter, owner_params = self._flashcard_owner_filter()
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:34800: in _flashcard_owner_filter
+    if self.backend_type != BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7795: in backend_type
+    return self.backend.backend_type
+           ^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7764: in backend
+    pinned_backend = self._get_pinned_backend()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7739: in _get_pinned_backend
+    return getattr(self._connection_state(), "backend_ref", None)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7732: in _connection_state
+    if self._backend.backend_type == BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^
+E   AttributeError: 'CharactersRAGDB' object has no attribute '_backend'
+_____ test_named_binary_row_preserves_conversion_and_defensive_null[empty] _____
+tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py:110: in test_named_binary_row_preserves_conversion_and_defensive_null
+    result = db.get_flashcard_asset_content("row-boundary-control")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:37540: in get_flashcard_asset_content
+    owner_filter, owner_params = self._flashcard_owner_filter()
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:34800: in _flashcard_owner_filter
+    if self.backend_type != BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7795: in backend_type
+    return self.backend.backend_type
+           ^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7764: in backend
+    pinned_backend = self._get_pinned_backend()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7739: in _get_pinned_backend
+    return getattr(self._connection_state(), "backend_ref", None)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:7732: in _connection_state
+    if self._backend.backend_type == BackendType.POSTGRESQL:
+       ^^^^^^^^^^^^^
+E   AttributeError: 'CharactersRAGDB' object has no attribute '_backend'
+_ test_deck_parent_cycle_check_locks_parent_chain_for_postgres[BackendType.POSTGRESQL-True] _
+tldw_Server_API/tests/Flashcards/test_flashcard_deck_hierarchy_locking.py:55: in test_deck_parent_cycle_check_locks_parent_chain_for_postgres
+    assert db._validate_deck_parent_locked(conn, deck_id=1, parent_deck_id=2) == 22026-09-16 22:12:43.038 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Determined ACTUAL_PROJECT_ROOT for database paths: /Users/macbook-dev/Documents/GitHub/tldw_server2
+2026-09-16 22:12:43.039 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:12:43.043 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Early loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:12:43.048 | DEBUG    | tldw_Server_API.app.core.config:_buffered_log:210 - load_and_log_configs(): Loading and logging configurations...
+2026-09-16 22:12:43.049 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.env
+2026-09-16 22:12:43.053 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Loading environment variables from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/.ENV
+2026-09-16 22:12:43.058 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Attempting to load comprehensive config from: /Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/config.txt
+2026-09-16 22:12:43.060 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - load_comprehensive_config(): Sections found in config: ['Setup', 'UI', 'Server', 'Files', 'Image-Generation', 'ACP', 'WORKSPACES', 'ACP-WORKSPACE', 'ACP-SANDBOX', 'Audit', 'Processing', 'Media-Processing', 'Chat-Dictionaries', 'Chat-Module', 'Chat-Commands', 'Chat-Templating', 'Character-Chat', 'Settings', 'Auto-Save', 'Prompts', 'Database', 'Chunking', 'Visual-RAG', 'AuthNZ', 'Streaming', 'HTTP', 'Egress', 'Embeddings', 'Claims', 'ClaimsMonitoring', 'RAG', 'Search-Agent', 'ResourceGovernor', 'Jobs', 'SlidesStandaloneHtml', 'Diarization', 'API', 'MLX', 'Local-API', 'LlamaCpp', 'STT-Settings', 'external_providers', 'TTS-Settings', 'VibeVoice', 'Audio-Quota', 'API-Routes', 'Search-Engines', 'Web-Scraper', 'Logging', 'Moderation', 'Redis', 'Web-Scraping', 'personalization', 'persona', 'persona.rbac']
+2026-09-16 22:12:43.063 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured main SQLite database directory exists: /Users/macbook-dev/Documents/GitHub/tldw_server2/Databases
+2026-09-16 22:12:43.063 | INFO     | tldw_Server_API.app.core.config:_buffered_log:210 - Ensured user data base directory exists: Databases/user_databases
+2026-09-16 22:12:43.063 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1034 - Shutting down audit services for 0 instances...
+2026-09-16 22:12:43.063 | INFO     | tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps:shutdown_all_audit_services:1091 - All audit services shut down successfully.
+2026-09-16 22:12:43.075 | DEBUG    | tldw_Server_API.app.core.AuthNZ.settings:_ensure_jwt_secret:899 - Single-user mode - skipping JWT secret initialization
+2026-09-16 22:12:43.075 | WARNING  | tldw_Server_API.app.core.AuthNZ.settings:_validate_api_key:1013 - SINGLE_USER_API_KEY uses a legacy format; generate a new server-generated key for improved security.
+2026-09-16 22:12:43.075 | INFO     | tldw_Server_API.app.core.AuthNZ.settings:get_settings:1588 - Settings initialized - Auth mode: single_user, profile=local-single-user
+2026-09-16 22:12:43.075 | INFO     | tldw_Server_API.app.core.AuthNZ.db_config:_detect_backend:83 - Detected database backend: sqlite
+2026-09-16 22:12:43.139 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlist_run
+2026-09-16 22:12:43.139 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_enrich_output
+2026-09-16 22:12:43.139 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: watchlists_deliver_briefing
+2026-09-16 22:12:43.139 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: acp_run
+2026-09-16 22:12:43.140 | DEBUG    | tldw_Server_API.app.core.Scheduler.base.registry:decorator:81 - Registered task handler: workflow_run
+2026-09-16 22:12:43.140 | WARNING  | tldw_Server_API.app.core.DB_Management.db_path_utils:resolve_user_db_base_dir:491 - USER_DB_BASE_DIR not configured in tests, using isolated fallback: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-41da0dc2
+2026-09-16 22:12:43.141 | DEBUG    | tldw_Server_API.app.core.DB_Management.backends.factory:_get_or_create_shared_sqlite_backend:325 - Creating sqlite backend for /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-41da0dc2/1/workflows/workflows_scheduler.db
+2026-09-16 22:12:43.142 | INFO     | tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB:__init__:210 - WorkflowsSchedulerDB using SQLite path: /private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw_user_databases_test/default-41da0dc2/1/workflows/workflows_scheduler.db
+2026-09-16 22:12:43.142 | INFO     | tldw_Server_API.app.services.workflows_scheduler:stop:183 - Workflows recurring scheduler stopped
+2026-09-16 22:12:43.142 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:876 - Closing all cached ChaChaNotesDB instances (0)...
+2026-09-16 22:12:43.142 | INFO     | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:close_all_chacha_db_instances:892 - All ChaChaNotesDB instances closed and cache cleared.
+2026-09-16 22:12:43.142 | INFO     | tldw_Server_API.app.api.v1.API_Deps.DB_Deps:<module>:57 - Using LRUCache for user DB instances (maxsize=100).
+
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py:34861: in _validate_deck_parent_locked
+    owner_params = (self.client_id,)
+                    ^^^^^^^^^^^^^^
+E   AttributeError: 'CharactersRAGDB' object has no attribute 'client_id'

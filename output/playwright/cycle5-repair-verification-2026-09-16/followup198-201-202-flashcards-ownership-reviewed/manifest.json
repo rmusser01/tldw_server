@@ -1,0 +1,306 @@
+{
+  "at": "2026-09-17T05:30:47.953Z",
+  "files": [
+    {
+      "file": "author-DESIGN198.md",
+      "source": ".tmp/uat198-diagnosis-20260917/DESIGN198.md",
+      "original_sha256": "24ba4f6974ab86601f79536e7adcae372d55dfafd87b43b05722aec555690959",
+      "retained_sha256": "24ba4f6974ab86601f79536e7adcae372d55dfafd87b43b05722aec555690959",
+      "normalization": "none"
+    },
+    {
+      "file": "author-IMPLEMENTATION198-201-202.md",
+      "source": ".tmp/uat198-diagnosis-20260917/IMPLEMENTATION198-201-202.md",
+      "original_sha256": "406b7a57a5820374e99b6a7e71c77cfbc5b135ebfb320327f3ac17d6e8db0f07",
+      "retained_sha256": "406b7a57a5820374e99b6a7e71c77cfbc5b135ebfb320327f3ac17d6e8db0f07",
+      "normalization": "none"
+    },
+    {
+      "file": "author-adjacent-first-failure-assertions.txt",
+      "source": ".tmp/uat198-diagnosis-20260917/adjacent-first-failure-assertions.txt",
+      "original_sha256": "4341ac8a83b3dc89d42bd051c8a39d7cc6021bd2b81b42321bbf0f257961fd3b",
+      "retained_sha256": "546f2cc2b6c093ceaa4c7bb245eeff5cc8ca026ad3ebee0e490f5502590967aa",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-changed-methods.json",
+      "source": ".tmp/uat198-diagnosis-20260917/changed-methods.json",
+      "original_sha256": "35043993d475cdea12f3dca6246675d734ee17dceb077a59566987ab7f226787",
+      "retained_sha256": "35043993d475cdea12f3dca6246675d734ee17dceb077a59566987ab7f226787",
+      "normalization": "none"
+    },
+    {
+      "file": "author-final-bandit-production.json",
+      "source": ".tmp/uat198-diagnosis-20260917/final-bandit-production.json",
+      "original_sha256": "a212c7c7845e188dff2d245d8042bd02ed0c75049bbe626baa524ac800e8d3a1",
+      "retained_sha256": "35f9e0e798d4750902e1aaef646ff0a9fe660d0b483344fff73f54dd89c459dc",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-final-bandit-tests.json",
+      "source": ".tmp/uat198-diagnosis-20260917/final-bandit-tests.json",
+      "original_sha256": "35a4a1b4ea933dd7e59986b16a8f0d05824a3609a884f28932695aaf99d99419",
+      "retained_sha256": "cac439518363507da57b6218e7cc2e9249c016e0c39e52ced9ae37055f6b8451",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-final-ruff8.json",
+      "source": ".tmp/uat198-diagnosis-20260917/final-ruff8.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-owned-manifest.json",
+      "source": ".tmp/uat198-diagnosis-20260917/owned-manifest.json",
+      "original_sha256": "c87fe3776978277d64ebc5954657597464ac3f6c5f23c75c02429e8210d0d35b",
+      "retained_sha256": "c87fe3776978277d64ebc5954657597464ac3f6c5f23c75c02429e8210d0d35b",
+      "normalization": "none"
+    },
+    {
+      "file": "author-owned.patch",
+      "source": ".tmp/uat198-diagnosis-20260917/owned.patch",
+      "original_sha256": "f7931a3f9bfd7e451a1de8a56091f03436fb20e8a6f2b75386884812a7ee5df5",
+      "retained_sha256": "fab3aa99b8993c51df887100310774daaa7d6190a81de4c6c853d7e74717eb95",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-raw-sql-policy-diagnostic.py",
+      "source": ".tmp/uat198-diagnosis-20260917/raw-sql-policy-diagnostic.py",
+      "original_sha256": "350ff4f04d260d2777ef8e1db9f7d5a359727cd65c4d29272bc5994500c593f3",
+      "retained_sha256": "2a7d6d75075fbd53c382de3146a3b472a41c1d75b87615e481569946cde583d9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-release-hash-check.json",
+      "source": ".tmp/uat198-diagnosis-20260917/release-hash-check.json",
+      "original_sha256": "df80a550c588da00f23c05cd693053471c20b8b68458912bf5c1f6cb7fab5a51",
+      "retained_sha256": "df80a550c588da00f23c05cd693053471c20b8b68458912bf5c1f6cb7fab5a51",
+      "normalization": "none"
+    },
+    {
+      "file": "author-restricted-role-catalog.json",
+      "source": ".tmp/uat198-diagnosis-20260917/restricted-role-catalog.json",
+      "original_sha256": "7fb64f0e5b927142f5d92c653d8eca75dafe6ccdf14d65e6d141b8ef1ffe4453",
+      "retained_sha256": "7fb64f0e5b927142f5d92c653d8eca75dafe6ccdf14d65e6d141b8ef1ffe4453",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-201-202-final-release-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-201-202-final-release-command.json",
+      "original_sha256": "3dd9e381263708e7ec06b119409746df861488118755aac6f0322885b1688ade",
+      "retained_sha256": "3dd9e381263708e7ec06b119409746df861488118755aac6f0322885b1688ade",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-201-202-final-release.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-201-202-final-release.redacted.log",
+      "original_sha256": "033fff0bb6306d9118604ef382b62a0a1517e6020329774758166d3d9894fef1",
+      "retained_sha256": "033fff0bb6306d9118604ef382b62a0a1517e6020329774758166d3d9894fef1",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-ancestor-review-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-ancestor-review-red-command.json",
+      "original_sha256": "427c8ed948ad64411fde732c171d329dca8339d701afe4c639f365e4970576c8",
+      "retained_sha256": "427c8ed948ad64411fde732c171d329dca8339d701afe4c639f365e4970576c8",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-ancestor-review-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-ancestor-review-red.redacted.log",
+      "original_sha256": "45d29df928b004df973a84c18286f7fada9bf2272a833d5c2feb6c7901a2c807",
+      "retained_sha256": "45d29df928b004df973a84c18286f7fada9bf2272a833d5c2feb6c7901a2c807",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-closure-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-closure-red-command.json",
+      "original_sha256": "0f7f0b8948d85b0374bf01c374f43441e804f0081427e007a1bc9ff7ed73e9e2",
+      "retained_sha256": "0f7f0b8948d85b0374bf01c374f43441e804f0081427e007a1bc9ff7ed73e9e2",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-closure-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-closure-red.redacted.log",
+      "original_sha256": "66d09f16f1070f69dce68fa9ba81cf1bc3bae0853ace0876ce74b743ad907d62",
+      "retained_sha256": "b6642c02c8316d5703ebd7a433c135f29cee4a4fef39ad82efd2b6fcd0443d03",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat198-explicit-queue-review-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-explicit-queue-review-red-command.json",
+      "original_sha256": "9d9d9fb8d54630321c8c7086fc6f34078941d4e40aa5759b37abf9b2af273561",
+      "retained_sha256": "9d9d9fb8d54630321c8c7086fc6f34078941d4e40aa5759b37abf9b2af273561",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-explicit-queue-review-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-explicit-queue-review-red.redacted.log",
+      "original_sha256": "80205c0fbbf830a8fe45bf65028f67911ad61dbb133f4f1c35a9f35e0a8b19df",
+      "retained_sha256": "3d9bd3c268b58dd7382b036837f9b81d219a3158f940c5f50a8b866254bb9bd9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat198-final-adjacent-release-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-final-adjacent-release-command.json",
+      "original_sha256": "dd50c21c18d00372c5db50ceba3792eca4ebe2d27619540ee8d2d85fad2b9ac1",
+      "retained_sha256": "dd50c21c18d00372c5db50ceba3792eca4ebe2d27619540ee8d2d85fad2b9ac1",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-final-adjacent-release.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-final-adjacent-release.redacted.log",
+      "original_sha256": "9f167fa1b0a35be220b1c16d4bcb1dd32b0beaab2297bdaecd4fc5794c348615",
+      "retained_sha256": "9f167fa1b0a35be220b1c16d4bcb1dd32b0beaab2297bdaecd4fc5794c348615",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-owner-boundary-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-owner-boundary-red-command.json",
+      "original_sha256": "fdfb9695663d6aafce31304195878822336294a5a09172a1263db72fa9892e0e",
+      "retained_sha256": "fdfb9695663d6aafce31304195878822336294a5a09172a1263db72fa9892e0e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-owner-boundary-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-owner-boundary-red.redacted.log",
+      "original_sha256": "989e40f903dd7356a1aa29f52cdc1f2dd7db4f17ad4e98a1e20bc3cced452a3e",
+      "retained_sha256": "d971bf5bf48fd12338d87dadc11ee2e85684dea8f184a0f2f17c09e2d04dba78",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat198-resource-edges-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-resource-edges-red-command.json",
+      "original_sha256": "26c1c65105ef0060497a50359b0396c3ee11629fc21792f9318e3c20e7145146",
+      "retained_sha256": "26c1c65105ef0060497a50359b0396c3ee11629fc21792f9318e3c20e7145146",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-resource-edges-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-resource-edges-red.redacted.log",
+      "original_sha256": "c62ad30212d12ec2adaab84ffdf985e25877e4671c7104195827581dd7c492cd",
+      "retained_sha256": "1fba6bd609092b595ef15db0d6c9ebeb6dff02651e41055139e9047d24189f3a",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat198-session-rollback-baseline-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-session-rollback-baseline-command.json",
+      "original_sha256": "b606cb14ad655d809f9b43e1661bd342793a8e3bd6fc6e59a35c2aa2dff80906",
+      "retained_sha256": "b606cb14ad655d809f9b43e1661bd342793a8e3bd6fc6e59a35c2aa2dff80906",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-session-rollback-baseline.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-session-rollback-baseline.redacted.log",
+      "original_sha256": "586a26a6cff1a6b2a28ebb3085ca942eb8b52d0c7483095c2b6e226d0bc4cdf5",
+      "retained_sha256": "5ba77fe1c803c1cd3ffd9b440b7284c16f554a654e85066293fccea342fbc3c9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat198-tag-edge-corrected-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-tag-edge-corrected-red-command.json",
+      "original_sha256": "5ca06c31202a1c8cfca9f6b198f2ca6258c0d751190b0df8a6626e084cbcef07",
+      "retained_sha256": "5ca06c31202a1c8cfca9f6b198f2ca6258c0d751190b0df8a6626e084cbcef07",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat198-tag-edge-corrected-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat198-tag-edge-corrected-red.redacted.log",
+      "original_sha256": "e80e63d3aaf9ce57c0082d12381c4c12e3c5abd1aec8c4217dbd2c2e28c3b73e",
+      "retained_sha256": "43c9259707bd7ebba1cb7e559cd59c4fc0ed65ff989bd84b47d55cecb21e867a",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author-uat201-migration-red-command.json",
+      "source": ".tmp/uat198-diagnosis-20260917/uat201-migration-red-command.json",
+      "original_sha256": "1af91bd4e1885f3d00041fabc063291f39cd6f8a3e02f0b23d2d2955a788cb0e",
+      "retained_sha256": "1af91bd4e1885f3d00041fabc063291f39cd6f8a3e02f0b23d2d2955a788cb0e",
+      "normalization": "none"
+    },
+    {
+      "file": "author-uat201-migration-red.redacted.log",
+      "source": ".tmp/uat198-diagnosis-20260917/uat201-migration-red.redacted.log",
+      "original_sha256": "c2eaaa02f433ff5fb3ffe4a595eac7ee70828ad36d06023a7f260e1f98e6a496",
+      "retained_sha256": "c2eaaa02f433ff5fb3ffe4a595eac7ee70828ad36d06023a7f260e1f98e6a496",
+      "normalization": "none"
+    },
+    {
+      "file": "author-verification-manifest.json",
+      "source": ".tmp/uat198-diagnosis-20260917/verification-manifest.json",
+      "original_sha256": "93ea20c77b69a3dfce81246d3d78b9087a6d823c33111325532de4880eedc891",
+      "retained_sha256": "93ea20c77b69a3dfce81246d3d78b9087a6d823c33111325532de4880eedc891",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-REVIEW198-201-202.md",
+      "source": ".tmp/uat198-201-202-independent-20260917/REVIEW198-201-202.md",
+      "original_sha256": "0b13ba982f2ef6c124f2264002cb72d6d3949e9b627749eb3658634ea2f64cf2",
+      "retained_sha256": "0b13ba982f2ef6c124f2264002cb72d6d3949e9b627749eb3658634ea2f64cf2",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-bandit-production.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/bandit-production.json",
+      "original_sha256": "8bd338fb9a07cef930656883fdd77628705e2dcfedc816a95201d91a8dda670b",
+      "retained_sha256": "ccc23c59376131f4a7ff06c7be66f7e01f3bcd4b5dd65a5ae4cfb9094f359c5b",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-bandit-tests.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/bandit-tests.json",
+      "original_sha256": "47917ce5967cd44956ba7a01ca5ccdef6647e2d1b587f4bfc08d400aef2e3c54",
+      "retained_sha256": "653090826ac7abd99df34f7eb206200a65b0bf938fdc315ae7aa19a8b81b9c44",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-post-run-hashes.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/post-run-hashes.json",
+      "original_sha256": "6ea9f1e0bec201b9eb75437aca4110f7e7c5b4c68f2c5b40cfad15cbaef042a2",
+      "retained_sha256": "6ea9f1e0bec201b9eb75437aca4110f7e7c5b4c68f2c5b40cfad15cbaef042a2",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-pre-run-hashes.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/pre-run-hashes.json",
+      "original_sha256": "7f43e4b80f70362a4617640274285194355f5db0fe4009172ee50f2395404fa9",
+      "retained_sha256": "7f43e4b80f70362a4617640274285194355f5db0fe4009172ee50f2395404fa9",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-reviewer-manifest.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/reviewer-manifest.json",
+      "original_sha256": "32e6b2680fd617dcdbb7464011aa9b1276c87d24751c57a0b0c65d53320353c9",
+      "retained_sha256": "32e6b2680fd617dcdbb7464011aa9b1276c87d24751c57a0b0c65d53320353c9",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-ruff.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "retained_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-static-summary.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/static-summary.json",
+      "original_sha256": "699e5ac9f855145a8cdeedefc1ce0e35739c9d20bbc607173e4e5e26ec6d07eb",
+      "retained_sha256": "699e5ac9f855145a8cdeedefc1ce0e35739c9d20bbc607173e4e5e26ec6d07eb",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-uat198-independent-final-command.json",
+      "source": ".tmp/uat198-201-202-independent-20260917/uat198-independent-final-command.json",
+      "original_sha256": "220ea72ae1dae6e1693d1210fa2f3bc5dbd8e40d8269e673aa2a102acbe6c2be",
+      "retained_sha256": "220ea72ae1dae6e1693d1210fa2f3bc5dbd8e40d8269e673aa2a102acbe6c2be",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-uat198-independent-final.redacted.log",
+      "source": ".tmp/uat198-201-202-independent-20260917/uat198-independent-final.redacted.log",
+      "original_sha256": "b8d7e77effb1ef908d505497bdec49baf9986fc6bcc870cb845afad5ce5e9e75",
+      "retained_sha256": "b8d7e77effb1ef908d505497bdec49baf9986fc6bcc870cb845afad5ce5e9e75",
+      "normalization": "none"
+    }
+  ]
+}

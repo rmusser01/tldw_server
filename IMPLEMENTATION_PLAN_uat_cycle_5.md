@@ -1,6 +1,6 @@
 # Cycle 5 repair and verification plan
 
-Current Stage3 checkpoint:203 findings —183verified/17targeted acceptance pending/3unresolved (198/201/202). Memory200/203 and background callback181 are reviewed and committed throughdd4afb11d8; independent44+32 actual backend tests pass with0skips. Full fresh matrix remains Not Started. Latest ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json.
+Current Stage3 checkpoint:204 findings —183 verified/21 targeted acceptance pending/0 unresolved implementations. Memory200/203 and background callback181 are reviewed and committed throughdd4afb11d8; independent44+32 actual backend tests pass with0skips. Full fresh matrix remains Not Started. Latest ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-203-persona-fixtures-verified.json.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 
@@ -129,3 +129,7 @@ Stage3 remains active at23:45UTC: all180 identified defects have reviewed implem
 00:44UTC:183 verified with all162 adjacent tests and4 independent controls passing, zero skips; real historical fixture and exact66/current-head contracts preserve migration guards. Native Manage reveals184 singular wording, tracked before edits under13260.121. Frozen181/182 production is running for targeted Study/image/restart acceptance. Stage3 remains active;184total/165verified/18pending/1unresolved. Full matrix not started.
 
 2026-09-17 04:38UTC: reviewed character193/194/195 loaded. Bob default3 creates chat201, exposing199 unused rowid and200 Persona Memory boolean predicate; actual Bob catalogue also exposes198 private Flashcards leakage. Tasks13260.136–138 active before repairs;182verified/15pending/3unresolved across200. Role125 independently cleared36+26guards/2actualcoldPGcontrols; final matrix remains gated.
+
+2026-09-17 05:20UTC: UAT204 cold StudyPack owner identity is proven with actual factory/cache/service persistence (1PGfail/3warm+SQLite controls0skip). Task13260.142 owns a bounded adopter repair; no generic cache changes.198/201/202 source is frozen for independent review, including ancestry/queue review corrections and exact adjacent fixture compatibility changes. Native API remains stopped until reviewed repairs are integrated. Fresh dev fetch05:10:56UTC remains59049e094e with zero dev-only commits; original branch-start correction remains in tracker.
+
+2026-09-17 05:31UTC: Flashcards198/201/202 integrated61e5af6702 (author126+322 and independent183 pass, zero skips). Cold StudyPack204 integrateda130b8e550 (author30/independent30 pass, zero skips). All current repairs are implemented; required native acceptance still gates Stage4. Combined source hash receipt captured before new API30793 start; health200 and normal Alice2 auth/me200 observed. Native browser/API targeted acceptance resumed.

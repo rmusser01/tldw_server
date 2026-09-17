@@ -1,0 +1,21 @@
+{
+  "at": "2026-09-17T05:21:29.434Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_shared_owner_contract.py",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_owner_resource_edges.py",
+    "tldw_Server_API/tests/DB_Management/test_deck_owner_name_migration_postgres.py",
+    "tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py",
+    "tldw_Server_API/tests/DB_Management/test_flashcard_asset_content_backends.py",
+    "tldw_Server_API/tests/Flashcards/test_flashcard_deck_hierarchy_locking.py",
+    "tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
