@@ -1057,7 +1057,7 @@ class ConversationStore:
             with self._db.transaction() as conn:
                 current_state = conn.execute(
                     """
-                    SELECT rowid, title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
+                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
                     FROM conversations
                     WHERE id = ?
                     """,
