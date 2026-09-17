@@ -1,6 +1,6 @@
 # Cycle 5 repair and verification plan
 
-Current Stage3 checkpoint: 219 unique findings — 206 verified, 12 awaiting targeted acceptance, 1 unresolved (219). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-219-pack-serialization.json. Stage4 full matrix remains Not Started.
+Current Stage3 checkpoint (2026-09-17): 225 unique findings — 224 verified, 1 unresolved (225). Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-225-progress-accepted.json. Stage4 full matrix remains Not Started. Independent native audits close181,205 and221–224.225 reproduces on SQLite and PostgreSQL: inactive-Sync suggestion reads require a nonexistent dataset authority. The bounded read repair and documented local decision lifecycle are being addressed without inserting a conflicting canonical authority binding.
 
 Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 
