@@ -1,0 +1,18 @@
+[
+  {
+    "path": "REVIEW.md",
+    "sha256": "91640eb4a3171e7061e9b5272ed352807a97a37954a9dc58e0ce718eddafc714"
+  },
+  {
+    "path": "verification.json",
+    "sha256": "bd37abaa2e7712b2b9e83eac2cf4481d54f098a1b36e117f1a4016c38dabcda4"
+  },
+  {
+    "path": "node-tests.log",
+    "sha256": "30397e10ea7b9b662d7399260f0c3183f3652e0f1e479e28273bc2c26e52c748"
+  },
+  {
+    "path": "python-tests.log",
+    "sha256": "ef0e7ef49e71fa999842be0cb8d22ec1058d3a384ed5c0a2ec6efb8f434975ac"
+  }
+]

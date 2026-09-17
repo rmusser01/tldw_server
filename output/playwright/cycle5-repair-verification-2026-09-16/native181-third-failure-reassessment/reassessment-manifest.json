@@ -1,0 +1,23 @@
+{
+  "task": "TASK13260.118",
+  "mode": "read-only architecture reassessment; no production or test changes",
+  "source_hashes": {
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "1b7f83da58f622233ee1002d8a920b102a7e6ed8fe52c0ea8e1212548056eaa5",
+    "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276",
+    "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "6a85f94a1aaf7346a5d92ec237205238e72d20a47e61d118567dc771cdf9deb3",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/session.py": "c7c0b412fe0e245129e93c26997a930d959224ff191727c2dde73615da22d4b1",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/connection_lifecycle.py": "99449a6275b0bf26cbd0d6738ded987a9dd9355c43deedee83e81aeb0722f6b9",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "ff4cb39f19da5e090acc6dc8055c35531f8d75d703e8011dbfd34b421d6304fc",
+    "tldw_Server_API/app/api/v1/API_Deps/DB_Deps.py": "9a9576b075ddfbb9ff10a73334d99a62caaf093d5231b6ca729f03607de420b1",
+    "tldw_Server_API/app/core/AuthNZ/database.py": "1d0ed23cde7dca3311db84f368fb3bced5223b3f152acf4ae3e7edee3a065cb9",
+    "tldw_Server_API/app/core/AuthNZ/profile_user_sync_boundary.py": "9044ff22ab9333f3f0649f2d0c5657c0f54eab9c4953b049ae968513d26a7499",
+    "tldw_Server_API/app/core/DB_Management/Buddy_DB.py": "ffd4c2b1dfd7c10e7beed095d354b33b186f26b0515af2f6d3b70980521dffa3",
+    "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
+    "apps/packages/ui/src/components/Flashcards/hooks/useSourceReviewQueries.ts": "2cb719b7b3a19946132caa285a641e05079a26fb581d401a1069af9c31bcad61",
+    "apps/packages/ui/src/components/Flashcards/components/SourceReviewDuePanel.tsx": "4c9567887d93a0a7bdcfe6cbce174ac9e1f0e343d04e39e0da29812dc8d0e6b0"
+  },
+  "artifacts": {
+    "ARCHITECTURE181.md": "5472966365a5a8b9c99caf8426089ef0d4e13338b7b2d8989b829884f69deb62",
+    "causal-receipts.sanitized.json": "3026e889d1ba36a03011e200157b6184117a52a3d78dd5b5ef739bf3b16a8299"
+  }
+}

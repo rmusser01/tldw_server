@@ -1,0 +1,47 @@
+{
+  "at": "2026-09-17T02:35:31.974Z",
+  "files": [
+    {
+      "file": "manage-singular-native-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-native-evidence.txt",
+      "original_sha256": "65ade359ec374c542a3f231226f87cd9aeaafa2b0c3c73043ee7a925d88c7329",
+      "retained_sha256": "6db7d0170026df039d8be9bb514a19640637c89e84cbf5c7dbfbea026340cdc0",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "manage-singular-native.png",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-native.png",
+      "original_sha256": "c7e8c9d91cd84a2657833b465e9804c007b383298940036c715ff038bae8e550",
+      "retained_sha256": "c7e8c9d91cd84a2657833b465e9804c007b383298940036c715ff038bae8e550",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-singular-audit.json",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-audit.json",
+      "original_sha256": "ea482e383e2304645532d24e8c670615836ca4ae29e92db1fe77b1ae79d873ce",
+      "retained_sha256": "ea482e383e2304645532d24e8c670615836ca4ae29e92db1fe77b1ae79d873ce",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-singular-search.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-search.txt",
+      "original_sha256": "3b8e49a2546c05901384209a8ddc3decd781f49667087260f9df12032d8eedc1",
+      "retained_sha256": "3d8bad3dca920800ae6c022872e6e2566130653389ae8468dd0994c38ae67b7e",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "manage-singular-submit.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-submit.txt",
+      "original_sha256": "f7338703a00f80183f9199e1b49945f7751bcdd9614727a6b20eee7acb335848",
+      "retained_sha256": "f7338703a00f80183f9199e1b49945f7751bcdd9614727a6b20eee7acb335848",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-singular-ready.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-singular-ready.txt",
+      "original_sha256": "d5998efd66078c32f5fb4040841b9d47e430baa838fd623506941a8d27191398",
+      "retained_sha256": "4424ab0ba1143dec13d3d6e6ed7a18873c621c31fc744f2837d22480a00fb614",
+      "normalization": "trailing text whitespace and final newline"
+    }
+  ]
+}

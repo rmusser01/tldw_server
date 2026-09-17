@@ -1,0 +1,41 @@
+{
+  "task": "TASK13260.125",
+  "realActionsExecuted": [],
+  "files": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sha256": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e",
+      "snapshot": "review-snapshot/matrix-launcher.mjs"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/initialize-cell.py",
+      "sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "snapshot": "review-snapshot/initialize-cell.py"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.test.mjs",
+      "sha256": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d",
+      "snapshot": "review-snapshot/matrix-launcher.test.mjs"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/test_initialize_cell.py",
+      "sha256": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5",
+      "snapshot": "review-snapshot/test_initialize_cell.py"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/LAUNCHER.md",
+      "sha256": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df",
+      "snapshot": "review-snapshot/LAUNCHER.md"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/ISOLATION.md",
+      "sha256": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0",
+      "snapshot": "review-snapshot/ISOLATION.md"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/launcher-static-validation.json",
+      "sha256": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68",
+      "snapshot": "review-snapshot/launcher-static-validation.json"
+    }
+  ]
+}

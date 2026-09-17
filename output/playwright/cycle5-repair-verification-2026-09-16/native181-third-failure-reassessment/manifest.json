@@ -1,0 +1,110 @@
+{
+  "at": "2026-09-17T02:20:21.536Z",
+  "files": [
+    {
+      "file": "api61182-source.json",
+      "source": ".tmp/uat181-full-native-20260917/api61182-source.json",
+      "original_sha256": "a57cfa62697ece5e516693efd79d694385638b30f7bd8f5aac708987ce036499",
+      "retained_sha256": "a57cfa62697ece5e516693efd79d694385638b30f7bd8f5aac708987ce036499",
+      "normalization": "none"
+    },
+    {
+      "file": "prior-source-stopped.json",
+      "source": ".tmp/uat181-full-native-20260917/prior-source-stopped.json",
+      "original_sha256": "b839351401bd507fd6f209e4223a3c05e4594c249bc7d1093b23eb50f5edfd22",
+      "retained_sha256": "b839351401bd507fd6f209e4223a3c05e4594c249bc7d1093b23eb50f5edfd22",
+      "normalization": "none"
+    },
+    {
+      "file": "after-full-notes-bootstrap.json",
+      "source": ".tmp/uat181-full-native-20260917/after-full-notes-bootstrap.json",
+      "original_sha256": "79275f07ac30df4d2b309a25ce3ed793232a7ddc8d619afec709965053426880",
+      "retained_sha256": "79275f07ac30df4d2b309a25ce3ed793232a7ddc8d619afec709965053426880",
+      "normalization": "none"
+    },
+    {
+      "file": "notes-bootstrap-events.txt",
+      "source": ".tmp/uat181-full-native-20260917/notes-bootstrap-events.txt",
+      "original_sha256": "57bffa321868c8cb35103626d34fa3d3a0348e796cb8b99425b44ddb87939e47",
+      "retained_sha256": "c21a2ff3feaf8e520f99fc43a793cac87f4c4c360457be875ffd9e4103446a52",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "repaired-overlap-stop-61182.json",
+      "source": ".tmp/uat181-full-native-20260917/repaired-overlap-stop-61182.json",
+      "original_sha256": "a9ebfa2adbee3e8ef6fe73d3550a785d9f078622d32fdc95383588aef8a6cca6",
+      "retained_sha256": "a9ebfa2adbee3e8ef6fe73d3550a785d9f078622d32fdc95383588aef8a6cca6",
+      "normalization": "none"
+    },
+    {
+      "file": "during-replacement.json",
+      "source": ".tmp/uat181-full-native-20260917/during-replacement.json",
+      "original_sha256": "4ddd470b13ea0a01fc3fd88e7d9aec6fca319f27113986cab407887e11459177",
+      "retained_sha256": "4ddd470b13ea0a01fc3fd88e7d9aec6fca319f27113986cab407887e11459177",
+      "normalization": "none"
+    },
+    {
+      "file": "replacement-health.json",
+      "source": ".tmp/uat181-full-native-20260917/replacement-health.json",
+      "original_sha256": "b800e96528d027b100e502f74a2c89e664b60a5c9e21a694eb1ed3dc15efce5f",
+      "retained_sha256": "b800e96528d027b100e502f74a2c89e664b60a5c9e21a694eb1ed3dc15efce5f",
+      "normalization": "none"
+    },
+    {
+      "file": "overlap-notes-events.txt",
+      "source": ".tmp/uat181-full-native-20260917/overlap-notes-events.txt",
+      "original_sha256": "68b4b4d91ed47b53ca30987011d0ed53352ec3efb423d734cd68dc8cd5c63175",
+      "retained_sha256": "d1cb9353a8ea1d8dba863ef9aea0e7b1585847e7174676e3f5321d6d9b8a8f07",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "overlap-notes-failure.png",
+      "source": ".tmp/uat181-full-native-20260917/overlap-notes-failure.png",
+      "original_sha256": "522e5d988646b267239ce4bcd07414813f2a4a4b60305837ee3cb56fa900d083",
+      "retained_sha256": "522e5d988646b267239ce4bcd07414813f2a4a4b60305837ee3cb56fa900d083",
+      "normalization": "none"
+    },
+    {
+      "file": "failed-overlap-old-stop.json",
+      "source": ".tmp/uat181-full-native-20260917/failed-overlap-old-stop.json",
+      "original_sha256": "c62ae4aec792c895e6e3b6768207dffebdca809ecaf717ef8082fb15dd4d76f5",
+      "retained_sha256": "c62ae4aec792c895e6e3b6768207dffebdca809ecaf717ef8082fb15dd4d76f5",
+      "normalization": "none"
+    },
+    {
+      "file": "old-exit-confirmed.json",
+      "source": ".tmp/uat181-full-native-20260917/old-exit-confirmed.json",
+      "original_sha256": "dead37128cdf3f834601908248d324a32248f76a5e958a98197a1cd8d1ac9cae",
+      "retained_sha256": "dead37128cdf3f834601908248d324a32248f76a5e958a98197a1cd8d1ac9cae",
+      "normalization": "none"
+    },
+    {
+      "file": "recovery-retry.txt",
+      "source": ".tmp/uat181-full-native-20260917/recovery-retry.txt",
+      "original_sha256": "312675fd80507837ff0162e143af3371218ac57a16d8047a5716d8385da9fe17",
+      "retained_sha256": "312675fd80507837ff0162e143af3371218ac57a16d8047a5716d8385da9fe17",
+      "normalization": "none"
+    },
+    {
+      "file": "reassessment-ARCHITECTURE181.md",
+      "source": ".tmp/uat181-architecture-reassessment-20260917/ARCHITECTURE181.md",
+      "original_sha256": "5472966365a5a8b9c99caf8426089ef0d4e13338b7b2d8989b829884f69deb62",
+      "retained_sha256": "5472966365a5a8b9c99caf8426089ef0d4e13338b7b2d8989b829884f69deb62",
+      "normalization": "none"
+    },
+    {
+      "file": "reassessment-causal-receipts.sanitized.json",
+      "source": ".tmp/uat181-architecture-reassessment-20260917/causal-receipts.sanitized.json",
+      "original_sha256": "3026e889d1ba36a03011e200157b6184117a52a3d78dd5b5ef739bf3b16a8299",
+      "retained_sha256": "3026e889d1ba36a03011e200157b6184117a52a3d78dd5b5ef739bf3b16a8299",
+      "normalization": "none"
+    },
+    {
+      "file": "reassessment-manifest.json",
+      "source": ".tmp/uat181-architecture-reassessment-20260917/manifest.json",
+      "original_sha256": "e2654206aa3a3680204a661b8d8a87f6916ec711af17b08209e04758939935d2",
+      "retained_sha256": "e2654206aa3a3680204a661b8d8a87f6916ec711af17b08209e04758939935d2",
+      "normalization": "none"
+    }
+  ]
+}

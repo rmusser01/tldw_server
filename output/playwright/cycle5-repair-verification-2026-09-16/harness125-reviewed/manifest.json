@@ -1,0 +1,131 @@
+{
+  "at": "2026-09-17T02:21:25.628Z",
+  "files": [
+    {
+      "file": "frozen-matrix-launcher.mjs",
+      "source": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "original_sha256": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e",
+      "retained_sha256": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-initialize-cell.py",
+      "source": ".tmp/uat-next-matrix-20260916/initialize-cell.py",
+      "original_sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "retained_sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-matrix-launcher.test.mjs",
+      "source": ".tmp/uat-next-matrix-20260916/matrix-launcher.test.mjs",
+      "original_sha256": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d",
+      "retained_sha256": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-test_initialize_cell.py",
+      "source": ".tmp/uat-next-matrix-20260916/test_initialize_cell.py",
+      "original_sha256": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5",
+      "retained_sha256": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-LAUNCHER.md",
+      "source": ".tmp/uat-next-matrix-20260916/LAUNCHER.md",
+      "original_sha256": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df",
+      "retained_sha256": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-ISOLATION.md",
+      "source": ".tmp/uat-next-matrix-20260916/ISOLATION.md",
+      "original_sha256": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0",
+      "retained_sha256": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0",
+      "normalization": "none"
+    },
+    {
+      "file": "frozen-launcher-static-validation.json",
+      "source": ".tmp/uat-next-matrix-20260916/launcher-static-validation.json",
+      "original_sha256": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68",
+      "retained_sha256": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68",
+      "normalization": "none"
+    },
+    {
+      "file": "DESIGN125.md",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/DESIGN125.md",
+      "original_sha256": "09a0226ed1abd7c7036f12afefff894a76a56a69335c26c75ba50f627a17b596",
+      "retained_sha256": "09a0226ed1abd7c7036f12afefff894a76a56a69335c26c75ba50f627a17b596",
+      "normalization": "none"
+    },
+    {
+      "file": "IMPLEMENTATION125.md",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/IMPLEMENTATION125.md",
+      "original_sha256": "95e5b7b97a41a07c5d49047a2787b393e94f3a7793e33732120e9a0feb304091",
+      "retained_sha256": "95e5b7b97a41a07c5d49047a2787b393e94f3a7793e33732120e9a0feb304091",
+      "normalization": "none"
+    },
+    {
+      "file": "RED125.md",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/RED125.md",
+      "original_sha256": "dbbeedecc50b9388e922a70f3943f8ddaeacacee69a435a2b689ded5ada6d5da",
+      "retained_sha256": "dbbeedecc50b9388e922a70f3943f8ddaeacacee69a435a2b689ded5ada6d5da",
+      "normalization": "none"
+    },
+    {
+      "file": "owned-manifest.json",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/owned-manifest.json",
+      "original_sha256": "bfbfbfb56793fa4ecb95c276d0f4da5415d7a78a9bd4e487a2be177490129d1c",
+      "retained_sha256": "bfbfbfb56793fa4ecb95c276d0f4da5415d7a78a9bd4e487a2be177490129d1c",
+      "normalization": "none"
+    },
+    {
+      "file": "original-draft-manifest.json",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/original-draft-manifest.json",
+      "original_sha256": "b453f28b2839589f7bba04e86294ad058179a4f0e0ab09f2b4acba266aa44cfc",
+      "retained_sha256": "b453f28b2839589f7bba04e86294ad058179a4f0e0ab09f2b4acba266aa44cfc",
+      "normalization": "none"
+    },
+    {
+      "file": "owned.patch",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/owned.patch",
+      "original_sha256": "2529ae1fdbf1111757f8ba1e0a2e7248e5fcb7c72b50b8c5b7b417d63fd74769",
+      "retained_sha256": "6efb3f6fb2255dc8642327dc98e016b53b1813536f268a0e88a9590ffb77a597",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent-REVIEW.md",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/independent-sidebar/REVIEW.md",
+      "original_sha256": "91640eb4a3171e7061e9b5272ed352807a97a37954a9dc58e0ce718eddafc714",
+      "retained_sha256": "91640eb4a3171e7061e9b5272ed352807a97a37954a9dc58e0ce718eddafc714",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-verification.json",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/independent-sidebar/verification.json",
+      "original_sha256": "bd37abaa2e7712b2b9e83eac2cf4481d54f098a1b36e117f1a4016c38dabcda4",
+      "retained_sha256": "bd37abaa2e7712b2b9e83eac2cf4481d54f098a1b36e117f1a4016c38dabcda4",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-manifest.json",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/independent-sidebar/manifest.json",
+      "original_sha256": "32f2e564e682c1d1943a38e40c4b3583763b66636949b7c81bdef30dc4ca1fd5",
+      "retained_sha256": "32f2e564e682c1d1943a38e40c4b3583763b66636949b7c81bdef30dc4ca1fd5",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-node-tests.log",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/independent-sidebar/node-tests.log",
+      "original_sha256": "30397e10ea7b9b662d7399260f0c3183f3652e0f1e479e28273bc2c26e52c748",
+      "retained_sha256": "30397e10ea7b9b662d7399260f0c3183f3652e0f1e479e28273bc2c26e52c748",
+      "normalization": "none"
+    },
+    {
+      "file": "independent-python-tests.log",
+      "source": ".tmp/uat-next-matrix-20260916/repair125/independent-sidebar/python-tests.log",
+      "original_sha256": "ef0e7ef49e71fa999842be0cb8d22ec1058d3a384ed5c0a2ec6efb8f434975ac",
+      "retained_sha256": "ef0e7ef49e71fa999842be0cb8d22ec1058d3a384ed5c0a2ec6efb8f434975ac",
+      "normalization": "none"
+    }
+  ]
+}

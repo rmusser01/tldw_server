@@ -1,0 +1,61 @@
+{
+  "at": "2026-09-17T00:50:08.204Z",
+  "files": [
+    {
+      "file": "manage-populated.png",
+      "source": ".tmp/uat-study-native-20260917/manage-populated.png",
+      "original_sha256": "798d36c30d644e623cda1aab54c6185e6204f6422ab27a745ca6761a3a4dde6a",
+      "retained_sha256": "798d36c30d644e623cda1aab54c6185e6204f6422ab27a745ca6761a3a4dde6a",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-deck-selected.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-deck-selected.txt",
+      "original_sha256": "4ecba14b7f61c96f74607dc7c3e471a6bc231053f5ef3801a68ad655fc415208",
+      "retained_sha256": "4ecba14b7f61c96f74607dc7c3e471a6bc231053f5ef3801a68ad655fc415208",
+      "normalization": "none"
+    },
+    {
+      "file": "manage-events.txt",
+      "source": ".tmp/uat-study-native-20260917/manage-events.txt",
+      "original_sha256": "45a565ef49c88210a4a3653eee740f73bf19b91019bce0b2392e02f6041932ad",
+      "retained_sha256": "cbbcd04d322599d9a9e20088070b56b01508a4bbd7b2f1db029b0b46e18df289",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "assistant-events.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-events.txt",
+      "original_sha256": "f73d518587861cc65f766466208ccb194e2751fc7917686281adfbc557a2f4c1",
+      "retained_sha256": "49aa009f70841b411df74279084fd76e92f9d2a84460ab847eeffa557c87abef",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "assistant-settled.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-settled.txt",
+      "original_sha256": "c5459c6477241b5aac843f18fab7db3e0c039a398d74e04df3cc61600cf90afe",
+      "retained_sha256": "7f22c354018d523156a1224cf96b819198ec8f12962b2c98a588c4c1af02979c",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "assistant-server-error-overlay.png",
+      "source": ".tmp/uat-study-native-20260917/assistant-server-error-overlay.png",
+      "original_sha256": "1e3365343ffb07fc2aceb319b69ec9408ec6f89424fa8cf4163ffef89ccc9cdb",
+      "retained_sha256": "1e3365343ffb07fc2aceb319b69ec9408ec6f89424fa8cf4163ffef89ccc9cdb",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-backend-diagnostic.redacted.log",
+      "source": ".tmp/uat-study-native-20260917/assistant-backend-diagnostic.redacted.log",
+      "original_sha256": "09846b985965e25f52086a91558f51ed64c4b23029a6c08c710b3a8278394bd0",
+      "retained_sha256": "829e67c91c6006a2b59d737f4d5548de4d1c42f12b6e37523ca4737c41e4f6f1",
+      "normalization": "trailing text whitespace only; final newline"
+    },
+    {
+      "file": "assistant-overlay-dismissed.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-overlay-dismissed.txt",
+      "original_sha256": "239bbfc58d739faaaa894fdc9106845156ee6ecdedbf9a42e8acabba3e5075d6",
+      "retained_sha256": "137a36cf4aea83f625a21e1d071f61e702b59f49d3edeeb3cacef1141160146f",
+      "normalization": "trailing text whitespace only; final newline"
+    }
+  ]
+}

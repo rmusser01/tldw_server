@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-17T02:18:18.209Z",
+  "pid": 63046,
+  "profile": "pg-multi",
+  "noHotReload": true,
+  "backendFiles": 3667,
+  "allCurrentBackendHashesMatch61182Manifest": true,
+  "sourceCommit": "3ce1b63d57ed2be154bbc5a72305b62a0a8d2778",
+  "note": "Replacement startup receipt identifies63046; first runtime source manifest and same unchanged backend bytes provide provenance. Frontend188 committed6982d72114;189/190 modifications start after these native captures."
+}

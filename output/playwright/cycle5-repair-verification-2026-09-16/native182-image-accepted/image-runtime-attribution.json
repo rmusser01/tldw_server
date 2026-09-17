@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-17T01:18:01.683Z",
+  "sourceCommit": "a647f5cd890e980dd79027ead3452486ad2b2a47",
+  "file": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+  "committedSha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
+  "currentSha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
+  "runtimeFileSha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
+  "runtimeReceipt": ".tmp/uat181-native-20260917/fixed-runtime-source.json",
+  "runtimeReceiptSha256": "a6d8e376d09933686e306b6627b47eb6c33348ef892b4819da439b7be47c198a",
+  "runtimePid": 14540,
+  "imageNativeWindow": "2026-09-17T00:53 through 01:02 UTC",
+  "shutdownReceipt": ".tmp/uat181-native-20260917/fixed-api-replacement-stop.json",
+  "note": "Committed getter bytes match frozen runtime receipt; no hot reload. Historical00:12 Study protocol manifest is not acceptance source attribution. Initial git-show hash helper exceeded the default1MiB buffer; retried read-only with8MiB."
+}

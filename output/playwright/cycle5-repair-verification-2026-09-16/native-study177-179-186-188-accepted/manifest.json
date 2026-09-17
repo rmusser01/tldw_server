@@ -1,0 +1,180 @@
+{
+  "at": "2026-09-17T02:19:46.042Z",
+  "files": [
+    {
+      "file": "audit-disposable-acceptance.mjs",
+      "source": ".tmp/uat-study-native-20260917/audit-disposable-acceptance.mjs",
+      "original_sha256": "9d5d0a4c8cc91a3c2ded824d86c483e0eb3777bb303901e84a9f31d55d33e024",
+      "retained_sha256": "9d5d0a4c8cc91a3c2ded824d86c483e0eb3777bb303901e84a9f31d55d33e024",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-acceptance-audit.json",
+      "source": ".tmp/uat-study-native-20260917/disposable-acceptance-audit.json",
+      "original_sha256": "4473cff9437cda744ec3eeba50e2d61c5ac9f25115483d9de7c9a8d1c13544a8",
+      "retained_sha256": "4473cff9437cda744ec3eeba50e2d61c5ac9f25115483d9de7c9a8d1c13544a8",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-runtime-attribution.json",
+      "source": ".tmp/uat-study-native-20260917/disposable-runtime-attribution.json",
+      "original_sha256": "0d852843ff5e592b98702bfb036d1cb613aa72323765ec76d7a30b5e39e61243",
+      "retained_sha256": "0d852843ff5e592b98702bfb036d1cb613aa72323765ec76d7a30b5e39e61243",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-edit-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-edit-evidence.txt",
+      "original_sha256": "91f546dc199d9af34f266c015094cb04617c846523292e981dbfaf7fcc4c275e",
+      "retained_sha256": "8333b369c08f5aa7b1b658cef96063510ba7c4bc63ccab1ee25edd5d8cee2bf7",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-cram-filtered.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-cram-filtered.txt",
+      "original_sha256": "24a0844ec198c309ec78924faeddad3fd7ab7c9487847810997d0e0a327c9f5a",
+      "retained_sha256": "b47d6468cd1171aee3f852a4b80b95a74d912695db3c79f91b6015583e09befe",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-schedule-on.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-schedule-on.txt",
+      "original_sha256": "76b596773cb0f8304dae47657758375f9f48074247662c551e0210acb41a7998",
+      "retained_sha256": "76b596773cb0f8304dae47657758375f9f48074247662c551e0210acb41a7998",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-answer-visible.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-answer-visible.txt",
+      "original_sha256": "b7e7685175e08544493b39fefdb00c4c1dc8f3af0ad9a7f1aa20fc335cbc3fb2",
+      "retained_sha256": "b7e7685175e08544493b39fefdb00c4c1dc8f3af0ad9a7f1aa20fc335cbc3fb2",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-rating-fault-installed.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-fault-installed.txt",
+      "original_sha256": "657c12b3e6089e7d4e9a6cd6c06a3ea54ed43565bc4bec04fd73a0c5fca29e75",
+      "retained_sha256": "8b35ef9439803724c3c6ec38e1f081668bfa0ffd6c73017ac269a1c4949b4706",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-rating-negative-submit.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-negative-submit.txt",
+      "original_sha256": "789c1b1e1d20d4f24a8eef59b211e45aae2036e095fca56c8d160119ce023f5a",
+      "retained_sha256": "789c1b1e1d20d4f24a8eef59b211e45aae2036e095fca56c8d160119ce023f5a",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-rating-negative-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-negative-evidence.txt",
+      "original_sha256": "0e2f3902d9c752f780a93239dc55e7cd41b58988c7da113a5c60e5e3b5d92e45",
+      "retained_sha256": "1c6eb83e64df9ad4391d5e740a311109e46f2e7a6bf612e5d4e9b75e659c7360",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-rating-negative.png",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-negative.png",
+      "original_sha256": "072d2b40e1e57758cca7e0a2adfd18c3c0887194f63f1895a9938bde0071f975",
+      "retained_sha256": "072d2b40e1e57758cca7e0a2adfd18c3c0887194f63f1895a9938bde0071f975",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-rating-fault-removed.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-fault-removed.txt",
+      "original_sha256": "d302f798c2b8283bbf5db9f0f03479cc8af94da4dc33d2e8a3f70d0c17570253",
+      "retained_sha256": "f7e2ef4c1f43f01b1edb453cf2f8080c130fb461e889841dce0625da192cf897",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-rating-real-retry.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-real-retry.txt",
+      "original_sha256": "c23306b0d0d2ec339e29df82521c30eadf7294652ec58ff1f7a8d0bf59371814",
+      "retained_sha256": "c23306b0d0d2ec339e29df82521c30eadf7294652ec58ff1f7a8d0bf59371814",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-rating-success-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-rating-success-evidence.txt",
+      "original_sha256": "5648f382b303d1884c7b2d2ec1a6a71517725627ed1df79bfea73f9a28104ba7",
+      "retained_sha256": "5635a657da6ca1e82937e055385c07be196b0b637b03866b36bb3afe07e6cbed",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-completed-session.png",
+      "source": ".tmp/uat-study-native-20260917/disposable-completed-session.png",
+      "original_sha256": "2f771966bf072c73fd64c9f92e21bc87a2ddef96daf650f2afde831f1512f92a",
+      "retained_sha256": "2f771966bf072c73fd64c9f92e21bc87a2ddef96daf650f2afde831f1512f92a",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-session-reload.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-session-reload.txt",
+      "original_sha256": "6a8c52e35f4ef9bf6c6cbfac95550b281ea6b21ab0e4c82e8085f839bc9f075e",
+      "retained_sha256": "6a8c52e35f4ef9bf6c6cbfac95550b281ea6b21ab0e4c82e8085f839bc9f075e",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-session-reload-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-session-reload-evidence.txt",
+      "original_sha256": "a6a9601b5e46381015e052621093e69eba21d8de8d84e208fd9d96d8b78e7865",
+      "retained_sha256": "2332c3826f02c16b73ca6537d4534a52be68ae70f8191d6b4cc89ace3d56e227",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-session-reloaded-visible.png",
+      "source": ".tmp/uat-study-native-20260917/disposable-session-reloaded-visible.png",
+      "original_sha256": "526bf567f0e0ae8b2b9b2251658ba07fb0e044dd6575c6118caca194cbe5307e",
+      "retained_sha256": "526bf567f0e0ae8b2b9b2251658ba07fb0e044dd6575c6118caca194cbe5307e",
+      "normalization": "none"
+    },
+    {
+      "file": "streak-final-native.png",
+      "source": ".tmp/uat-study-native-20260917/streak-final-native.png",
+      "original_sha256": "71e488ff51b2f10f0d15b3080d5572542f993cc9ecd8c53e6c169237016c07d5",
+      "retained_sha256": "71e488ff51b2f10f0d15b3080d5572542f993cc9ecd8c53e6c169237016c07d5",
+      "normalization": "none"
+    },
+    {
+      "file": "streak-final-native-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/streak-final-native-evidence.txt",
+      "original_sha256": "11b3cdb3341ecb7699d2efd65c51e1910e8e4f842a00d7172a1916afd6f37063",
+      "retained_sha256": "b8a8127472e28629ffa33d4ef9ada800230225b8596baf8ddb08c26c8f0dde81",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "study-final-streak-reload.txt",
+      "source": ".tmp/uat-study-native-20260917/study-final-streak-reload.txt",
+      "original_sha256": "86370bd2b80fc23a7f32faacb4950de3b1a8f0f2e57351644b01559854c50349",
+      "retained_sha256": "86370bd2b80fc23a7f32faacb4950de3b1a8f0f2e57351644b01559854c50349",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-reset-confirmation.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-confirmation.txt",
+      "original_sha256": "22ff9cdeef1d165d234576f235b54e95b858b6d63d9e66d14e787198ad5a6c50",
+      "retained_sha256": "22ff9cdeef1d165d234576f235b54e95b858b6d63d9e66d14e787198ad5a6c50",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-reset-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-evidence.txt",
+      "original_sha256": "46c8f04de3051aaf3b6fde2246e98bcde827f9047dbfd09d0b754677d9b7a434",
+      "retained_sha256": "7d05f0103218e7fc180afb63b3a068699db0e829ff1f892ed605c8aeb1a17a34",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "disposable-reset-reload.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-reload.txt",
+      "original_sha256": "3c05846f7b36a7bab96348919b6a70b88cb2aa244a45b23e3295352571bd69f2",
+      "retained_sha256": "3c05846f7b36a7bab96348919b6a70b88cb2aa244a45b23e3295352571bd69f2",
+      "normalization": "none"
+    },
+    {
+      "file": "disposable-reset-reloaded-list-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/disposable-reset-reloaded-list-evidence.txt",
+      "original_sha256": "3a2ec6d7100ddd19a6f5ddb674b6e1c8b62320a238a08dcd0af2ef14c776f696",
+      "retained_sha256": "f9b9200a8efa24e4f31c84922345bf54f41af73c14b271d76d9051a39ead6ae8",
+      "normalization": "trailing text whitespace and final newline"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-17T00:38:21.252Z",
+  "head": "b253ca901c988c5f4d1e7a15cb24f15c2e5b669c",
+  "pid": 14540,
+  "sourceStatus": "reviewed production files frozen; test-only183 edits concurrent",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/Buddy_DB.py",
+      "sha256": "ffd4c2b1dfd7c10e7beed095d354b33b186f26b0515af2f6d3b70980521dffa3"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py",
+      "sha256": "d089e822c3b32de000d66eb85c5f9f541530bcedd07a5c9796ee47531328166c"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py",
+      "sha256": "23f9d6959ac21052310d3051bb40daa7d41b4247456c34de7ff578fd87476abe"
+    }
+  ]
+}

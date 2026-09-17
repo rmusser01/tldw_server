@@ -1,0 +1,462 @@
+{
+  "observedAt": "2026-09-17T02:01:11.394499+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 37174,
+      "state": "idle"
+    },
+    {
+      "pid": 37201,
+      "state": "idle"
+    },
+    {
+      "pid": 37202,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 37203,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 37204,
+      "state": "idle"
+    },
+    {
+      "pid": 37205,
+      "state": "idle"
+    },
+    {
+      "pid": 37206,
+      "state": "idle"
+    },
+    {
+      "pid": 37207,
+      "state": "idle"
+    },
+    {
+      "pid": 37208,
+      "state": "idle"
+    },
+    {
+      "pid": 37209,
+      "state": "idle"
+    },
+    {
+      "pid": 37217,
+      "state": "idle"
+    },
+    {
+      "pid": 37397,
+      "state": "idle"
+    },
+    {
+      "pid": 37398,
+      "state": "idle"
+    },
+    {
+      "pid": 38214,
+      "state": "active"
+    },
+    {
+      "pid": 38243,
+      "state": "idle"
+    }
+  ],
+  "locks": [
+    {
+      "pid": 37202,
+      "relation": "buddy_attachments",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37202,
+      "relation": "buddy_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37202,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37202,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "buddy_attachments",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "buddy_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "chacha_schema_migration_progress",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "db_schema_version",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "db_schema_version",
+      "mode": "RowShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "deck_shares",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "decks",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "decks",
+      "mode": "RowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "decks",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_assets",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_citations",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_citations",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_citations",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_citations",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_review_sessions",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_review_sessions",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_reviews",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_templates",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_templates",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_templates",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcard_templates",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcards",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "flashcards",
+      "mode": "RowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "moodboard_notes",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "moodboards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_attachments",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_studio_documents",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_task_reconciliation_state",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_task_scope_authority",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_tasks",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "note_tasks",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "notes",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "notes",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "source_review_occurrences",
+      "mode": "AccessExclusiveLock",
+      "granted": false
+    },
+    {
+      "pid": 38214,
+      "relation": "source_review_occurrences",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "source_review_plans",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_pack_cards",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_pack_cards",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_pack_cards",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_pack_cards",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_packs",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_packs",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_packs",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "study_packs",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_generation_links",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_generation_links",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_generation_links",
+      "mode": "RowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_generation_links",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_generation_links",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_snapshots",
+      "mode": "AccessExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_snapshots",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_snapshots",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "suggestion_snapshots",
+      "mode": "ShareRowExclusiveLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "task_event_read_state",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "task_events",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "task_events",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "task_note_projections",
+      "mode": "ShareLock",
+      "granted": true
+    },
+    {
+      "pid": 38214,
+      "relation": "task_projection_drifts",
+      "mode": "ShareLock",
+      "granted": true
+    }
+  ],
+  "transactionReadOnlyVerified": true,
+  "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+}

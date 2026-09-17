@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T02:09:23.330Z","installed":true,"card":"f2a61712-8d3e-45df-bfb9-0527f86cda21","expected":"real422, no rating write"}
+### Ran Playwright code
+```js
+await (async page=>{const card='f2a61712-8d3e-45df-bfb9-0527f86cda21',pattern='**/api/v1/flashcards/review';if(page.__uat186RatingFault)throw Error('already installed');const handler=async route=>{const req=route.request();if(req.method()!=='POST')return route.continue();const before=req.postDataJSON();if(before.card_uuid!==card)throw Error('wrong card boundary');page.__uat186RatingFault.applied++;if(page.__uat186RatingFault.applied!==1)throw Error('fault is one request only');const after={...before,rating:6};(page.__uatStudyEvents??=[]).push({event:'controlled-request-override',at:new Date().toISOString(),url:req.url(),before,after,note:'Deliberate invalid rating6; actual FastAPI validation422 before endpoint execution, no fake response.'});await route.continue({postData:JSON.stringify(after)});};page.__uat186RatingFault={pattern,handler,applied:0};await page.route(pattern,handler);return {at:new Date().toISOString(),installed:true,card,expected:'real422, no rating write'};}
+)(page);
+```

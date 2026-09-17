@@ -1,0 +1,95 @@
+{
+  "at": "2026-09-17T02:19:08.411Z",
+  "assertionsPassed": true,
+  "accepted": [
+    177,
+    179,
+    186,
+    187,
+    188
+  ],
+  "reviewSession": {
+    "id": 2,
+    "deck_id": 1,
+    "deck_name_snapshot": "Alice UAT151 Citrine Deck",
+    "review_mode": "cram",
+    "tag_filter": "uat180-disposable-20260917",
+    "scope_key": "cram:deck:1:tag:uat180-disposable-20260917",
+    "status": "completed",
+    "started_at": "2026-09-17T02:09:54.137000+00:00",
+    "last_activity_at": "2026-09-17T02:09:54.332000+00:00",
+    "completed_at": "2026-09-17T02:09:54.332000+00:00",
+    "cards_reviewed": 1,
+    "client_id": "2"
+  },
+  "review": {
+    "uuid": "f2a61712-8d3e-45df-bfb9-0527f86cda21",
+    "ef": 2.5,
+    "interval_days": 0,
+    "repetitions": 1,
+    "lapses": 0,
+    "due_at": "2026-09-17T02:19:54.135000+00:00",
+    "last_reviewed_at": "2026-09-17T02:09:54.135000+00:00",
+    "last_modified": "2026-09-17T02:09:54.135000+00:00",
+    "version": 3,
+    "scheduler_type": "sm2_plus",
+    "queue_state": "learning",
+    "step_index": 1,
+    "suspended_reason": null,
+    "next_intervals": {
+      "again": "1 min",
+      "hard": "15 min",
+      "good": "1 day",
+      "easy": "4 days"
+    },
+    "review_session_id": 2
+  },
+  "reset": {
+    "version": 4,
+    "queue_state": "new",
+    "contentPreserved": true,
+    "originalVersion": 2,
+    "originalRepetitions": 1
+  },
+  "limits": [
+    "Root native evidence audit; implementation independent reviews are retained separately.",
+    "179 assistant half uses separately independently audited native185 evidence.",
+    "180 reset accepted; deletion pending191 preview recapture.",
+    "189/190 completion presentation and191 interval preview remain open.",
+    "181 restart failure remains separate and unresolved."
+  ],
+  "evidence": [
+    {
+      "path": "disposable-rating-negative-evidence.txt",
+      "sha256": "0e2f3902d9c752f780a93239dc55e7cd41b58988c7da113a5c60e5e3b5d92e45"
+    },
+    {
+      "path": "disposable-rating-fault-removed.txt",
+      "sha256": "d302f798c2b8283bbf5db9f0f03479cc8af94da4dc33d2e8a3f70d0c17570253"
+    },
+    {
+      "path": "disposable-rating-success-evidence.txt",
+      "sha256": "5648f382b303d1884c7b2d2ec1a6a71517725627ed1df79bfea73f9a28104ba7"
+    },
+    {
+      "path": "disposable-session-reload-evidence.txt",
+      "sha256": "a6a9601b5e46381015e052621093e69eba21d8de8d84e208fd9d96d8b78e7865"
+    },
+    {
+      "path": "streak-final-native-evidence.txt",
+      "sha256": "11b3cdb3341ecb7699d2efd65c51e1910e8e4f842a00d7172a1916afd6f37063"
+    },
+    {
+      "path": "disposable-reset-evidence.txt",
+      "sha256": "46c8f04de3051aaf3b6fde2246e98bcde827f9047dbfd09d0b754677d9b7a434"
+    },
+    {
+      "path": "disposable-reset-reloaded-list-evidence.txt",
+      "sha256": "3a2ec6d7100ddd19a6f5ddb674b6e1c8b62320a238a08dcd0af2ef14c776f696"
+    },
+    {
+      "path": "disposable-runtime-attribution.json",
+      "sha256": "0d852843ff5e592b98702bfb036d1cb613aa72323765ec76d7a30b5e39e61243"
+    }
+  ]
+}

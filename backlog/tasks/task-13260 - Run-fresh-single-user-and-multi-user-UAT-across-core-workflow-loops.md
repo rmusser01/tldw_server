@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-16 23:45'
+updated_date: '2026-09-17 03:13'
 labels:
   - uat
   - testing
@@ -182,6 +182,8 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 21:52UTC checkpoint164 findings:155verified,7awaiting acceptance(024/031/137/138/139/141/151),2unresolved(163/164),0toolblocked. Independent retained final-source013/103/152/156 native acceptance passes; exact report and164-row ledger under cycle5-repair-verification. Full matrix remains gated. PostgreSQL targeted initial admin creation and real frontend login pass; local provider configuration uses documented isolated operator path.
 
 2026-09-16T23:45Z: tracker180findings,163verified/17native-pending/0unresolved implementation defects. Reviewed commits50a86e81eb,c000d45187,f817f4aa96;179/180readycommit with independent28and22 requiredPG/SQLite passes0skip. Retained failure/repair evidence through180 and current180ledger. Next targeted browser acceptance on fixed source;024uses explicit local provider-fault fixture followed by exactconfig restoration. Full fresh SQLite/PostgreSQL single/multi A/B/C remains pending.
+
+2026-09-17 latest targeted checkpoint:192 product findings;176 native-verified. Reviewed189/190 commit2274e64ff9,192 tag fix26c8aab045 and191 scheduler-previewbd8a7ef1c7 await native acceptance.181 request-ownership implementation remains under validation; no full fresh matrix has run. Usage-limit automatic-review interruption resolved by fresh ordinaryUsageAllowed check after user continue; no reset credit used. Existing branch remains codex/fresh-install-uat-fixes, with initial non-latest-dev ancestry limitation documented.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

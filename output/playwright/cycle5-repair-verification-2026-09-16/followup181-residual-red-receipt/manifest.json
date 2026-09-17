@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T01:32:47.867Z",
+  "files": [
+    {
+      "file": "final-red.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat181-residual-final-red.redacted.log",
+      "original_sha256": "504da2c70b9cff5530e1abec53b80cf3b885942da51b1ed120d5e9942c728ba5",
+      "retained_sha256": "891c1dea1622ed2b107934f2730f45aef3c0ef763276c1629c0e546ba3235e17",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "red-test-manifest.json",
+      "source": ".tmp/uat181-residual-repair-20260917/red-test-manifest.json",
+      "original_sha256": "1034944d1c7c49dc9e8f08dcb68cbaba1471a2ca911411449604fe1969dfb919",
+      "retained_sha256": "1034944d1c7c49dc9e8f08dcb68cbaba1471a2ca911411449604fe1969dfb919",
+      "normalization": "none"
+    }
+  ]
+}

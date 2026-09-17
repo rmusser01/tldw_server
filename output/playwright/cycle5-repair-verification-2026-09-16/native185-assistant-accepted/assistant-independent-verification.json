@@ -1,0 +1,136 @@
+{
+  "auditedAt": "2026-09-17T02:02:44.041Z",
+  "assertionsPassed": true,
+  "card": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+  "clientId": "2",
+  "negative": {
+    "requestAt": "2026-09-17T01:44:45.907Z",
+    "responseAt": "2026-09-17T01:44:45.957Z",
+    "status": 400,
+    "durationMs": 50,
+    "overrideCount": 1,
+    "questionRetained": true,
+    "askEnabled": true,
+    "pageErrorsInNegativeCapture": 0
+  },
+  "removedAt": "2026-09-17T01:45:49.848Z",
+  "retry": {
+    "requestAt": "2026-09-17T01:47:01.693Z",
+    "responseAt": "2026-09-17T01:47:05.838Z",
+    "durationMs": 4145,
+    "requestBodyMatchesOriginalBeforeOverride": true,
+    "explicitProviderOrModel": false,
+    "thread": {
+      "id": 1,
+      "context_type": "flashcard",
+      "flashcard_uuid": "37b10bd7-edf4-4f35-83c1-1490115d8c55",
+      "quiz_attempt_id": null,
+      "question_id": null,
+      "last_message_at": "2026-09-17T01:47:05.808000+00:00",
+      "message_count": 2,
+      "deleted": false,
+      "client_id": "2",
+      "version": 3,
+      "created_at": "2026-09-16T23:31:07.313000+00:00",
+      "last_modified": "2026-09-17T01:47:05.808000+00:00"
+    },
+    "ids": [
+      1,
+      2
+    ],
+    "provider": "llama.cpp",
+    "model": "../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+    "answer": "Citrine study volunteers meet every Tuesday at 14:00."
+  },
+  "reload": {
+    "requestAt": "2026-09-17T01:52:54.274Z",
+    "responseAt": "2026-09-17T01:52:54.334Z",
+    "status": 200,
+    "exactThreadAndMessagesUnchanged": true,
+    "correctedFilter": "/assistant",
+    "originalIncompleteFilter": "/assistant/"
+  },
+  "sources": [
+    {
+      "path": "assistant-fault-installed-repaired.txt",
+      "sha256": "92f3db4aeae46e47724db9815e3b0bae61ccc56061bd2b249e1faa6d5797cec8"
+    },
+    {
+      "path": "assistant-repaired-expanded.txt",
+      "sha256": "71fb3cd7e72338bed3036ac39fcc1f8d94371477c4063b9646704abe8b0e0305"
+    },
+    {
+      "path": "assistant-repaired-fault-removed.txt",
+      "sha256": "24c7f8615415fe96f0057cdb3ebb0eb9d9d69e250794ea0f9a348b14116e9b52"
+    },
+    {
+      "path": "assistant-repaired-negative-evidence.txt",
+      "sha256": "2d5983f8a03ffb1a9c66b76ea30e18566d2b6d450eda50c13b066d3019b50bee"
+    },
+    {
+      "path": "assistant-repaired-negative-submit.txt",
+      "sha256": "4371ea879a73a0f0dad0fcda08a6da1c1491b9054a2d96a4ea6a1d728642f0fd"
+    },
+    {
+      "path": "assistant-repaired-negative.png",
+      "sha256": "9cec5f21c4866805360c9637649635271148017f4dd28533425dca5dba420dc9"
+    },
+    {
+      "path": "assistant-repaired-open.txt",
+      "sha256": "078efb721ef1c29559752ec55ab577e46dc143d8e0fff5199842c9d30c332375"
+    },
+    {
+      "path": "assistant-repaired-question.txt",
+      "sha256": "46b505eadf288e25b8049c027eb0c8de872a3e9043336ae2ac792284b7be9c7f"
+    },
+    {
+      "path": "assistant-repaired-real-result.txt",
+      "sha256": "b30af9409f5795404085da7ce9e230d96bfaab73e812921c463f0c50285fd258"
+    },
+    {
+      "path": "assistant-repaired-real-retry.txt",
+      "sha256": "f666f2f5f852fa8bc9869cae22a8cdf5c032878aaf5b81f21b871e6b313c7052"
+    },
+    {
+      "path": "assistant-repaired-reload-corrected-filter.txt",
+      "sha256": "0c81f3264b912db9bd0a616b04485353679dba43b58fe04efdd82a3d2ab8f40e"
+    },
+    {
+      "path": "assistant-repaired-reload-evidence.txt",
+      "sha256": "68aa73f1bff43ba78f359d0f9108a86ba1ac768ae7f26715fad44d54117d20f9"
+    },
+    {
+      "path": "assistant-repaired-reloaded-panel.txt",
+      "sha256": "c72ae09a22f2a491bfe5e1cd8da16d3e1591e388dfbd2314689bdaffa9ffa2f3"
+    },
+    {
+      "path": "assistant-repaired-reloaded-visible.png",
+      "sha256": "cd6c97ba1b1fbe5d716d642b3aa8c5a90cc12a8d249a58a4e721e840db27bf7f"
+    },
+    {
+      "path": "assistant-repaired-reloaded.png",
+      "sha256": "6f39cda69d8458f81547cdf9fb9bb20072e3520e7c770a54186c33d44674e8c3"
+    },
+    {
+      "path": "assistant-repaired-success.png",
+      "sha256": "15dba226120b33efdede691d8fcc8e31671f84dd2a3be415f3055ed40d5b6893"
+    },
+    {
+      "path": "repaired-study-acceptance-start.txt",
+      "sha256": "4319d4341e297c653da623a94c9719216982506f6c0a8011f126238342b1d4c8"
+    },
+    {
+      "path": "repaired-study-bootstrap-events.txt",
+      "sha256": "d96d1f9871973ae381bb190e12b8e32ff0842bcb73e602cf70f9a408db961f4d"
+    }
+  ],
+  "runtimeManifest": "Do not use source-manifest.json: explicitly stale 00:12 protocol-preparation record.",
+  "reviewActions": [
+    "read retained text",
+    "parse JSON and compare exact IDs/objects",
+    "view three retained screenshots"
+  ],
+  "browserActions": [],
+  "providerCalls": [],
+  "productEdits": []
+}

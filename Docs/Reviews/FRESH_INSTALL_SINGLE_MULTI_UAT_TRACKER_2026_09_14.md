@@ -2,6 +2,32 @@
 
 ## Run status
 
+- **03:14 UTC reviewed checkpoint:192 findings —176 verified,15 awaiting native acceptance,1 unresolved (181).**191 scheduler-previewbd8a7ef1c7 and192 named-tag-columns26c8aab045 are independently reviewed and committed, each with mandatory PostgreSQL coverage and zero skips.189/190 final completion also awaits native recapture. [Reviewed ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-192-reviewed-checkpoint.json). The request-ownership prototype is incomplete and has not been loaded into the native API; full fresh matrix remains gated.
+
+- **02:37 UTC repair reconciliation:192 unique findings —176 verified,13 awaiting native acceptance,3 unresolved (181/191/192).**177/179/184/185/186/187/188 now have retained passing PostgreSQL browser acceptance.189/190 are independently reviewed and committed2274e64ff9; final completion recapture awaits191. New192 isolates two named-row tag mutation failures: actualDB RED8fail12controls, GREEN28pass0skip, independent review underway.181 actual HTTP lifetime RED9fail14controls leads to an explicit request-owner/maintenance design; further per-query patches stopped. [Current ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-192-repair-checkpoint.json). Full fresh matrix remains gated; harness125 is independently reviewed separately.
+
+- **02:12 UTC Study acceptance follow-up:191 unique findings.** Disposable-card edit200, controlled rating422, ordinary Retry200, completed session2/count1 and normal-reload session/analytics200 now succeed. New189 is completion singular grammar,190 is the contradictory no-match message after completing a nonempty tag queue,191 is the one-day Good preview versus the actual ten-minute scheduled result. Tasks13260.127/.128/.129 precede repair work.185 passes independent native audit;186 rating,177/179/187 and188 await retained-evidence acceptance.181 remains unresolved after the third replacement failure; no full matrix rerun.
+
+- **02:02 UTC third181 native failure; architecture reassessment required.** Complete Notes/keyword/collection bootstrap passes200 on committed3ce1b63d57 and releases those locks. A separate retained Buddy/source-review transaction still blocks replacement initialization on source_review_occurrences. With old61182 draining and new63046 health200, actual Notes/collections/keywords return500 at02:01:34UTC; Notes automatic retry also500.181 remains unresolved; further query-by-query patches are stopped. Read-only architecture reassessment precedes another implementation. Full matrix remains gated.
+
+- **01:54 UTC Study response/reload:** controlled assistant400 preserved the question and usable Ask action without an overlay. After removing the single-request override, the configured real Gemma provider returned200 with the correct Tuesday14:00 answer. Normal reloadGET200 retained thread1/version3 and exactly messages1/2 with unchanged content/provider/timestamps.185 awaits independent evidence audit;186 rating recovery and179 completed-session acceptance remain pending. No original-card rating was resubmitted.
+
+- **01:44 UTC Study wording finding:188 unique findings.** Actual populated PostgreSQL analytics now returns200 with study_streak_days1, while the UI shows1 days.188/TASK13260.126 tracks the localized wording.185/186 controlled error recovery and real-provider retry are underway;181 whole Notes keyword/collection bootstrap reads and harness125 remain in repair/review. Full matrix remains gated.
+
+- **01:38 UTC targeted transaction follow-up:**169 verified,17 awaiting acceptance,181 remains unresolved. Six character/persona read scopes are committed1872951315 and independently pass31 controls, but the real Notes page also issues keyword/collection reads missing from prior chain tests. All-public-table metadata confirms these locks and a replacement wait on note_folders. This handoff returnedNotes200, so it is not recorded as a native500 failure. Causal whole-Notes-bootstrap regressions are required before another bounded repair.
+
+- **Harness preparation findings, TASK13260.125:** the unexecuted fresh-matrix launcher needs successful-initialization verification, launch prerequisites and unique source-root binding per run/cell. These are tracked harness defects and do not increment native product findings. Author self-review is explicitly distinguished from independent review; no matrix action has run.
+
+- **Reviewed-repair checkpoint:187 findings —169 verified,17 awaiting native acceptance,1 unresolved (181).**161 and182 have independently audited native acceptance.184–187 are reviewed and committed;181 six residual read scopes pass184 tests and await independent review. [Image acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native182-image-accepted/README.md), [actual remaining transaction failure](../../output/playwright/cycle5-repair-verification-2026-09-16/native181-residual-failure/README.md). Full fresh matrix has not started.
+
+- **01:20 UTC PostgreSQL acceptance failure:187 findings —167 verified,14 awaiting acceptance,6 unresolved (161,181,184–187).** Actual overlapping replacement reaches health200 but Notes returns500. Old persona reads retain a transaction; new initialization waits for AccessExclusiveLock on persona_profiles.181 is reopened within its existing scope. Six specifically reproduced missing read scopes are being repaired; no new finding number and no full UAT restart.
+
+- **Current targeted reconciliation: 187 findings — 167 verified, 15 awaiting acceptance, 5 unresolved (reopened161,184–187).** Independent native audit accepts137/168/178. The saved Flashcard image survives reload with identical PNG bytes;182 awaits independent audit.161 reopened because the relocated development badge covers Create.181 remains pending: replacement Notes reads succeed after the prior API exits, but read-only metadata still shows retained transactions; overlapping replacement acceptance is not established. The full fresh matrix has not started.
+
+- **00:52 UTC scheduled-review finding: 187 findings — 165 verified, 18 awaiting acceptance, 4 unresolved (184–187).** Original Citrine Good rating returns500 on response datetime validation, but the subsequent real Manage read shows Recall runs1 and the new due time.187/TASK13260.124 tracks this saved-but-reported-failed mutation; the original rating will not be resubmitted.186 expands to the same observed overlay mechanism in the review mutation.177/179 populated-session acceptance remains pending. Image upload is the next independent native check.
+
+- **00:47 UTC targeted Study failure: 186 findings — 165 verified, 18 awaiting acceptance, 3 unresolved (184–186).** Native Study assistant Ask returns500 before inference with `LLM provider is required`;185/TASK13260.122 tracks missing default-provider resolution. Source inspection rejected the initial keyword-mismatch hypothesis: the adapter accepts api_provider, but the actual UI request omits provider/model.186/TASK13260.123 separately tracks the blocking Next error overlay from its mutation reporter. The question remains visible in the inline error state.179 populated assistant acceptance remains pending; rating/image checks are independent. No full rerun.
+
 - **00:44 UTC repair checkpoint: 184 findings — 165 verified, 18 awaiting native acceptance, 1 unresolved (184).**183's four migration test corrections pass the complete162-case adjacent suite and4 independent controls, zero skips, with production migration guards unchanged.181/182 remain reviewed and under targeted native acceptance. Current source-backed Manage list and Cram error/Retry controls succeed; acceptance reconciliation follows retained evidence review. Full fresh matrix has not started.
 
 - **00:41 UTC targeted native finding: 184 unique findings.** The repaired PostgreSQL API loads Alice's Notes and populated Flashcards deck. Manage displays `1 Cards` against real count1/total1, now184/TASK13260.121. This is separate from137 Study wording and166 generation feedback. Current targeted Study and fixed-to-fixed restart checks continue on frozen production files; no full rerun.
@@ -133,7 +159,7 @@
 ## UAT-178 — P1: Failed Cram queue load is displayed as successful completion
 
 - With one real saved new card in the selected deck, the queue GET returns500 repeatedly. Cram nevertheless says “Cram session complete! You reached the end of your cram queue.” No rating has occurred. This is distinct from039's pre-start readiness copy and128's scheduled re-rating queue shrink.
-- Status: implemented, TASK13260.115; native acceptance pending. Explicit error/Retry/loading feedback and success-gated completion preserve current scope and progress. Independent65 tests across5 files pass with zero skips, including cached-progress/session controls. [Repair and review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup178/README.md), [native failure](../../output/playwright/cycle5-repair-verification-2026-09-16/followup177-178-native/README.md).137's one-card Cram acceptance remains pending.
+- Status: verified, TASK13260.115. Native controlled Cram GET failure shows actionable error/Retry, then the real same-card GET200 recovers without a page reload or false completion. The fault was removed before Retry; scheduling stayed OFF through recovery. Independent65 UI tests pass. [Native evidence and independent audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native137-168-178-accepted/README.md).
 
 ## UAT-177 — P1: PostgreSQL Study analytics and queue reads fail
 
@@ -186,7 +212,7 @@
 ## UAT-168 — P1: PostgreSQL Flashcards listing fails when reading its count
 
 - Two actual GET /flashcards requests return500 during the PostgreSQL Notes handoff. count_flashcards uses row[0] on a mapping result containing the named cnt column, raising KeyError0. This is distinct from167's response timestamp validation failure.
-- Status: implemented, TASK13260.105, commit `1d79053797`; native acceptance pending. Named columns repair count, deck version, asset reconciliation and card update/no-op paths without changing SQL semantics. Combined167/168 actual PostgreSQL/SQLite checks pass38 with zero skips; independent review and Bandit pass. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup168/README.md).
+- Status: verified, TASK13260.105, commit `1d79053797`. Native PostgreSQL Manage reads return200 with count1/total1 and the original saved source-note card identity. Named-column count/write regressions pass38 PostgreSQL/SQLite controls with zero skips. [Native evidence and independent audit](../../output/playwright/cycle5-repair-verification-2026-09-16/native137-168-178-accepted/README.md).
 
 ## UAT-167 — P1: PostgreSQL generated-card save fails while returning the new deck
 
@@ -223,7 +249,7 @@
 
 ## UAT-161 — P3: Development indicator covers the collapsed sidebar Settings button
 
-- Status: verified, TASK13260.98. Supported Next configuration moves the indicator to bottom-right; independent12/2 tests, installed-schema review and actual pointer/geometry checks pass. Chat composer/Send/Advanced controls also remain clear in the captured viewport. Errors stay enabled; explicit developer position preferences are preserved. [Evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup161/README.md).
+- Status: verified after reopened repair, TASK13260.98, commit0ded794730. Supported devIndicators:false removes the optional badge; actual ordinary Create invokes required-field validation and Settings pointer navigation succeeds. A labeled synthetic runtime TypeError remains visibly reported. Independent review and12 existing config tests pass. [Retained acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/followup161-reopened-accepted/README.md).
 - At1200×969, the bottom-left Next.js development indicator overlaps the Settings button center. A normal pointer click times out because `nextjs-portal` intercepts it; keyboard Enter opens Settings. The screenshot shows the indicator, not a runtime-error overlay. This is a development-only UX defect; production impact is not claimed.
 - TASK13260.98 records a bounded configuration/layout repair that preserves development error visibility. Actual screenshot and click failure are being retained from `.tmp/uat142-native-20260916/`; no full UAT restart.
 
@@ -435,7 +461,7 @@ The fresh native additions close older012/015/016/055/056/068/074/104 boundaries
 
 - Targeted scheduled Cram on frozen `3c30685611` displays and announces `1 cards remaining` before the fifth card. Evidence: `cycle5-repair-native-single-032-after4.txt`. UAT039's historical quote also contains this wording but tracks a separate false-completion state.
 - Expected: singular card wording at1 and plural wording at0/multiple cards, using existing localization conventions without changing counts or queue behavior.
-- Status: open, TASK13260.76. Repair waits for the current native freeze to finish. No product edits or pass are claimed.
+- Status: verified, TASK13260.76. Independent native audit confirms visible and live-region singular wording for the one-card Cram queue; no queue count or rating changed during that check. [Native evidence and review](../../output/playwright/cycle5-repair-verification-2026-09-16/native137-168-178-accepted/README.md).
 
 ## Cycle 5 fresh workflow run — execution complete, repairs pending
 
@@ -1880,7 +1906,13 @@ Evidence review: checked all48 retained evidence files (plus the generated manif
 
 Additional URL observation: both Media inspectors show “Chunking: Completed” for the Wikipedia denial item despite the submitted `perform_chunking:false`. The processing-state origin was not independently diagnosed; retain this discrepancy with UAT-044 for investigation rather than infer a separate confirmed root cause.
 
-## UAT-181 — P1, implemented; native acceptance pending — PostgreSQL Flashcards reads block replacement database initialization
+## UAT-181 — P1, reopened — PostgreSQL reads block replacement database initialization
+
+- Third bounded repair committed3ce1b63d57: four keyword/collection reads, actual whole-Notes chain RED14/30, author92 and independent44 PASS/0skips. Native full Notes bootstrap200 at01:58:57UTC releases all its keyword/collection/Notes locks. All-public-table metadata still shows idle transactions retaining Buddy/source-review locks. Replacement63046 reaches health200 while old61182 drains; new initializer waits on source_review_occurrences and actual Notes/collections/keywords return500 at02:01:34UTC. Notes automatic retry500 at02:01:39UTC. **Stop further per-query patches and reassess transaction/schema lifecycle architecture before another repair.** Evidence `.tmp/uat181-full-native-20260917/` includes exact backend3667-file source manifest, metadata, wire responses and screenshot. [Four-read repair/review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-notes-bootstrap-reviewed/README.md).
+
+- Six residual character/persona read scopes are now committed1872951315, with author184 and independent31 passing controls. Native all-public-table follow-up shows additional keyword/collection predecessor locks; the earlier monitor allowlist hid those tables. The latest actual Notes responses are200 during old-process exit, but metadata proves initialization waited on note_folders. Do not claim another500 or complete181 acceptance. New actual whole-Notes bootstrap-chain tests are in progress; no broad commit/rollback or generic execute-query change is proposed.
+
+- Reopened native overlap at01:19 UTC: old API32260 is still draining when new38457 returnshealth200; actual Notes GETs fail500. Metadata records old7234 holding persona_profiles and new12217 waiting for an exclusive lock there. Six additional default-character/persona read scopes have causal official-PG regressions; repair is in progress. Evidence `.tmp/uat181-native-20260917/bounded-replacement-notes-events.txt` and `bounded-replacement-notes-38457.json`. The earlier after-old-exit load passed only normal startup.
 
 - Actual PG multi Alice Notes list/detail reads succeed and release Notes locks. Owned API740 begins graceful shutdown00:00:36UTC; replacement2996 reaches startup/root health200. Its actual Notes/detail/collections/keywords calls then return500 `ChaChaNotes DB unavailable`.
 - Read-only metadata00:03:23UTC shows bootstrap `ALTER TABLE flashcards ADD COLUMN IF NOT EXISTS front_search TEXT` waiting for AccessExclusiveLock behind seven older idle transactions. Their last statements concern Flashcards/decks/Buddy; exact ownership diagnosis is retained privately pending review. This is separate from171 standalone Notes reads and does not reopen accepted024 error UX.
@@ -1890,7 +1922,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Reviewed repair adds39 explicit pure-read scopes across four files. Required PostgreSQL regression proof includes populated Buddy chains, actual replacement initialization and caller-owned transaction controls. Root85 lifecycle/Notes checks and independent61 lifecycle checks pass with zero skips. Four baseline migration-test failures are separately tracked as183; native replacement acceptance remains pending.
 - [Repair and causal evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181/README.md), [independent review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-review/final-review.md), [root verification](../../output/playwright/cycle5-repair-verification-2026-09-16/followup181-182-root/README.md).
 
-## UAT-182 — P1, implemented; native acceptance pending — PostgreSQL Flashcard asset content raises a row-index error
+## UAT-182 — P1, verified — PostgreSQL Flashcard asset content raises a row-index error
+
+- Status: verified, TASK13260.119. Actual PNG upload200, keyboard Create200, persisted reference after reload, exact contentGET200 bytes and rendered120×120 preview pass independent audit on the committeda647 getter. Pointer collision remains separately handled by161. [Native image acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native182-image-accepted/README.md).
 
 - Official mandatory-PG probe saves an asset and reads its metadata, then get_flashcard_asset_content raises KeyError:0 at positional row access. Same SQLite probe passes;1failed/1passed/0skips. The actual content route calls this getter, but a native endpoint failure has not yet been claimed.
 - TASK13260.119 precedes permanent tests and repair. Use the named image_data column, retain binary/missing/deleted semantics, test actual route responses, then perform native image-content upload/load/reload acceptance. Separate from181 read transaction ownership. Private causal proof: .tmp/uat181-review-20260917/asset-probe-redacted.log.
@@ -1903,7 +1937,82 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - TASK13260.120 precedes edits. Construct the historical schema accurately, retain seeded-data and explicit v66 storage/RLS checks, and verify current-head upgrade completion. Do not weaken production migration guards or skip these failures. Repeat the complete adjacent suite and independent review before acceptance.
 - Verified test-only repair constructs39 using the real V4 base and registered migrations, then restores normal initialization for upgrade. Exact66 Buddy storage and forced RLS checks remain, followed by current-head preservation. All162 adjacent tests and4 independent controls pass with zero skips. Ruff has zero new findings; Bandit reports only expected pytest assertions, with zero non-assert findings. [Repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup183/README.md), [review](../../output/playwright/cycle5-repair-verification-2026-09-16/followup183-review/independent-review.md), [complete adjacent run](../../output/playwright/cycle5-repair-verification-2026-09-16/followup183-adjacent/README.md). This regression-fixture defect has no separate browser acceptance requirement.
 
-## UAT-184 — P3, open — Manage uses plural card wording for one card
+## UAT-184 — P3, verified — Manage uses plural card wording for one card
+
+- Current acceptance: actual PostgreSQL filtered count1/list200 renders1 card; root visual/machine audit retained in native184-manage-count-accepted.
+
+- Status: implemented and independently reviewed, native count1 acceptance pending. Commitb338016414; author40 assigned tests and independent21 combined184/186 cases pass with zero skips. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup184-186-reviewed/README.md).
 
 - Actual Alice PostgreSQL Manage page displays `1 Cards` for the original Citrine card. Real list responses return count1/total1 and preserve the saved source-note link. Original screenshot/snapshot/wire evidence is in `.tmp/uat-study-native-20260917/manage-populated.png`, `manage-deck-selected.txt` and `manage-events.txt`, awaiting retention.
 - TASK13260.121 precedes edits. Apply the existing localized count convention to Manage without changing totals, selection or list behavior. Focused localization validation, independent review and native count1 recapture are required. Production files remain frozen during the current targeted acceptance sequence.
+
+## UAT-185 — P1, verified — Study assistant fails before provider dispatch
+
+- Current acceptance: independent native audit accepts controlled400, real Gemma200 and normal reload with identical saved thread/messages; native185-assistant-accepted.
+
+- Independent native audit accepts the real400 → Retry200 → reloadGET200 path, exact unchanged canonical pair, and visible response. Source provenance is a transparent same-commit/no-hot-reload startup chain; no exact postlaunch47347 loaded-source receipt was created. Full details and limits are in `.tmp/uat-study-native-20260917/assistant-independent-review.md`, pending durable retention.
+
+- Native targeted response/reload now succeeds: real provider200 at01:47:05.838UTC, reloadGET200 at01:52:54.334UTC, thread1/version3/message_count2 and exact messages1/2 preserved. Answer: “Citrine study volunteers meet every Tuesday at 14:00.” The controlled prior400 wrote no pair; its override was removed before the real retry. Independent evidence audit is pending. Evidence: `.tmp/uat-study-native-20260917/assistant-repaired-real-result.txt`, `assistant-repaired-reload-corrected-filter.txt`, and `assistant-repaired-reloaded-visible.png`. The earlier reload evidence filter incorrectly required a trailing slash and returned no events; the corrected filter captures the actual GET ending `/assistant`.
+
+- Status: implemented and independently reviewed, native real-provider response/reload pending. Commit1d375dd491; author159combined+21 selected endpoint controls and independent65 requiredPG/SQLite cases pass in separate runs, zero skips. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup185-reviewed/README.md).
+
+- Native Alice PostgreSQL Study Ask for the Citrine card returns500 and `Study assistant unavailable`. Sanitized traceback reaches study_assistant.py generate_study_assistant_reply and raises `LLM provider is required` before inference. The adapter accepts api_provider as an alias, rejecting the initial keyword-mismatch hypothesis. The actual native payload omits provider/model and Study fails to resolve the configured default. Default/model/credential ownership is under investigation. This is distinct from179 timestamp serialization.
+- TASK13260.122 precedes edits. Preserve real provider ownership, user/system context, actionable missing-configuration responses and exchange persistence. Causal actual-adapter and required-PG controls, independent review and actual successful response/reload are required. Evidence: `.tmp/uat-study-native-20260917/assistant-events.txt`, `assistant-settled.txt`, and `assistant-backend-diagnostic.redacted.log`.
+
+## UAT-186 — P2, verified — Study assistant and rating error reporting open blocking runtime overlays
+
+- Current acceptance: retained native-study177-179-186-188-accepted confirms controlled rating422 → ordinary Retry200, completed session2/count1, identical reloaded session and analytics/streak1; visible1 day. Earlier pending observations below are historical.
+
+- Native assistant half passes the controlled400 → same-question real200 → reload sequence with no blocking overlay; the question remains available after failure and clears only after success. Native rating failure/Retry remains pending, so186 is not yet accepted.
+
+- Status: implemented and independently reviewed, native failure/real retry pending. Commitb338016414; author97 assigned tests and independent21 combined184/186 cases pass with zero skips. Exactly two handlers reuse the existing reporter; unexpected errors retain diagnostics. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup184-186-reviewed/README.md).
+
+- The same actual assistant500 has usable inline guidance and a preserved question, but its mutation onError logs the Error object with console.error. The Next runtime overlay blocks the normal view. Escape did not dismiss it in this native attempt. Screenshot: `.tmp/uat-study-native-20260917/assistant-server-error-overlay.png`.
+- TASK13260.123 precedes edits. Reuse the established recoverable mutation reporter, retain diagnostics for unexpected errors, and prove the real assistant mutation/Next boundary plus failed-request-to-successful-Retry UX. Separate from185 provider dispatch,175 create errors and024 generation errors.
+- The scheduled-review500 reproduces the same console-driven overlay in useFlashcardReviewMutation. Include these two actually observed Study handlers in the same repair;187 separately owns the review response failure. Preserve failed-rating recovery and unexpected-error diagnostics.
+
+## UAT-187 — P1, verified — PostgreSQL review saves scheduling but fails response timestamp validation
+
+- Current acceptance: retained native-study177-179-186-188-accepted confirms controlled rating422 → ordinary Retry200, completed session2/count1, identical reloaded session and analytics/streak1; visible1 day. Earlier pending observations below are historical.
+
+- Status: implemented and independently reviewed, native single successful rating/session acceptance pending. Commit6f177f30c6; author71 and root15 requiredPG/SQLite cases pass with zero skips, productionBandit clear. [Repair evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup187-reviewed/README.md).
+
+- The actual original Citrine Cram Good request returns500. Sanitized FastAPI validation identifies datetime values rejected by FlashcardReviewResponse string fields due_at, last_reviewed_at and last_modified. Subsequent actual Manage list shows the changed due time and Recall runs1, proving the schedule was saved despite the failure response. Do not resubmit the original rating and create another review unintentionally.
+- TASK13260.124 precedes edits. Normalize timestamps at the exact response boundary using the established contract; retain scheduling, version, session and authorization behavior. Causal official PostgreSQL/SQLite actual-route tests, independent review, and native single successful rating plus persisted session acceptance are required. Evidence: `.tmp/uat-study-native-20260917/rating-events.txt`, `rating-backend-diagnostic.redacted.log`, `rating-server-error-overlay.png`, and `manage-after-rating-ready.txt`. Separate from179 completed-session/assistant response models.
+
+## UAT-188 — P3, verified — Study streak uses plural day wording at one
+
+- Current acceptance: retained native-study177-179-186-188-accepted confirms controlled rating422 → ordinary Retry200, completed session2/count1, identical reloaded session and analytics/streak1; visible1 day. Earlier pending observations below are historical.
+
+- Two-message ICU repair committed6982d72114 after independent18/4 tests,0skips. Actual reloaded PostgreSQL analytics shows1 and native Study now renders1 day; independent acceptance audit remains pending. [Reviewed repair](../../output/playwright/cycle5-repair-verification-2026-09-16/followup188-reviewed/README.md).
+
+- Actual PostgreSQL analytics response contains study_streak_days1 and the visible Study dashboard renders1 days. The numerical metric is correct; the localized day label is wrong. Native screenshot and response receipts: `.tmp/uat-study-native-20260917/study-one-day-streak.png` and `repaired-study-bootstrap-events.txt`.
+- TASK13260.126 precedes edits. Use the existing full ICU count-message pattern, preserve0/multiple and the actual value, add causal real-localization checks, and recapture the genuine one-day response after review. Separate from137 remaining-card and184 Manage count wording.
+
+## UAT-189 — P3, implemented; native acceptance pending — one-card Cram completion uses plural grammar
+
+- Current acceptance: reviewed commit2274e64ff9, independent64tests/6files0skip; native final completion remains pending191.
+
+- Actual filtered scheduled Cram completes session2/cards_reviewed1, but the visible celebration says `1 cards practiced in this cram session`. This is a separate completion message from137 remaining-card wording. TASK13260.127 owns localized singular/plural correction without count changes.
+- Evidence: `.tmp/uat-study-native-20260917/disposable-rating-real-retry.txt`, `disposable-completed-session.png`, and `disposable-rating-success-evidence.txt`. Actual rating/end/session-list responses all200. New causal tests and design precede production changes.
+
+## UAT-190 — P2, implemented; native acceptance pending — completed filtered Cram reports no matching cards
+
+- Current acceptance: reviewed commit2274e64ff9, independent64tests/6files0skip; native final completion remains pending191.
+
+- The tag-filtered queue contains one saved disposable card. After its successful scheduled rating and completed session, the UI says `No cards match this cram tag filter.` above `You reached the end of your cram queue.` The actual matching-card list remains nonempty; the session is exhausted, not an initially empty search.
+- TASK13260.128 owns the completed versus initial-empty distinction. Preserve loading/error recovery178, rating/re-rating progression128, genuine no-match guidance and scope changes. Same native completion evidence as189; no full UAT restart.
+
+## UAT-191 — P2, implemented; native acceptance pending — scheduled Cram previews one day but saves ten minutes
+
+- Current status: independently reviewed and committed; durable followup191-reviewed retains tests/source limits. Native exact scenario remains pending. Earlier diagnosis below is historical.
+
+- New disposable card, Update schedule on: the Good button displays1 day. Actual successful rating at02:09:54.135UTC sets due02:19:54.135UTC, a ten-minute gap; the saved toast accurately reports10minutes. The controlled preceding invalid-rating422 did not write a review. The final successful response is version3/repetitions1/session2.
+- TASK13260.129 owns diagnosis of the displayed interval source versus active scheduler output. Evidence: `.tmp/uat-study-native-20260917/disposable-answer-visible.txt` and `disposable-rating-success-evidence.txt`. Preserve the scheduler algorithm and practice-only behavior; do not change scheduling merely to fit the stale preview. The original Citrine card is unchanged.
+
+## UAT-192 — P1, implemented; native acceptance pending — PostgreSQL Flashcard tag writes read named rows as tuples
+
+- Current status: independently reviewed and committed; durable followup192-reviewed retains tests/source limits. Native exact scenario remains pending. Earlier diagnosis below is historical.
+
+- Required official PostgreSQL191 fixture exposes set_flashcard_tags KeyError0 before scheduler checks. Root actual route/database tests independently reproduce HTTP PUT/PATCH500 and HTTP POST200 with missing keyword links; SQLite controls pass. A second tuple read in the shared keyword-link synchronizer fails when existing links are present. No native tag failure is claimed yet.
+- TASK13260.130 precedes edits. Exact two named-column reads preserve SQL, versions, normalized tags_json, actual link membership, missing/deleted behavior and caller rollback. Corrected causalRED8fail12controls0skip; GREEN28pass0skip; scoped Ruff/Bandit0. Independent review/native targeted acceptance pending. Private evidence .tmp/uat192-repair-20260917; separate from181 transaction ownership and191 scheduler preview.

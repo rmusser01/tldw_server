@@ -1,0 +1,58 @@
+{
+  "runtimePid": 47347,
+  "sourceHead": "1872951315dc96c06faf1da23aa6520de3866565",
+  "sourceAttributionLimit": "No exact post-launch source receipt was created for PID47347. The preceding PID45185 manifest and overlapping health receipt supply the retained source chain; these are not an independent exact loaded-module measurement.",
+  "precedingSource": {
+    "path": ".tmp/uat181-native-20260917/repaired-45185-source.json",
+    "sha256": "f12950d0ff80e4349414695ef885359d45f437c0472283503f577d25dff1e3ed",
+    "at": "2026-09-17T01:33:29.538Z",
+    "pid": 45185
+  },
+  "overlap": {
+    "path": ".tmp/uat181-final-native-20260917/repaired-overlap-health.json",
+    "sha256": "742e5b4d0f575021da4616521da3c6f5e0e3421cbe9605f22f74a58a36a44011"
+  },
+  "startup": {
+    "path": ".tmp/fresh-uat-recovery-20260916/profiles/tldw-onboarding-uat-recovery-targeted-pg-multi-20260916/logs/live-tier-uat/backend-1789609015512.private.log",
+    "sha256": "153c3e37192cfce8acfb61a259812a60c2ee338184d06907ff95e3b272b0fe5f",
+    "allowlistedPhrases": [
+      "Started server process [47347]",
+      "Waiting for application startup.",
+      "Application startup complete.",
+      "Uvicorn running on http://127.0.0.1:18503"
+    ]
+  },
+  "stopped": {
+    "path": ".tmp/uat181-full-native-20260917/prior-source-stopped.json",
+    "sha256": "b839351401bd507fd6f209e4223a3c05e4594c249bc7d1093b23eb50f5edfd22"
+  },
+  "reload": {
+    "path": ".tmp/fresh-uat-recovery-20260916/browser-evidence/1789609953886-reload.private.txt",
+    "sha256": "bfef24bf27296e1235efa6180e93ee9e4d92a91ac33520a9fcec7d2bb8fee539",
+    "executedCode": "await page.reload();",
+    "captureNameUnixMs": 1789609953886,
+    "captureNameTimestamp": "2026-09-17T01:52:33.886Z"
+  },
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/Flashcards/study_assistant.py",
+      "precedingManifestHash": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660",
+      "currentHash": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+      "precedingManifestHash": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
+      "currentHash": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/quizzes.py",
+      "precedingManifestHash": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef",
+      "currentHash": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "precedingManifestHash": "1ee9663cf71635cb2bdd2504cf4605cce852a0cfd223e49bcee8d69cd7b5dd3d",
+      "currentHash": "1ee9663cf71635cb2bdd2504cf4605cce852a0cfd223e49bcee8d69cd7b5dd3d"
+    }
+  ]
+}

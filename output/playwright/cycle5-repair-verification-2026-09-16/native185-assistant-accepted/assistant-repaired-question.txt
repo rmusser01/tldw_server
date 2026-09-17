@@ -1,0 +1,4 @@
+### Ran Playwright code
+```js
+await page.getByRole('textbox', { name: 'Ask the study assistant' }).fill('Using only this card and its linked note, state the day and time when Citrine study volunteers meet in one sentence.');
+```

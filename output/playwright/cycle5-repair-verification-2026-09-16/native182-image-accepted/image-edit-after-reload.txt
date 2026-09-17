@@ -1,0 +1,300 @@
+### Ran Playwright code
+```js
+await page.getByTestId('flashcard-edit-f2a61712-8d3e-45df-bfb9-0527f86cda21').click();
+```
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: (current) [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=cards)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media?id=1)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [For this fictional UAT031 control, reply with exactly: CITRINE RETRY VERIFIED. | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+- 11: [Notes | tldw](http://127.0.0.1:18583/notes)
+### Page
+- Page URL: http://127.0.0.1:18583/flashcards?tab=cards
+- Page Title: Flashcards | tldw
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-09-17T01-01-27-113Z.yml)
+
+- generic [ref=f14e11]:
+  - generic [ref=f14e12]:
+    - generic [ref=f14e14]:
+      - link "Skip to main content" [ref=f14e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f14e16]:
+        - button "Expand sidebar" [ref=f14e17] [cursor=pointer]
+        - button "New Chat" [ref=f14e21] [cursor=pointer]
+        - generic [ref=f14e24]:
+          - button "Quick Ingest" [ref=f14e25] [cursor=pointer]
+          - button "Chat" [ref=f14e29] [cursor=pointer]
+          - button "Prompts" [ref=f14e32] [cursor=pointer]
+          - button "Characters" [ref=f14e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f14e41] [cursor=pointer]
+          - button "World Books" [ref=f14e45] [cursor=pointer]
+          - button "Notes" [ref=f14e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f14e52] [cursor=pointer]
+          - button "Media" [ref=f14e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f14e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f14e69] [cursor=pointer]
+          - button "Kanban" [ref=f14e75] [cursor=pointer]
+          - button "Watchlists" [ref=f14e77] [cursor=pointer]
+        - generic [ref=f14e82]:
+          - button "Open Notes Dock" [ref=f14e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f14e88] [cursor=pointer]
+          - button "Settings" [ref=f14e91] [cursor=pointer]
+      - main [ref=f14e95]:
+        - generic [ref=f14e96]:
+          - generic [ref=f14e99]:
+            - generic [ref=f14e100]:
+              - button "Expand sidebar" [ref=f14e101] [cursor=pointer]
+              - generic [ref=f14e103]:
+                - img "tldw Assistant" [ref=f14e104]
+                - generic [ref=f14e105]: tldw Assistant
+                - button "Companion Home" [ref=f14e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f14e110] [cursor=pointer]
+            - generic [ref=f14e113]:
+              - button "Search - Open command palette" [ref=f14e114] [cursor=pointer]:
+                - generic [ref=f14e118]: Search
+                - generic [ref=f14e119]: ⌘K
+              - button "Open settings" [ref=f14e120] [cursor=pointer]
+              - generic [ref=f14e132]:
+                - button "Notifications, 0 unread" [ref=f14e133] [cursor=pointer]
+                - status [ref=f14e137]: Notifications are active
+              - button "Switch to light theme" [ref=f14e138] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f14e145] [cursor=pointer]:
+                - generic [ref=f14e146]: "?"
+          - generic [ref=f14e148]:
+            - generic [ref=f14e150]:
+              - generic [ref=f14e152]:
+                - generic [ref=f14e153]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f14e154]
+              - navigation "Flashcards modes" [ref=f14e155]:
+                - generic [ref=f14e156]: Study
+                - generic [ref=f14e157]: Manage
+                - generic [ref=f14e158]: Import / Export
+                - generic [ref=f14e159]: Templates
+                - generic [ref=f14e160]: Scheduler
+            - generic [ref=f14e163]:
+              - tablist [ref=f14e164]:
+                - generic [ref=f14e166]:
+                  - tab "Study" [ref=f14e168] [cursor=pointer]
+                  - tab "Manage" [selected] [ref=f14e170] [cursor=pointer]
+                  - tab "Import / Export" [ref=f14e172] [cursor=pointer]
+                  - tab "Templates" [ref=f14e174] [cursor=pointer]
+                  - tab "Scheduler" [ref=f14e176] [cursor=pointer]
+                - generic [ref=f14e178]:
+                  - button "Test with Quiz" [disabled] [ref=f14e180]
+                  - button "Keyboard Shortcuts" [ref=f14e181] [cursor=pointer]
+              - tabpanel "Manage" [ref=f14e188]:
+                - generic [ref=f14e189]:
+                  - generic [ref=f14e191]:
+                    - radiogroup "segmented control" [ref=f14e192]:
+                      - generic [ref=f14e193]:
+                        - generic [ref=f14e194] [cursor=pointer]:
+                          - radio "Cards" [checked]
+                          - generic "Cards" [ref=f14e195]
+                        - generic [ref=f14e196] [cursor=pointer]:
+                          - radio "Trash"
+                          - generic [ref=f14e197]: Trash
+                    - generic [ref=f14e199]:
+                      - generic [ref=f14e200]: "?"
+                      - generic [ref=f14e204]: J/K Navigate
+                      - generic [ref=f14e205]: Enter Edit
+                      - generic [ref=f14e206]: Space Select
+                      - generic [ref=f14e207]: Delete Remove
+                      - button "Compact hints" [ref=f14e208] [cursor=pointer]
+                  - generic [ref=f14e210]:
+                    - generic [ref=f14e211]:
+                      - generic [ref=f14e212]:
+                        - searchbox "Search" [ref=f14e214]
+                        - button [ref=f14e216] [cursor=pointer]:
+                          - img "search" [ref=f14e218]
+                      - generic [ref=f14e221] [cursor=pointer]:
+                        - generic [ref=f14e222]:
+                          - generic: Deck
+                          - combobox [ref=f14e223]
+                        - img "down" [ref=f14e225]
+                      - button "Move scope" [ref=f14e228] [cursor=pointer]
+                      - generic [ref=f14e230] [cursor=pointer]:
+                        - checkbox "Show workspace decks" [ref=f14e232]
+                        - generic [ref=f14e234]: Show workspace decks
+                      - generic [ref=f14e235]:
+                        - generic [ref=f14e236]:
+                          - generic: Filter workspace
+                          - combobox [disabled] [ref=f14e237]
+                        - img "down" [ref=f14e239]
+                      - button "More" [ref=f14e243] [cursor=pointer]
+                    - generic [ref=f14e248]:
+                      - radiogroup "segmented control" [ref=f14e249]:
+                        - generic [ref=f14e250]:
+                          - generic [ref=f14e251] [cursor=pointer]:
+                            - radio "All" [checked]
+                            - generic "All" [ref=f14e252]
+                          - generic [ref=f14e253] [cursor=pointer]:
+                            - radio "Due"
+                            - generic "Due" [ref=f14e254]
+                          - generic [ref=f14e255] [cursor=pointer]:
+                            - radio "New"
+                            - generic "New" [ref=f14e256]
+                          - generic [ref=f14e257] [cursor=pointer]:
+                            - radio "Learning"
+                            - generic "Learning" [ref=f14e258]
+                      - generic [ref=f14e259]:
+                        - generic [ref=f14e261] [cursor=pointer]:
+                          - generic [ref=f14e262]:
+                            - 'generic "Sort: Due date" [ref=f14e263]'
+                            - combobox [ref=f14e264]
+                          - img "down" [ref=f14e266]
+                        - generic "Presentation mode" [ref=f14e269]:
+                          - button [ref=f14e270] [cursor=pointer]
+                          - button [ref=f14e273] [cursor=pointer]
+                          - button "Doc" [ref=f14e278] [cursor=pointer]
+                  - generic [ref=f14e280]:
+                    - checkbox "Select all on page" [ref=f14e284] [cursor=pointer]
+                    - generic [ref=f14e286]: 2 Cards
+                  - list "Flashcards" [ref=f14e291]:
+                    - listitem [ref=f14e292] [cursor=pointer]:
+                      - generic [ref=f14e294]:
+                        - paragraph [ref=f14e300]: When do Citrine study volunteers meet?
+                        - generic [ref=f14e302]:
+                          - generic [ref=f14e303]:
+                            - generic [ref=f14e304]: Alice UAT151 Citrine Deck
+                            - generic [ref=f14e305]: a few seconds ago
+                            - 'link "Note #b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8" [ref=f14e306]':
+                              - /url: /notes?source_ref_id=b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8
+                          - generic [ref=f14e307]:
+                            - generic [ref=f14e308]: Memory 2.50
+                            - generic [ref=f14e309]: Next gap 0d
+                            - generic [ref=f14e310]: Recall runs 1
+                            - generic [ref=f14e311]: Relearns 0
+                      - generic [ref=f14e312]:
+                        - 'checkbox "Select card: When do Citrine study volunteers meet?" [ref=f14e316]'
+                        - generic [ref=f14e318]:
+                          - button "Edit" [ref=f14e319]
+                          - button "More actions" [ref=f14e323]
+                    - listitem [ref=f14e329] [cursor=pointer]:
+                      - generic [ref=f14e331]:
+                        - paragraph [ref=f14e337]: UAT180 disposable lifecycle control 20260917
+                        - generic [ref=f14e339]:
+                          - generic [ref=f14e340]: Alice UAT151 Citrine Deck
+                          - generic [ref=f14e342]:
+                            - generic [ref=f14e343]: Memory 2.50
+                            - generic [ref=f14e344]: Next gap 0d
+                            - generic [ref=f14e345]: Recall runs 0
+                            - generic [ref=f14e346]: Relearns 0
+                      - generic [ref=f14e347]:
+                        - 'checkbox "Select card: ![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable" [ref=f14e351]'
+                        - generic [ref=f14e353]:
+                          - button "Edit" [ref=f14e354]
+                          - button "More actions" [ref=f14e358]
+                  - list [ref=f14e365]:
+                    - listitem "Previous Page" [ref=f14e366]:
+                      - button [disabled] [ref=f14e367]:
+                        - img "left" [ref=f14e368]
+                    - listitem "1" [ref=f14e371] [cursor=pointer]
+                    - listitem "Next Page" [ref=f14e373]:
+                      - button [disabled] [ref=f14e374]:
+                        - img "right" [ref=f14e375]
+                    - listitem [ref=f14e378]:
+                      - generic [ref=f14e379]:
+                        - generic [ref=f14e380]:
+                          - generic "20 / page" [ref=f14e381]
+                          - combobox "Page Size" [ref=f14e382]
+                        - img "down" [ref=f14e384]
+                - button "Create Flashcard" [ref=f14e387] [cursor=pointer]
+    - dialog "Edit Card" [ref=f14e401]:
+      - generic [ref=f14e403]:
+        - button "Close" [ref=f14e404] [cursor=pointer]:
+          - img "close" [ref=f14e405]
+        - generic [ref=f14e408]: Edit Card
+      - generic [ref=f14e410]:
+        - generic [ref=f14e411]:
+          - heading "Organization" [level=3] [ref=f14e412]
+          - generic [ref=f14e414]:
+            - generic "Deck" [ref=f14e416]
+            - generic [ref=f14e420] [cursor=pointer]:
+              - generic [ref=f14e421]:
+                - generic "Alice UAT151 Citrine Deck" [ref=f14e422]
+                - combobox "Deck" [ref=f14e423]
+              - img "down" [ref=f14e425]
+              - img "close-circle" [ref=f14e429]
+          - generic [ref=f14e433]:
+            - generic "Card template" [ref=f14e435]
+            - generic [ref=f14e439] [cursor=pointer]:
+              - generic [ref=f14e440]:
+                - generic "Basic (Question - Answer)" [ref=f14e441]
+                - combobox "Card template" [ref=f14e442]
+              - img "down" [ref=f14e444]
+          - generic [ref=f14e447]: Choose Basic for direct question and answer cards (facts, definitions, short prompts).
+          - generic [ref=f14e449]:
+            - generic "Tags" [ref=f14e451]
+            - generic [ref=f14e456]:
+              - generic [ref=f14e457]:
+                - generic "uat180-disposable-20260917" [ref=f14e459]:
+                  - generic [aria-hidden] [ref=f14e461] [cursor=pointer]
+                - combobox [ref=f14e466]
+              - img "down" [ref=f14e468]
+              - img "close-circle" [ref=f14e472] [cursor=pointer]
+        - generic [ref=f14e475]:
+          - heading "Scheduling" [level=3] [ref=f14e476]
+          - generic [ref=f14e477]:
+            - generic [ref=f14e478]:
+              - generic [ref=f14e479]: Memory strength
+              - text: "2.50"
+            - generic [ref=f14e480]:
+              - generic [ref=f14e481]: Next review gap
+              - text: 0d
+            - generic [ref=f14e482]:
+              - generic [ref=f14e483]: Recall runs
+              - text: "0"
+            - generic [ref=f14e484]:
+              - generic [ref=f14e485]: Relearns
+              - text: "0"
+          - generic [ref=f14e486]:
+            - generic [ref=f14e487]:
+              - generic [ref=f14e488]: Due at
+              - text: Not scheduled
+            - generic [ref=f14e489]:
+              - generic [ref=f14e490]: Last reviewed
+              - text: Never
+          - generic [ref=f14e491]:
+            - generic [ref=f14e492]: Reset scheduling when this card's timing feels wrong. This keeps card content but starts scheduling from new-card defaults.
+            - button "Reset scheduling" [ref=f14e493] [cursor=pointer]
+        - generic [ref=f14e495]:
+          - generic [ref=f14e496]:
+            - heading "Content" [level=3] [ref=f14e497]
+            - button "Show preview" [ref=f14e498] [cursor=pointer]
+          - generic [ref=f14e500]:
+            - generic [ref=f14e502]:
+              - text: "*"
+              - generic [ref=f14e503]:
+                - generic [ref=f14e504]: Front
+                - button "Upload image for Front" [ref=f14e505]
+                - button "Insert image" [ref=f14e506] [cursor=pointer]
+            - textbox "* Front Upload image for Front Insert image" [ref=f14e511]: "![icon](flashcard-asset://c32ba7d6-2091-4d3d-9fb6-24ff206f25e0)UAT180 disposable lifecycle control 20260917"
+          - generic [ref=f14e512]: "Front: 107 / 8192 bytes"
+          - generic [ref=f14e513]: Supports Markdown and LaTeX.
+          - generic [ref=f14e515]:
+            - generic [ref=f14e517]:
+              - text: "*"
+              - generic [ref=f14e518]:
+                - generic [ref=f14e519]: Back
+                - button "Upload image for Back" [ref=f14e520]
+                - button "Insert image" [ref=f14e521] [cursor=pointer]
+            - textbox "* Back Upload image for Back Insert image" [ref=f14e526]: This card is disposable; preserve the original Citrine source card.
+          - generic [ref=f14e527]: "Back: 67 / 8192 bytes"
+          - generic [ref=f14e528]: Supports Markdown and LaTeX.
+        - button "collapsed Additional fields" [ref=f14e531] [cursor=pointer]:
+          - img "collapsed" [ref=f14e533]
+          - generic [ref=f14e536]: Additional fields
+      - generic [ref=f14e540]:
+        - button "Cancel" [ref=f14e542] [cursor=pointer]
+        - button "Delete" [ref=f14e545] [cursor=pointer]
+        - button "Save" [ref=f14e548] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=f14e395] [cursor=pointer]
+  - alert [ref=f14e10]

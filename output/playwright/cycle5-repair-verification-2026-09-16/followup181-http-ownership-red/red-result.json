@@ -1,0 +1,32 @@
+{
+  "failed": 9,
+  "passed": 14,
+  "skipped": 0,
+  "seconds": 227.66,
+  "failed_nodes": [
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_http_success_does_not_commit_an_undecided_write[owned-teardown]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_http_failure_handoff_and_child_work_release_their_owned_reads[joined-task]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_another_http_owner_cannot_observe_or_settle_pending_work",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_http_failure_handoff_and_child_work_release_their_owned_reads[sync-handoff]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_http_failure_handoff_and_child_work_release_their_owned_reads[cancel]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_completed_http_read_does_not_retain_a_transaction[/api/v1/flashcards/source-review-plans/due]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_real_dependency_http_chain_allows_live_replacement[populated]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_http_failure_handoff_and_child_work_release_their_owned_reads[failure]",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py::test_real_dependency_http_chain_allows_live_replacement[empty]"
+  ],
+  "actual_replacement_failures": [
+    "E   Failed: Live HTTP replacement failed with CharactersRAGDBError; request connection states: [{'pid': 54472, 'closed': False, 'transaction': 'INTRANS', 'relations': ['buddy_attachments', 'buddy_profiles', 'source_review_occurrences', 'source_review_plans']}, {'pid': 54473, 'closed': False, 'transaction': 'IDLE', 'relations': []}]",
+    "E   Failed: Live HTTP replacement failed with CharactersRAGDBError; request connection states: [{'pid': 55217, 'closed': False, 'transaction': 'INTRANS', 'relations': ['buddy_attachments', 'buddy_profiles', 'source_review_occurrences', 'source_review_plans']}, {'pid': 55218, 'closed': False, 'transaction': 'IDLE', 'relations': []}]"
+  ],
+  "same_user_isolation_assertion": "A different HTTP request observed another owner's uncommitted write",
+  "production_baseline": {
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "1b7f83da58f622233ee1002d8a920b102a7e6ed8fe52c0ea8e1212548056eaa5",
+    "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276",
+    "tldw_Server_API/app/core/DB_Management/chacha/runtime.py": "580e24e99b644a70b267843b14ffb4706b8af8d72c3a52bc7c374fa52a0c8999"
+  },
+  "production_after_run": {
+    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "1b7f83da58f622233ee1002d8a920b102a7e6ed8fe52c0ea8e1212548056eaa5",
+    "tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py": "7b5e0d837ff506f7c877e4e915cf805b73e7d96c3f1ae848f86a3d696e404276",
+    "tldw_Server_API/app/core/DB_Management/chacha/runtime.py": "580e24e99b644a70b267843b14ffb4706b8af8d72c3a52bc7c374fa52a0c8999"
+  }
+}

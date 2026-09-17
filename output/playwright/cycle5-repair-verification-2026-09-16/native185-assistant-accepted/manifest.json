@@ -1,0 +1,159 @@
+{
+  "at": "2026-09-17T02:15:03.139Z",
+  "files": [
+    {
+      "file": "assistant-fault-installed-repaired.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-fault-installed-repaired.txt",
+      "original_sha256": "92f3db4aeae46e47724db9815e3b0bae61ccc56061bd2b249e1faa6d5797cec8",
+      "retained_sha256": "020d008b1341aaee8690cbe1e548926d54bf439149b677b6134e9a4c49ecf323",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-expanded.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-expanded.txt",
+      "original_sha256": "71fb3cd7e72338bed3036ac39fcc1f8d94371477c4063b9646704abe8b0e0305",
+      "retained_sha256": "71fb3cd7e72338bed3036ac39fcc1f8d94371477c4063b9646704abe8b0e0305",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-fault-removed.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-fault-removed.txt",
+      "original_sha256": "24c7f8615415fe96f0057cdb3ebb0eb9d9d69e250794ea0f9a348b14116e9b52",
+      "retained_sha256": "460d81877ba610c5f253db0362d347e9314ab3c1e0c82d476d97ef344f0ab392",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-negative-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-negative-evidence.txt",
+      "original_sha256": "2d5983f8a03ffb1a9c66b76ea30e18566d2b6d450eda50c13b066d3019b50bee",
+      "retained_sha256": "4c4a362c8ed09b0f0ab7fce49feb5f5cefa17277014c8318baa8646ec29c2c21",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-negative-submit.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-negative-submit.txt",
+      "original_sha256": "4371ea879a73a0f0dad0fcda08a6da1c1491b9054a2d96a4ea6a1d728642f0fd",
+      "retained_sha256": "4371ea879a73a0f0dad0fcda08a6da1c1491b9054a2d96a4ea6a1d728642f0fd",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-negative.png",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-negative.png",
+      "original_sha256": "9cec5f21c4866805360c9637649635271148017f4dd28533425dca5dba420dc9",
+      "retained_sha256": "9cec5f21c4866805360c9637649635271148017f4dd28533425dca5dba420dc9",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-open.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-open.txt",
+      "original_sha256": "078efb721ef1c29559752ec55ab577e46dc143d8e0fff5199842c9d30c332375",
+      "retained_sha256": "078efb721ef1c29559752ec55ab577e46dc143d8e0fff5199842c9d30c332375",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-question.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-question.txt",
+      "original_sha256": "46b505eadf288e25b8049c027eb0c8de872a3e9043336ae2ac792284b7be9c7f",
+      "retained_sha256": "a76007e5bc67fe041d8fc69054048d3f27ff00fd8eba49b88e4bc9a424ff97ef",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-real-result.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-real-result.txt",
+      "original_sha256": "b30af9409f5795404085da7ce9e230d96bfaab73e812921c463f0c50285fd258",
+      "retained_sha256": "81ebb9f864c38b873c5532d72a195b653d71b1181055d8042028c35d0a06cc37",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-real-retry.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-real-retry.txt",
+      "original_sha256": "f666f2f5f852fa8bc9869cae22a8cdf5c032878aaf5b81f21b871e6b313c7052",
+      "retained_sha256": "f666f2f5f852fa8bc9869cae22a8cdf5c032878aaf5b81f21b871e6b313c7052",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-reload-corrected-filter.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-reload-corrected-filter.txt",
+      "original_sha256": "0c81f3264b912db9bd0a616b04485353679dba43b58fe04efdd82a3d2ab8f40e",
+      "retained_sha256": "ddf391903157acf984e492d91b643f5dc86ef9dc8d5850dad251c06fdd2e52a9",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-reload-evidence.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-reload-evidence.txt",
+      "original_sha256": "68aa73f1bff43ba78f359d0f9108a86ba1ac768ae7f26715fad44d54117d20f9",
+      "retained_sha256": "97c74bbc49241fb8def13fdb4b932b52eb2872081dc4d7d6555070cf92f09507",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-repaired-reloaded-panel.txt",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-reloaded-panel.txt",
+      "original_sha256": "c72ae09a22f2a491bfe5e1cd8da16d3e1591e388dfbd2314689bdaffa9ffa2f3",
+      "retained_sha256": "c72ae09a22f2a491bfe5e1cd8da16d3e1591e388dfbd2314689bdaffa9ffa2f3",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-reloaded-visible.png",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-reloaded-visible.png",
+      "original_sha256": "cd6c97ba1b1fbe5d716d642b3aa8c5a90cc12a8d249a58a4e721e840db27bf7f",
+      "retained_sha256": "cd6c97ba1b1fbe5d716d642b3aa8c5a90cc12a8d249a58a4e721e840db27bf7f",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-reloaded.png",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-reloaded.png",
+      "original_sha256": "6f39cda69d8458f81547cdf9fb9bb20072e3520e7c770a54186c33d44674e8c3",
+      "retained_sha256": "6f39cda69d8458f81547cdf9fb9bb20072e3520e7c770a54186c33d44674e8c3",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-repaired-success.png",
+      "source": ".tmp/uat-study-native-20260917/assistant-repaired-success.png",
+      "original_sha256": "15dba226120b33efdede691d8fcc8e31671f84dd2a3be415f3055ed40d5b6893",
+      "retained_sha256": "15dba226120b33efdede691d8fcc8e31671f84dd2a3be415f3055ed40d5b6893",
+      "normalization": "none"
+    },
+    {
+      "file": "repaired-study-acceptance-start.txt",
+      "source": ".tmp/uat-study-native-20260917/repaired-study-acceptance-start.txt",
+      "original_sha256": "4319d4341e297c653da623a94c9719216982506f6c0a8011f126238342b1d4c8",
+      "retained_sha256": "251164e8e8a2e67f59e1140d6247ec2ecd6d26fc3b6e82d2a2ab55b99513ab14",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "repaired-study-bootstrap-events.txt",
+      "source": ".tmp/uat-study-native-20260917/repaired-study-bootstrap-events.txt",
+      "original_sha256": "d96d1f9871973ae381bb190e12b8e32ff0842bcb73e602cf70f9a408db961f4d",
+      "retained_sha256": "c70c7ef88aa1c05ffe93274799fe63d78786c67ac05db26c3dfd9c44e71b916d",
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "assistant-independent-review.md",
+      "source": ".tmp/uat-study-native-20260917/assistant-independent-review.md",
+      "original_sha256": "1fa1cb84b576c1db4ff05e5913cda304b6f7208a18055e3c2b037516ddbd858e",
+      "retained_sha256": "1fa1cb84b576c1db4ff05e5913cda304b6f7208a18055e3c2b037516ddbd858e",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-independent-verification.json",
+      "source": ".tmp/uat-study-native-20260917/assistant-independent-verification.json",
+      "original_sha256": "22ec601f22b40bdb4adb1ad0fea82f3f823af6fdc6b16eaf3021564f91458cdc",
+      "retained_sha256": "22ec601f22b40bdb4adb1ad0fea82f3f823af6fdc6b16eaf3021564f91458cdc",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-independent-runtime-attribution.json",
+      "source": ".tmp/uat-study-native-20260917/assistant-independent-runtime-attribution.json",
+      "original_sha256": "1bd03fe5318be147748ccab7982c97459162182f3b8e032fbb4f890bb07f9c57",
+      "retained_sha256": "1bd03fe5318be147748ccab7982c97459162182f3b8e032fbb4f890bb07f9c57",
+      "normalization": "none"
+    },
+    {
+      "file": "assistant-independent-manifest.json",
+      "source": ".tmp/uat-study-native-20260917/assistant-independent-manifest.json",
+      "original_sha256": "08071922555321b89e510d7bbd619ac539929ad45fb2135403f2a91c648e3afa",
+      "retained_sha256": "08071922555321b89e510d7bbd619ac539929ad45fb2135403f2a91c648e3afa",
+      "normalization": "none"
+    }
+  ]
+}

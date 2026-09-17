@@ -1,0 +1,46 @@
+{
+  "task": "TASK13260.118",
+  "production_edited": false,
+  "files": [
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py",
+      "sha256": "5eaeff248b2694edd8c95f11c1107615cb5c8abcbd75f12742e37b16b78fedaa"
+    }
+  ],
+  "result": {
+    "failed": 9,
+    "passed": 14,
+    "skipped": 0,
+    "seconds": 227.66
+  },
+  "static": {
+    "ruff": 0,
+    "bandit": 0,
+    "bandit_errors": 0,
+    "bandit_excluded": [
+      "B101"
+    ],
+    "compile": true,
+    "format": true
+  },
+  "artifacts": {
+    "PLAN-http-lifetime.md": "ea7abfa6a05c6e1ea35787e73a7cb4cc5f634144035917d99af703a6053b6739",
+    "baseline-manifest.json": "45e7a6fd55c6bdad7b057fbb0b730590ec7a73c51ce281adf831d83128355d83",
+    "red-result.json": "eebe4b42af3818687d06f7904b9946e429f0f757aa9c016c95c6b3cbd9557fbc",
+    "ruff.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "uat181-http-lifetime-first-red-command.json": "2e37b5f59153e3f32d5794ec8999af29d3fae269ebcb027f11279ebacc90ddef",
+    "owned.patch": "3cab04754a162bc1ee4fa875096422e8020075185bbaf24a73ec8664b0f8bed3",
+    "bandit-test.json": "d7f281b54d3d8f09726618a3608c3a7c713b78ab8932607da575ad3ccac25985",
+    "uat181-http-lifetime-causal-red-command.json": "c270f868de6411ff31ec7f2e833ca24cbeb189adddaefb6b36a2d728af5a1ee7",
+    "uat181-http-lifetime-full-red-command.json": "114ec56401192183b81553af92253bce74f6a81e29b056316ac927f7eb5020cc",
+    "bandit-stderr.log": "768c2f92d49e344db63499f70f33e7abd3f0a2fad9d1caeefdf99f22c6dbdb0a",
+    "red-test.py": "5eaeff248b2694edd8c95f11c1107615cb5c8abcbd75f12742e37b16b78fedaa",
+    "nonhttp-accessor-audit.json": "62bd635ffed6d794424d98bb64bdb5d6b79cf62c0fd05e34434b54931b28712e",
+    "DESIGN181-http-ownership.md": "9a584802a0df1ee174e8d1ef307eb4662094a944e27ce560ed735a48332873fe",
+    "RED181-http-lifetime.md": "f0108e0defce6754798f0a856d665547c238b71574df738b8859a98756ea8d00",
+    "uat181-http-lifetime-full-red.redacted.log": "ac4a55c56fa36b9d73fd4516dd3d2cb76a8d40ee2e47d1518d3d90bf74ada431",
+    "uat181-http-lifetime-causal-red.redacted.log": "9d2f1c79a01b0941001145ab0069ed6cbeb887213c9396120ffef7e2589063d0",
+    "uat181-http-lifetime-first-red.redacted.log": "c36a53c570dd2c4aa4ba687ad42e7470f7a51d4547406dd567322d942ac29390",
+    "bandit-stdout.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

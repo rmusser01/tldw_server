@@ -1,0 +1,95 @@
+{
+  "reviewedAt": "2026-09-17T01:59:22.629Z",
+  "ownedManifestHash": "bfbfbfb56793fa4ecb95c276d0f4da5415d7a78a9bd4e487a2be177490129d1c",
+  "files": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "expected": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e",
+      "current": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e",
+      "snapshot": "7859dd96bcbfd88ecdd4a6b87c37f5761e4bbe6654592dfd92b6b4d9412c1d8e"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/initialize-cell.py",
+      "expected": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "current": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "snapshot": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/matrix-launcher.test.mjs",
+      "expected": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d",
+      "current": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d",
+      "snapshot": "30e1089983d5549b8d418e9774fad2fccd14968246ff99ff470b46278bc8e45d"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/test_initialize_cell.py",
+      "expected": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5",
+      "current": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5",
+      "snapshot": "2aa13d0316004216e7c9215a5403bd3d96290217b2ee2a0a12dc29443c157ca5"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/LAUNCHER.md",
+      "expected": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df",
+      "current": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df",
+      "snapshot": "28c968de6dd1940db7b51841f6a01302f5772db21427effb82db1d27328442df"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/ISOLATION.md",
+      "expected": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0",
+      "current": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0",
+      "snapshot": "abe305a28a218c3ca13437bcf5f799bcf3fd8d54acd95c44940e6afc58eb49f0"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/launcher-static-validation.json",
+      "expected": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68",
+      "current": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68",
+      "snapshot": "fc92a81f977824d82b6eac8175612a0d20bddca404ee8f2561010f8ffd5c0c68"
+    }
+  ],
+  "unchanged": [
+    {
+      "path": "pg-holder.mjs",
+      "current": "22289e40e445f6e4f1ceb22b6282b07f358331a2861372a65d4c09fbf305ed15",
+      "original": "22289e40e445f6e4f1ceb22b6282b07f358331a2861372a65d4c09fbf305ed15",
+      "expected": "22289e40e445f6e4f1ceb22b6282b07f358331a2861372a65d4c09fbf305ed15"
+    },
+    {
+      "path": "test_hold_official_pg.py",
+      "current": "c468775c9653f67e10e979ae46e3949c0dad7b89dce2af2e3981a8f0f71f8def",
+      "original": "c468775c9653f67e10e979ae46e3949c0dad7b89dce2af2e3981a8f0f71f8def",
+      "expected": "c468775c9653f67e10e979ae46e3949c0dad7b89dce2af2e3981a8f0f71f8def"
+    },
+    {
+      "path": "pytest-holder.ini",
+      "current": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b",
+      "original": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b",
+      "expected": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b"
+    },
+    {
+      "path": "PROTOCOL.md",
+      "current": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b",
+      "original": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b",
+      "expected": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b"
+    }
+  ],
+  "absent": {
+    "profiles": true,
+    "holders": true
+  },
+  "commands": [
+    {
+      "command": "node --experimental-vm-modules --test .tmp/uat-next-matrix-20260916/matrix-launcher.test.mjs",
+      "exitCode": 0,
+      "passed": 23,
+      "skipped": 0,
+      "logHash": "30397e10ea7b9b662d7399260f0c3183f3652e0f1e479e28273bc2c26e52c748"
+    },
+    {
+      "command": "source .venv/bin/activate && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest --confcutdir=.tmp/uat-next-matrix-20260916 -c .tmp/uat-next-matrix-20260916/pytest-holder.ini .tmp/uat-next-matrix-20260916/test_initialize_cell.py -q --tb=short",
+      "exitCode": 0,
+      "passed": 5,
+      "skipped": 0,
+      "logHash": "ef0e7ef49e71fa999842be0cb8d22ec1058d3a384ed5c0a2ec6efb8f434975ac"
+    }
+  ],
+  "realActionsExecuted": []
+}

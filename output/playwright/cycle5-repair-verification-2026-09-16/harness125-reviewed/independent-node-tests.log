@@ -1,0 +1,33 @@
+(node:61468) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ zero exit without normal-return proof cannot mark initialization complete (5.525334ms)
+✔ forwarded cancellation cannot mark initialization complete even with exit zero (2.675041ms)
+✔ initialization rejects stale attempt proof (3.101792ms)
+✔ initialization rejects other preparation proof (2.531ms)
+✔ initialization rejects incomplete proof (2.859167ms)
+✔ nonzero child exit rejects an otherwise matching completion proof (3.084625ms)
+✔ matching normal completion records identity and allows restart without resetting (3.68875ms)
+✔ failed initialization remains retryable and an old attempt cannot satisfy retry (3.53625ms)
+✔ backend rejects missing initialization before port or spawn (2.635459ms)
+✔ backend rejects wrong-preparation initialization before port or spawn (2.195ms)
+✔ backend rejects legacy-exit-only initialization before port or spawn (1.7705ms)
+✔ frontend rejects missing initialization before port or spawn (2.107333ms)
+✔ frontend rejects wrong-preparation initialization before port or spawn (2.102958ms)
+✔ frontend rejects legacy-exit-only initialization before port or spawn (2.633042ms)
+✔ incomplete preparation cannot initialize or start (1.895792ms)
+✔ another run/cell cannot reuse a bound source root (sqlite-single) (2.684542ms)
+✔ another run/cell cannot reuse a bound source root (pg-single) (1.981459ms)
+✔ preparation reserves a new source before a helper can fail (1.975458ms)
+✔ successful new preparation writes a completed matching record (4.833709ms)
+✔ existing profile mode ownership refusal remains before spawn (2.182125ms)
+✔ a failed child never creates a success marker (2.496042ms)
+✔ existing profile preparation is never overwritten (2.454583ms)
+✔ official PG receipt validates exact local ownership without connecting (2.7085ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 99.967666

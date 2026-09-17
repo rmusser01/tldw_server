@@ -1,0 +1,6 @@
+### Result
+{"at":"2026-09-17T01:03:18.466Z","image":{"complete":true,"naturalWidth":120,"naturalHeight":120,"rect":{"x":713,"y":419.5,"width":122,"height":122,"top":419.5,"right":835,"bottom":541.5,"left":713}}}
+### Ran Playwright code
+```js
+await (async page => {await page.getByRole("img",{name:"icon",exact:true}).scrollIntoViewIfNeeded();return {at:new Date().toISOString(),image:await page.getByRole("img",{name:"icon",exact:true}).evaluate(el=>({complete:el.complete,naturalWidth:el.naturalWidth,naturalHeight:el.naturalHeight,rect:el.getBoundingClientRect().toJSON()}))};})(page);
+```

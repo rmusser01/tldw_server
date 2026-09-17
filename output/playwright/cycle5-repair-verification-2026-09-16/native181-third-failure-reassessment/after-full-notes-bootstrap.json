@@ -1,0 +1,88 @@
+{
+  "observedAt": "2026-09-17T01:59:22.938759+00:00",
+  "profile": "pg-multi",
+  "targetContentDatabaseSha256": "2ba0a35cd8e53f76eea53d63cd0d0459e0aea4128471cc05eef8540832fca22b",
+  "mode": "metadata-snapshot",
+  "sessions": [
+    {
+      "pid": 37174,
+      "state": "idle"
+    },
+    {
+      "pid": 37201,
+      "state": "idle"
+    },
+    {
+      "pid": 37202,
+      "state": "idle"
+    },
+    {
+      "pid": 37203,
+      "state": "idle in transaction"
+    },
+    {
+      "pid": 37204,
+      "state": "idle"
+    },
+    {
+      "pid": 37205,
+      "state": "idle"
+    },
+    {
+      "pid": 37206,
+      "state": "idle"
+    },
+    {
+      "pid": 37207,
+      "state": "idle"
+    },
+    {
+      "pid": 37208,
+      "state": "idle"
+    },
+    {
+      "pid": 37209,
+      "state": "idle"
+    },
+    {
+      "pid": 37217,
+      "state": "idle"
+    },
+    {
+      "pid": 37397,
+      "state": "idle"
+    },
+    {
+      "pid": 37398,
+      "state": "idle"
+    }
+  ],
+  "locks": [
+    {
+      "pid": 37203,
+      "relation": "buddy_attachments",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "buddy_profiles",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "source_review_occurrences",
+      "mode": "AccessShareLock",
+      "granted": true
+    },
+    {
+      "pid": 37203,
+      "relation": "source_review_plans",
+      "mode": "AccessShareLock",
+      "granted": true
+    }
+  ],
+  "transactionReadOnlyVerified": true,
+  "relationScope": "All public ordinary/partitioned tables; indexes and catalogs excluded"
+}

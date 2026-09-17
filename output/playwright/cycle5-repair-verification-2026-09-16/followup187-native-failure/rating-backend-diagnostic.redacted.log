@@ -1,0 +1,415 @@
+5243: 2026-09-16 17:44:37.745 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Prompts_DB:_apply_schema_v6:933 - Applying schema migration (Version 6)...
+5244: 2026-09-16 17:44:37.746 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Prompts_DB:_apply_schema_v6:943 - [Schema V6] Service Prompt overrides applied.
+5245: 2026-09-16 17:44:37.746 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Prompts_DB:_initialize_schema:993 - Database schema initialized/migrated to version 6.
+5246: 2026-09-16 17:44:37.746 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps:get_prompts_db_for_user:371 - Initializing PromptsDatabase instance for user 2 at path: /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/fresh-uat-recovery-20260916/profiles/tldw-onboarding-uat-recovery-targeted-pg-multi-20260916/Databases/user_databases/2/prompts_user_dbs/user_prompts_v2.sqlite
+5247: 2026-09-16 17:44:37.747 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps:get_prompts_db_for_user:381 - PromptsDatabase instance created and cached for user 2 (salt=none) at /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/fresh-uat-recovery-20260916/profiles/tldw-onboarding-uat-recovery-targeted-pg-multi-20260916/Databases/user_databases/2/prompts_user_dbs/user_prompts_v2.sqlite
+5248: 2026-09-16 17:44:37.757 | WARNING  | trace= span= tp= req=9a621834-b462-48ab-a690-7982615593db job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP POST /api/v1/flashcards/37b10bd7-edf4-4f35-83c1-1490115d8c55/assistant/respond -> 500 in 35ms
+5249: 2026-09-16 17:44:37.757 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.utils.exception_handlers:global_unhandled_exception_handler:61 - Unhandled exception on POST /api/v1/flashcards/37b10bd7-edf4-4f35-83c1-1490115d8c55/assistant/respond (request_id=9a621834-b462-48ab-a690-7982615593db): LLM provider is required.  + Exception Group Traceback (most recent call last):
+5250:   |
+5251:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_utils.py", line 81, in collapse_excgroups
+5252:   |     yield
+5253:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 192, in __call__
+5254:   |     async with anyio.create_task_group() as task_group:
+5255:   |                |     |                      -> <anyio._backends._asyncio.TaskGroup object at 0x1318173d0>
+5256:   |                |     -> <function create_task_group at 0x10a7589a0>
+5257:   |                -> <module 'anyio' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/anyio/__init__.py'>
+5258:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 783, in __aexit__
+5259:   |     raise BaseExceptionGroup(
+5260:   |
+5261:   | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+5262:   +-+---------------- 1 ----------------
+5263:     | Traceback (most recent call last):
+5264:     |
+5265:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/middleware/errors.py", line 164, in __call__
+5266:     |     await self.app(scope, receive, _send)
+5267:     |           |    |   |      |        -> <function ServerErrorMiddleware.__call__.<locals>._send at 0x1310151c0>
+5268:     |           |    |   |      -> <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x1311ceb...
+5269:     |           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+5270:     |           |    -> <tldw_Server_API.app.core.Security.request_id_middleware.RequestIDMiddleware object at 0x10ac35c10>
+5271:     |           -> <starlette.middleware.errors.ServerErrorMiddleware object at 0x10ac48710>
+5272:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 191, in __call__
+5273:     |     with recv_stream, send_stream, collapse_excgroups():
+5274:     |          |            |            -> <function collapse_excgroups at 0x10b8c1760>
+5275:     |          |            -> MemoryObjectSendStream(_state=_MemoryObjectStreamState(max_buffer_size=0, buffer=deque([]), open_send_channels=0, open_receiv...
+5276:     |          -> MemoryObjectReceiveStream(_state=_MemoryObjectStreamState(max_buffer_size=0, buffer=deque([]), open_send_channels=0, open_rec...
+5277:     |   File "/Users/macbook-dev/.local/share/uv/python/cpython-3.11.13-macos-aarch64-none/lib/python3.11/contextlib.py", line 158, in __exit__
+5278:     |     self.gen.throw(typ, value, traceback)
+5279:     |     |    |   |     |    |      -> <traceback object at 0x13163f440>
+5280:     |     |    |   |     |    -> ExceptionGroup('unhandled errors in a TaskGroup', [ChatConfigurationError('LLM provider is required.')])
+5854:     |     await route.handle(scope, receive, send)
+5855:     |           |     |      |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+5856:     |           |     |      |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+5857:     |           |     |      -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+5858:     |           |     -> <function Route.handle at 0x10b95bce0>
+5859:     |           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+5860:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+5861:     |     await self.app(scope, receive, send)
+5862:     |           |    |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+5863:     |           |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+5864:     |           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+5865:     |           |    -> <function request_response.<locals>.app at 0x128ec1620>
+5866:     |           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+5867:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+5868:     |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+5869:     |           |                            |    |        |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+5870:     |           |                            |    |        |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+5871:     |           |                            |    |        -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+5872:     |           |                            |    -> <starlette.requests.Request object at 0x1316e0a90>
+5873:     |           |                            -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+5874:     |           -> <function wrap_app_handling_exceptions at 0x10b95a660>
+5875:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+5876:     |     raise exc
+5877:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+5878:     |     await app(scope, receive, sender)
+5879:     |           |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e0900>
+5880:     |           |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+5881:     |           |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+5882:     |           -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+5883:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 120, in app
+5892:     |                  |         |      -> {'db': <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x130e266d0>, 'guidance': 'Answer the...
+5893:     |                  |         -> <function respond_flashcard_assistant at 0x128d50f40>
+5894:     |                  -> Dependant(path_params=[ModelField(field_info=Path(PydanticUndefined), name='card_uuid', mode='validation', config=None)], que...
+5895:     |
+5896:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2501, in respond_flashcard_assistant
+5897:     |     reply = await generate_study_assistant_reply(
+5898:     |                   -> <function generate_study_assistant_reply at 0x128b0dd00>
+5899:     |
+5900:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Flashcards/study_assistant.py", line 451, in generate_study_assistant_reply
+5901:     |     response = await perform_chat_api_call_async(
+5902:     |                      -> <function perform_chat_api_call_async at 0x112b53560>
+5903:     |
+5904:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2659, in perform_chat_api_call_async
+5905:     |     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
+5906:     |                                   |                                     -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+5907:     |                                   -> <function _build_adapter_request_from_chat_args at 0x112b52e80>
+5908:     |
+5909:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2386, in _build_adapter_request_from_chat_args
+5910:     |     raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
+5911:     |           |                                   |         -> <method 'get' of 'dict' objects>
+5912:     |           |                                   -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+5913:     |           -> <class 'tldw_Server_API.app.core.exceptions.ChatConfigurationError'>
+5914:     |
+5915:     | tldw_Server_API.app.core.exceptions.ChatConfigurationError: LLM provider is required.
+5916:     +------------------------------------
+5917:
+5918:
+5919: The above exception was the direct cause of the following exception:
+5920:
+5921:
+5922: Traceback (most recent call last):
+5923:
+5924:   File "<frozen runpy>", line 198, in _run_module_as_main
+5925:   File "<frozen runpy>", line 88, in _run_code
+5926:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__main__.py", line 4, in <module>
+5927:     uvicorn.main()
+5928:     |       -> <Command main>
+5929:     -> <module 'uvicorn' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__init__....
+5930:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1569, in __call__
+5931:     return self.main(*args, **kwargs)
+5932:            |    |     |       -> {}
+5933:            |    |     -> ()
+5934:            |    -> <function Command.main at 0x1055720c0>
+5935:            -> <Command main>
+5936:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1490, in main
+5937:     rv = self.invoke(ctx)
+5938:          |    |      -> <click.core.Context object at 0x105096690>
+5939:          |    -> <function Command.invoke at 0x105571da0>
+6590:     await route.handle(scope, receive, send)
+6591:           |     |      |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+6592:           |     |      |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+6593:           |     |      -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6594:           |     -> <function Route.handle at 0x10b95bce0>
+6595:           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+6596:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+6597:     await self.app(scope, receive, send)
+6598:           |    |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+6599:           |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+6600:           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6601:           |    -> <function request_response.<locals>.app at 0x128ec1620>
+6602:           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+6603:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+6604:     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+6605:           |                            |    |        |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+6606:           |                            |    |        |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+6607:           |                            |    |        -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6608:           |                            |    -> <starlette.requests.Request object at 0x1316e0a90>
+6609:           |                            -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+6610:           -> <function wrap_app_handling_exceptions at 0x10b95a660>
+6611:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+6612:     raise exc
+6613:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+6614:     await app(scope, receive, sender)
+6615:           |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e0900>
+6616:           |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+6617:           |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6618:           -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+6619:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 120, in app
+6628:                  |         |      -> {'db': <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x130e266d0>, 'guidance': 'Answer the...
+6629:                  |         -> <function respond_flashcard_assistant at 0x128d50f40>
+6630:                  -> Dependant(path_params=[ModelField(field_info=Path(PydanticUndefined), name='card_uuid', mode='validation', config=None)], que...
+6631:
+6632:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2501, in respond_flashcard_assistant
+6633:     reply = await generate_study_assistant_reply(
+6634:                   -> <function generate_study_assistant_reply at 0x128b0dd00>
+6635:
+6636:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Flashcards/study_assistant.py", line 451, in generate_study_assistant_reply
+6637:     response = await perform_chat_api_call_async(
+6638:                      -> <function perform_chat_api_call_async at 0x112b53560>
+6639:
+6640:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2659, in perform_chat_api_call_async
+6641:     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
+6642:                                   |                                     -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+6643:                                   -> <function _build_adapter_request_from_chat_args at 0x112b52e80>
+6644:
+6645:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2386, in _build_adapter_request_from_chat_args
+6646:     raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
+6647:           |                                   |         -> <method 'get' of 'dict' objects>
+6648:           |                                   -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+6649:           -> <class 'tldw_Server_API.app.core.exceptions.ChatConfigurationError'>
+6650:
+6651: tldw_Server_API.app.core.exceptions.ChatConfigurationError: LLM provider is required.
+6652: 2026-09-16 17:44:37.773 | INFO     | trace= span= tp= req=9a621834-b462-48ab-a690-7982615593db job= ps=: | starlette.responses:__call__:166 - 127.0.0.1:50914 - "POST /api/v1/flashcards/37b10bd7-edf4-4f35-83c1-1490115d8c55/assistant/respond HTTP/1.1" 500
+6653: 2026-09-16 17:44:37.773 | ERROR    | trace= span= tp= req=9a621834-b462-48ab-a690-7982615593db job= ps=: | asyncio.runners:run:118 - Exception in ASGI application
+6654:   + Exception Group Traceback (most recent call last):
+6655:   |
+6656:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_utils.py", line 81, in collapse_excgroups
+6657:   |     yield
+6658:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/middleware/base.py", line 192, in __call__
+6659:   |     async with anyio.create_task_group() as task_group:
+6660:   |                |     |                      -> <anyio._backends._asyncio.TaskGroup object at 0x1318173d0>
+6661:   |                |     -> <function create_task_group at 0x10a7589a0>
+6662:   |                -> <module 'anyio' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/anyio/__init__.py'>
+6663:   |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 783, in __aexit__
+6664:   |     raise BaseExceptionGroup(
+6665:   |
+6666:   | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+6667:   +-+---------------- 1 ----------------
+6668:     | Traceback (most recent call last):
+6669:     |
+6670:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/protocols/http/httptools_impl.py", line 409, in run_asgi
+6671:     |     result = await app(  # type: ignore[func-returns-value]
+6672:     |                    -> <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x12fb97b10>
+6673:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+6674:     |     return await self.app(scope, receive, send)
+6675:     |                  |    |   |      |        -> <bound method RequestResponseCycle.send of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x1311cebd0>>
+6676:     |                  |    |   |      -> <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x1311ceb...
+6677:     |                  |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6678:     |                  |    -> <fastapi.applications.FastAPI object at 0x110cf9050>
+6679:     |                  -> <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x12fb97b10>
+6680:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/applications.py", line 1159, in __call__
+6681:     |     await super().__call__(scope, receive, send)
+6682:     |                            |      |        -> <bound method RequestResponseCycle.send of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x1311cebd0>>
+6683:     |                            |      -> <bound method RequestResponseCycle.receive of <uvicorn.protocols.http.httptools_impl.RequestResponseCycle object at 0x1311ceb...
+6684:     |                            -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+6685:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/applications.py", line 90, in __call__
+7283:     |     await route.handle(scope, receive, send)
+7284:     |           |     |      |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+7285:     |           |     |      |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+7286:     |           |     |      -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+7287:     |           |     -> <function Route.handle at 0x10b95bce0>
+7288:     |           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+7289:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+7290:     |     await self.app(scope, receive, send)
+7291:     |           |    |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+7292:     |           |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+7293:     |           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+7294:     |           |    -> <function request_response.<locals>.app at 0x128ec1620>
+7295:     |           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+7296:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+7297:     |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+7298:     |           |                            |    |        |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+7299:     |           |                            |    |        |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+7300:     |           |                            |    |        -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+7301:     |           |                            |    -> <starlette.requests.Request object at 0x1316e0a90>
+7302:     |           |                            -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+7303:     |           -> <function wrap_app_handling_exceptions at 0x10b95a660>
+7304:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+7305:     |     raise exc
+7306:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+7307:     |     await app(scope, receive, sender)
+7308:     |           |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e0900>
+7309:     |           |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+7310:     |           |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+7311:     |           -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+7312:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 120, in app
+7321:     |                  |         |      -> {'db': <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x130e266d0>, 'guidance': 'Answer the...
+7322:     |                  |         -> <function respond_flashcard_assistant at 0x128d50f40>
+7323:     |                  -> Dependant(path_params=[ModelField(field_info=Path(PydanticUndefined), name='card_uuid', mode='validation', config=None)], que...
+7324:     |
+7325:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2501, in respond_flashcard_assistant
+7326:     |     reply = await generate_study_assistant_reply(
+7327:     |                   -> <function generate_study_assistant_reply at 0x128b0dd00>
+7328:     |
+7329:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Flashcards/study_assistant.py", line 451, in generate_study_assistant_reply
+7330:     |     response = await perform_chat_api_call_async(
+7331:     |                      -> <function perform_chat_api_call_async at 0x112b53560>
+7332:     |
+7333:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2659, in perform_chat_api_call_async
+7334:     |     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
+7335:     |                                   |                                     -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+7336:     |                                   -> <function _build_adapter_request_from_chat_args at 0x112b52e80>
+7337:     |
+7338:     |   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2386, in _build_adapter_request_from_chat_args
+7339:     |     raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
+7340:     |           |                                   |         -> <method 'get' of 'dict' objects>
+7341:     |           |                                   -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+7342:     |           -> <class 'tldw_Server_API.app.core.exceptions.ChatConfigurationError'>
+7343:     |
+7344:     | tldw_Server_API.app.core.exceptions.ChatConfigurationError: LLM provider is required.
+7345:     +------------------------------------
+7346:
+7347:
+7348: The above exception was the direct cause of the following exception:
+7349:
+7350:
+7351: Traceback (most recent call last):
+7352:
+7353:   File "<frozen runpy>", line 198, in _run_module_as_main
+7354:   File "<frozen runpy>", line 88, in _run_code
+7355:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__main__.py", line 4, in <module>
+7356:     uvicorn.main()
+7357:     |       -> <Command main>
+7358:     -> <module 'uvicorn' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__init__....
+7359:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1569, in __call__
+7360:     return self.main(*args, **kwargs)
+7361:            |    |     |       -> {}
+7362:            |    |     -> ()
+7363:            |    -> <function Command.main at 0x1055720c0>
+7364:            -> <Command main>
+7365:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1490, in main
+7366:     rv = self.invoke(ctx)
+7367:          |    |      -> <click.core.Context object at 0x105096690>
+7368:          |    -> <function Command.invoke at 0x105571da0>
+8021:     await route.handle(scope, receive, send)
+8022:           |     |      |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+8023:           |     |      |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+8024:           |     |      -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+8025:           |     -> <function Route.handle at 0x10b95bce0>
+8026:           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+8027:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+8028:     await self.app(scope, receive, send)
+8029:           |    |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+8030:           |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+8031:           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+8032:           |    -> <function request_response.<locals>.app at 0x128ec1620>
+8033:           -> APIRoute(path='/api/v1/flashcards/{card_uuid}/assistant/respond', name='respond_flashcard_assistant', methods=['POST'])
+8034:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+8035:     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+8036:           |                            |    |        |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e1a80>
+8037:           |                            |    |        |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+8038:           |                            |    |        -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+8039:           |                            |    -> <starlette.requests.Request object at 0x1316e0a90>
+8040:           |                            -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+8041:           -> <function wrap_app_handling_exceptions at 0x10b95a660>
+8042:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+8043:     raise exc
+8044:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+8045:     await app(scope, receive, sender)
+8046:           |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x1313e0900>
+8047:           |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1313e37e0>
+8048:           |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+8049:           -> <function request_response.<locals>.app.<locals>.app at 0x1313e3ba0>
+8050:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 120, in app
+8059:                  |         |      -> {'db': <tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB object at 0x130e266d0>, 'guidance': 'Answer the...
+8060:                  |         -> <function respond_flashcard_assistant at 0x128d50f40>
+8061:                  -> Dependant(path_params=[ModelField(field_info=Path(PydanticUndefined), name='card_uuid', mode='validation', config=None)], que...
+8062:
+8063:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2501, in respond_flashcard_assistant
+8064:     reply = await generate_study_assistant_reply(
+8065:                   -> <function generate_study_assistant_reply at 0x128b0dd00>
+8066:
+8067:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Flashcards/study_assistant.py", line 451, in generate_study_assistant_reply
+8068:     response = await perform_chat_api_call_async(
+8069:                      -> <function perform_chat_api_call_async at 0x112b53560>
+8070:
+8071:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2659, in perform_chat_api_call_async
+8072:     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
+8073:                                   |                                     -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+8074:                                   -> <function _build_adapter_request_from_chat_args at 0x112b52e80>
+8075:
+8076:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/Chat/chat_service.py", line 2386, in _build_adapter_request_from_chat_args
+8077:     raise ChatConfigurationError(provider=str(chat_args.get("api_endpoint")), message="LLM provider is required.")
+8078:           |                                   |         -> <method 'get' of 'dict' objects>
+8079:           |                                   -> {'messages': [{'role': 'user', 'content': 'Context type: flashcard\nAnchor: When do Citrine study volunteers meet?\nStudy con...
+8080:           -> <class 'tldw_Server_API.app.core.exceptions.ChatConfigurationError'>
+8081:
+8082: tldw_Server_API.app.core.exceptions.ChatConfigurationError: LLM provider is required.
+8083: 2026-09-16 17:44:37.828 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+8084: 2026-09-16 17:44:37.829 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+12069: 2026-09-16 17:51:18.316 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.utils.exception_handlers:global_unhandled_exception_handler:61 - Unhandled exception on POST /api/v1/flashcards/review (request_id=0cf1e412-7a6e-4553-bf86-bb40415091f5): 3 validation errors:
+12070:   {'type': 'string_type', 'loc': ('response', 'due_at'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 1, 1, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12071:   {'type': 'string_type', 'loc': ('response', 'last_reviewed_at'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 0, 51, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12072:   {'type': 'string_type', 'loc': ('response', 'last_modified'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 0, 51, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12073:
+12074:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2015, in review_flashcard
+12075:     POST /api/v1/flashcards/reviewTraceback (most recent call last):
+12076:
+12077:   File "<frozen runpy>", line 198, in _run_module_as_main
+12078:   File "<frozen runpy>", line 88, in _run_code
+12079:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__main__.py", line 4, in <module>
+12080:     uvicorn.main()
+12081:     |       -> <Command main>
+12082:     -> <module 'uvicorn' from '/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/uvicorn/__init__....
+12083:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1569, in __call__
+12084:     return self.main(*args, **kwargs)
+12085:            |    |     |       -> {}
+12086:            |    |     -> ()
+12087:            |    -> <function Command.main at 0x1055720c0>
+12088:            -> <Command main>
+12089:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/click/core.py", line 1490, in main
+12090:     rv = self.invoke(ctx)
+12091:          |    |      -> <click.core.Context object at 0x105096690>
+12092:          |    -> <function Command.invoke at 0x105571da0>
+12194:     await route.handle(scope, receive, send)
+12195:           |     |      |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x12fdffce0>
+12196:           |     |      |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1316c3b00>
+12197:           |     |      -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+12198:           |     -> <function Route.handle at 0x10b95bce0>
+12199:           -> APIRoute(path='/api/v1/flashcards/review', name='review_flashcard', methods=['POST'])
+12200:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/routing.py", line 276, in handle
+12201:     await self.app(scope, receive, send)
+12202:           |    |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x12fdffce0>
+12203:           |    |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1316c3b00>
+12204:           |    |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+12205:           |    -> <function request_response.<locals>.app at 0x128d53f60>
+12206:           -> APIRoute(path='/api/v1/flashcards/review', name='review_flashcard', methods=['POST'])
+12207:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 134, in app
+12208:     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+12209:           |                            |    |        |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x12fdffce0>
+12210:           |                            |    |        |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1316c3b00>
+12211:           |                            |    |        -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+12212:           |                            |    -> <starlette.requests.Request object at 0x131372590>
+12213:           |                            -> <function request_response.<locals>.app.<locals>.app at 0x12fdff1a0>
+12214:           -> <function wrap_app_handling_exceptions at 0x10b95a660>
+12215: > File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+12216:     await app(scope, receive, sender)
+12217:           |   |      |        -> <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x12fdff6a0>
+12218:           |   |      -> <function BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.receive_or_disconnect at 0x1316c3b00>
+12219:           |   -> {'type': 'http', 'asgi': {'version': '3.0', 'spec_version': '2.3'}, 'http_version': '1.1', 'server': ('127.0.0.1', 18503), 'c...
+12220:           -> <function request_response.<locals>.app.<locals>.app at 0x12fdff1a0>
+12221:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/fastapi/routing.py", line 120, in app
+12222:     response = await f(request)
+12223:                      | -> <starlette.requests.Request object at 0x131372590>
+12232: fastapi.exceptions.ResponseValidationError: 3 validation errors:
+12233:   {'type': 'string_type', 'loc': ('response', 'due_at'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 1, 1, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12234:   {'type': 'string_type', 'loc': ('response', 'last_reviewed_at'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 0, 51, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12235:   {'type': 'string_type', 'loc': ('response', 'last_modified'), 'msg': 'Input should be a valid string', 'input': datetime.datetime(2026, 9, 17, 0, 51, 18, 308000, tzinfo=zoneinfo.ZoneInfo(key='Etc/UTC'))}
+12236:
+12237:   File "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/flashcards.py", line 2015, in review_flashcard
+12238:     POST /api/v1/flashcards/review
+12239: 2026-09-16 17:51:18.318 | WARNING  | trace= span= tp= req=0cf1e412-7a6e-4553-bf86-bb40415091f5 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP POST /api/v1/flashcards/review -> 500 in 29ms
+12240: 2026-09-16 17:51:18.318 | INFO     | trace= span= tp= req=0cf1e412-7a6e-4553-bf86-bb40415091f5 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:59718 - "POST /api/v1/flashcards/review HTTP/1.1" 500
+12241: 2026-09-16 17:51:20.661 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+12242: 2026-09-16 17:51:20.661 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+12243: 2026-09-16 17:51:20.672 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.User_DB_Handling:verify_jwt_and_fetch_user:950 - Authenticated active user (details redacted)
+12244: 2026-09-16 17:51:20.673 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:831 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
+12245: 2026-09-16 17:51:20.673 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.User_DB_Handling:verify_jwt_and_fetch_user:950 - Authenticated active user (details redacted)
+12246: 2026-09-16 17:51:20.674 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:831 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
+12247: 2026-09-16 17:51:20.680 | INFO     | trace= span= tp= req=a575f0a5-62ca-44c5-ad6b-c7b4c8be50fc job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/buddies -> 200 in 26ms
+12248: 2026-09-16 17:51:20.680 | INFO     | trace= span= tp= req=a575f0a5-62ca-44c5-ad6b-c7b4c8be50fc job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:59772 - "GET /api/v1/buddies?limit=100&offset=0 HTTP/1.1" 200
+12249: 2026-09-16 17:51:20.681 | INFO     | trace= span= tp= req=c589986c-9852-46da-a2d1-48779955f069 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP GET /api/v1/buddies/attachment -> 200 in 27ms
+12250: 2026-09-16 17:51:20.682 | INFO     | trace= span= tp= req=c589986c-9852-46da-a2d1-48779955f069 job= ps=: | starlette.middleware.errors:_send:161 - 127.0.0.1:59773 - "GET /api/v1/buddies/attachment?client_slot=default HTTP/1.1" 200
+12251: 2026-09-16 17:51:22.131 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+12252: 2026-09-16 17:51:22.131 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.DB_Management.Users_DB:initialize:172 - UsersDB initialized
+12253: 2026-09-16 17:51:22.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.User_DB_Handling:verify_jwt_and_fetch_user:950 - Authenticated active user (details redacted)
+12254: 2026-09-16 17:51:22.142 | INFO     | trace= span= tp= req= job= ps=: | tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps:get_chacha_db_for_user:831 - <<<<< ACTUAL get_chacha_db_for_user CALLED >>>>>
