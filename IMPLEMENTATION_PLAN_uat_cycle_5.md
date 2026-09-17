@@ -4,6 +4,8 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 
 ## Mandatory entry gate for another full UAT
 
+Latest character-reviewed ledger:182verified/15targeted acceptance pending/0unresolved implementations across197. Commitsdf0fbbd73a/48f89447fc integrate reviewed character/schema/search and test-only183 fixes; independent247pass0skip. Bob account-switch read500 on oldPID63046 blocks151 acceptance until reviewed runtime reload. Restricted-role harness independent review remains pending; Stage4 not started.
+
 Latest197-worker-reviewed ledger:181 verified/12 awaitingnative/4 unresolved183,193,194,195.196 nativeaccepted;181HTTP+worker and197count repairs committed07e0abf1c4/11c9b0a933/053ff74116.183 additionalhistorical21fixture andcharacter/schema/search independentreview remain. No full matrix started.
 
 Latest197-finding checkpoint2026-09-17:181 verified,10 awaiting native acceptance,6 unresolved181/193–197. Native166/172/167/174/175 accepted; HTTP checkout ownership committed07e0abf1c4 with independent77/0skip, author164/0skip. Remaining worker lifetime, character ownership/name migration, exemplar parameter typing, duplicate copy and StudyPack count fixes stay in Stage3. Harness125 is reopened for actual direct non-bypass PostgreSQL runtime-role cold-init proof. Stage4 remains Not Started; no final matrix profile has been launched. See the current tracker/197-row ledger rather than historical counts below.

@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-17T04:07:26.094Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "character_baseline_replay",
+    "tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py::test_search_character_cards_postgres_uses_tsquery",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py::test_get_character_exemplar_by_id_uses_backend_safe_deleted_value",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py::test_list_character_exemplars_uses_backend_safe_deleted_value",
+    "tldw_Server_API/tests/ChaChaNotesDB/test_character_exemplars_db.py::test_migration_v21_to_v22_creates_exemplar_tables",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

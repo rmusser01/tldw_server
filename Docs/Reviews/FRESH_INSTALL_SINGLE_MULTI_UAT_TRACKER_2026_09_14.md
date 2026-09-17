@@ -1,5 +1,7 @@
 # Fresh-install UAT: single-user and multi-user
 
+- **Latest checkpoint:197 unique findings —182 verified,15 awaiting targeted acceptance,0 unresolved implementations.** Character ownership, per-owner PostgreSQL names and typed exemplar search are reviewed/committeddf0fbbd73a; the additional183 fixtures are verified48f89447fc. Independent247pass/0skip. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-character-reviewed.json). Restricted-role harness cold controls pass and are under independent review. Full fresh matrix has not started.
+
 - **Latest checkpoint:197 unique findings —181 verified,12 awaiting native acceptance,4 unresolved (183/193/194/195).**196 native concise recovery passes.181 HTTP/worker and197 count repairs are committed and independently reviewed.183 reopened for an additional stale historical migration fixture. Character/schema/search unit is frozen for independent review. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-worker-reviewed.json). Restricted-role harness cold-init proof remains in progress; full fresh matrix has not started.
 
 - **Latest reconciliation:197 unique findings —181 verified,10 awaiting native acceptance,6 unresolved (181/193–197).**167/174/175 native acceptance is retained.181 HTTP ownership is committed07e0abf1c4; worker adoption and native replacement remain pending.193/194 ownership/name migration,195 exemplar parameter typing,196 duplicate copy and197 StudyPack counts are being repaired. Final-matrix harness is reopened to enforce a direct non-bypass PostgreSQL runtime role. [Ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-197-deck-accepted.json).
@@ -1958,7 +1960,9 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - The one-line named-column repair passes12 independent required-PG/SQLite controls and28 broader asset tests, separate runs with zero skips. Real router upload/content tests preserve exact valid PNG bytes; native authenticated upload/render/reload remains pending.
 - [Repair and evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup182/README.md).
 
-## UAT-183 — P2, reopened — stale Buddy migration test fixtures fail current-schema regression checks
+## UAT-183 — P2, verified — stale Buddy migration test fixtures fail current-schema regression checks
+
+- Current status: Verified additional historical21/OSCE fixture repairs48f89447fc; independent242+5pass0skip. Original162+4 proofs remain valid. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
 - Current status: Reopened for one additional stale historical fixture: exemplar21-to22 test relabels a current database as21 and triggers the realv59 Notes registry guard. Nonmutating baseline reproduces it. Actual historical21 construction is under independent review; prior183162+4 evidence remains valid for its original cases. TASK13260.120 tracks the extension. Earlier status statements below are historical.
 
@@ -2046,20 +2050,26 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 - Required official PostgreSQL191 fixture exposes set_flashcard_tags KeyError0 before scheduler checks. Root actual route/database tests independently reproduce HTTP PUT/PATCH500 and HTTP POST200 with missing keyword links; SQLite controls pass. A second tuple read in the shared keyword-link synchronizer fails when existing links are present. No native tag failure is claimed yet.
 - TASK13260.130 precedes edits. Exact two named-column reads preserve SQL, versions, normalized tags_json, actual link membership, missing/deleted behavior and caller rollback. Corrected causalRED8fail12controls0skip; GREEN28pass0skip; scoped Ruff/Bandit0. Independent review/native targeted acceptance pending. Private evidence .tmp/uat192-repair-20260917; separate from181 transaction ownership and191 scheduler preview.
 
-## UAT-193 — P1, open — visible PostgreSQL character cannot start its conversation
+## UAT-193 — P1, implemented; targeted acceptance pending — visible PostgreSQL character cannot start its conversation
+
+- Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
 - Fresh Alice Characters page lists Helpful AI Assistant; actual GET/characters/2 returns200 with its greeting. Selecting Chat and sending the fictional acceptance prompt calls POST/chats/ with character_id2, but returns400 Character ID2 not found at03:15:04UTC. Ordinary Retry03:16:09 also400. The UI shows generic server/provider recovery guidance although failure occurs before completion.
 - TASK13260.131 precedes repair edits. Trace persisted character identity and scoped conversation materialization; preserve user isolation/immutable snapshot authorization. Do not remove owner checks without a proven replacement boundary. The one-request complete-v2 provider fault had zero invocations and was removed before Retry, so no controlled provider failure or successful031 acceptance is claimed. Native evidence .tmp/uat031-native-20260916/fresh-postretry-events.txt and fresh-character-not-found.png. Distinct observed failure from173 quota503 and176 world-book500.
 
 - UAT193 ownership diagnosis03:19:24UTC: read-only metadata identifies visible Helpful AI Assistant2 as client_id1; active Alice is user2. The factory ownership check therefore appears to be protecting the boundary. Investigate list/read/default-by-name reuse, preserving authorization. Only system/default content was observed; no private-character leak is claimed. Receipt .tmp/uat193-native-20260917/character-owner-read.json.
 
-## UAT-194 — P1, open — character ownership is unguarded under the configured PostgreSQL bypass role
+## UAT-194 — P1, implemented; targeted acceptance pending — character ownership is unguarded under the configured PostgreSQL bypass role
+
+- Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
 - Actual isolated two-owner PostgreSQL route tests under the configured superuser/BYPASSRLS role return foreign private fixture content through list/query/detail and permit PUT to change description/version/client_id1→2. Native read-only role flags confirm that privilege. Existing forced RLS hides foreign rows and rejects owner-changing UPDATE under a verified NOSUPERUSER/NOBYPASSRLS role; ordinary-role leakage is not established. Startup accepts the bypass role, and the Notes domain documents application predicates for privileged service roles. SQLite per-user controls pass. No native private-character attack or diagnostic database mutation was performed. [Role qualification](../../output/playwright/cycle5-repair-verification-2026-09-16/native193-194-role-qualification/README.md).
 - TASK13260.132 owns the read/write boundary, coordinated with193 in one reviewed character-store/schema unit. Preserve factory checks and SQLite sync semantics, cover foreign mutation/child/deleted paths, and use parameterized current-owner predicates plus versioned tenant-name uniqueness. Causal combined193/194 RED8fail16pass0skip; .tmp/uat193-diagnosis-20260917 retains exact paths/results. Root reviewed the role contract and authorized bounded PG-only CharacterStore ownership plus atomic PG67-to68 owner/name uniqueness. Preserve RLS/factory authorization and SQLite semantics. Shared source edits remain coordinated with181; no native repair acceptance yet.
 
 
-## UAT-195 — P1, open — PostgreSQL exemplar search fails with omitted optional filters
+## UAT-195 — P1, implemented; targeted acceptance pending — PostgreSQL exemplar search fails with omitted optional filters
+
+- Current status: Implemented and independently reviewed, commitdf0fbbd73a; native acceptance pending. PostgreSQL role qualification remains explicit; no ordinary-role leakage claimed. [Reviewed evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/followup193-195-character-ownership-reviewed/README.md). Earlier status statements below are historical.
 
 - Actual required-PostgreSQL ownership regressions encounter a separate CharacterStore.search_character_exemplars query error when emotion/scenario are omitted. Driver replay confirms IndeterminateDatatype42P18 at parameter4 for both omitted and supplied filters; each IS NULL placeholder lacks type context. Actual owned-list control succeeds. The earlier explicit-filter positive-control hypothesis was rejected. ExistingTASK16 covered deleted filtering only. No native failure is claimed.
 - TASK13260.133 precedes repair. Preserve filtering, result/count/deleted semantics and SQLite; retain exact driver classification, causal RED and mandatory-PG GREEN, then independent review.
@@ -2078,3 +2088,7 @@ Additional URL observation: both Media inspectors show “Chunking: Completed”
 
 - Actual StudyPack worker success reaches real add_study_pack_cards and raises KeyError0 at before_row[0]; after_row has the same unaliased COUNT(*) row contract. PostgreSQL returns named count, SQLite retains tuple-compatible COUNT(*). Four persistence controls fail; SQLite success/repeats pass. Separate from181 worker checkout lifetime. No native failure is claimed.
 - TASK13260.135 owns exactly these count reads and actual append/duplicate/rollback controls, preserving SQL/transaction semantics. Shared source regions are coordinated with193/194 schema changes. Evidence .tmp/fresh-uat-recovery-20260916/uat181-study-pack-first-red.redacted.log; corrected lease-specific cancellation accounting is a separate181 harness correction.
+
+## Account-switch retest before backend reload —2026-09-17 04:27 UTC
+
+Alice source and both deck labels clear on Bob’s first return to Import/Export. Normal auth/me confirms Bob3, but deck/card reads fail500 ChaChaNotes DB unavailable on old backendPID63046, started02:00UTC before the reviewed ownership changes. Read-only metadata retains idle transactions and35public-table locks. UAT151 is not accepted; this is preserved old-runtime failure evidence under181, not a regression claim against the newly committed backend. Load reviewed source, warm both owners, then repeat original151 before full UAT.

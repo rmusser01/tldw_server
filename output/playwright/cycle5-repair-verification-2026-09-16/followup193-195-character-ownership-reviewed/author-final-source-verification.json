@@ -1,0 +1,47 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_shared_owner_contract.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_exemplar_search_backends.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/ChaChaNotesDB/test_character_exemplars_db.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_osce_postgres_migration_v67.py",
+    "matches_frozen": true,
+    "trailing_whitespace_lines": 0
+  }
+]

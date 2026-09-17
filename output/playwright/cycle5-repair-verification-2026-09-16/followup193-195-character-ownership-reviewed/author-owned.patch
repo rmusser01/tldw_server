@@ -1,0 +1,1361 @@
+--- a/tldw_Server_API/app/core/DB_Management/chacha/character_store.py
++++ b/tldw_Server_API/app/core/DB_Management/chacha/character_store.py
+@@ -54,6 +54,43 @@
+     def _deleted_value(self, deleted: bool) -> bool | int:
+         """Return the backend-native value for a soft-delete flag."""
+         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
++
++    def _owner_filter(self, *, aliased: bool = False) -> tuple[str, tuple[str, ...]]:
++        """Scope shared PostgreSQL rows; SQLite client IDs remain sync-device IDs."""
++        if self._db.backend_type != BackendType.POSTGRESQL:
++            return "", ()
++        clause = " AND cc.client_id = ?" if aliased else " AND client_id = ?"
++        return clause, (self._db.client_id,)
++
++    def _exemplar_owner_filter(self, *, aliased: bool = False) -> tuple[str, tuple[str, ...]]:
++        """Derive exemplar ownership from its character without duplicating it."""
++        if self._db.backend_type != BackendType.POSTGRESQL:
++            return "", ()
++        if aliased:
++            clause = (
++                " AND EXISTS (SELECT 1 FROM character_cards owner_card "
++                "WHERE owner_card.id = ce.character_id AND owner_card.client_id = ?)"
++            )
++        else:
++            clause = (
++                " AND EXISTS (SELECT 1 FROM character_cards owner_card "
++                "WHERE owner_card.id = character_exemplars.character_id AND owner_card.client_id = ?)"
++            )
++        return clause, (self._db.client_id,)
++
++    def _current_character_version(self, conn: Any, character_id: int) -> int:
++        """Check the version without exposing a foreign PostgreSQL character."""
++        if self._db.backend_type != BackendType.POSTGRESQL:
++            return self._db._get_current_db_version(conn, "character_cards", "id", character_id)
++        row = conn.execute(
++            "SELECT version, deleted FROM character_cards WHERE id = ? AND client_id = ?",
++            (character_id, self._db.client_id),
++        ).fetchone()
++        if not row:
++            raise ConflictError("Record not found in character_cards.", entity="character_cards", entity_id=character_id)
++        if row["deleted"]:
++            raise ConflictError("Record is soft-deleted in character_cards.", entity="character_cards", entity_id=character_id)
++        return row["version"]
+
+     # ------------------------------------------------------------------
+     # Character card creation
+@@ -220,6 +257,9 @@
+         else:
+             query += f" AND deleted = {self._deleted_literal(False)}"
+             params = (character_id,)
++        owner_filter, owner_params = self._owner_filter()
++        query += owner_filter
++        params += owner_params
+         try:
+             cursor = self._db.execute_query(query, params)
+             row = cursor.fetchone()
+@@ -268,6 +308,10 @@
+         params: list[Any] = list(normalized_ids)
+         if not include_deleted:
+             query += f" AND deleted = {self._deleted_literal(False)}"
++
++        owner_filter, owner_params = self._owner_filter()
++        query += owner_filter
++        params.extend(owner_params)
+
+         try:
+             cursor = self._db.execute_query(query, tuple(params))
+@@ -314,6 +358,9 @@
+         if not include_deleted:
+             query += " AND deleted = ?"
+             params += (self._deleted_value(False),)
++        owner_filter, owner_params = self._owner_filter()
++        query += owner_filter
++        params += owner_params
+         try:
+             cursor = self._db.execute_query(query, params, read_only=True)
+             row = cursor.fetchone()
+@@ -361,9 +408,10 @@
+         Raises:
+             CharactersRAGDBError: For database errors during listing.
+         """
+-        query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
++        owner_filter, owner_params = self._owner_filter()
++        query = "SELECT * FROM character_cards WHERE deleted = ?" + owner_filter + " ORDER BY name LIMIT ? OFFSET ?"  # nosec B608 # Fixed owner predicate; all values remain bound
+         try:
+-            cursor = self._db.execute_query(query, (self._deleted_value(False), limit, offset))
++            cursor = self._db.execute_query(query, (self._deleted_value(False), *owner_params, limit, offset))
+             rows = cursor.fetchall()
+             return [self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
+         except CharactersRAGDBError as e:
+@@ -406,14 +454,19 @@
+         deleted_false = "FALSE" if self._db.backend_type == BackendType.POSTGRESQL else "0"
+         deleted_true = "TRUE" if self._db.backend_type == BackendType.POSTGRESQL else "1"
+         updated_expr = "COALESCE(cc.last_modified, cc.created_at)"
++        conversation_owner_filter = (
++            " AND conv.client_id = cc.client_id" if self._db.backend_type == BackendType.POSTGRESQL else ""
++        )
+         conversation_count_expr = (
+             "SELECT COUNT(1) FROM conversations conv "  # nosec B608
+             f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
++            + conversation_owner_filter
+         )
+         last_used_expr = (
+             "COALESCE(("  # nosec B608
+             "SELECT MAX(conv.last_modified) FROM conversations conv "
+             f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
++            f"{conversation_owner_filter}"
+             "), cc.created_at)"
+         )
+
+@@ -471,6 +524,7 @@
+                 "EXISTS ("  # nosec B608
+                 "SELECT 1 FROM conversations conv "
+                 f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
++                f"{conversation_owner_filter}"
+                 ")"
+             )
+         elif has_conversations is False:
+@@ -478,6 +532,7 @@
+                 "NOT EXISTS ("  # nosec B608
+                 "SELECT 1 FROM conversations conv "
+                 f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
++                f"{conversation_owner_filter}"
+                 ")"
+             )
+
+@@ -537,6 +592,9 @@
+             deleted_filter = f"cc.deleted = {deleted_false}"
+
+         base_query = f"FROM character_cards cc WHERE {deleted_filter}"
++        owner_filter, owner_params = self._owner_filter(aliased=True)
++        base_query += owner_filter
++        params = [*owner_params, *params]
+         if filters:
+             base_query += " AND " + " AND ".join(filters)
+
+@@ -611,6 +669,9 @@
+
+         deleted_filter = "1=1" if include_deleted else f"cc.deleted = {deleted_false}"
+         base_query = f"FROM character_cards cc WHERE {deleted_filter}"  # nosec B608
++        owner_filter, owner_params = self._owner_filter(aliased=True)
++        base_query += owner_filter
++        params = [*owner_params, *params]
+         if filters:
+             base_query += " AND " + " AND ".join(filters)
+
+@@ -671,6 +732,9 @@
+         params: tuple[Any, ...] = (character_id,)
+         if not include_deleted:
+             query += f" AND deleted = {self._deleted_literal(False)}"
++        owner_filter, owner_params = self._owner_filter()
++        query += owner_filter
++        params += owner_params
+         try:
+             cursor = self._db.execute_query(query, params)
+             row = cursor.fetchone()
+@@ -685,9 +749,10 @@
+
+     def _get_raw_character_tags(self, character_id: int) -> Any:
+         """Return the stored tags value without JSON deserialization."""
++        owner_filter, owner_params = self._owner_filter()
+         cursor = self._db.execute_query(
+-            "SELECT tags FROM character_cards WHERE id = ?",
+-            (character_id,),
++            "SELECT tags FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++            (character_id, *owner_params),
+         )
+         row = cursor.fetchone()
+         return dict(row).get("tags") if row else None
+@@ -879,19 +944,22 @@
+         # If card_data is empty, treat as a no-op as per original behavior.
+         # No version check, no transaction, no version bump.
+         if not card_data:
++            if self._db.backend_type == BackendType.POSTGRESQL and not self.get_character_card_by_id(character_id):
++                raise ConflictError(
++                    "Record not found in character_cards.", entity="character_cards", entity_id=character_id,
++                )
+             logger.info(f"No data provided in card_data for character card update ID {character_id}. No-op.")
+             return True
+
+         now = self._db._get_current_utc_timestamp_iso()
++        owner_filter, owner_params = self._owner_filter()
+
+         try:
+             with self._db.transaction() as conn:
+                 logger.debug(f"Transaction started. Connection object: {id(conn)}")
+
+                 # Initial version check. This also confirms the record exists and is not deleted.
+-                current_db_version_initial_check = self._db._get_current_db_version(
+-                    conn, "character_cards", "id", character_id,
+-                )
++                current_db_version_initial_check = self._current_character_version(conn, character_id)
+                 logger.debug(
+                     f"Initial DB version: {current_db_version_initial_check}, Client expected: {expected_version}")
+
+@@ -945,10 +1013,11 @@
+                 final_update_query = (
+                     f"UPDATE character_cards SET {', '.join(set_clauses_sql)} "  # nosec B608
+                     f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}"
++                    f"{owner_filter}"
+                 )
+
+                 # WHERE clause parameters
+-                where_params: list[Any] = [character_id, expected_version]
++                where_params: list[Any] = [character_id, expected_version, *owner_params]
+                 final_params = tuple(params_for_set_clause + where_params)
+
+                 logger.debug("Executing SINGLE character update query: {}", final_update_query)
+@@ -960,8 +1029,8 @@
+                 if cursor.rowcount == 0:
+                     # Re-check the record's state to provide a more specific error.
+                     check_again_cursor = conn.execute(
+-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
+-                        (character_id,),
++                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                        (character_id, *owner_params),
+                     )
+                     final_state = check_again_cursor.fetchone()
+                     msg = f"Update for character_cards ID {character_id} (expected v{expected_version}) affected 0 rows."
+@@ -1100,11 +1169,13 @@
+         """
+         now = self._db._get_current_utc_timestamp_iso()
+         next_version_val = expected_version + 1
++        owner_filter, owner_params = self._owner_filter()
+
+         query = (
+             "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
+             "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
+         )
++        query += owner_filter
+         params = (
+             self._deleted_value(True),
+             now,
+@@ -1113,20 +1184,19 @@
+             character_id,
+             expected_version,
+             self._deleted_value(False),
++            *owner_params,
+         )
+
+         try:
+             with self._db.transaction() as conn:
+                 try:
+-                    current_db_version = self._db._get_current_db_version(
+-                        conn, "character_cards", "id", character_id,
+-                    )
++                    current_db_version = self._current_character_version(conn, character_id)
+                     # If here, record is active.
+                 except ConflictError:
+                     # Check if ConflictError was because it's ALREADY soft-deleted.
+                     check_status_cursor = conn.execute(
+-                        "SELECT deleted, version FROM character_cards WHERE id = ?",
+-                        (character_id,),
++                        "SELECT deleted, version FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                        (character_id, *owner_params),
+                     )
+                     record_status = check_status_cursor.fetchone()
+                     if record_status and record_status['deleted']:
+@@ -1150,8 +1220,8 @@
+                 if cursor.rowcount == 0:
+                     # Race condition: Record changed between pre-check and UPDATE.
+                     check_again_cursor = conn.execute(
+-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
+-                        (character_id,),
++                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                        (character_id, *owner_params),
+                     )
+                     final_state = check_again_cursor.fetchone()
+                     msg = (
+@@ -1244,11 +1314,13 @@
+         """
+         now = self._db._get_current_utc_timestamp_iso()
+         next_version_val = expected_version + 1
++        owner_filter, owner_params = self._owner_filter()
+
+         query = (
+             "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
+             "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
+         )
++        query += owner_filter
+         params = (
+             self._deleted_value(False),
+             now,
+@@ -1257,14 +1329,15 @@
+             character_id,
+             expected_version,
+             self._deleted_value(True),
++            *owner_params,
+         )
+
+         try:
+             with self._db.transaction() as conn:
+                 # First check if record exists at all
+                 check_cursor = conn.execute(
+-                    "SELECT deleted, version, last_modified FROM character_cards WHERE id = ?",
+-                    (character_id,),
++                    "SELECT deleted, version, last_modified FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                    (character_id, *owner_params),
+                 )
+                 record_status = check_cursor.fetchone()
+
+@@ -1348,8 +1421,8 @@
+                 if cursor.rowcount == 0:
+                     # Race condition: Record changed between pre-check and UPDATE.
+                     check_again_cursor = conn.execute(
+-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
+-                        (character_id,),
++                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                        (character_id, *owner_params),
+                     )
+                     final_state = check_again_cursor.fetchone()
+                     msg = (
+@@ -1443,11 +1516,12 @@
+                 FROM character_cards cc
+                 WHERE cc.deleted = FALSE
+                   AND cc.character_cards_fts_tsv @@ to_tsquery('english', ?)
++                  AND cc.client_id = ?
+                 ORDER BY rank DESC, cc.last_modified DESC
+                 LIMIT ?
+             """
+             try:
+-                cursor = self._db.execute_query(query, (tsquery, tsquery, limit))
++                cursor = self._db.execute_query(query, (tsquery, tsquery, self._db.client_id, limit))
+                 rows = cursor.fetchall()
+                 return [
+                     self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
+@@ -1620,8 +1694,11 @@
+
+             while len(results) < limit:
+                 # Load cards in batches
+-                query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
+-                cursor = self._db.execute_query(query, (self._deleted_value(False), batch_size, offset))
++                owner_filter, owner_params = self._owner_filter()
++                query = "SELECT * FROM character_cards WHERE deleted = ?" + owner_filter + " ORDER BY name LIMIT ? OFFSET ?"  # nosec B608 # Fixed owner predicate; all values remain bound
++                cursor = self._db.execute_query(
++                    query, (self._deleted_value(False), *owner_params, batch_size, offset),
++                )
+                 batch_rows = cursor.fetchall()
+
+                 if not batch_rows:
+@@ -1773,11 +1850,16 @@
+                 novelty_hint, emotion, scenario, rhetorical, register, safety_allowed,
+                 safety_blocked, rights_public_figure, rights_notes, length_tokens,
+                 created_at, updated_at, is_deleted
+-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++            )
+         """
+         if self._db.backend_type == BackendType.POSTGRESQL:
++            query += (
++                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
++                " WHERE EXISTS (SELECT 1 FROM character_cards WHERE id = ? AND client_id = ? AND deleted = FALSE)"
++            )
+             rights_public_figure = bool(exemplar_data.get('rights_public_figure', True))
+         else:
++            query += " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+             rights_public_figure = 1 if exemplar_data.get('rights_public_figure', True) else 0
+         is_deleted = self._deleted_value(False)
+
+@@ -1802,11 +1884,15 @@
+             now,
+             is_deleted,
+         )
++        if self._db.backend_type == BackendType.POSTGRESQL:
++            params += (character_id, self._db.client_id)
+
+         try:
+             with self._db.transaction() as conn:
+                 prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+-                conn.execute(prepared_query, prepared_params)
++                cursor = conn.execute(prepared_query, prepared_params)
++                if cursor.rowcount == 0:
++                    raise InputError(f"Character ID {character_id} not found.")
+         except sqlite3.IntegrityError as exc:
+             msg = str(exc).lower()
+             if "unique constraint failed: character_exemplars.id" in msg:
+@@ -1847,6 +1933,9 @@
+         if not include_deleted:
+             query += " AND is_deleted = ?"
+             params.append(self._deleted_value(False))
++        owner_filter, owner_params = self._exemplar_owner_filter()
++        query += owner_filter
++        params.extend(owner_params)
+         query += " LIMIT 1"
+         try:
+             cursor = self._db.execute_query(query, tuple(params))
+@@ -1857,17 +1946,21 @@
+
+     def list_character_exemplars(self, character_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+         """List non-deleted exemplars for a character."""
++        owner_filter, owner_params = self._exemplar_owner_filter()
+         query = """
+             SELECT *
+             FROM character_exemplars
+             WHERE character_id = ? AND is_deleted = ?
++        """
++        query += owner_filter
++        query += """
+             ORDER BY updated_at DESC, created_at DESC
+             LIMIT ? OFFSET ?
+         """
+         try:
+             cursor = self._db.execute_query(
+                 query,
+-                (character_id, self._deleted_value(False), limit, offset),
++                (character_id, self._deleted_value(False), *owner_params, limit, offset),
+             )
+             rows = cursor.fetchall()
+             return [self._normalize_character_exemplar_row(row) for row in rows if row]
+@@ -2009,6 +2102,9 @@
+                 self._deleted_value(False),
+             ]
+         )
++        owner_filter, owner_params = self._exemplar_owner_filter()
++        query += owner_filter
++        params.extend(owner_params)
+         try:
+             with self._db.transaction() as conn:
+                 prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
+@@ -2023,11 +2119,12 @@
+
+     def soft_delete_character_exemplar(self, character_id: int, exemplar_id: str) -> bool:
+         """Soft-delete a character exemplar (idempotent)."""
++        owner_filter, owner_params = self._exemplar_owner_filter()
+         query = """
+             UPDATE character_exemplars
+             SET is_deleted = ?, updated_at = ?
+             WHERE id = ? AND character_id = ? AND is_deleted = ?
+-        """
++        """ + owner_filter  # nosec B608 # Fixed owner predicate; all values remain bound
+         now = self._db._get_current_utc_timestamp_iso()
+         set_deleted = self._deleted_value(True)
+         active_flag = self._deleted_value(False)
+@@ -2036,7 +2133,7 @@
+             with self._db.transaction() as conn:
+                 prepared_query, prepared_params = self._db._prepare_backend_statement(
+                     query,
+-                    (set_deleted, now, exemplar_id, character_id, active_flag),
++                    (set_deleted, now, exemplar_id, character_id, active_flag, *owner_params),
+                 )
+                 cursor = conn.cursor()
+                 cursor.execute(prepared_query, prepared_params)
+@@ -2044,8 +2141,8 @@
+                     return True
+
+                 check_query, check_params = self._db._prepare_backend_statement(
+-                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?",
+-                    (exemplar_id, character_id),
++                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
++                    (exemplar_id, character_id, *owner_params),
+                 )
+                 check_row = conn.execute(check_query, check_params).fetchone()
+                 return bool(check_row and bool(check_row['is_deleted']))  # noqa: TRY300
+@@ -2097,6 +2194,7 @@
+             scenario_filter,
+         ]
+         normalized_query = (query or "").strip()
++        owner_filter, owner_params = self._exemplar_owner_filter(aliased=True)
+
+         if normalized_query and self._db.backend_type == BackendType.POSTGRESQL:
+             tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
+@@ -2106,9 +2204,12 @@
+                     FROM character_exemplars ce
+                     WHERE ce.character_id = ?
+                       AND ce.is_deleted = ?
+-                      AND (? IS NULL OR ce.emotion = ?)
+-                      AND (? IS NULL OR ce.scenario = ?)
++                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
++                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
+                       AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
++                """
++                sql += owner_filter
++                sql += """
+                     ORDER BY rank DESC, ce.updated_at DESC
+                 """
+                 query_params = [tsquery] + filter_params + [tsquery]
+@@ -2118,9 +2219,12 @@
+                     FROM character_exemplars ce
+                     WHERE ce.character_id = ?
+                       AND ce.is_deleted = ?
+-                      AND (? IS NULL OR ce.emotion = ?)
+-                      AND (? IS NULL OR ce.scenario = ?)
++                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
++                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
+                       AND ce.text ILIKE ?
++                """
++                sql += owner_filter
++                sql += """
+                     ORDER BY ce.updated_at DESC
+                 """
+                 query_params = filter_params + [f"%{normalized_query}%"]
+@@ -2134,8 +2238,11 @@
+                 WHERE character_exemplars_fts MATCH ?
+                   AND ce.character_id = ?
+                   AND ce.is_deleted = ?
+-                  AND (? IS NULL OR ce.emotion = ?)
+-                  AND (? IS NULL OR ce.scenario = ?)
++                  AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
++                  AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
++            """
++            sql += owner_filter
++            sql += """
+                 ORDER BY bm25_score, ce.updated_at DESC
+             """
+             query_params = [safe_fts] + filter_params
+@@ -2145,14 +2252,17 @@
+                 FROM character_exemplars ce
+                 WHERE ce.character_id = ?
+                   AND ce.is_deleted = ?
+-                  AND (? IS NULL OR ce.emotion = ?)
+-                  AND (? IS NULL OR ce.scenario = ?)
++                  AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
++                  AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
++            """
++            sql += owner_filter
++            sql += """
+                 ORDER BY ce.updated_at DESC
+             """
+             query_params = filter_params
+
+         try:
+-            cursor = self._db.execute_query(sql, tuple(query_params))
++            cursor = self._db.execute_query(sql, (*query_params, *owner_params))
+             rows = cursor.fetchall()
+         except CharactersRAGDBError as exc:
+             logger.error(
+--- a/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
++++ b/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+@@ -753,7 +753,7 @@
+         db_path_str (str): String representation of the database path for SQLite connection.
+     """
+     _CURRENT_SCHEMA_VERSION = 67  # Schema v67 adds OSCE quiz activities and practice storage
+-    _POSTGRES_SCHEMA_VERSION = 67
++    _POSTGRES_SCHEMA_VERSION = 68
+     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
+     _NOTE_TASK_V60_TABLES = (
+@@ -17695,6 +17695,54 @@
+         if self._get_schema_version_postgres(conn) != 67:
+             raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
+         self._sync_postgres_sequences(conn)
++
++    def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
++        """Reserve character names per owner without changing existing rows or IDs."""
++        if self._get_schema_version_postgres(conn) != 67:
++            raise SchemaError("Character name migration requires PostgreSQL schema V67.")  # noqa: TRY003
++        catalog_query = (
++            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
++            "FROM pg_constraint c "
++            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
++            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
++            "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
++            "GROUP BY c.oid, c.conname"
++        )
++        constraints = self.backend.execute(catalog_query, connection=conn).rows
++        old_keys = [row for row in constraints if row["columns"] == ["name"]]
++        new_key = "character_cards_client_id_name_key"
++        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
++            raise SchemaError("Unexpected character name constraint catalog at PostgreSQL V67.")  # noqa: TRY003
++        self.backend.execute(
++            "ALTER TABLE character_cards ADD CONSTRAINT character_cards_client_id_name_key "
++            "UNIQUE (client_id, name)",
++            connection=conn,
++        )
++        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
++        self.backend.execute(
++            f"ALTER TABLE character_cards DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
++            connection=conn,
++        )
++        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
++        remaining_global_name_key = self.backend.execute(
++            "SELECT EXISTS (SELECT 1 FROM pg_index i "
++            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
++            "WHERE i.indrelid = 'character_cards'::regclass AND i.indisunique "
++            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
++            connection=conn,
++        ).scalar
++        if remaining_global_name_key or not any(
++            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
++            for row in final_constraints
++        ):
++            raise SchemaError("Character owner/name constraint verification failed.")  # noqa: TRY003
++        result = self.backend.execute(
++            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
++            (68, self._SCHEMA_NAME, 67),
++            connection=conn,
++        )
++        if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 68:
++            raise SchemaError("Character name PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
+
+     def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
+         """Migrate schema from V64 to V65 (character resume snapshot state)."""
+@@ -24988,6 +25036,9 @@
+             if target_version >= 67 and current_version < 67:
+                 self._migrate_from_v66_to_v67_postgres(conn)
+                 current_version = 67
++            if target_version >= 68 and current_version < 68:
++                self._migrate_from_v67_to_v68_postgres(conn)
++                current_version = 68
+             self._runtime_schema_version = current_version
+
+             if current_version > target_version:
+--- a/tldw_Server_API/tests/DB_Management/test_character_shared_owner_contract.py
++++ b/tldw_Server_API/tests/DB_Management/test_character_shared_owner_contract.py
+@@ -0,0 +1,413 @@
++"""Character visibility and creation agree across two actual database owners."""
++
++from types import SimpleNamespace
++
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++
++from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
++from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
++from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
++from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def owners(request, tmp_path):
++    """PG owners share one official fixture database; SQLite uses per-user files."""
++    backend = None
++    if request.param == "postgres":
++        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++    first = CharactersRAGDB(tmp_path / "1" / "ChaChaNotes.db", client_id="1", backend=backend)
++    second = CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="2", backend=backend)
++    try:
++        yield SimpleNamespace(first=first, second=second, postgres=request.param == "postgres")
++    finally:
++        first.close_all_connections()
++        second.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++def _seed_defaults(owners):
++    """Run the actual dependency maintenance bootstrap for both owners."""
++    first = deps._ensure_default_character(owners.first)
++    owners.first.close_connection()
++    second = deps._ensure_default_character(owners.second)
++    owners.second.close_connection()
++    assert first is not None and second is not None
++    return first, second
++
++
++def _client(db, monkeypatch):
++    app = FastAPI()
++    app.include_router(characters.router, prefix="/api/v1/characters")
++    app.include_router(chats.router, prefix="/api/v1/chats")
++    app.dependency_overrides[deps.get_chacha_db_for_user] = lambda: db
++    app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=int(db.client_id))
++    app.dependency_overrides[chats.require_expected_user] = lambda: None
++    # Keep real quota counting and the factory; frequency and sync transport are unrelated.
++    limiter = CharacterRateLimiter(enabled=False, max_chats_per_user=100)
++    monkeypatch.setattr(chats, "get_character_rate_limiter", lambda: limiter)
++    monkeypatch.setattr(chats, "_active_chat_sync_service", lambda *_args: None)
++    return TestClient(app, raise_server_exceptions=False)
++
++
++def _create(client, character):
++    return client.post(
++        "/api/v1/chats/",
++        json={
++            "character_id": str(character),
++            "state": "in-progress",
++            "source": "webui-character-chat",
++            "scope_type": "global",
++        },
++    )
++
++
++def _foreign(owners):
++    # Keep the foreign ID absent from the other user's SQLite file too.
++    owners.first.add_character_card({"name": "First owner padding"})
++    return owners.first.add_character_card(
++        {"name": "Private owner-one archivist", "system_prompt": "Owner-one secret", "tags": ["private_owner"]}
++    )
++
++
++def test_default_bootstrap_returns_the_current_owners_character(owners):
++    _first, second = _seed_defaults(owners)
++    card = owners.second.get_character_card_by_id(second)
++    assert card["name"] == deps.DEFAULT_CHARACTER_NAME
++    assert card["client_id"] == "2"
++    assert deps._ensure_default_character(owners.second) == second
++
++
++def test_visible_bootstrap_default_can_create_a_character_chat(owners, monkeypatch):
++    _first, second = _seed_defaults(owners)
++    with _client(owners.second, monkeypatch) as client:
++        detail = client.get(f"/api/v1/characters/{second}")
++        assert detail.status_code == 200, detail.text
++        response = _create(client, second)
++    assert response.status_code == 201, response.text
++    stored = owners.second.get_conversation_by_id(response.json()["id"])
++    assert stored["client_id"] == "2"
++    assert stored["character_id"] == second
++
++
++def test_user_created_owned_character_can_create_chat(owners, monkeypatch):
++    character = owners.second.add_character_card({"name": "Alice archivist", "first_message": "Hello Alice"})
++    owners.second.close_connection()
++    with _client(owners.second, monkeypatch) as client:
++        response = _create(client, character)
++    assert response.status_code == 201, response.text
++    assert owners.second.get_conversation_by_id(response.json()["id"])["client_id"] == "2"
++
++
++@pytest.mark.parametrize("route", ["detail", "list", "query"])
++def test_character_routes_do_not_expose_another_owners_card(owners, monkeypatch, route):
++    foreign = _foreign(owners)
++    owners.first.close_connection()
++    with _client(owners.second, monkeypatch) as client:
++        if route == "detail":
++            response = client.get(f"/api/v1/characters/{foreign}")
++            assert response.status_code == 404, response.text
++        else:
++            path = "/api/v1/characters/" if route == "list" else "/api/v1/characters/query"
++            response = client.get(path)
++            assert response.status_code == 200, response.text
++            rows = response.json() if route == "list" else response.json()["items"]
++            assert "Private owner-one archivist" not in [row["name"] for row in rows]
++
++
++def test_default_name_lookup_cannot_reuse_another_owners_character(owners):
++    owners.first.add_character_card({"name": "Private same-name lookup"})
++    owners.first.close_connection()
++    assert owners.second.get_character_card_by_name("Private same-name lookup") is None
++
++
++def test_two_owners_can_create_the_same_character_name(owners):
++    first = owners.first.add_character_card({"name": "Shared display name"})
++    second = owners.second.add_character_card({"name": "Shared display name"})
++    assert owners.first.get_character_card_by_id(first)["client_id"] == "1"
++    assert owners.second.get_character_card_by_id(second)["client_id"] == "2"
++
++
++@pytest.mark.parametrize("kind", ["missing", "deleted", "foreign"])
++def test_unavailable_character_cannot_create_a_partial_chat(owners, monkeypatch, kind):
++    character = 99999
++    if kind == "foreign":
++        character = _foreign(owners)
++        owners.first.close_connection()
++    elif kind == "deleted":
++        character = owners.second.add_character_card({"name": "Deleted Alice character"})
++        assert owners.second.soft_delete_character_card(character, expected_version=1)
++    owners.second.close_connection()
++    with _client(owners.second, monkeypatch) as client:
++        response = _create(client, character)
++    assert response.status_code in {400, 404}, response.text
++    assert owners.second.count_conversations_for_user("2") == 0
++
++
++def test_foreign_character_update_cannot_transfer_ownership(owners, monkeypatch):
++    foreign = _foreign(owners)
++    before = owners.first.get_character_card_by_id(foreign)
++    owners.first.close_connection()
++    with _client(owners.second, monkeypatch) as client:
++        response = client.put(
++            f"/api/v1/characters/{foreign}",
++            params={"expected_version": 1},
++            json={"description": "Unauthorized replacement"},
++        )
++    after = owners.first.get_character_card_by_id(foreign)
++    assert after == before
++    assert response.status_code == 404, response.text
++
++
++@pytest.mark.parametrize("operation", ["batch", "setup-id", "setup-query", "fts", "tags"])
++def test_other_character_read_paths_exclude_foreign_cards(owners, operation):
++    foreign = _foreign(owners)
++    owners.first.close_connection()
++    db = owners.second
++    if operation == "batch":
++        assert foreign not in db.get_character_cards_by_ids([foreign])
++    elif operation == "setup-id":
++        assert db.get_character_setup_option_by_id(foreign) is None
++    elif operation == "setup-query":
++        rows, count = db.query_character_setup_options(query="Private owner-one archivist")
++        assert rows == [] and count == 0
++    elif operation == "fts":
++        assert db.search_character_cards("archivist") == []
++    else:
++        assert db.search_character_cards_by_tags(["private_owner"]) == []
++
++
++@pytest.mark.parametrize("operation", ["delete", "restore"])
++def test_foreign_card_lifecycle_cannot_change_state_or_owner(owners, operation):
++    foreign = _foreign(owners)
++    version = 1
++    if operation == "restore":
++        assert owners.first.soft_delete_character_card(foreign, expected_version=1)
++        version = 2
++    before = owners.first.get_character_card_by_id(foreign, include_deleted=True)
++    owners.first.close_connection()
++    method = owners.second.soft_delete_character_card if operation == "delete" else owners.second.restore_character_card
++    try:
++        result = method(foreign, expected_version=version)
++    except ConflictError:
++        result = None
++    assert owners.first.get_character_card_by_id(foreign, include_deleted=True) == before
++    assert result is not True
++
++
++@pytest.mark.parametrize("operation", ["get", "list", "search", "add", "update", "delete"])
++def test_exemplar_child_paths_preserve_parent_ownership(owners, operation):
++    foreign = _foreign(owners)
++    exemplar = owners.first.add_character_exemplar(foreign, {"text": "Private exemplar"})
++    before = owners.first.get_character_exemplar_by_id(foreign, exemplar["id"], include_deleted=True)
++    owners.first.close_connection()
++    db = owners.second
++    if operation == "get":
++        assert db.get_character_exemplar_by_id(foreign, exemplar["id"]) is None
++    elif operation == "list":
++        assert db.list_character_exemplars(foreign) == []
++    elif operation == "search":
++        assert db.search_character_exemplars(foreign, query="Private", emotion="other", scenario="other") == ([], 0)
++    elif operation == "add":
++        with pytest.raises(InputError):
++            db.add_character_exemplar(foreign, {"text": "Injected exemplar"})
++    elif operation == "update":
++        assert db.update_character_exemplar(foreign, exemplar["id"], {"text": "Replaced"}) is None
++    else:
++        assert db.soft_delete_character_exemplar(foreign, exemplar["id"]) is False
++    assert owners.first.get_character_exemplar_by_id(foreign, exemplar["id"], include_deleted=True) == before
++
++
++def test_owned_card_and_exemplar_lifecycle_is_preserved(owners):
++    db = owners.second
++    character = db.add_character_card({"name": "Owned lifecycle"})
++    exemplar = db.add_character_exemplar(character, {"text": "Original"})
++    assert db.update_character_card(character, {"description": "Owned edit"}, expected_version=1)
++    assert db.update_character_exemplar(character, exemplar["id"], {"text": "Updated"})["text"] == "Updated"
++    assert db.get_character_exemplar_by_id(character, exemplar["id"])["text"] == "Updated"
++    assert db.soft_delete_character_exemplar(character, exemplar["id"])
++    assert db.get_character_exemplar_by_id(character, exemplar["id"]) is None
++    assert db.soft_delete_character_card(character, expected_version=2)
++    assert db.restore_character_card(character, expected_version=3)
++    card = db.get_character_card_by_id(character)
++    assert (card["client_id"], card["version"], card["description"]) == ("2", 4, "Owned edit")
++
++
++def test_character_writes_remain_owned_by_the_callers_transaction(owners):
++    db = owners.second
++    character = db.add_character_card({"name": "Caller transaction"})
++    before = db.get_character_card_by_id(character)
++    db.close_connection()
++    with pytest.raises(RuntimeError, match="caller rollback"):
++        with db.transaction():
++            assert db.update_character_card(character, {"description": "Rollback"}, expected_version=1)
++            db.add_character_exemplar(character, {"text": "Rollback exemplar"})
++            assert db.get_character_card_by_id(character)["description"] == "Rollback"
++            raise RuntimeError("caller rollback")
++    assert db.get_character_card_by_id(character) == before
++    assert db.list_character_exemplars(character) == []
++
++
++def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path):
++    """A SQLite client_id identifies the last syncing device, not a separate tenant."""
++    path = tmp_path / "single-owner.db"
++    first = CharactersRAGDB(path, client_id="device-first")
++    second = CharactersRAGDB(path, client_id="device-second")
++    try:
++        character = first.add_character_card({"name": "Shared per-user file"})
++        assert second.get_character_card_by_id(character)["client_id"] == "device-first"
++        assert second.update_character_card(character, {"description": "Device edit"}, expected_version=1)
++        assert first.get_character_card_by_id(character)["client_id"] == "device-second"
++    finally:
++        first.close_all_connections()
++        second.close_all_connections()
++
++
++def test_deleted_reads_and_bulk_tag_changes_still_exclude_foreign_cards(owners):
++    foreign = _foreign(owners)
++    exemplar = owners.first.add_character_exemplar(foreign, {"text": "Deleted foreign child"})
++    assert owners.first.soft_delete_character_exemplar(foreign, exemplar["id"])
++    assert owners.first.soft_delete_character_card(foreign, expected_version=1)
++    before = owners.first.get_character_card_by_id(foreign, include_deleted=True)
++    owners.first.close_connection()
++    db = owners.second
++    assert db.get_character_card_by_id(foreign, include_deleted=True) is None
++    assert db.get_character_card_by_name(before["name"], include_deleted=True) is None
++    assert foreign not in db.get_character_cards_by_ids([foreign], include_deleted=True)
++    assert db.get_character_setup_option_by_id(foreign, include_deleted=True) is None
++    assert db.get_character_exemplar_by_id(foreign, exemplar["id"], include_deleted=True) is None
++    assert db.search_character_exemplars(foreign) == ([], 0)
++    result = db.manage_character_tags(operation="rename", source_tag="private_owner", target_tag="changed")
++    assert result["updated_count"] == 0
++    assert owners.first.get_character_card_by_id(foreign, include_deleted=True) == before
++
++
++def test_owned_query_setup_tags_and_noop_keep_current_semantics(owners):
++    db = owners.second
++    character = db.add_character_card({"name": "Owned searchable Citrine", "tags": ["owned_tag"]})
++    assert db.update_character_card(character, {}, expected_version=999)
++    assert db.get_character_card_by_id(character)["version"] == 1
++    assert character in db.get_character_cards_by_ids([character])
++    assert db.get_character_setup_option_by_id(character)["id"] == character
++    rows, count = db.query_character_setup_options(query="Citrine")
++    assert count == 1 and rows[0]["id"] == character
++    assert db.search_character_cards("Citrine")[0]["id"] == character
++    result = db.manage_character_tags(operation="rename", source_tag="owned_tag", target_tag="renamed")
++    assert result["updated_count"] == 1
++    assert db.search_character_cards_by_tags(["renamed"])[0]["id"] == character
++
++
++def test_created_behavior_snapshot_survives_later_owned_card_edits(owners, monkeypatch):
++    db = owners.second
++    character = db.add_character_card({"name": "Frozen Citrine", "system_prompt": "Original frozen instruction"})
++    db.close_connection()
++    with _client(db, monkeypatch) as client:
++        response = _create(client, character)
++    assert response.status_code == 201, response.text
++    conversation = response.json()["id"]
++    before = db.execute_query("SELECT canonical_json FROM conversation_behavior_snapshots WHERE conversation_id = ?", (conversation,), read_only=True).fetchone()["canonical_json"]
++    assert "Original frozen instruction" in before
++    assert db.update_character_card(character, {"system_prompt": "Changed instruction"}, expected_version=1)
++    after = db.execute_query("SELECT canonical_json FROM conversation_behavior_snapshots WHERE conversation_id = ?", (conversation,), read_only=True).fetchone()["canonical_json"]
++    assert after == before
++
++
++def test_postgres_foreign_noop_and_stale_parent_preflight_do_not_authorize_writes(pg_database_config, tmp_path, monkeypatch):
++    backend = DatabaseBackendFactory.create_backend(pg_database_config)
++    first = CharactersRAGDB(tmp_path / "first.db", client_id="1", backend=backend)
++    second = CharactersRAGDB(tmp_path / "second.db", client_id="2", backend=backend)
++    try:
++        character = first.add_character_card({"name": "Stale parent preflight"})
++        row = first.get_character_card_by_id(character)
++        first.close_connection()
++        with pytest.raises(ConflictError):
++            second.update_character_card(character, {}, expected_version=1)
++        # Simulate a parent result read before an ownership change: INSERT must still guard it.
++        monkeypatch.setattr(second.character_store, "get_character_card_by_id", lambda *_args, **_kwargs: row)
++        with pytest.raises(InputError):
++            second.add_character_exemplar(character, {"text": "Must not be inserted"})
++        assert first.list_character_exemplars(character) == []
++        assert first.get_character_card_by_id(character) == row
++    finally:
++        first.close_all_connections()
++        second.close_all_connections()
++        backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("use_postgres", [False, pytest.param(True, marks=pytest.mark.postgres)], ids=["sqlite", "postgres"])
++@pytest.mark.asyncio
++async def test_real_cold_dependency_bootstrap_list_and_factory_share_owner(request, tmp_path, monkeypatch, use_postgres):
++    import asyncio
++    from concurrent.futures import ThreadPoolExecutor
++
++    import httpx
++    from cachetools import LRUCache
++
++    from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as db_module
++    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
++    from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
++    from tldw_Server_API.app.main import app as main_app
++
++    backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config")) if use_postgres else None
++    monkeypatch.setattr(db_module, "get_content_backend", lambda _config: backend)
++    monkeypatch.setattr(deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda user: tmp_path / str(user)))
++    monkeypatch.setattr(deps.DatabasePaths, "get_chacha_db_path", staticmethod(lambda user: tmp_path / str(user) / "ChaChaNotes.db"))
++    cache = LRUCache(maxsize=4)
++    monkeypatch.setattr(deps, "_chacha_db_instances", cache)
++    monkeypatch.setattr(deps, "_chacha_db_init_events", {})
++    monkeypatch.setattr(deps, "_chacha_db_init_errors", {})
++    monkeypatch.setattr(deps, "_CHACHA_RUNTIME", ChaChaRuntimeManager())
++    monkeypatch.setattr(deps, "_CHACHA_SHUTTING_DOWN", False)
++    monkeypatch.setattr(deps, "_chacha_default_char_tasks", set())
++    monkeypatch.delitem(main_app.dependency_overrides, deps.get_chacha_db_for_user, raising=False)
++    executor = ThreadPoolExecutor(max_workers=2)
++    monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
++    monkeypatch.setattr(chats, "get_character_rate_limiter", lambda: CharacterRateLimiter(enabled=False, max_chats_per_user=100))
++    monkeypatch.setattr(chats, "_active_chat_sync_service", lambda *_args: None)
++    principal = {"id": 1}
++    app = FastAPI()
++    app.add_middleware(ChaChaOperationMiddleware)
++    app.include_router(characters.router, prefix="/api/v1/characters")
++    app.include_router(chats.router, prefix="/api/v1/chats")
++    app.dependency_overrides[deps.get_request_user] = lambda: SimpleNamespace(id=principal["id"])
++    app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=principal["id"])
++    app.dependency_overrides[chats.require_expected_user] = lambda: None
++    defaults = []
++    try:
++        assert not cache
++        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test") as client:
++            for user in (1, 2):
++                principal["id"] = user
++                cold = await client.get("/api/v1/characters/")
++                assert cold.status_code == 200, cold.text
++                if deps._chacha_default_char_tasks:
++                    await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
++                listed = await client.get("/api/v1/characters/")
++                assert listed.status_code == 200, listed.text
++                default = next(card for card in listed.json() if card["name"] == deps.DEFAULT_CHARACTER_NAME)
++                defaults.append(default["id"])
++                db = cache[str(tmp_path / str(user))]
++                assert db.client_id == str(user)
++                assert db.get_character_card_by_id(default["id"])["client_id"] == str(user)
++                db.close_connection()
++                response = await client.post("/api/v1/chats/", json={"character_id": str(default["id"]), "state": "in-progress", "source": "webui-character-chat", "scope_type": "global"})
++                assert response.status_code == 201, response.text
++            assert len(cache) == 2
++            if use_postgres:
++                assert defaults[0] != defaults[1]
++    finally:
++        if deps._chacha_default_char_tasks:
++            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
++        executor.shutdown(wait=True)
++        for db in tuple(cache.values()):
++            db.close_all_connections()
++        cache.clear()
++        if backend is not None:
++            backend.get_pool().close_all()
+--- a/tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py
++++ b/tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py
+@@ -0,0 +1,252 @@
++"""PostgreSQL character ownership migration preserves rows and caller boundaries."""
++
++from concurrent.futures import ThreadPoolExecutor
++from threading import Barrier
++from uuid import uuid4
++
++import pytest
++
++from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
++    CharactersRAGDB,
++    CharactersRAGDBError,
++    ConflictError,
++    SchemaError,
++)
++
++pytestmark = [pytest.mark.integration, pytest.mark.postgres]
++
++
++class _RealV67Database(CharactersRAGDB):
++    """Build real historical PostgreSQL v67 through its normal registered steps."""
++
++    _POSTGRES_SCHEMA_VERSION = 67
++
++
++@pytest.fixture
++def pg_backend(pg_database_config):
++    backend = DatabaseBackendFactory.create_backend(pg_database_config)
++    try:
++        yield backend
++    finally:
++        backend.get_pool().close_all()
++
++
++def _version(backend):
++    return backend.execute(
++        "SELECT version FROM db_schema_version WHERE schema_name = %s",
++        (CharactersRAGDB._SCHEMA_NAME,),
++    ).scalar
++
++
++def _name_constraints(backend):
++    return backend.execute(
++        "SELECT array_agg(a.attname ORDER BY k.ordinality) AS columns "
++        "FROM pg_constraint c CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
++        "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
++        "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' GROUP BY c.oid"
++    ).rows
++
++
++def _rows(backend):
++    return backend.execute("SELECT * FROM character_cards ORDER BY id").rows
++
++
++@pytest.fixture
++def real_v67(pg_backend, tmp_path):
++    db = _RealV67Database(tmp_path / "owner1.db", client_id="1", backend=pg_backend)
++    try:
++        assert _version(pg_backend) == 67
++        assert _name_constraints(pg_backend) == [{"columns": ["name"]}]
++        live = db.add_character_card({"name": deps.DEFAULT_CHARACTER_NAME, "system_prompt": "Keep owner-one prompt"})
++        deleted = db.add_character_card({"name": "Reserved deleted character", "extensions": {"fixture": "keep"}})
++        assert db.soft_delete_character_card(deleted, expected_version=1)
++        db.close_connection()
++        yield pg_backend, _rows(pg_backend), live, deleted
++    finally:
++        db.close_all_connections()
++
++
++def test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key(real_v67, tmp_path):
++    backend, before, _live, _deleted = real_v67
++    upgraded = CharactersRAGDB(tmp_path / "owner2.db", client_id="2", backend=backend)
++    try:
++        assert _rows(backend) == before
++        assert _version(backend) == 68
++        assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
++        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 67  # SQLite contract stays unchanged.
++    finally:
++        upgraded.close_all_connections()
++
++
++def test_upgraded_names_preserve_same_owner_and_deleted_reservations(real_v67, tmp_path):
++    backend, _before, live, deleted = real_v67
++    first = CharactersRAGDB(tmp_path / "same-owner.db", client_id="1", backend=backend)
++    second = CharactersRAGDB(tmp_path / "other-owner.db", client_id="2", backend=backend)
++    try:
++        for name in (deps.DEFAULT_CHARACTER_NAME, "Reserved deleted character"):
++            with pytest.raises(ConflictError):
++                first.add_character_card({"name": name})
++            created = second.add_character_card({"name": name})
++            assert created not in (live, deleted)
++            assert second.get_character_card_by_id(created)["client_id"] == "2"
++        assert first.get_character_card_by_id(deleted, include_deleted=True)["deleted"] is True
++    finally:
++        first.close_all_connections()
++        second.close_all_connections()
++
++
++def test_reopening_upgraded_schema_preserves_ids_and_constraints(real_v67, tmp_path):
++    backend, before, _live, _deleted = real_v67
++    reopened = []
++    try:
++        for owner in ("1", "2", "1"):
++            db = CharactersRAGDB(tmp_path / f"{owner}.db", client_id=owner, backend=backend)
++            reopened.append(db)
++            db.close_connection()
++            assert _rows(backend) == before
++            assert _version(backend) == 68
++            assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
++    finally:
++        for db in reopened:
++            db.close_all_connections()
++
++
++def test_name_migration_rolls_back_catalog_data_and_version_on_failure(real_v67, tmp_path, monkeypatch):
++    backend, before, _live, _deleted = real_v67
++    original = backend.execute
++    checkpoints = []
++
++    def fail_after_catalog_change(query, *args, **kwargs):
++        result = original(query, *args, **kwargs)
++        if "DROP CONSTRAINT" in query and "character_cards" in query:
++            checkpoints.append("name-key-replaced")
++            raise RuntimeError("Controlled migration failure after name constraint replacement")
++        return result
++
++    with monkeypatch.context() as patch:
++        patch.setattr(backend, "execute", fail_after_catalog_change)
++        with pytest.raises(CharactersRAGDBError) as error:
++            CharactersRAGDB(tmp_path / "failed-upgrade.db", client_id="2", backend=backend)
++        assert isinstance(error.value.__cause__, RuntimeError)
++        assert str(error.value.__cause__) == "Controlled migration failure after name constraint replacement"
++    assert checkpoints == ["name-key-replaced"]
++    assert _version(backend) == 67
++    assert _name_constraints(backend) == [{"columns": ["name"]}]
++    assert _rows(backend) == before
++    reopened = CharactersRAGDB(tmp_path / "retried.db", client_id="2", backend=backend)
++    try:
++        assert _version(backend) == 68
++        assert _rows(backend) == before
++    finally:
++        reopened.close_all_connections()
++
++
++def test_name_migration_preserves_an_unrelated_unique_constraint(real_v67, tmp_path):
++    backend, before, _live, _deleted = real_v67
++    backend.execute("ALTER TABLE character_cards ADD CONSTRAINT fixture_image_key UNIQUE (image)")
++    upgraded = CharactersRAGDB(tmp_path / "with-extra-key.db", client_id="2", backend=backend)
++    try:
++        assert sorted(tuple(row["columns"]) for row in _name_constraints(backend)) == [("client_id", "name"), ("image",)]
++        assert _rows(backend) == before
++    finally:
++        upgraded.close_all_connections()
++
++
++def test_name_migration_rejects_unexpected_catalog_without_advancing(real_v67, tmp_path):
++    backend, before, _live, _deleted = real_v67
++    backend.execute("ALTER TABLE character_cards RENAME CONSTRAINT character_cards_name_key TO historical_name_key")
++    # A historical constraint name is fine; occupying the destination with a wrong key is not.
++    backend.execute("ALTER TABLE character_cards ADD CONSTRAINT character_cards_client_id_name_key UNIQUE (image)")
++    with pytest.raises(CharactersRAGDBError) as error:
++        CharactersRAGDB(tmp_path / "bad-catalog.db", client_id="2", backend=backend)
++    assert isinstance(error.value.__cause__, SchemaError)
++    assert _version(backend) == 67
++    assert sorted(tuple(row["columns"]) for row in _name_constraints(backend)) == [("image",), ("name",)]
++    assert _rows(backend) == before
++
++
++@pytest.mark.parametrize("same_owner", [False, True], ids=["different-owners", "same-owner"])
++def test_concurrent_actual_default_bootstrap_respects_owner_names(pg_backend, tmp_path, monkeypatch, same_owner):
++    first = CharactersRAGDB(tmp_path / "first.db", client_id="1", backend=pg_backend)
++    second = CharactersRAGDB(tmp_path / "second.db", client_id="1" if same_owner else "2", backend=pg_backend)
++    barrier = Barrier(2, timeout=10)
++    for db in (first, second):
++        original = db.get_character_card_by_name
++
++        def after_read(name, *, include_deleted=False, original=original):
++            result = original(name, include_deleted=include_deleted)
++            if name == deps.DEFAULT_CHARACTER_NAME and result is None:
++                barrier.wait()
++            return result
++
++        monkeypatch.setattr(db, "get_character_card_by_name", after_read)
++
++    def ensure(db):
++        try:
++            return deps._ensure_default_character(db)
++        finally:
++            db.close_connection()
++
++    try:
++        with ThreadPoolExecutor(max_workers=2) as executor:
++            ids = list(executor.map(ensure, (first, second)))
++        assert all(character is not None for character in ids)
++        assert (ids[0] == ids[1]) is same_owner
++        for db, character in zip((first, second), ids, strict=True):
++            assert db.get_character_card_by_id(character)["client_id"] == db.client_id
++    finally:
++        first.close_all_connections()
++        second.close_all_connections()
++
++
++def test_existing_character_rls_still_rejects_foreign_reads_and_updates(pg_backend, tmp_path):
++    """Use the existing fixture-admin/restricted-role pattern without changing policy."""
++    backend = pg_backend
++    db = CharactersRAGDB(tmp_path / "rls.db", client_id="1", backend=backend)
++    role = f"character_owner_{uuid4().hex[:12]}"
++    quoted = backend.escape_identifier(role)
++    created_role = False
++    try:
++        assert backend.execute(
++            "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
++        ).scalar
++        character = db.add_character_card({"name": "RLS private character"})
++        db.close_connection()
++        with backend.transaction() as conn:
++            backend.execute(f"CREATE ROLE {quoted} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)
++            backend.execute(f"GRANT USAGE ON SCHEMA public TO {quoted}", connection=conn)
++            backend.execute(f"GRANT SELECT, UPDATE ON character_cards TO {quoted}", connection=conn)
++            backend.execute(f"GRANT {quoted} TO CURRENT_USER", connection=conn)
++        created_role = True
++        with backend.transaction() as conn:
++            backend.execute(f"SET LOCAL ROLE {quoted}", connection=conn)
++            backend.execute("SELECT set_config('app.current_user_id', %s, true)", ("2",), connection=conn)
++            assert backend.execute(
++                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user", connection=conn
++            ).scalar is False
++            assert backend.execute("SELECT id FROM character_cards", connection=conn).rows == []
++            assert backend.execute(
++                "UPDATE character_cards SET client_id = %s WHERE id = %s RETURNING id",
++                ("2", character), connection=conn,
++            ).rows == []
++        assert db.get_character_card_by_id(character)["client_id"] == "1"
++    finally:
++        db.close_connection()
++        if created_role:
++            with backend.transaction() as conn:
++                backend.execute(f"DROP OWNED BY {quoted}", connection=conn)
++                backend.execute(f"DROP ROLE {quoted}", connection=conn)
++        db.close_all_connections()
++
++
++def test_name_migration_rejects_remaining_global_unique_index(real_v67, tmp_path):
++    backend, before, _live, _deleted = real_v67
++    backend.execute("CREATE UNIQUE INDEX fixture_extra_global_name ON character_cards (name)")
++    with pytest.raises(CharactersRAGDBError) as error:
++        CharactersRAGDB(tmp_path / "extra-global-key.db", client_id="2", backend=backend)
++    assert isinstance(error.value.__cause__, SchemaError)
++    assert _version(backend) == 67
++    assert _name_constraints(backend) == [{"columns": ["name"]}]
++    assert _rows(backend) == before
+--- a/tldw_Server_API/tests/DB_Management/test_character_exemplar_search_backends.py
++++ b/tldw_Server_API/tests/DB_Management/test_character_exemplar_search_backends.py
+@@ -0,0 +1,44 @@
++"""Real exemplar search keeps optional filters typed and search results intact."""
++
++import pytest
++
++from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
++from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
++
++pytestmark = pytest.mark.integration
++
++
++@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
++def exemplar_db(request, tmp_path):
++    backend = None
++    if request.param == "postgres":
++        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
++    db = CharactersRAGDB(tmp_path / "exemplars.db", client_id="1", backend=backend)
++    try:
++        yield db
++    finally:
++        db.close_all_connections()
++        if backend is not None:
++            backend.get_pool().close_all()
++
++
++@pytest.mark.parametrize("filters", [{}, {"emotion": "other"}, {"scenario": "other"}, {"emotion": "other", "scenario": "other"}, {"emotion": "", "scenario": ""}], ids=["absent", "emotion-only", "scenario-only", "both", "empty"])
++@pytest.mark.parametrize("query", [None, "Citrine"], ids=["browse", "text-search"])
++def test_owned_search_optional_filters_return_matching_exemplar(exemplar_db, filters, query):
++    character = exemplar_db.add_character_card({"name": "Search owner"})
++    item = exemplar_db.add_character_exemplar(character, {"text": "Citrine archive", "emotion": "other", "scenario": "other"})
++    rows, total = exemplar_db.search_character_exemplars(character, query=query, **filters)
++    assert total == 1
++    assert [row["id"] for row in rows] == [item["id"]]
++
++
++def test_search_filters_deleted_rows_and_preserves_total_before_pagination(exemplar_db):
++    character = exemplar_db.add_character_card({"name": "Paged search owner"})
++    one = exemplar_db.add_character_exemplar(character, {"text": "Citrine first", "rhetorical": ["metaphor"]})
++    two = exemplar_db.add_character_exemplar(character, {"text": "Citrine second", "rhetorical": ["metaphor"]})
++    removed = exemplar_db.add_character_exemplar(character, {"text": "Citrine removed", "rhetorical": ["metaphor"]})
++    assert exemplar_db.soft_delete_character_exemplar(character, removed["id"])
++    rows, total = exemplar_db.search_character_exemplars(character, query="Citrine", rhetorical=["metaphor"], limit=1, offset=1)
++    assert total == 2
++    assert len(rows) == 1 and rows[0]["id"] in {one["id"], two["id"]}
++    assert exemplar_db.search_character_exemplars(character, query="NoMatchingWord") == ([], 0)
+--- a/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
++++ b/tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py
+@@ -114,6 +114,7 @@
+
+ def test_search_character_cards_postgres_uses_tsquery(monkeypatch: pytest.MonkeyPatch) -> None:
+     db = _make_postgres_db()
++    db.client_id = "character-owner"
+     rows = [{"id": 1, "rank": 0.42}]
+     db.execute_query = MagicMock(return_value=_CursorStub(rows))
+     db._deserialize_row_fields = lambda row, _fields: row  # type: ignore[assignment]
+@@ -124,7 +125,8 @@
+     assert db.execute_query.call_count == 1
+     sql, params = db.execute_query.call_args[0]
+     assert "ts_rank" in sql and "to_tsquery('english', ?)" in sql
+-    assert params == ("dragon & rider", "dragon & rider", 5)
++    assert "cc.client_id = ?" in sql
++    assert params == ("dragon & rider", "dragon & rider", "character-owner", 5)
+
+
+ def test_list_flashcards_postgres_translates_fts(monkeypatch: pytest.MonkeyPatch) -> None:
+--- a/tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py
++++ b/tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py
+@@ -292,7 +292,8 @@
+
+     assert store.get_character_exemplar_by_id(11, "ex-1") is None
+     assert "is_deleted = ?" in captured["query"]
+-    assert captured["params"] == ("ex-1", 11, False)
++    assert "owner_card.client_id = ?" in captured["query"]
++    assert captured["params"] == ("ex-1", 11, False, store._db.client_id)
+
+
+ def test_list_character_exemplars_uses_backend_safe_deleted_value(store, monkeypatch):
+@@ -312,7 +313,8 @@
+
+     assert store.list_character_exemplars(22, limit=5, offset=3) == []
+     assert "WHERE character_id = ? AND is_deleted = ?" in captured["query"]
+-    assert captured["params"] == (22, False, 5, 3)
++    assert "owner_card.client_id = ?" in captured["query"]
++    assert captured["params"] == (22, False, store._db.client_id, 5, 3)
+
+
+ def test_character_store_does_not_proxy_arbitrary_parent_db_attributes(store):

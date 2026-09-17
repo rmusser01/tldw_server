@@ -1,0 +1,50 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/chacha/character_store.py",
+    "baseline_count": 3,
+    "current_count": 3,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "baseline_count": 0,
+    "current_count": 0,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_shared_owner_contract.py",
+    "baseline_count": 0,
+    "current_count": 0,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_owner_name_migration_postgres.py",
+    "baseline_count": 0,
+    "current_count": 0,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_character_exemplar_search_backends.py",
+    "baseline_count": 0,
+    "current_count": 0,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_chacha_postgres_fts.py",
+    "baseline_count": 12,
+    "current_count": 12,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py",
+    "baseline_count": 2,
+    "current_count": 2,
+    "added": []
+  },
+  {
+    "path": "tldw_Server_API/tests/ChaChaNotesDB/test_character_exemplars_db.py",
+    "baseline_count": 0,
+    "current_count": 0,
+    "added": []
+  }
+]

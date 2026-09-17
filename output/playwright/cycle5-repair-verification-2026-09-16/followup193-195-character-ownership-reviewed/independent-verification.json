@@ -1,0 +1,19 @@
+{
+  "combined_tests": 242,
+  "combined_skipped": 0,
+  "combined_seconds": 340.67,
+  "osce_original_failed": 1,
+  "osce_original_passed": 4,
+  "osce_corrected_passed": 5,
+  "osce_corrected_skipped": 0,
+  "osce_corrected_seconds": 3.85,
+  "source_hash_matches": 9,
+  "ruff_baseline": 17,
+  "ruff_current": 17,
+  "ruff_added": 0,
+  "ruff_removed": 0,
+  "bandit_production_findings": 0,
+  "bandit_production_errors": 0,
+  "bandit_tests_findings": 0,
+  "bandit_tests_errors": 0
+}

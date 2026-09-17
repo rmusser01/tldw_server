@@ -1,0 +1,218 @@
+[
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-expanded-red.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-expanded-red.redacted.log",
+    "sha256": "8b3df412140473507c49b60934feb4a79e5ff60c66886c601077512385b6f932",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-expanded-red-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-expanded-red-command.json",
+    "sha256": "40721be6a08e0c5da93549f20838ec4d6ca18ffb93f6f995715d564259268d75",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-expanded-red-v2.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-expanded-red-v2.redacted.log",
+    "sha256": "cc7b264f42fb3d2758e4dca44b2c49fa70af0c60df5afdd9367738a9ea220c8e",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-expanded-red-v2-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-expanded-red-v2-command.json",
+    "sha256": "fe4e450749b372998eb3c651fae5d29c7bdc0f9643f0d0fecb837cc9cf3b9d50",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-exemplar-filter-diagnosis.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-exemplar-filter-diagnosis.redacted.log",
+    "sha256": "502aaf8c296217f1ac087dad20d34ce0296b0b4a5f42336bae3cadf1c2f356f9",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-exemplar-filter-diagnosis-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-exemplar-filter-diagnosis-command.json",
+    "sha256": "5834760419358d138a81a5f47e89bae924b43e1b7d5545a3e81112a47b01fc88",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat195-driver-cause.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat195-driver-cause.redacted.log",
+    "sha256": "c91282ee970f54603029e34475230944d606a19be7d4ee277177ae1edb8d2823",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat195-driver-cause-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat195-driver-cause-command.json",
+    "sha256": "089e76a480b4f7109d8c7e07d0a5962c616bc26d7d6669b7412bb08b7da934d6",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat195-owned-search-red.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat195-owned-search-red.redacted.log",
+    "sha256": "9510b4ccb3da7feb28e94b4f5764b6ca47293b718045a2b6cf1482bc3924e34e",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat195-owned-search-red-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat195-owned-search-red-command.json",
+    "sha256": "741a93054d9c4936b5f3d507a72b4d43931c5b79c6ac897b11f83e131a0ac858",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-migration-atomic-red.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-migration-atomic-red.redacted.log",
+    "sha256": "621442d1fa16435ebb7fe8126c22f0cd6db56bfe254d09f4f17247915e357993",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-migration-atomic-red-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-migration-atomic-red-command.json",
+    "sha256": "4402642736192111b5ce6106f5ebefbc25c4efc981919bb7a18da07e270962e4",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-195-initial-green.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-195-initial-green.redacted.log",
+    "sha256": "c3187bdc3cd2790f0fbd7a0ed94e62ce5ec0680ecea9f6fb9d5c7f0e6e42f959",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-195-initial-green-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-195-initial-green-command.json",
+    "sha256": "7d7618cc960fad9f8376cca7d9af0d463e673219421f184416dc07480ec6fe9b",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-migration-harness-corrected.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-migration-harness-corrected.redacted.log",
+    "sha256": "790d8e607d5bf6acc818fba920c41689e36c2dbf7de3d2ceb24a12071b4dd277",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-migration-harness-corrected-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-migration-harness-corrected-command.json",
+    "sha256": "3db60bb31aba84ae857e35008fb267633e6a6418410c96dc8c043fec19f1bffc",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-195-adjacent.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-195-adjacent.redacted.log",
+    "sha256": "8391dd97d5378654ca041f9363644a3366a3b54074ee4bc57ce4e04817a962cd",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-195-adjacent-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-195-adjacent-command.json",
+    "sha256": "0baddacf1bc6dd63c59154477d3b5312fb282701edbbe6fbd382ee6271688b49",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-adjacent-baseline.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-adjacent-baseline.redacted.log",
+    "sha256": "5948e8064e64a1f216e986478a625f8c116e2ced6f2af728923848052408b9b2",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-adjacent-baseline-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-adjacent-baseline-command.json",
+    "sha256": "6c4900aec250c10181151ab06e4c9a99821399267a40c14b0e37028230017fb3",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-cold-and-extra-controls.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-cold-and-extra-controls.redacted.log",
+    "sha256": "df3abda11ec3eac0cadec192ffbef8d893dad8177e65a4dffba25853f236e455",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-cold-and-extra-controls-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-cold-and-extra-controls-command.json",
+    "sha256": "3ac1fd0dd06b997783e3cb60d6d6b6b88e718e13bdd04852636433bfff1ea28c",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat183-real21-green.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat183-real21-green.redacted.log",
+    "sha256": "20ed5944841c4d2a9615a8c117c5f642242d534c748c7f139525aaa8119eb8d5",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat183-real21-green-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat183-real21-green-command.json",
+    "sha256": "b2ec3546de5d5437e3d0f9743b58743c624730b0adec6097c44e4d2d2fbd16b7",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-extra-global-index-red.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-extra-global-index-red.redacted.log",
+    "sha256": "05f97c6abe45aa1f927918274b33ec200aa88781b3f768dc02a8774e0d8a1271",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-extra-global-index-red-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-extra-global-index-red-command.json",
+    "sha256": "a6157cf7f9fed159cb908ea7da0575d7d1db40f10118d23b45a356fd4e03e66d",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-cold-baseline-red.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-cold-baseline-red.redacted.log",
+    "sha256": "13bf21531e621a98f1a8af0b12629de607c61060b29bf3fb70830771ff5109f4",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-cold-baseline-red-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-cold-baseline-red-command.json",
+    "sha256": "c8dc2f76fc7fd528160d4d405fdc54ea19f90c4b00171289832256699df6ec51",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-195-final-green.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-195-final-green.redacted.log",
+    "sha256": "97a519ae26bad5b731b48b3be96973217bd04b162c7d96a1c34c1c7590ead31f",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-194-195-final-green-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-194-195-final-green-command.json",
+    "sha256": "dff5de3581016cfd543f1dd8c75de84fdb8a08fb4cb354c3f2f49cf93c17aa07",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-195-adjacent-final.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-195-adjacent-final.redacted.log",
+    "sha256": "0396450b2542e018ddbdd56fb8de930afe67e9a1eb22fea71243dfba15c6adfd",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-195-adjacent-final-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-195-adjacent-final-command.json",
+    "sha256": "3fec9fcbbf4681b0d5f24e2b993c4a968c00b00629fd2894546c79fefbf9e2f2",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-osce-head-review.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-osce-head-review.redacted.log",
+    "sha256": "9376960bdf1829311e68a26dc00c2c282c2012fe8ec985ee5ca471903035c3ae",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat193-osce-head-review-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat193-osce-head-review-command.json",
+    "sha256": "c12a63b4e4ebf5a500db12bcee202eb4e3d1d646447fd0496a0302b53e6c733d",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat183-osce-head-green.redacted.log",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat183-osce-head-green.redacted.log",
+    "sha256": "3c1d0f803cd9f47878f2ffc47a0dea120755a012f013b32cf36d490fba0a2a47",
+    "bytes_unchanged": true
+  },
+  {
+    "source": ".tmp/fresh-uat-recovery-20260916/uat183-osce-head-green-command.json",
+    "retained": ".tmp/uat193-diagnosis-20260917/uat183-osce-head-green-command.json",
+    "sha256": "dd462aff0ee0703b4c272c58ece6e4d3393f04ff9f8b8655769384d6ac181065",
+    "bytes_unchanged": true
+  }
+]

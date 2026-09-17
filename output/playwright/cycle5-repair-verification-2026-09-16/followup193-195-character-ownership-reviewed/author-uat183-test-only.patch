@@ -1,0 +1,98 @@
+--- a/tldw_Server_API/tests/ChaChaNotesDB/test_character_exemplars_db.py
++++ b/tldw_Server_API/tests/ChaChaNotesDB/test_character_exemplars_db.py
+@@ -1,4 +1,3 @@
+-import sqlite3
+ from pathlib import Path
+
+ import pytest
+@@ -31,39 +30,49 @@
+     return char_id
+
+
+-def test_migration_v21_to_v22_creates_exemplar_tables(db_path: Path):
+-    db = CharactersRAGDB(db_path, "migration_seed_client")
+-    db.close_connection()
++def test_migration_v21_to_v22_creates_exemplar_tables(db_path: Path, monkeypatch):
++    def initialize_historical_v21(db):
++        with db.transaction() as conn:
++            db._apply_schema_v4(conn)
++            steps = db._sqlite_linear_migration_steps()
++            for version in range(4, 21):
++                steps[version](conn)
++                assert db._get_db_version(conn) == version + 1
+
+-    with sqlite3.connect(str(db_path)) as conn:
+-        conn.execute(
+-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+-            (21, CharactersRAGDB._SCHEMA_NAME),
+-        )
+-        conn.execute("DROP TABLE IF EXISTS character_exemplars_fts")
+-        conn.execute("DROP TABLE IF EXISTS character_exemplars")
+-        conn.commit()
++    with monkeypatch.context() as patch:
++        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 21)
++        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical_v21)
++        seeded = CharactersRAGDB(db_path, "migration_seed_client")
++        with seeded.transaction() as conn:
++            assert seeded._get_db_version(conn) == 21
++            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
++            assert {"character_exemplars", "character_exemplars_fts", "note_attachments"}.isdisjoint(tables)
++            conn.execute(
++                "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
++                ("Retained v21 character", "Historical content", "migration_seed_client"),
++            )
++            before = dict(conn.execute("SELECT * FROM character_cards WHERE name = ?", ("Retained v21 character",)).fetchone())
++
++    # Verify the exact historical step before the ordinary initializer reaches head.
++    with seeded.transaction() as conn:
++        seeded._migrate_from_v21_to_v22(conn)
++        assert seeded._get_db_version(conn) == 22
++        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
++        assert {"character_exemplars", "character_exemplars_fts"}.issubset(tables)
++        assert dict(conn.execute("SELECT * FROM character_cards WHERE id = ?", (before["id"],)).fetchone()) == before
++    seeded.close_connection()
+
+     migrated_db = CharactersRAGDB(db_path, "migration_check_client")
+-    conn = migrated_db.get_connection()
+-
+-    version = conn.execute(
+-        "SELECT version FROM db_schema_version WHERE schema_name = ?",
+-        (CharactersRAGDB._SCHEMA_NAME,),
+-    ).fetchone()["version"]
+-    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+-
+-    exemplar_table = conn.execute(
+-        "SELECT name FROM sqlite_master WHERE type='table' AND name='character_exemplars'"
+-    ).fetchone()
+-    exemplar_fts_table = conn.execute(
+-        "SELECT name FROM sqlite_master WHERE type='table' AND name='character_exemplars_fts'"
+-    ).fetchone()
+-
+-    assert exemplar_table is not None
+-    assert exemplar_fts_table is not None
+-
+-    migrated_db.close_connection()
++    try:
++        conn = migrated_db.get_connection()
++        assert migrated_db._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
++        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
++        assert {"character_exemplars", "character_exemplars_fts"}.issubset(tables)
++        after = dict(conn.execute("SELECT * FROM character_cards WHERE id = ?", (before["id"],)).fetchone())
++        assert all(after[key] == value for key, value in before.items())
++    finally:
++        migrated_db.close_all_connections()
++        seeded.close_all_connections()
+
+
+ def test_character_exemplar_crud_and_search(db_instance: CharactersRAGDB):
+--- a/tldw_Server_API/tests/DB_Management/test_osce_postgres_migration_v67.py
++++ b/tldw_Server_API/tests/DB_Management/test_osce_postgres_migration_v67.py
+@@ -205,7 +205,7 @@
+             "SELECT version FROM db_schema_version WHERE schema_name = %s",
+             (CharactersRAGDB._SCHEMA_NAME,),
+         ).scalar
+-        assert int(version) == 67
++        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+         _assert_live_postgres_osce_schema(backend)
+     finally:
+         db.close_all_connections()
