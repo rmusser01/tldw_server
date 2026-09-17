@@ -1,0 +1,5 @@
+# Fresh matrix browser harness — TASK13260.166
+
+This is harness preparation, not finding UAT166 and not full-matrix execution. Reviewer shorthand166 refers to the Backlog task. The wrapper selects the initialized run/cell session and source, protects raw evidence and redacts known credentials. Original command/config isolation review findings were corrected; independent33 synthetic tests pass0skip and all14 existing launcher files/snapshots remain unchanged. No browser, runtime, actual profile, DB, archive/dependency copy or model was started. Full matrix still waits onUAT225. Read the reviewed README166 and final-review report for usage and limits. Bandit cannot analyze JavaScript; two parse errors are disclosed without coverage claim.
+
+Retained snapshots preserve exact reviewed source except trailing text whitespace/final-newline normalization; both hashes are recorded. Secret scanning permits only the explicitly synthetic unsigned test JWT literal used by the redaction regression. It is not an issued session credential; all known real profile/provider/PG credentials and other JWT/PEM patterns remain prohibited.

@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-17T10:35:08.343Z",
+  "dev": "59049e094e0845a4611ea725ae19b7c1754ea709",
+  "head": "ed2e9af5eb749ed7f511caeb093e93f1fd5cfe81",
+  "branch": "codex/fresh-install-uat-fixes",
+  "devIsAncestor": true,
+  "originalBranchWasBasedOnLatestDev": false,
+  "note": "Original base was older; dev was merged later. This fetch verifies current ancestry, not original creation ancestry."
+}

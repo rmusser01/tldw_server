@@ -1,0 +1,59 @@
+✔ uses recorded session/archive and privately preserves raw command evidence (45.99775ms)
+✔ redacts raw, JSON-escaped, URL-encoded, account and JWT values (23.81475ms)
+✔ redacts matching PostgreSQL runtime password (24.862458ms)
+✔ redacts operator-supplied provider credentials registered before UI entry (24.5715ms)
+✔ replaces raw snapshot references with confined redacted text copies (24.355291ms)
+✔ does not follow a snapshot symlink outside the owned archive (24.61525ms)
+✔ preserves command failure exit code and sanitized diagnostics (23.888583ms)
+✔ rejects owner mismatch before subprocess execution (23.464ms)
+✔ rejects session mismatch before subprocess execution (24.389917ms)
+✔ rejects source mismatch before subprocess execution (24.102583ms)
+✔ rejects credentials mismatch before subprocess execution (22.787875ms)
+✔ rejects initialization mismatch before subprocess execution (21.708292ms)
+✔ rejects mode mismatch before subprocess execution (22.457666ms)
+✔ rejects session overrides and invalid run/cell values (21.581375ms)
+✔ safe setup errors never print malformed credential contents (21.586917ms)
+✔ subprocess infrastructure errors suppress partial output (1.479917ms)
+✔ rejects command or browser override: kill-all (1.202541ms)
+✔ rejects command or browser override: close-all (1.458542ms)
+✔ rejects command or browser override: attach http://synthetic.invalid (1.068542ms)
+✔ rejects command or browser override: open --profile=/synthetic/foreign (1.161625ms)
+✔ rejects command or browser override: open --config=/synthetic/foreign (1.140833ms)
+✔ rejects command or browser override: open --persistent (1.041792ms)
+✔ child environment removes host browser/config/storage and Node overrides (1.353334ms)
+✔ rejects implicit local config before subprocess creation (1.731708ms)
+✔ rejects implicit global config before subprocess creation (1.771958ms)
+✔ supports reviewed interaction and evidence options in the owned session (104.826167ms)
+✖ rejects malformed short options while allowing numeric interaction arguments (22.721792ms)
+✔ installed config resolver sees an isolated browser with the exact child environment (102.992792ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 27
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 658.197542
+
+✖ failing tests:
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:163:1
+✖ rejects malformed short options while allowing numeric interaction arguments (22.721792ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:165:79)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

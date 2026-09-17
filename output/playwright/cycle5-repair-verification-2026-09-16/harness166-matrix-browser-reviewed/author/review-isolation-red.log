@@ -1,0 +1,227 @@
+✔ uses recorded session/archive and privately preserves raw command evidence (41.379ms)
+✔ redacts raw, JSON-escaped, URL-encoded, account and JWT values (21.181792ms)
+✔ redacts matching PostgreSQL runtime password (20.332708ms)
+✔ redacts operator-supplied provider credentials registered before UI entry (21.67475ms)
+✔ replaces raw snapshot references with confined redacted text copies (22.030292ms)
+✔ does not follow a snapshot symlink outside the owned archive (21.924792ms)
+✔ preserves command failure exit code and sanitized diagnostics (21.439375ms)
+✔ rejects owner mismatch before subprocess execution (21.153958ms)
+✔ rejects session mismatch before subprocess execution (20.266708ms)
+✔ rejects source mismatch before subprocess execution (20.595ms)
+✔ rejects credentials mismatch before subprocess execution (20.102625ms)
+✔ rejects initialization mismatch before subprocess execution (19.671709ms)
+✔ rejects mode mismatch before subprocess execution (18.870625ms)
+✔ rejects session overrides and invalid run/cell values (19.599042ms)
+✔ safe setup errors never print malformed credential contents (19.7995ms)
+✔ subprocess infrastructure errors suppress partial output (1.554167ms)
+✖ rejects command or browser override: kill-all (1.860917ms)
+✖ rejects command or browser override: close-all (1.493625ms)
+✖ rejects command or browser override: attach http://synthetic.invalid (1.418667ms)
+✖ rejects command or browser override: open --profile=/synthetic/foreign (1.801083ms)
+✖ rejects command or browser override: open --config=/synthetic/foreign (1.58525ms)
+✖ rejects command or browser override: open --persistent (1.668583ms)
+✖ child environment removes host browser/config/storage and Node overrides (2.163125ms)
+✖ rejects implicit local config before subprocess creation (1.925792ms)
+✖ rejects implicit global config before subprocess creation (1.853041ms)
+✔ supports reviewed interaction and evidence options in the owned session (89.041917ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 17
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 470.40875
+
+✖ failing tests:
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: kill-all (1.860917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: close-all (1.493625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: attach http://synthetic.invalid (1.418667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: open --profile=/synthetic/foreign (1.801083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: open --config=/synthetic/foreign (1.58525ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:126:3
+✖ rejects command or browser override: open --persistent (1.668583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:129:12)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:133:1
+✖ child environment removes host browser/config/storage and Node overrides (2.163125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'synthetic-foreign-setting'
+  - undefined
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:140:57)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'synthetic-foreign-setting',
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:145:3
+✖ rejects implicit local config before subprocess creation (1.925792ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:151:64)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:145:3
+✖ rejects implicit global config before subprocess creation (1.853041ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== 1
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:151:64)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

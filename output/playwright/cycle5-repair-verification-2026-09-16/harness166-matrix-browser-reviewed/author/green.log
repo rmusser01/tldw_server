@@ -1,0 +1,121 @@
+✖ uses recorded session/archive and privately preserves raw command evidence (2.973625ms)
+✖ redacts raw, JSON-escaped, URL-encoded, account and JWT values (1.423459ms)
+✔ redacts matching PostgreSQL runtime password (1.646666ms)
+✖ replaces raw snapshot references with confined redacted text copies (1.177083ms)
+✔ does not follow a snapshot symlink outside the owned archive (1.473125ms)
+✖ preserves command failure exit code and sanitized diagnostics (1.36575ms)
+✔ rejects owner mismatch before subprocess execution (1.502833ms)
+✔ rejects session mismatch before subprocess execution (1.525666ms)
+✔ rejects source mismatch before subprocess execution (1.304208ms)
+✔ rejects credentials mismatch before subprocess execution (1.291334ms)
+✔ rejects initialization mismatch before subprocess execution (1.236959ms)
+✔ rejects mode mismatch before subprocess execution (1.266792ms)
+✔ rejects session overrides and invalid run/cell values (1.070292ms)
+✔ safe setup errors never print malformed credential contents (1.175917ms)
+✖ subprocess infrastructure errors suppress partial output (1.154416ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 10
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 55.126583
+
+✖ failing tests:
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:36:1
+✖ uses recorded session/archive and privately preserves raw command evidence (2.973625ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:38:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.start (node:internal/test_runner/test:978:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:332:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:46:1
+✖ redacts raw, JSON-escaped, URL-encoded, account and JWT values (1.423459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:51:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:60:1
+✖ replaces raw snapshot references with confined redacted text copies (1.177083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 0
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:62:42)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:77:1
+✖ preserves command failure exit code and sanitized diagnostics (1.36575ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  1 !== 7
+
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:79:42)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 7,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:108:1
+✖ subprocess infrastructure errors suppress partial output (1.154416ms)
+  Error: Invalid browser profile or command
+      at requireThat (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/matrix-browser.mjs:16:58)
+      at context (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/matrix-browser.mjs:24:3)
+      at runBrowser (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/matrix-browser.mjs:47:34)
+      at TestContext.<anonymous> (file:///Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs:110:13)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1081:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:763:18)
+      at Test.postRun (node:internal/test_runner/test:1210:19)
+      at Test.run (node:internal/test_runner/test:1138:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7)

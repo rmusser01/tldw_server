@@ -1,0 +1,41 @@
+✔ uses recorded session/archive and privately preserves raw command evidence (41.521958ms)
+✔ redacts raw, JSON-escaped, URL-encoded, account and JWT values (19.860125ms)
+✔ redacts matching PostgreSQL runtime password (19.901375ms)
+✔ redacts operator-supplied provider credentials registered before UI entry (20.166833ms)
+✔ replaces raw snapshot references with confined redacted text copies (19.531709ms)
+✔ does not follow a snapshot symlink outside the owned archive (20.611708ms)
+✔ preserves command failure exit code and sanitized diagnostics (21.560167ms)
+✔ rejects owner mismatch before subprocess execution (22.551875ms)
+✔ rejects session mismatch before subprocess execution (22.375083ms)
+✔ rejects source mismatch before subprocess execution (21ms)
+✔ rejects credentials mismatch before subprocess execution (20.598083ms)
+✔ rejects initialization mismatch before subprocess execution (19.937084ms)
+✔ rejects mode mismatch before subprocess execution (19.597375ms)
+✔ rejects session overrides and invalid run/cell values (19.325417ms)
+✔ safe setup errors never print malformed credential contents (19.8225ms)
+✔ subprocess infrastructure errors suppress partial output (1.638458ms)
+✔ rejects command or browser override: kill-all (1.154375ms)
+✔ rejects command or browser override: close-all (1.114625ms)
+✔ rejects command or browser override: attach http://synthetic.invalid (0.975666ms)
+✔ rejects command or browser override: open --profile=/synthetic/foreign (1.130125ms)
+✔ rejects command or browser override: open --config=/synthetic/foreign (1.233417ms)
+✔ rejects command or browser override: open --persistent (1.181333ms)
+✔ child environment removes host browser/config/storage and Node overrides (1.393708ms)
+✔ rejects implicit local config before subprocess creation (1.753792ms)
+✔ rejects implicit global config before subprocess creation (1.900542ms)
+✔ supports reviewed interaction and evidence options in the owned session (91.902334ms)
+✔ rejects malformed short options while allowing numeric interaction arguments (19.667584ms)
+✔ installed config resolver sees an isolated browser with the exact child environment (93.359375ms)
+✔ rejects foreign/global browser command kill-all  (2.249792ms)
+✔ rejects foreign/global browser command attach http://synthetic.invalid:9222 (1.61625ms)
+✔ rejects foreign/global browser command open --profile=/synthetic/foreign-profile (1.153041ms)
+✔ rejects foreign/global browser command open --config=/synthetic/foreign-config.json (1.124417ms)
+✔ does not inherit browser attachment, profile, or config overrides (1.825209ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 579.866291

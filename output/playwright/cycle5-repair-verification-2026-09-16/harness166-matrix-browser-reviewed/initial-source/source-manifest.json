@@ -1,0 +1,22 @@
+[
+  {
+    "path": ".tmp/uat-next-matrix-20260916/matrix-browser.mjs",
+    "sha256": "334c34e65574bd484ddd9af8ea6424e2b2d921f42e9b28770676d54695e79f1f",
+    "snapshot": ".tmp/uat-matrix-browser-20260917/snapshot/matrix-browser.mjs"
+  },
+  {
+    "path": ".tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs",
+    "sha256": "8dcc57ea5e6a1ee3a3e4c28d0648bbfe90a2f2ee56d623ed3841cdb1576d277e",
+    "snapshot": ".tmp/uat-matrix-browser-20260917/snapshot/browser-wrapper.test.mjs"
+  },
+  {
+    "path": ".tmp/uat-matrix-browser-20260917/README166.md",
+    "sha256": "0657409af3de95119f573d220a0996471f00b88646c1b552092982e92dceba34",
+    "snapshot": ".tmp/uat-matrix-browser-20260917/snapshot/README166.md"
+  },
+  {
+    "path": ".tmp/uat-matrix-browser-20260917/PLAN166.md",
+    "sha256": "8c66a0c9c9381dadb4c63474dd863fff64986318df3126e3eac0aaaf82c3afd6",
+    "snapshot": ".tmp/uat-matrix-browser-20260917/snapshot/PLAN166.md"
+  }
+]

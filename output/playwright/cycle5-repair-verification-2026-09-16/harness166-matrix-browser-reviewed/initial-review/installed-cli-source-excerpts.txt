@@ -1,0 +1,246 @@
+## /Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/program.js
+SHA256 55a9a10132c680ecdec25b5000afb12035745ac9e75dd9cc0ef3e5d5e08d7f3e
+97:   const sessionName = (0, import_registry.resolveSessionName)(args.session);
+98:   switch (commandName) {
+99:     case "list": {
+100:       const data = await collectList(registry, clientInfo, !!args.all);
+101:       output.list(data);
+102:       return;
+103:     }
+104:     case "close-all": {
+105:       const entries = registry.entries(clientInfo);
+106:       const closed = [];
+107:       for (const entry of entries) {
+108:         await new import_session.Session(entry).stop();
+109:         closed.push(entry.config.name);
+110:       }
+111:       output.closeAll(closed);
+112:       return;
+113:     }
+114:     case "delete-data": {
+115:       const entry = registry.entry(clientInfo, sessionName);
+116:       if (!entry) {
+117:         output.deleteData(sessionName, { existed: false, deletedUserDataDir: false });
+118:         return;
+119:       }
+120:       const result = await new import_session.Session(entry).deleteData();
+121:       output.deleteData(sessionName, result);
+122:       return;
+123:     }
+124:     case "kill-all": {
+125:       const pids = await killAllDaemons();
+126:       output.killAll(pids);
+127:       return;
+128:     }
+129:     case "open": {
+130:       const { pid } = await startSession(sessionName, registry, clientInfo, args, "open");
+131:       const newEntry = await registry.loadEntry(clientInfo, sessionName);
+132:       const params = args._.slice(1);
+133:       const toolText = await runInSessionOrStop(newEntry, clientInfo, { _: ["goto", ...params.length ? params : ["about:blank"]] }, output);
+134:       output.open(sessionName, pid, toolText);
+135:       return;
+136:     }
+137:     case "attach": {
+138:       const attachTarget = args._[1];
+139:       const targetCount = (attachTarget ? 1 : 0) + (args.cdp ? 1 : 0) + (args.endpoint ? 1 : 0) + (args.extension ? 1 : 0);
+140:       if (targetCount > 1)
+141:         output.errorAttachConflict();
+142:       if (attachTarget)
+143:         args.endpoint = attachTarget;
+144:       const extensionChannel = typeof args.extension === "string" ? args.extension : void 0;
+145:       if (extensionChannel) {
+146:         args.browser = extensionChannel;
+147:         args.extension = true;
+148:       }
+149:       const cdpChannel = typeof args.cdp === "string" && (0, import_channelSessions.isKnownChannel)(args.cdp) ? args.cdp : void 0;
+150:       const targetName = attachTarget ?? cdpChannel ?? extensionChannel ?? args.endpoint ?? args.cdp;
+151:       if (!targetName)
+152:         output.errorAttachNoTarget();
+153:       const attachSessionName = (0, import_registry.explicitSessionName)(args.session) ?? attachTarget ?? cdpChannel ?? extensionChannel ?? sessionName;
+154:       args.session = attachSessionName;
+155:       const { pid } = await startSession(attachSessionName, registry, clientInfo, args, "attach");
+156:       const newEntry = await registry.loadEntry(clientInfo, attachSessionName);
+157:       const toolText = await runInSessionOrStop(newEntry, clientInfo, { _: ["snapshot"], filename: "<auto>" }, output);
+312: const daemonProcessPatterns = ["run-mcp-server", "run-cli-server", "cli-daemon", "cliDaemon.js", "dashboardApp.js"];
+313: async function killAllDaemons() {
+314:   const platform = import_os.default.platform();
+315:   const pidFilterEnv = process.env.PWTEST_KILL_ALL_PID_FILTER_FOR_TEST;
+316:   const pidFilter = pidFilterEnv ? new Set(pidFilterEnv.split(",").map((p) => parseInt(p, 10)).filter((n) => !isNaN(n))) : void 0;
+317:   const killed = [];
+318:   try {
+319:     if (platform === "win32") {
+320:       const clauses = [`(${daemonProcessPatterns.map((p) => `$_.CommandLine -like '*${p}*'`).join(" -or ")})`];
+321:       if (pidFilter)
+322:         clauses.push(`(${[...pidFilter].map((p) => `$_.ProcessId -eq ${p}`).join(" -or ")})`);
+323:       const whereClause = clauses.join(" -and ");
+324:       const result = (0, import_child_process.execSync)(
+325:         `powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { ${whereClause} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"`,
+326:         { encoding: "utf-8" }
+327:       );
+328:       const pids = result.split("\n").map((line) => line.trim()).filter((line) => /^\d+$/.test(line));
+329:       for (const pid of pids)
+330:         killed.push(parseInt(pid, 10));
+331:     } else {
+332:       const result = (0, import_child_process.execSync)("ps auxww", { encoding: "utf-8" });
+333:       const lines = result.split("\n");
+334:       for (const line of lines) {
+335:         if (daemonProcessPatterns.some((p) => line.includes(p))) {
+336:           const parts = line.trim().split(/\s+/);
+337:           const pid = parts[1];
+338:           if (pid && /^\d+$/.test(pid)) {
+339:             const numericPid = parseInt(pid, 10);
+340:             if (pidFilter && !pidFilter.has(numericPid))
+341:               continue;
+342:             try {
+343:               process.kill(numericPid, "SIGKILL");
+344:               killed.push(numericPid);
+345:             } catch {
+## /Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/tools/cli-client/session.js
+SHA256 8c3f9aff3fab537771cb560e1bad3e417e16b3315b7a3dc10a305faeca3f6024
+122:     await import_fs.default.promises.mkdir(clientInfo.daemonProfilesDir, { recursive: true });
+123:     const cliPath = (0, import_package.libPath)("entry", "cliDaemon.js");
+124:     const sessionName = (0, import_registry.resolveSessionName)(cliArgs.session);
+125:     const errLog = import_path.default.join(clientInfo.daemonProfilesDir, sessionName + ".err");
+126:     const err = import_fs.default.openSync(errLog, "w");
+127:     const args = [
+128:       cliPath,
+129:       sessionName
+130:     ];
+131:     if (cliArgs.headed)
+132:       args.push("--headed");
+133:     if (cliArgs.mobile)
+134:       args.push("--mobile");
+135:     if (cliArgs.device)
+136:       args.push(`--device=${cliArgs.device}`);
+137:     if (cliArgs.browser)
+138:       args.push(`--browser=${cliArgs.browser}`);
+139:     if (cliArgs.persistent)
+140:       args.push("--persistent");
+141:     if (cliArgs.profile)
+142:       args.push(`--profile=${cliArgs.profile}`);
+143:     if (cliArgs.config)
+144:       args.push(`--config=${cliArgs.config}`);
+145:     if (cliArgs["idle-timeout"] !== void 0)
+146:       args.push(`--idle-timeout=${cliArgs["idle-timeout"]}`);
+147:     if (cliArgs.extension)
+148:       args.push("--extension");
+149:     else if (cliArgs.cdp)
+150:       args.push(`--cdp=${cliArgs.cdp}`);
+151:     else if (cliArgs.endpoint)
+152:       args.push(`--endpoint=${cliArgs.endpoint}`);
+153:     const child = (0, import_child_process.spawn)(process.execPath, args, {
+154:       detached: true,
+155:       stdio: ["ignore", "pipe", err],
+156:       cwd: process.cwd(),
+157:       // Will be used as root.
+158:       windowsHide: true
+159:     });
+## /Users/macbook-dev/.npm/_npx/31e32ef8478fbf80/node_modules/playwright-core/lib/coreBundle.js
+SHA256 a4fa7fde1714bdf8f7f20689dafd2c6bdcf2577299ee36e712f7f4de210d31d4
+72774: async function resolveCLIConfigForCLI(daemonProfilesDir2, sessionName, options, env) {
+72775:   const config = options.config ? import_path59.default.resolve(options.config) : void 0;
+72776:   try {
+72777:     const defaultConfigFile2 = import_path59.default.resolve(".playwright", "cli.config.json");
+72778:     if (!config && import_fs65.default.existsSync(defaultConfigFile2))
+72779:       options.config = defaultConfigFile2;
+72780:   } catch {
+72781:   }
+72782:   const daemonOverrides = configFromCLIOptions({
+72783:     endpoint: options.endpoint,
+72784:     cdpEndpoint: options.cdp,
+72785:     config: options.config,
+72786:     browser: options.browser,
+72787:     device: options.device,
+72788:     headless: options.headed ? false : void 0,
+72789:     mobile: options.mobile,
+72790:     extension: options.extension,
+72791:     userDataDir: options.profile,
+72792:     idleTimeout: options.idleTimeout,
+72793:     snapshotMode: "full"
+72794:   });
+72795:   const envOverrides = configFromEnv(env);
+72796:   const configFile = daemonOverrides.configFile ?? envOverrides.configFile;
+72797:   const configInFile = await loadConfig(configFile);
+72798:   const configDir = configFile ? import_path59.default.dirname(import_path59.default.resolve(configFile)) : process.cwd();
+72799:   const globalConfigPath = import_path59.default.join((env ?? process.env)["PWTEST_CLI_GLOBAL_CONFIG"] ?? import_os26.default.homedir(), ".playwright", "cli.config.json");
+72800:   const globalConfigExists = import_fs65.default.existsSync(globalConfigPath);
+72801:   const globalConfigInFile = await loadConfig(globalConfigExists ? globalConfigPath : void 0);
+72802:   const globalConfigDir = globalConfigExists ? import_path59.default.dirname(globalConfigPath) : process.cwd();
+72803:   let result2 = defaultConfig;
+72804:   result2 = mergeConfig(result2, resolveConfigPaths(globalConfigInFile, globalConfigDir));
+72805:   result2 = mergeConfig(result2, resolveConfigPaths(configInFile, configDir));
+72806:   result2 = mergeConfig(result2, resolveConfigPaths(envOverrides, process.cwd()));
+72807:   result2 = mergeConfig(result2, resolveConfigPaths(daemonOverrides, process.cwd()));
+72808:   if (result2.browser.isolated === void 0)
+72809:     result2.browser.isolated = !options.profile && !options.persistent && !result2.browser.userDataDir && !result2.browser.remoteEndpoint && !result2.browser.cdpEndpoint && !result2.extension;
+72810:   if (result2.browser.launchOptions.headless === void 0)
+72811:     result2.browser.launchOptions.headless = true;
+72812:   const browser = await validateBrowserConfig(result2.browser);
+72813:   validateOutputDir(result2.outputDir);
+72814:   if (!result2.extension && !browser.isolated && !browser.userDataDir && !browser.remoteEndpoint && !browser.cdpEndpoint) {
+72815:     const browserToken = browser.launchOptions?.channel ?? browser?.browserName;
+72816:     const userDataDir = import_path59.default.resolve(daemonProfilesDir2, `ud-${sessionName}-${browserToken}`);
+72817:     browser.userDataDir = userDataDir;
+72818:   }
+72819:   return { ...result2, browser, configFile, skillMode: true };
+72820: }
+72989:   options.blockedOrigins = semicolonSeparatedList(e.PLAYWRIGHT_MCP_BLOCKED_ORIGINS);
+72990:   options.blockServiceWorkers = envToBoolean(e.PLAYWRIGHT_MCP_BLOCK_SERVICE_WORKERS);
+72991:   options.browser = envToString(e.PLAYWRIGHT_MCP_BROWSER);
+72992:   options.caps = commaSeparatedList(e.PLAYWRIGHT_MCP_CAPS);
+72993:   options.cdpEndpoint = envToString(e.PLAYWRIGHT_MCP_CDP_ENDPOINT);
+72994:   options.cdpHeader = headerParser(envToString(e.PLAYWRIGHT_MCP_CDP_HEADERS));
+72995:   options.cdpTimeout = numberParser(e.PLAYWRIGHT_MCP_CDP_TIMEOUT);
+72996:   if (e.PLAYWRIGHT_MCP_CODEGEN)
+72997:     options.codegen = enumParser("--codegen", ["none", "typescript", "python", "java", "csharp"], e.PLAYWRIGHT_MCP_CODEGEN);
+72998:   options.config = envToString(e.PLAYWRIGHT_MCP_CONFIG);
+72999:   if (e.PLAYWRIGHT_MCP_CONSOLE_LEVEL)
+73000:     options.consoleLevel = enumParser("--console-level", ["error", "warning", "info", "debug"], e.PLAYWRIGHT_MCP_CONSOLE_LEVEL);
+73001:   options.device = envToString(e.PLAYWRIGHT_MCP_DEVICE);
+73002:   options.executablePath = envToString(e.PLAYWRIGHT_MCP_EXECUTABLE_PATH);
+73003:   options.extension = envToBoolean(e.PLAYWRIGHT_MCP_EXTENSION);
+73004:   options.grantPermissions = commaSeparatedList(e.PLAYWRIGHT_MCP_GRANT_PERMISSIONS);
+73005:   options.headless = envToBoolean(e.PLAYWRIGHT_MCP_HEADLESS);
+73006:   options.host = envToString(e.PLAYWRIGHT_MCP_HOST);
+73007:   options.ignoreHttpsErrors = envToBoolean(e.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS);
+73008:   const initPage = envToString(e.PLAYWRIGHT_MCP_INIT_PAGE);
+73009:   if (initPage)
+73010:     options.initPage = [initPage];
+73011:   const initScript = envToString(e.PLAYWRIGHT_MCP_INIT_SCRIPT);
+73012:   if (initScript)
+73013:     options.initScript = [initScript];
+73014:   options.isolated = envToBoolean(e.PLAYWRIGHT_MCP_ISOLATED);
+73015:   if (e.PLAYWRIGHT_MCP_IMAGE_RESPONSES)
+73016:     options.imageResponses = enumParser("--image-responses", ["allow", "omit", "only"], e.PLAYWRIGHT_MCP_IMAGE_RESPONSES);
+73017:   options.mobile = envToBoolean(e.PLAYWRIGHT_MCP_MOBILE);
+73018:   options.sandbox = envToBoolean(e.PLAYWRIGHT_MCP_SANDBOX);
+73019:   options.outputDir = envToString(e.PLAYWRIGHT_MCP_OUTPUT_DIR);
+73020:   options.outputMaxSize = numberParser(e.PLAYWRIGHT_MCP_OUTPUT_MAX_SIZE);
+73021:   options.port = numberParser(e.PLAYWRIGHT_MCP_PORT);
+73022:   options.proxyBypass = envToString(e.PLAYWRIGHT_MCP_PROXY_BYPASS);
+73023:   options.proxyServer = envToString(e.PLAYWRIGHT_MCP_PROXY_SERVER);
+73024:   options.remoteHeader = headerParser(envToString(e.PLAYWRIGHT_MCP_REMOTE_HEADERS));
+73025:   options.secrets = dotenvFileLoader(e.PLAYWRIGHT_MCP_SECRETS_FILE);
+73026:   options.storageState = envToString(e.PLAYWRIGHT_MCP_STORAGE_STATE);
+73027:   options.testIdAttribute = envToString(e.PLAYWRIGHT_MCP_TEST_ID_ATTRIBUTE);
+73028:   options.timeoutAction = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_ACTION);
+73029:   options.idleTimeout = numberParser(e.PLAYWRIGHT_MCP_IDLE_TIMEOUT);
+73030:   options.timeoutNavigation = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_NAVIGATION);
+73031:   options.timeoutSettle = numberParser(e.PLAYWRIGHT_MCP_TIMEOUT_SETTLE);
+73032:   options.userAgent = envToString(e.PLAYWRIGHT_MCP_USER_AGENT);
+73033:   options.userDataDir = envToString(e.PLAYWRIGHT_MCP_USER_DATA_DIR);
+73034:   options.viewportSize = resolutionParser("--viewport-size", e.PLAYWRIGHT_MCP_VIEWPORT_SIZE);
+74889: function decorateProgram3(program4) {
+74890:   program4.argument("[session-name]", "name of the session to create or connect to", "default").option("--headed", "run in headed mode (non-headless)").option("--device <device>", 'emulate a specific device, for example "iPhone 15"').option("--mobile", "emulate a generic mobile device (Pixel 10 for Chromium, iPhone 17 for WebKit)").option("--extension", "run with the extension").option("--browser <name>", "browser to use (chromium, chrome, firefox, webkit)").option("--persistent", "use a persistent browser context").option("--profile <path>", "path to the user data dir").option("--config <path>", "path to the config file; by default uses .playwright/cli.config.json in the project directory and ~/.playwright/cli.config.json as global config").option("--cdp <url>", "connect to an existing browser via CDP endpoint URL").option("--endpoint <endpoint>", "attach to a running Playwright browser endpoint").option("--idle-timeout <timeout>", "shut the session down after this many milliseconds without a command, defaults to one hour for headless browsers", numberParser).option("--init-workspace", "initialize workspace").option("--init-skills <value>", 'install skills for the given agent type ("claude" or "agents")').option("--init-skills-global <value>", 'install skills for the given agent type ("claude" or "agents") into the home directory').action(async (sessionName, options) => {
+74891:     if (options.initWorkspace) {
+74892:       await initWorkspace(options.initSkills, options.initSkillsGlobal);
+74893:       return;
+74894:     }
+74895:     setupExitWatchdog();
+74896:     const clientInfo = createClientInfo();
+74897:     const mcpConfig = await resolveCLIConfigForCLI(clientInfo.daemonProfilesDir, sessionName, options);
+74898:     const mcpClientInfo = {
+74899:       cwd: process.cwd(),
+74900:       clientName: guessClientName()
+74901:     };
+74902:     try {

@@ -1,0 +1,10 @@
+✔ installed resolver consumes an inherited CDP endpoint without browser launch (1.971542ms)
+✔ installed resolver merges global browser configuration even with explicit empty local config (1.908292ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 127.573083

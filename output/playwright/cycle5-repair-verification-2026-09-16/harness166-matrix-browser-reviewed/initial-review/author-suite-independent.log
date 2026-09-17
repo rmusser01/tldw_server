@@ -1,0 +1,24 @@
+✔ uses recorded session/archive and privately preserves raw command evidence (39.325292ms)
+✔ redacts raw, JSON-escaped, URL-encoded, account and JWT values (19.288833ms)
+✔ redacts matching PostgreSQL runtime password (19.223291ms)
+✔ redacts operator-supplied provider credentials registered before UI entry (19.630833ms)
+✔ replaces raw snapshot references with confined redacted text copies (20.81225ms)
+✔ does not follow a snapshot symlink outside the owned archive (21.687541ms)
+✔ preserves command failure exit code and sanitized diagnostics (21.945ms)
+✔ rejects owner mismatch before subprocess execution (21.141583ms)
+✔ rejects session mismatch before subprocess execution (19.78375ms)
+✔ rejects source mismatch before subprocess execution (18.990541ms)
+✔ rejects credentials mismatch before subprocess execution (19.230375ms)
+✔ rejects initialization mismatch before subprocess execution (19.631292ms)
+✔ rejects mode mismatch before subprocess execution (19.05375ms)
+✔ rejects session overrides and invalid run/cell values (18.839208ms)
+✔ safe setup errors never print malformed credential contents (19.942791ms)
+✔ subprocess infrastructure errors suppress partial output (1.465583ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 349.928375

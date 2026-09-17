@@ -1,0 +1,10 @@
+{
+  "command": "node --test .tmp/uat-matrix-browser-20260917/browser-wrapper.test.mjs .tmp/uat166-browser-independent-20260917/isolation-counterexamples.test.mjs",
+  "result": {
+    "pass": 33,
+    "fail": 0,
+    "skip": 0,
+    "durationMs": 579.866291
+  },
+  "scope": "Synthetic fixture/fake spawn tests, harmless subprocess, and installed config resolver only. No real CLI entry point/browser/runtime/DB invoked."
+}
