@@ -2,6 +2,9 @@ import React from "react"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { createInstance } from "i18next"
+import settings from "@/assets/locale/en/settings.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import {
   CharacterListContent,
   type CharacterListContentProps
@@ -134,4 +137,69 @@ describe("CharacterListContent design-system alerts", () => {
 
     expect(refetch).toHaveBeenCalledTimes(1)
   })
+})
+
+const createEnglishTranslator = async (includeAnnouncement = true) => {
+  const resource = structuredClone(settings)
+  if (!includeAnnouncement) {
+    delete (resource.manageCharacters.aria as Record<string, string>).searchResults
+  }
+  const i18n = createInstance()
+  await i18n.use(ICUWithInterpolation).init({
+    lng: "en",
+    fallbackLng: false,
+    resources: { en: { settings: resource } }
+  })
+  return i18n.t as CharacterListContentProps["t"]
+}
+
+const resultProps = (
+  translate: CharacterListContentProps["t"],
+  count: number
+) => createProps({
+  t: translate,
+  status: "success",
+  error: null,
+  totalCharacters: count,
+  data: Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    name: `Character ${index + 1}`,
+    description: "A character result",
+    tags: []
+  }))
+})
+
+describe.each([true, false])("Character result announcements (English resource: %s)", includeAnnouncement => {
+  it.each([
+    [0, "0 characters found"],
+    [1, "1 character found"],
+    [2, "2 characters found"]
+  ] as const)("announces %i results with the correct noun", async (count, expected) => {
+    const translate = await createEnglishTranslator(includeAnnouncement)
+    render(<CharacterListContent {...resultProps(translate, count)} />)
+
+    const announcement = screen.getByRole("status")
+    expect(announcement).toHaveTextContent(expected)
+    expect(announcement).toHaveAttribute("aria-live", "polite")
+    expect(announcement).toHaveAttribute("aria-atomic", "true")
+  })
+})
+
+it("updates the announcement when the result count changes on one translator", async () => {
+  const translate = await createEnglishTranslator()
+  const view = render(<CharacterListContent {...resultProps(translate, 2)} />)
+  expect(screen.getByRole("status")).toHaveTextContent("2 characters found")
+
+  view.rerender(<CharacterListContent {...resultProps(translate, 1)} />)
+  expect(screen.getByRole("status")).toHaveTextContent("1 character found")
+
+  view.rerender(<CharacterListContent {...resultProps(translate, 0)} />)
+  expect(screen.getByRole("status")).toHaveTextContent("0 characters found")
+})
+
+it.each(["pending", "error"] as const)("does not announce results while %s", async status => {
+  const translate = await createEnglishTranslator()
+  render(<CharacterListContent {...resultProps(translate, 1)} status={status} />)
+
+  expect(screen.getByRole("status")).toBeEmptyDOMElement()
 })
