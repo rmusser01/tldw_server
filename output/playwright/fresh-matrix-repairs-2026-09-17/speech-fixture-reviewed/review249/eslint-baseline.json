@@ -1,0 +1,190 @@
+[
+  {
+    "filePath": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts",
+    "messages": [
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 53,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 53,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                1554,
+                1557
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                1554,
+                1557
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 82,
+        "column": 10,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 82,
+        "endColumn": 13,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                2526,
+                2529
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                2526,
+                2529
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 97,
+        "column": 17,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 97,
+        "endColumn": 20,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                2868,
+                2871
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                2868,
+                2871
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 106,
+        "column": 33,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 106,
+        "endColumn": 36,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                3095,
+                3098
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                3095,
+                3098
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      },
+      {
+        "ruleId": "@typescript-eslint/no-explicit-any",
+        "severity": 1,
+        "message": "Unexpected any. Specify a different type.",
+        "line": 126,
+        "column": 64,
+        "nodeType": "TSAnyKeyword",
+        "messageId": "unexpectedAny",
+        "endLine": 126,
+        "endColumn": 67,
+        "suggestions": [
+          {
+            "messageId": "suggestUnknown",
+            "fix": {
+              "range": [
+                3833,
+                3836
+              ],
+              "text": "unknown"
+            },
+            "desc": "Use `unknown` instead, this will force you to explicitly, and safely assert the type is correct."
+          },
+          {
+            "messageId": "suggestNever",
+            "fix": {
+              "range": [
+                3833,
+                3836
+              ],
+              "text": "never"
+            },
+            "desc": "Use `never` instead, this is useful when instantiating generic type parameters that you don't need to know the type of."
+          }
+        ]
+      }
+    ],
+    "suppressedMessages": [],
+    "errorCount": 0,
+    "fatalErrorCount": 0,
+    "warningCount": 5,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": "import { beforeEach, describe, expect, it, vi } from \"vitest\"\n\nconst mocks = vi.hoisted(() => ({\n  bgRequest: vi.fn()\n}))\n\nvi.mock(\"@/services/background-proxy\", () => ({\n  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),\n  bgUpload: vi.fn(),\n  bgStream: vi.fn()\n}))\n\nvi.mock(\"@/utils/safe-storage\", () => ({\n  createSafeStorage: () => ({\n    get: vi.fn(async () => null),\n    set: vi.fn(async () => undefined),\n    remove: vi.fn(async () => undefined)\n  }),\n  safeStorageSerde: {\n    serialize: (value: unknown) => value,\n    deserialize: (value: unknown) => value\n  }\n}))\n\nimport { TldwApiClient } from \"@/services/tldw/TldwApiClient\"\n\ndescribe(\"TldwApiClient.createChatCompletion (non-streaming sanitizer)\", () => {\n  beforeEach(() => {\n    vi.clearAllMocks()\n  })\n\n  it(\"returns successful completion content verbatim even when it looks like an error\", async () => {\n    const content =\n      \"To handle this exception, wrap it in try/catch — see /Users/foo/bar.py:12\"\n    const completion = {\n      id: \"chatcmpl-1\",\n      object: \"chat.completion\",\n      choices: [\n        {\n          index: 0,\n          message: { role: \"assistant\", content },\n          finish_reason: \"stop\"\n        }\n      ]\n    }\n    // bgRequest throws on non-2xx, so a resolved value is always a success body.\n    mocks.bgRequest.mockResolvedValueOnce(completion)\n\n    const client = new TldwApiClient()\n    const res = await client.createChatCompletion({\n      model: \"gpt-test\",\n      messages: [{ role: \"user\", content: \"How do I handle errors?\" }]\n    } as any)\n\n    const body = await res.json()\n    expect(body.choices[0].message.content).toBe(content)\n    // The suspicious substrings must survive untouched.\n    expect(body.choices[0].message.content).toContain(\"exception\")\n    expect(body.choices[0].message.content).toContain(\"/Users/foo/bar.py:12\")\n    expect(JSON.stringify(body)).not.toContain(\"Chat completion failed.\")\n  })\n\n  it(\"preserves error-shaped keys inside successful assistant content\", async () => {\n    const completion = {\n      choices: [\n        {\n          index: 0,\n          message: {\n            role: \"assistant\",\n            content: \"Here is a stack trace and a traceback for you.\"\n          },\n          finish_reason: \"stop\"\n        }\n      ]\n    }\n    mocks.bgRequest.mockResolvedValueOnce(completion)\n\n    const client = new TldwApiClient()\n    const res = await client.createChatCompletion({\n      model: \"gpt-test\",\n      messages: [{ role: \"user\", content: \"show me a trace\" }]\n    } as any)\n\n    const body = await res.json()\n    expect(body.choices[0].message.content).toBe(\n      \"Here is a stack trace and a traceback for you.\"\n    )\n  })\n})\n\ndescribe(\"TldwApiClient.synthesizeSpeech (timeout)\", () => {\n  beforeEach(() => {\n    vi.clearAllMocks()\n  })\n\n  const configureClient = (client: TldwApiClient) => {\n    ;(client as any).config = {\n      serverUrl: \"http://127.0.0.1:8000\",\n      apiKey: \"test-api-key-123\",\n      authMode: \"single-user\"\n    }\n  }\n\n  const findSpeechCall = () =>\n    mocks.bgRequest.mock.calls\n      .map((call) => call[0] as any)\n      .find((init) => init?.path === \"/api/v1/audio/speech\")\n\n  it(\"uses a generous default timeout so long synthesis is not aborted\", async () => {\n    mocks.bgRequest.mockResolvedValue(new ArrayBuffer(8))\n\n    const client = new TldwApiClient()\n    configureClient(client)\n    await client.synthesizeSpeech(\"Some long passage to render.\")\n\n    const speechCall = findSpeechCall()\n    expect(speechCall).toBeTruthy()\n    expect(speechCall.timeoutMs).toBeGreaterThanOrEqual(120000)\n  })\n\n  it(\"lets callers override the timeout\", async () => {\n    mocks.bgRequest.mockResolvedValue(new ArrayBuffer(8))\n\n    const client = new TldwApiClient()\n    configureClient(client)\n    await client.synthesizeSpeech(\"hi\", { timeoutMs: 5000 } as any)\n\n    const speechCall = findSpeechCall()\n    expect(speechCall).toBeTruthy()\n    expect(speechCall.timeoutMs).toBe(5000)\n  })\n})\n",
+    "usedDeprecatedRules": []
+  }
+]

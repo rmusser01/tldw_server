@@ -1,0 +1,18 @@
+{
+  "file": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts",
+  "sha256": "50dc80dfa6992e2bcc3eb5ef0e3cbe396968b79f36c055412768f3515cc6c4f6",
+  "originalAssertions": 9,
+  "assertionsUnchanged": true,
+  "tests": "9 passed across2files; zero skips",
+  "lint": {
+    "baselineWarnings": 5,
+    "currentWarnings": 4,
+    "errors": 0,
+    "added": []
+  },
+  "bandit": {
+    "findings": 0,
+    "parseLimitations": 1
+  },
+  "limits": "Test fixture correction only; no production or native TTS claim. Full adjacent run awaits concurrent248 integration."
+}

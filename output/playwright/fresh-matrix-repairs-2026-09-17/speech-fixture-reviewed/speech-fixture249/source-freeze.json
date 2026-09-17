@@ -1,0 +1,10 @@
+{
+  "frozenAt": "2026-09-17T19:26:21.981Z",
+  "base": "f1cefecb22ae2447a53e2ffdb5cda67866ccf4a4",
+  "files": [
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts",
+      "sha256": "50dc80dfa6992e2bcc3eb5ef0e3cbe396968b79f36c055412768f3515cc6c4f6"
+    }
+  ]
+}

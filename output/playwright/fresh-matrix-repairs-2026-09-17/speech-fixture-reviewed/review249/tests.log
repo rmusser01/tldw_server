@@ -1,0 +1,24 @@
+
+ RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend
+
+stderr | ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > uses a generous default timeout so long synthesis is not aborted
+Could not clear private Flashcards transfers after the account or server changed.
+
+stderr | ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > lets callers override the timeout
+Could not clear private Flashcards transfers after the account or server changed.
+
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.createChatCompletion (non-streaming sanitizer) > returns successful completion content verbatim even when it looks like an error 1ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.createChatCompletion (non-streaming sanitizer) > preserves error-shaped keys inside successful assistant content 0ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > uses a generous default timeout so long synthesis is not aborted 3ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts > TldwApiClient.synthesizeSpeech (timeout) > lets callers override the timeout 1ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts > unconfigured client guidance on the current surface > rejects and warns with accurate Settings guidance on http: 2ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts > unconfigured client guidance on the current surface > rejects and warns with accurate Settings guidance on https: 0ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts > unconfigured client guidance on the current surface > rejects and warns with accurate Settings guidance on chrome-extension: 0ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts > unconfigured client guidance on the current surface > rejects and warns with accurate Settings guidance on moz-extension: 0ms
+ ✓ ../packages/ui/src/services/tldw/__tests__/TldwApiClient.configuration-guidance.test.ts > unconfigured client guidance on the current surface > keeps configured unauthenticated discovery available without a warning 0ms
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  12:27:19
+   Duration  1.18s (transform 377ms, setup 145ms, import 508ms, tests 9ms, environment 412ms)
+

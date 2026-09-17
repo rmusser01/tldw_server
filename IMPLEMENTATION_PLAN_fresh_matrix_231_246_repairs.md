@@ -2,11 +2,11 @@
 
 > **For agentic workers:** Use the existing coordinated implementation/review workflow. Do not start new full UAT before the repair gate. Root owns shared tracker, Backlog, runtimes, native browser and commits.
 
-**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now248), and verify its original workflow before another full UAT.
+**Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now249), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
-**Task:** TASK13260 and children173–190.
+**Task:** TASK13260 and children173–191.
 
 ## Global constraints
 
@@ -55,6 +55,7 @@
 - [x] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Independent296pass/0skip, Bandit0/no added lint; original native statistics pending.
 - [x] Media237/241/244: reviewed193+37 independent checks, including two review-discovered deletion callback races; exact90compiler baseline and no new lint diagnostics. Native acceptance pending.
 - [x] Chat/model231/232/236/243: independently reviewed327focused/103adjacent pass;2existing speech fixture failures reproduced on baseline; exact90compiler baseline, no new lint diagnostics. Native acceptance pending.
+- [ ]249: repair only the stale speech timeout fixture using current configuration storage; retain original timeout and sanitizer assertions, with independent verification.
 - [ ]248: use the existing captured Character request scope/lifetime for transport and every persistence boundary; actual-auth causal regression, same-owner/recovery controls, independent review and native account-boundary verification.
 - [ ]246: correlate first-byte delivery using the existing actual stream path and bounded provider control; test a cause before changing budgets/forwarding. Repeat original TestBot with exact visible response and canonical reload on accepted source.
 - [ ] Review and commit disjoint units, recording tests and touched-scope static checks.

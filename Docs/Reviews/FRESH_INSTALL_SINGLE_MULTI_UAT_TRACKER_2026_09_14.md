@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 248 findings total:230 previously verified,16 reviewed implementations awaiting native acceptance (231–245 and247), and2 unresolved (246/248). All48 frozen outcomes remain retained. [Reviewed frontend repairs](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/README.md) join the reviewed backend repairs below. Required PostgreSQL checks have zero skips; combined verification is underway. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
+- **Current repair gate:** 249 findings total:230 previously verified,16 reviewed implementations awaiting native acceptance (231–245 and247), and3 unresolved (246/248/249). All48 frozen outcomes remain retained. [Reviewed frontend repairs](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/README.md) join the reviewed backend repairs below. Required PostgreSQL checks have zero skips; combined verification is underway. Repairs follow [this plan](../../IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md); no new full UAT before original-scenario acceptance.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2633,3 +2633,14 @@ UAT231/232/236/243 pass independent327 focused checks;103 adjacent pass with2 sp
 
 - Open, TASK13260.190. Independent real service-prompt lease plus actual WebUI authService.logout control aborts both lease signals. The Character path retains the original caller signal and later calls persistCharacterCompletion for the old conversation with a late assistant response and no captured scope options. Replacement local draft stays intact. This proves stale persistence dispatch, **not a native cross-account database write**.
 - Causal evidence: [independent finding](../../output/playwright/fresh-matrix-repairs-2026-09-17/frontend-reviewed/review-chat/AUTHORITY-FINDING.md), SHA `7688da44b75e3fb997914b70bc7dc2b9d3a0aaf55361d2d59f711976c18e53dc`; actual-auth lease probe1failure/33filtered. The four prior Chat repairs are independently clear;248 has a separate bounded repair. No timeout policy change or new full UAT.
+
+## UAT-249 — P2: Speech timeout regression fixtures fail before dispatch
+
+- Open test-fixture repair, TASK13260.191. The adjacent sanitizer suite has2speech timeout failures on original and repaired source: configureClient writes an in-memory field while mocked persisted configuration returns null. Both cases reject as unconfigured before reaching the timeout assertions. This is a test coverage failure, not a proven TTS product defect.
+- Repair only the supported configuration fixture; preserve original default>=120000ms and explicit5000ms assertions, sanitizer success-content checks and current auth/request scope. Retained causal baseline: frontend-reviewed/review-chat/baseline-speech.log,2failed/2passed. No production timeout change or native TTS acceptance claim.
+
+### Combined backend verification
+
+The reviewed backend repairs pass one combined required-PostgreSQL/SQLite run:616passed,0skips,66warnings,697.89seconds. Receipt currently `.tmp/uat-repairs-231-246/combined/backend.log`; exact command retained alongside. This combines the worker/sequence, quota/bootstrap, World Book, Study analytics/session/HTTP, stream diagnostics and adjacent ingestion controls. Native acceptance remains pending.
+
+UAT249 fixture implementation is independently reviewed:9focused tests pass, all9original assertions remain, no production changes. [Retained evidence](../../output/playwright/fresh-matrix-repairs-2026-09-17/speech-fixture-reviewed/README.md), manifest `3b8ba6d112a1cc93ca6bdb22c9806b3a378904b48f4bd5949c5292d69f1e81c3`. Final combined adjacency awaits248 integration;249 stays open until that verification.

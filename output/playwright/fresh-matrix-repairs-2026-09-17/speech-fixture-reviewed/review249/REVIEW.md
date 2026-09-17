@@ -1,0 +1,3 @@
+# Independent UAT249 fixture review
+
+CLEAR for integration. One existing test file changes; all9original assertion lines are preserved. Public updateConfig and persisted storage fixture replace a stale private field assignment; the speech mock observes actual WebUI request-core dispatch. Configuration/auth checks are not bypassed and production timeout behavior is unchanged. Independent9tests/2files pass, zero skips. Actual-root lint0errors4warnings versus5baseline, no added signatures. Bandit cannot parse thisTypeScript file and provides no security assurance. Full adjacent controls will run once concurrently authored248 is integrated; its current RED is retained separately. No native TTS/provider acceptance claim.

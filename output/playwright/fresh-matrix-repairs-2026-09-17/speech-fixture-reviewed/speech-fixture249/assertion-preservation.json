@@ -1,0 +1,14 @@
+{
+  "unchangedOriginalAssertionLines": [
+    "    expect(body.choices[0].message.content).toBe(content)",
+    "    expect(body.choices[0].message.content).toContain(\"exception\")",
+    "    expect(body.choices[0].message.content).toContain(\"/Users/foo/bar.py:12\")",
+    "    expect(JSON.stringify(body)).not.toContain(\"Chat completion failed.\")",
+    "    expect(body.choices[0].message.content).toBe(",
+    "    expect(speechCall).toBeTruthy()",
+    "    expect(speechCall.timeoutMs).toBeGreaterThanOrEqual(120000)",
+    "    expect(speechCall).toBeTruthy()",
+    "    expect(speechCall.timeoutMs).toBe(5000)"
+  ],
+  "allEqual": true
+}
