@@ -1,0 +1,7 @@
+### Result
+{"installed":true,"scope":"Only actual GET deck catalogue requests aborted until restored; no generation/save response fabrication."}
+### Ran Playwright code
+```js
+await (async page => { page.__uat172Faults=[];page.__uat172FailDeckReads=true;page.__uat172Route=async route=>{const r=route.request();if(r.method()==='GET'&&/\/api\/v1\/flashcards\/decks(?:\?|$)/.test(r.url())&&page.__uat172FailDeckReads){page.__uat172Faults.push({at:new Date().toISOString(),url:r.url(),method:r.method(),action:'abort-failed'});await route.abort('failed');}else await route.continue();};await page.route('**/api/v1/flashcards/decks*',page.__uat172Route);return {installed:true,scope:'Only actual GET deck catalogue requests aborted until restored; no generation/save response fabrication.'}; }
+)(page);
+```

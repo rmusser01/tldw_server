@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T03:29:54.984Z","faults":[],"restored":true}
+### Ran Playwright code
+```js
+await (async page => { page.__uat172FailDeckReads=false;await page.unroute('**/api/v1/flashcards/decks*',page.__uat172Route);return {at:new Date().toISOString(),faults:page.__uat172Faults,restored:true}; }
+)(page);
+```

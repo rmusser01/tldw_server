@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T03:31:52.248Z","faults":[{"at":"2026-09-17T03:30:47.720Z","url":"http://127.0.0.1:18583/api/v1/flashcards/decks?include_workspace_items=false","method":"GET","action":"abort-failed"},{"at":"2026-09-17T03:30:48.725Z","url":"http://127.0.0.1:18583/api/v1/flashcards/decks?include_workspace_items=false","method":"GET","action":"abort-failed"}],"restored":true}
+### Ran Playwright code
+```js
+await (async page => { page.__uat172FailDeckReads=false;await page.unroute('**/api/v1/flashcards/decks*',page.__uat172Route);return {at:new Date().toISOString(),faults:page.__uat172Faults,restored:true}; }
+)(page);
+```

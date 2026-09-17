@@ -1,0 +1,239 @@
+{
+  "at": "2026-09-17T03:39:01.291Z",
+  "acceptedIssues": [
+    166,
+    172
+  ],
+  "partialOnly": [
+    167
+  ],
+  "assertionsPassed": true,
+  "realGeneration": {
+    "flashcards": [
+      {
+        "front": "What color is the Citrine study marker and when do its volunteers meet?",
+        "back": "The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+        "tags": [],
+        "model_type": "basic",
+        "generation_type": "basic",
+        "notes": null,
+        "extra": null
+      }
+    ],
+    "count": 1,
+    "claim_verification": {
+      "verdict": "grounded",
+      "report": {
+        "report_id": "60469cb9-8583-46a4-a203-374787129954",
+        "generated_at": "2026-09-17T03:28:09.314845+00:00",
+        "query": "flashcards",
+        "answer_text": "Question: What color is the Citrine study marker and when do its volunteers meet?\nAnswer: The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+        "total_claims": 1,
+        "verified_count": 1,
+        "refuted_count": 0,
+        "unverified_count": 0,
+        "hallucination_count": 0,
+        "numerical_error_count": 0,
+        "misquoted_count": 0,
+        "citation_not_found_count": 0,
+        "contested_count": 0,
+        "verification_rate": 1,
+        "precision": 1,
+        "coverage": 1,
+        "claims": [
+          {
+            "claim_id": "flashcard:1:back:c1",
+            "claim_text": "Question: What color is the Citrine study marker and when do its volunteers meet?\nAnswer: The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+            "claim_type": "general",
+            "status": "verified",
+            "confidence": 1,
+            "match_level": "paraphrase",
+            "source_authority": "1",
+            "requires_external_knowledge": false,
+            "rationale": "NLI entailment (1.00)",
+            "evidence": [
+              {
+                "doc_id": "flashcards-source",
+                "snippet": "This is a fictional public UAT fixture. The Citrine study marker is amber. Citrine study volunteers meet every Tuesday at 14:00.",
+                "score": 0,
+                "authority": "1",
+                "start_offset": null,
+                "end_offset": null
+              }
+            ],
+            "citations": [
+              {
+                "doc_id": "flashcards-source",
+                "start": 0,
+                "end": 128
+              }
+            ]
+          }
+        ],
+        "metadata": {
+          "artifact_type": "flashcards",
+          "generation_provider": "llama.cpp",
+          "generation_model": null,
+          "verification_provider": "llama.cpp",
+          "verification_model": null,
+          "verification_provider_configured": false,
+          "verification_model_configured": false,
+          "verification_llm_source": "generation",
+          "verification_llm_is_default": true,
+          "verification_llm_differs_from_generation": false,
+          "claims_max_per_unit": 6,
+          "max_text_chars_per_unit": 2000
+        }
+      },
+      "unitResults": [
+        {
+          "unit_id": "flashcard:1:back",
+          "verdict": "grounded",
+          "claim_ids": [
+            "flashcard:1:back:c1"
+          ],
+          "statuses": [
+            "verified"
+          ],
+          "metadata": {
+            "requires_semantic_verification": true
+          }
+        }
+      ],
+      "metadata": {
+        "artifact_type": "flashcards",
+        "generation_provider": "llama.cpp",
+        "generation_model": null,
+        "verification_provider": "llama.cpp",
+        "verification_model": null,
+        "verification_provider_configured": false,
+        "verification_model_configured": false,
+        "verification_llm_source": "generation",
+        "verification_llm_is_default": true,
+        "verification_llm_differs_from_generation": false,
+        "claims_max_per_unit": 6,
+        "max_text_chars_per_unit": 2000
+      }
+    }
+  },
+  "faults": [
+    {
+      "at": "2026-09-17T03:30:47.720Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/decks?include_workspace_items=false",
+      "method": "GET",
+      "action": "abort-failed"
+    },
+    {
+      "at": "2026-09-17T03:30:48.725Z",
+      "url": "http://127.0.0.1:18583/api/v1/flashcards/decks?include_workspace_items=false",
+      "method": "GET",
+      "action": "abort-failed"
+    }
+  ],
+  "restoredAt": "2026-09-17T03:31:52.248Z",
+  "createdCard": {
+    "uuid": "5ad3f8eb-e106-4c73-bc29-1d16431a6a63",
+    "deck_id": 1,
+    "deck_name": "Alice UAT151 Citrine Deck",
+    "front": "What color is the Citrine study marker and when do its volunteers meet?",
+    "back": "The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+    "notes": null,
+    "extra": null,
+    "is_cloze": false,
+    "tags_json": "[]",
+    "tags": [],
+    "source_ref_type": "note",
+    "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+    "conversation_id": null,
+    "message_id": null,
+    "ef": 2.5,
+    "interval_days": 0,
+    "repetitions": 0,
+    "lapses": 0,
+    "due_at": null,
+    "last_reviewed_at": null,
+    "queue_state": "new",
+    "step_index": null,
+    "suspended_reason": null,
+    "created_at": "2026-09-17T03:31:53.012000+00:00",
+    "last_modified": "2026-09-17T03:31:53.012000+00:00",
+    "deleted": false,
+    "client_id": "2",
+    "version": 1,
+    "model_type": "basic",
+    "reverse": false,
+    "scheduler_type": "sm2_plus",
+    "next_intervals": null
+  },
+  "reloadedCard": {
+    "uuid": "5ad3f8eb-e106-4c73-bc29-1d16431a6a63",
+    "deck_id": 1,
+    "deck_name": "Alice UAT151 Citrine Deck",
+    "front": "What color is the Citrine study marker and when do its volunteers meet?",
+    "back": "The Citrine study marker is amber and Citrine study volunteers meet every Tuesday at 14:00.",
+    "notes": null,
+    "extra": null,
+    "is_cloze": false,
+    "tags_json": "[]",
+    "tags": [],
+    "source_ref_type": "note",
+    "source_ref_id": "b83dca90-fab0-4c6f-8c0f-6f1e93dfffc8",
+    "conversation_id": null,
+    "message_id": null,
+    "ef": 2.5,
+    "interval_days": 0,
+    "repetitions": 0,
+    "lapses": 0,
+    "due_at": null,
+    "last_reviewed_at": null,
+    "queue_state": "new",
+    "step_index": null,
+    "suspended_reason": null,
+    "created_at": "2026-09-17T03:31:53.012000+00:00",
+    "last_modified": "2026-09-17T03:31:53.012000+00:00",
+    "deleted": false,
+    "client_id": "2",
+    "version": 1,
+    "model_type": "basic",
+    "reverse": false,
+    "scheduler_type": null,
+    "next_intervals": null
+  },
+  "originalVersion": 2,
+  "disposableVersion": 4,
+  "frontendSourceHashesAtAudit": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImportExport/GeneratePanel.tsx",
+      "sha256": "fad0096cb8c6168fe9fe34b3bd0ce644af31db2b9d128b8371139f99dc7a1e49"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ImportExportTab.tsx",
+      "sha256": "0c110aa13d5e8c0aa93a601622831f3dfb823a6d13c47ef128812774c632b4cb"
+    },
+    {
+      "path": "apps/packages/ui/src/services/flashcards.ts",
+      "sha256": "923f290dce3b692d9d1d5160f43dc0fdd03fb4678cb1c34fffc221f762068aaa"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "sha256": "8a0f75914c299b4fbd27fa700835330738f2872b6a82a0b3785f114b23259e4b"
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/flashcards.py",
+      "sha256": "921d6f32fe1ac399d5f89c266bc8cd2d30681e5571fd3702f0cf9489fd05c425"
+    }
+  ],
+  "runtime": {
+    "apiPid": 63046,
+    "start": "2026-09-17T02:00:48Z",
+    "hotReload": false,
+    "backendStartSource": "3ce1b63d57",
+    "currentSourceIsNotLoadedBackend": true
+  },
+  "limits": [
+    "Native UAT PostgreSQL cluster role is superuser/BYPASSRLS; these two checks certify feedback and retry, not tenant row-security.",
+    "Initial URL-constructor route harness failure is excluded; two corrected aborts before restoration are causal.",
+    "UAT167 deck creation response still requires native acceptance.",
+    "Observer response timestamps are recorded after body consumption, not wire arrival."
+  ]
+}
