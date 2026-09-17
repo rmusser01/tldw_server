@@ -1,0 +1,9 @@
+{
+  "exact_function_change_two_conditional_count_reads": true,
+  "sql_unchanged": true,
+  "unrelated_shared_file_changes_excluded": true,
+  "function_before_sha256": "5ff0de8972fc13f587b3c5b38a11f5ea9abbf463367eac5d364c088f040c3247",
+  "function_after_sha256": "8736a8a0b96c091cb281f6ab4d70f07a5f0279270671a96938ee17b6322c0a77",
+  "baseline_full_file_sha256": "0e82c6e7381250188471ac0eab4f794ab683febf1d6770606b74d1e8ba29427e",
+  "combined_current_file_sha256": "40869b8d462980a7cee43ea30db6e13af64cd82da59fdd1b308dafa7c274736c"
+}

@@ -1,0 +1,25 @@
+{
+  "files": {
+    "ChaCha-before.py": "0e82c6e7381250188471ac0eab4f794ab683febf1d6770606b74d1e8ba29427e",
+    "DESIGN197-counts.md": "e0981928e13fbf8619bc150c53ee7023d718e06d5e7fb2cbcf807eb13aeb1b4d",
+    "IMPLEMENTATION197-counts.md": "31486b879bd0724e815cc6b84807efe63dab451266cbfe92b1590934a7e6e66f",
+    "ast-equivalence.json": "31106dae8378efd382de6726b911b81a1746572d0819d890d8a48d4b9c4bde6f",
+    "bandit-production.json": "cd1b878cf1c358bd7dd9a6ae8e0d4c5433341ae7cd982d6f1ace72e89c38b341",
+    "bandit-tests.json": "621721e48ffb1e126d9e30632f2a56070a23ac64b69750f04a5456d6da5b37af",
+    "compile.json": "b02e36982882f7ea772797682a962caf92d038a541afd685f305571b4c5f1ca5",
+    "function-after.py": "471e53e0278a3b2117a7ce52a08dcf7d31908c8606d0d1fd8ffd958bfd60f135",
+    "function-before.py": "12d2f34342a489debdafb0146dc3c8915ef66a439829ed7449016d1de18c7148",
+    "owned.patch": "b86c0a097c35cd92b182ba76bae8ceb95768208d18155da5e672c521c6a77229",
+    "review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "40869b8d462980a7cee43ea30db6e13af64cd82da59fdd1b308dafa7c274736c",
+    "review-snapshot/tldw_Server_API/tests/DB_Management/test_study_pack_membership_count_backends.py": "d18f3e5e983f303c615313022a08d6276e0ae786d6269e7f318fa89564236ab2",
+    "ruff-baseline.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "ruff-current.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "source-manifest.json": "d3ac905e8d62e19cba22f19586457e4f3aec9b02f55644d7bacefdc707adf924",
+    "uat181-study-pack-adjacent-green.redacted.log": "73cb086f83e392c4e98d4f21c28e40f1d714230714b2803c8d47a0a8dd245a44",
+    "uat181-worker-197-counts-green.redacted.log": "20030efe9b5f4efd4b1b916e9c633277c83383ee9babecf4ac803b8b6345e056",
+    "uat197-after-count-red.redacted.log": "8b9b18dd684f5edc515f5800748ef67bdc2273de59219625a74ec74aea7d55ad",
+    "uat197-counts-red.redacted.log": "0223d3ce55822ad7da7892ce322da301a45ef62f0e7668af0e65e252e3d20d4a"
+  },
+  "source_manifest": "source-manifest.json",
+  "status": "author frozen; independent review pending"
+}

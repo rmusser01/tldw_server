@@ -38857,13 +38857,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
                     (study_pack_id,),
                 ).fetchone()
-                before_count = int(before_row[0]) if before_row else 0
+                before_count = int(before_row["count"] if self.backend_type == BackendType.POSTGRESQL else before_row[0]) if before_row else 0
                 self.execute_many(insert_sql, params, commit=False)
                 after_row = conn.execute(
                     "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
                     (study_pack_id,),
                 ).fetchone()
-                after_count = int(after_row[0]) if after_row else before_count
+                after_count = int(after_row["count"] if self.backend_type == BackendType.POSTGRESQL else after_row[0]) if after_row else before_count
             return max(0, after_count - before_count)
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to add study pack cards: {exc}") from exc  # noqa: TRY003

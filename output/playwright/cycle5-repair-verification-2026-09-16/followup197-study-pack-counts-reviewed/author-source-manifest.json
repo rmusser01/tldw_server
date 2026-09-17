@@ -1,0 +1,12 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "sha256": "40869b8d462980a7cee43ea30db6e13af64cd82da59fdd1b308dafa7c274736c",
+    "snapshot": ".tmp/uat197-repair-20260917/review-snapshot/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py"
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_study_pack_membership_count_backends.py",
+    "sha256": "d18f3e5e983f303c615313022a08d6276e0ae786d6269e7f318fa89564236ab2",
+    "snapshot": ".tmp/uat197-repair-20260917/review-snapshot/tldw_Server_API/tests/DB_Management/test_study_pack_membership_count_backends.py"
+  }
+]
