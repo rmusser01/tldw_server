@@ -8,7 +8,7 @@ export type HistoryInfo = {
   id: string;
   title: string;
   is_rag: boolean;
-  message_source?: 'copilot' | 'web-ui' | 'branch' | 'server';
+  message_source?: "copilot" | "web-ui" | "branch" | "server";
   is_pinned?: boolean;
   createdAt: number;
   doc_id?: string;
@@ -17,11 +17,17 @@ export type HistoryInfo = {
   server_chat_id?: string;
   server_scope_key?: string;
   local_owner_key?: string;
+  // External settings writers register before writing; abandoned tokens block fork certification.
+  local_settings_guard?: {
+    revision: string;
+    pending: string[];
+    initialized?: boolean;
+  };
   // Timeline/branching fields (server-compatible with ChaChaDB)
-  root_id?: string;                    // All forks share same root_id
-  parent_conversation_id?: string;     // Parent in fork tree
-  forked_from_message_id?: string;     // Message that spawned this fork
-  character_id?: number;               // Associated character/assistant
+  root_id?: string; // All forks share same root_id
+  parent_conversation_id?: string; // Parent in fork tree
+  forked_from_message_id?: string; // Message that spawned this fork
+  character_id?: number; // Associated character/assistant
 };
 
 export type WebSearch = {

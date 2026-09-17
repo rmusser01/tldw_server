@@ -1,15 +1,14 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
-import { createSafeStorage } from "@/utils/safe-storage"
 import {
   applyChatSettingsPatch,
+  chatSettingsStorageForKey,
+  getChatSettingsForKey,
   getChatSettingsStorageKey,
   normalizeChatSettingsRecord,
   resolveChatSettingsKey
 } from "@/services/chat-settings"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
-
-const chatSettingsStorage = createSafeStorage()
 
 type UseChatSettingsRecordParams = {
   historyId: string | null
@@ -20,8 +19,7 @@ export const useChatSettingsRecord = ({
   historyId,
   serverChatId
 }: UseChatSettingsRecordParams) => {
-  const stableHistoryId =
-    historyId && historyId !== "temp" ? historyId : null
+  const stableHistoryId = historyId && historyId !== "temp" ? historyId : null
   const chatKey = React.useMemo(
     () => resolveChatSettingsKey({ historyId: stableHistoryId, serverChatId }),
     [serverChatId, stableHistoryId]
@@ -31,12 +29,13 @@ export const useChatSettingsRecord = ({
     [chatKey]
   )
 
-  const [rawSettings, setRawSettings] = useStorage<
-    ChatSettingsRecord | null | undefined
-  >({
+  const [rawSettings] = useStorage<ChatSettingsRecord | null | undefined>({
     key: storageKey,
-    instance: chatSettingsStorage
+    instance: chatSettingsStorageForKey(chatKey)
   })
+  React.useEffect(() => {
+    void getChatSettingsForKey(chatKey)
+  }, [chatKey])
   const settings = React.useMemo(
     () => normalizeChatSettingsRecord(rawSettings),
     [rawSettings]
@@ -49,12 +48,9 @@ export const useChatSettingsRecord = ({
         serverChatId,
         patch
       })
-      if (next) {
-        await setRawSettings(next)
-      }
       return next
     },
-    [serverChatId, setRawSettings, stableHistoryId]
+    [serverChatId, stableHistoryId]
   )
 
   return { settings, updateSettings, chatKey }

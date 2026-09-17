@@ -86,8 +86,6 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
   )
 }))
 
-
-
 vi.mock("@/db/dexie/helpers", async (original) => ({
   formatSelectedHistory: (await original<any>()).formatSelectedHistory,
   generateID: vi.fn(() => crypto.randomUUID()),
@@ -108,8 +106,6 @@ vi.mock("@/db/dexie/helpers", async (original) => ({
 vi.mock("@/db/dexie/nickname", () => ({
   getModelNicknameByID: vi.fn(async () => null)
 }))
-
-
 
 vi.mock("@/services/actor-settings", () => ({
   getActorSettingsForChat: vi.fn(async () => null)
@@ -278,7 +274,8 @@ const h1 = vi.hoisted(() => ({
   localAppend: vi.fn(),
   localSettle: vi.fn()
 }))
-vi.mock("@/hooks/chat/useHistorySelection", () => ({
+vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
+  ...(await original<any>()),
   useHistorySelectionContext: () => h1.controller
 }))
 vi.mock("@/db/dexie/history-selection", async (original) => ({
@@ -1402,7 +1399,22 @@ it("native required client tools are explicitly gated rather than silently disca
   )
 })
 
+const localMutationController = () => {
+  const current = h1.controller.getCurrent()
+  current.owner = {
+    kind: "local",
+    profile_id: "profile",
+    owner_key: "local-key",
+    conversation_id: "history-1"
+  }
+  current.view = {
+    ...current.view,
+    owner_key: "local-key",
+    conversation_id: "history-1"
+  }
+}
 describe("selected-history mutations", () => {
+  beforeEach(localMutationController)
   const visible = [
     {
       id: "greeting",
@@ -1510,6 +1522,7 @@ describe("selected-history mutations", () => {
 })
 
 it("deleting the selected local leaf follows only its captured parent", async () => {
+  localMutationController()
   const helpers = await import("@/db/dexie/helpers")
   const visible = [
     { id: "u-old", isBot: false, message: "question", sources: [] },
@@ -1538,6 +1551,7 @@ it("deleting the selected local leaf follows only its captured parent", async ()
   })
 })
 it("late leaf deletion retains its storage result without moving a new view", async () => {
+  localMutationController()
   const helpers = await import("@/db/dexie/helpers")
   const visible = [{ id: "a1", isBot: true, message: "same", sources: [] }]
   const choose = vi.fn(async () => true)
@@ -1596,24 +1610,243 @@ it("native plain edit/delete reject before any mutation or display change", asyn
   expect(helpers.removeMessageById).not.toHaveBeenCalled()
 })
 
-const localForks = vi.hoisted(() => ({capture:vi.fn(),prepare:vi.fn(),commit:vi.fn()}))
+const localForks = vi.hoisted(() => ({
+  capture: vi.fn(),
+  prepare: vi.fn(),
+  commit: vi.fn(),
+  digest: (_request: any) => "fork-digest"
+}))
 vi.mock("@/db/dexie/branch", () => ({
-  captureLocalForkSelection:localForks.capture,
-  prepareLocalFork:localForks.prepare,
-  commitLocalFork:localForks.commit,
-  forkRequestDigest:()=>"fork-digest"
+  captureLocalForkSelection: localForks.capture,
+  prepareLocalFork: localForks.prepare,
+  commitLocalFork: localForks.commit,
+  forkRequestDigest: (request: any) => localForks.digest(request)
 }))
 it("mounted branch action captures a stable boundary and returns the committed owner result", async () => {
   const current = h1.controller.getCurrent()
-  current.owner = {kind:"local",profile_id:"profile",owner_key:"local-key",conversation_id:"history-1"}
-  current.view = {...current.view,owner_key:"local-key",conversation_id:"history-1"}
-  localForks.capture.mockResolvedValue({kind:"normal",selection:{conversation_id:"history-1"}})
-  localForks.prepare.mockResolvedValue({history:{id:"child"},messages:[],files:undefined})
-  localForks.commit.mockImplementation(async (prepared:any) => ({state:"committed",owner_key:"local-key",operation_id:"op",child_id:prepared.history.id,message_map:{a1:"child-a1"}}))
-  const options = {...ordinaryOptions(),serverChatId:null,historyId:"history-1"}
-  const {result} = renderHook(() => useChatActions(options as any))
+  current.owner = {
+    kind: "local",
+    profile_id: "profile",
+    owner_key: "local-key",
+    conversation_id: "history-1"
+  }
+  current.view = {
+    ...current.view,
+    owner_key: "local-key",
+    conversation_id: "history-1"
+  }
+  localForks.capture.mockResolvedValue({
+    kind: "normal",
+    selection: { conversation_id: "history-1" }
+  })
+  localForks.prepare.mockResolvedValue({
+    history: { id: "child" },
+    messages: [],
+    files: undefined
+  })
+  localForks.commit.mockImplementation(async (prepared: any) => ({
+    state: "committed",
+    owner_key: "local-key",
+    operation_id: "op",
+    child_id: prepared.history.id,
+    message_map: { a1: "child-a1" }
+  }))
+  const options = {
+    ...ordinaryOptions(),
+    serverChatId: null,
+    historyId: "history-1"
+  }
+  const { result } = renderHook(() => useChatActions(options as any))
   let outcome: any
-  await act(async () => {outcome = await result.current.createChatBranch("a1")})
-  expect(localForks.capture).toHaveBeenCalledWith(current.owner,expect.objectContaining({cursor:{kind:"after_message",message_id:"a1"}}),expect.any(Object))
-  expect(outcome).toMatchObject({state:"committed",owner_key:"local-key",child_id:"child",message_map:{a1:"child-a1"}})
+  await act(async () => {
+    outcome = await result.current.createChatBranch("a1")
+  })
+  expect(localForks.capture).toHaveBeenCalledWith(
+    current.owner,
+    expect.objectContaining({
+      cursor: { kind: "after_message", message_id: "a1" }
+    }),
+    expect.any(Object)
+  )
+  expect(outcome).toMatchObject({
+    state: "committed",
+    owner_key: "local-key",
+    child_id: "child",
+    message_map: { a1: "child-a1" }
+  })
 })
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
+}))
+
+it.each(["normal", "bubble", "cluster"])(
+  "real controller fork -> immediate send -> reopen keeps source unchanged (entry=%s)",
+  async (entry) => {
+    const comparison = entry !== "normal"
+    const { memory, seedLocalFork } = await import(
+      "@/hooks/chat/__tests__/local-history-fixture"
+    )
+    const source = await seedLocalFork(comparison)
+    const authority = await vi.importActual<any>("@/db/dexie/history-selection")
+    const projector = await vi.importActual<any>("@/db/dexie/branch")
+    localForks.capture.mockImplementation(projector.captureLocalForkSelection)
+    localForks.prepare.mockImplementation(projector.prepareLocalFork)
+    localForks.commit.mockImplementation(projector.commitLocalFork)
+    // Bind the actual request digest rather than the older handler-only test stub.
+    localForks.digest = projector.forkRequestDigest
+    h1.localCapture.mockImplementation(authority.captureLocalHistorySnapshot)
+    h1.localAppend.mockImplementation(authority.appendLocalSelectedUser)
+    h1.localSettle.mockImplementation(authority.settleLocalAcceptedAssistant)
+    const { useHistorySelection } = await import(
+      "@/hooks/chat/useHistorySelection"
+    )
+    const controller = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await controller.result.current.loadConversation({
+        historyId: "history-1"
+      })
+    })
+    if (!comparison)
+      await act(async () => {
+        await controller.result.current.choose({
+          kind: "after_message",
+          message_id: "a1"
+        })
+      })
+    h1.controller = controller.result.current
+    const options: any = {
+      ...ordinaryOptions(),
+      serverChatId: null,
+      historyId: "history-1",
+      compareModeActive: comparison,
+      messages: (await import("@/db/dexie/helpers")).formatToMessage(source)
+    }
+    options.setHistoryId.mockImplementation((id: string) => {
+      options.historyId = id
+    })
+    const hook = renderHook(() => useChatActions(options))
+    let outcome: any
+    const onOpened = vi.fn(() => {
+      options.compareModeActive = false
+    })
+    await act(async () => {
+      outcome =
+        entry === "cluster"
+          ? await hook.result.current.createCompareBranch({
+              clusterId: "c1",
+              modelId: "A",
+              onOpened
+            })
+          : await hook.result.current.createChatBranch(
+              "a1",
+              comparison ? { model_id: "A", cluster_id: "c1" } : undefined,
+              onOpened
+            )
+    })
+    expect(onOpened).toHaveBeenCalledWith(outcome.child_id)
+    expect(outcome.state, JSON.stringify(outcome)).toBe("committed")
+    const childId = outcome.child_id
+    expect(controller.result.current.getCurrent().owner).toMatchObject({
+      kind: "local",
+      conversation_id: childId
+    })
+    expect(controller.result.current.getReference()).toMatchObject({
+      conversation_id: childId
+    })
+    h1.controller = controller.result.current
+    hook.rerender()
+    await act(async () => {
+      await hook.result.current.onSubmit({ message: "child next", image: "" })
+    })
+    const childRows = await memory.messages
+      .where("history_id")
+      .equals(childId)
+      .toArray()
+    expect(childRows.map((row: any) => row.content)).toEqual([
+      "question",
+      "selected answer",
+      "child next",
+      "new answer"
+    ])
+    expect(
+      await memory.messages.where("history_id").equals("history-1").toArray()
+    ).toEqual(source)
+    const reference = controller.result.current.getReference()
+    const reopened = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await reopened.result.current.loadConversation(
+        { historyId: childId },
+        reference
+      )
+    })
+    expect(reopened.result.current.getCurrent().owner).toMatchObject({
+      conversation_id: childId
+    })
+    const reopenedCapture = reopened.result.current.getCurrent().capture
+    expect(reopenedCapture?.status).toBe("captured")
+    if (reopenedCapture?.status !== "captured") throw new Error("reopen failed")
+    expect(reopenedCapture.rows.map((row) => row.id)).toEqual(
+      childRows.map((row: any) => row.id)
+    )
+    localForks.digest = () => "fork-digest"
+  }
+)
+
+vi.mock("@/utils/safe-storage", async (original) => {
+  const actual = await original<any>()
+  const { settings } = await import(
+    "@/hooks/chat/__tests__/local-history-fixture"
+  )
+  return {
+    ...actual,
+    createSafeStorage: (options: any) => {
+      const storage = actual.createSafeStorage(options)
+      const area = options?.area ?? "sync"
+      return new Proxy(storage, {
+        get(target, key) {
+          if (key === "get")
+            return async (name: string) =>
+              name.startsWith("chatSettings:")
+                ? settings.get(area + name)
+                : target.get(name)
+          if (key === "set")
+            return async (name: string, value: unknown) =>
+              name.startsWith("chatSettings:")
+                ? settings.set(area + name, value)
+                : target.set(name, value)
+          return Reflect.get(target, key)
+        }
+      })
+    }
+  }
+})
+
+it.each(["missing", "unavailable", "mismatch"])(
+  "%s controller never gains mutation authority from ambient local IDs",
+  async (kind) => {
+    const helpers = await import("@/db/dexie/helpers")
+    localMutationController()
+    if (kind === "missing") h1.controller = null
+    else if (kind === "unavailable")
+      h1.controller.getCurrent().owner = {
+        kind: "unavailable",
+        code: "owner_unavailable"
+      }
+    else h1.controller.getCurrent().owner.conversation_id = "other"
+    const options = {
+      ...ordinaryOptions(),
+      serverChatId: null,
+      historyId: "history-1"
+    }
+    const hook = renderHook(() => useChatActions(options as any))
+    options.setMessages.mockClear()
+    await expect(
+      hook.result.current.editMessage(0, "changed", false, false)
+    ).rejects.toThrow()
+    await expect(hook.result.current.deleteMessage(0)).rejects.toThrow()
+    expect(helpers.updateMessageById).not.toHaveBeenCalled()
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  }
+)

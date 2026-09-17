@@ -505,3 +505,33 @@ export const getCompareBranchBoundaryId = (
   const leaves = thread.filter((row) => row.id && !parents.has(row.id));
   return leaves.length === 1 ? leaves[0].id! : "";
 };
+
+/** Capture persistence authority synchronously with the stable UI target. */
+export const captureLocalMutationOwner = (
+  controller:
+    | import("./useHistorySelection").HistorySelectionController
+    | null
+    | undefined,
+  historyId: string | null,
+  serverChatId?: string | null
+): import("@/db/dexie/history-selection").LocalHistoryOwnerV1 => {
+  const origin = controller?.getCurrent()
+  if (serverChatId || origin?.owner?.kind === "native")
+    throw new Error("native_history_mutation_unavailable")
+  if (!historyId || historyId === "temp")
+    throw new Error("temporary_history_unavailable")
+  if (
+    !origin ||
+    origin.status !== "ready" ||
+    origin.owner?.kind !== "local" ||
+    !origin.view
+  )
+    throw new Error("history_selection_unavailable")
+  if (
+    origin.owner.conversation_id !== historyId ||
+    origin.view.conversation_id !== historyId ||
+    origin.view.owner_key !== origin.owner.owner_key
+  )
+    throw new Error("owner_conversation_mismatch")
+  return { ...origin.owner }
+}

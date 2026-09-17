@@ -199,8 +199,12 @@ describe("syncChatSettingsForServerChat", () => {
 
   it("treats missing remote chat settings as empty without warning", async () => {
     const serverChatId = "chat-settings-missing"
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    const error = new Error("Chat settings not found") as Error & { status?: number }
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined)
+    const error = new Error("Chat settings not found") as Error & {
+      status?: number
+    }
     error.status = 404
     mocks.getChatSettings.mockRejectedValueOnce(error)
 
@@ -220,7 +224,9 @@ describe("syncChatSettingsForServerChat", () => {
 
   it("does not swallow unrelated not-found messages without a 404 status", async () => {
     const serverChatId = "chat-settings-unrelated-not-found"
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined)
     mocks.getChatSettings.mockRejectedValueOnce(new Error("Prompt not found"))
 
     try {
@@ -305,4 +311,21 @@ describe("normalizeChatSettingsRecord", () => {
     })
     expect(settings?.chat_dictionary_ids).toEqual([3, 4])
   })
+})
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
+}))
+beforeEach(async () => {
+  const { memory } = await import(
+    "@/hooks/chat/__tests__/local-history-fixture"
+  )
+  memory.chatHistories.rows.clear()
+  for (const id of [
+    "history-1",
+    "history-2",
+    "history-overlay-sync",
+    "history-workspace-sync"
+  ])
+    await memory.chatHistories.put({ id })
 })

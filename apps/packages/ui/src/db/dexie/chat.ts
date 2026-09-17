@@ -1,4 +1,11 @@
-import { sanitizeImportedHistory, sanitizeImportedMessage, stripHistoryAuthority } from "./history-selection"
+import {
+  assertNoPendingLocalSettingsWrite,
+  withLocalMessageMutation,
+  type LocalHistoryOwnerV1,
+  sanitizeImportedHistory,
+  sanitizeImportedMessage,
+  stripHistoryAuthority
+} from "./history-selection"
 import {
   ChatHistory,
   HistoryInfo,
@@ -301,8 +308,13 @@ export class PageAssistDatabase {
     await db.messages.add(stripHistoryAuthority(message));
   }
 
-  async updateMessage(history_id: string, message_id: string, content: string) {
-    await db.transaction("rw", [db.messages], async () => {
+  async updateMessage(
+    history_id: string,
+    message_id: string,
+    content: string,
+    owner?: LocalHistoryOwnerV1
+  ) {
+    await withLocalMessageMutation(history_id, owner, async () => {
       const row = await db.messages.get(message_id);
       if (!row) throw new Error("missing_message");
       if (row.history_id !== history_id)
@@ -337,12 +349,19 @@ export class PageAssistDatabase {
   }
 
   async removeChatHistory(id: string) {
-    await db.chatHistories.delete(id);
-    await db.compareStates.delete(id);
+    await db.transaction("rw", [db.chatHistories, db.compareStates], async () => {
+      assertNoPendingLocalSettingsWrite(await db.chatHistories.get(id));
+      await db.chatHistories.delete(id);
+      await db.compareStates.delete(id);
+    });
   }
 
-  async removeMessage(history_id: string, message_id: string) {
-    return db.transaction("rw", [db.messages], async () => {
+  async removeMessage(
+    history_id: string,
+    message_id: string,
+    owner?: LocalHistoryOwnerV1
+  ) {
+    return withLocalMessageMutation(history_id, owner, async () => {
       const row = await db.messages.get(message_id);
       if (!row) throw new Error("missing_message");
       if (row.history_id !== history_id)
@@ -373,6 +392,7 @@ export class PageAssistDatabase {
 
   async deleteChatHistory(id: string) {
     await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+      assertNoPendingLocalSettingsWrite(await db.chatHistories.get(id));
       await db.chatHistories.delete(id);
       await db.messages.where('history_id').equals(id).delete();
       await db.compareStates.delete(id);
@@ -381,6 +401,7 @@ export class PageAssistDatabase {
 
   async deleteAllChatHistory() {
     await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+      (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
       await db.chatHistories.clear();
       await db.messages.clear();
       await db.compareStates.clear();
@@ -755,15 +776,20 @@ export class PageAssistDatabase {
   } = {}) {
     const { replaceExisting = false, mergeData = true } = options;
 
-    if (!mergeData && !replaceExisting) {
-      // Clear existing data
-      await this.deleteAllChatHistory();
-    }
-
-    // Use transaction for atomic batch operations
-    await db.transaction('rw', [db.chatHistories, db.messages], async () => {
-      // Collect all histories and messages for bulk operations
+    // Preserve this destination's guard, never imported authority, under the replacement lock.
+    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
       const histories = data.filter(item => item.history).map(item => sanitizeImportedHistory(item.history));
+      for (const history of histories) {
+        const destination = await db.chatHistories.get(history.id);
+        if (destination?.local_settings_guard)
+          history.local_settings_guard = destination.local_settings_guard;
+      }
+      if (!mergeData && !replaceExisting) {
+        (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
+        await db.chatHistories.clear();
+        await db.messages.clear();
+        await db.compareStates.clear();
+      }
       const allMessages = data.flatMap(item => (item.messages || []).map(sanitizeImportedMessage));
 
       // Bulk put histories

@@ -149,3 +149,14 @@ describe("chat settings deep research attachment", () => {
     ).toBeUndefined()
   })
 })
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
+}))
+beforeEach(async () => {
+  const { memory } = await import(
+    "@/hooks/chat/__tests__/local-history-fixture"
+  )
+  memory.chatHistories.rows.clear()
+  for (const id of ["history-1"]) await memory.chatHistories.put({ id })
+})

@@ -31,7 +31,24 @@ const committed = {
   child_id: "child",
   message_map: { u: "child-u" }
 }
+const testController = () => {
+  const state: any = { status: "ready" }
+  return {
+    getCurrent: () => state,
+    loadConversation: vi.fn(async ({ historyId }, _ref, loaded) => {
+      state.owner = {
+        kind: "local",
+        owner_key: "local",
+        conversation_id: historyId
+      }
+      state.view = { owner_key: "local", conversation_id: historyId }
+      loaded({ owner: state.owner, view: state.view })
+      return true
+    })
+  } as any
+}
 const setup = (extra = {}) => ({
+  historySelection: testController(),
   notification: { error: vi.fn(), warning: vi.fn() } as any,
   historyId: "source",
   setMessages: vi.fn(),
@@ -164,4 +181,41 @@ it("view application failure cannot relabel an acknowledged commit as rejected",
   })
   expect(await createBranchMessage(options)(request)).toEqual(committed)
   expect(forks.commit).toHaveBeenCalledTimes(1)
+})
+
+it("waits for an exact child load receipt before displaying a committed child", async () => {
+  const state: any = {
+    status: "ready",
+    owner: { kind: "local", owner_key: "local", conversation_id: "source" },
+    view: {}
+  }
+  const controller = {
+    getCurrent: () => state,
+    fence: () => () => true,
+    loadConversation: vi.fn(async (_target, _reference, loaded) => {
+      state.owner = {
+        kind: "local",
+        owner_key: "local",
+        conversation_id: "child"
+      }
+      state.view = { owner_key: "local", conversation_id: "child" }
+      loaded({ owner: state.owner, view: state.view })
+      return true
+    })
+  }
+  const options = setup({ historySelection: controller })
+  await createBranchMessage(options)(request)
+  expect(controller.loadConversation).toHaveBeenCalledWith(
+    { historyId: "child" },
+    undefined,
+    expect.any(Function)
+  )
+  expect(options.setHistoryId).toHaveBeenCalledWith("child")
+})
+it("a settled load without a receipt never presents the committed child", async () => {
+  const options = setup({
+    historySelection: { loadConversation: vi.fn(async () => true) }
+  })
+  expect(await createBranchMessage(options)(request)).toEqual(committed)
+  expect(options.setHistoryId).not.toHaveBeenCalled()
 })

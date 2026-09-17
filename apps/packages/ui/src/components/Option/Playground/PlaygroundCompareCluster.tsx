@@ -72,7 +72,7 @@ type PlaygroundCompareClusterProps = {
   editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
   deleteMessage: (index: number) => void
   toggleMessagePinned: (index: number) => Promise<void> | void
-  createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}) => Promise<ForkResultV1>
+  createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}, onOpened?: (childId: string) => void) => Promise<ForkResultV1>
   stopStreamingRequest: (...args: any[]) => void
   runContinue: () => void
   runSteeredContinue: (mode: "continue_as_user" | "impersonate_user") => void
@@ -112,6 +112,7 @@ type PlaygroundCompareClusterProps = {
     clusterId: string
     modelId: string
     open?: boolean
+    onOpened?: (childId: string) => void
   }) => Promise<ForkResultV1>
 }
 
@@ -772,27 +773,16 @@ export const PlaygroundCompareCluster = ({
           const threadPreviewItems = clusterMessagesForModel.slice(-4)
 
           const handleOpenFullChat = async () => {
-            const current = historySelection?.fence() ?? (() => true)
-            if (!compareFeatureEnabled) {
-              return
-            }
-            const forkResult = await createCompareBranch({
+            if (!compareFeatureEnabled) return
+            await createCompareBranch({
               clusterId: block.clusterId,
-              modelId: modelKey
+              modelId: modelKey,
+              onOpened: () => {
+                setCompareMode(false)
+                setSelectedModel(modelKey)
+                setCompareSelectedModels([modelKey])
+              }
             })
-            const newHistoryId = forkResult.state === "committed" || forkResult.state === "legacy_completed" ? forkResult.child_id : null
-            if (newHistoryId && historyId && current()) {
-              setCompareParentForHistory(newHistoryId, {
-                parentHistoryId: historyId,
-                clusterId: block.clusterId
-              })
-              setCompareSplitChat(block.clusterId, modelKey, newHistoryId)
-            }
-            if (newHistoryId && modelKey && current()) {
-              setCompareMode(false)
-              setSelectedModel(modelKey)
-              setCompareSelectedModels([modelKey])
-            }
           }
 
           const placeholder = t(
@@ -993,7 +983,15 @@ export const PlaygroundCompareCluster = ({
                   void toggleMessagePinned(index)
                 }}
                 onNewBranch={() => {
-                  void createChatBranch(message.id ?? "", {model_id:modelKey,cluster_id:block.clusterId})
+                  void createChatBranch(
+                    message.id ?? "",
+                    { model_id: modelKey, cluster_id: block.clusterId },
+                    () => {
+                      setCompareMode(false)
+                      setSelectedModel(modelKey)
+                      setCompareSelectedModels([modelKey])
+                    }
+                  )
                 }}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}

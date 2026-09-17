@@ -1,5 +1,8 @@
 import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
-import { createSelectedForkAction } from "@/hooks/chat/chat-action-utils";
+import {
+  captureLocalMutationOwner,
+  createSelectedForkAction
+} from "@/hooks/chat/chat-action-utils";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import React from "react";
@@ -3114,10 +3117,12 @@ export const useMessage = () => {
     validateBeforeSubmitFn: () => true,
     captureViewFence: historySelection?.fence,
     mutate: async (target, content) => {
-      if (serverChatId) throw new Error("native_history_mutation_unavailable");
-      if (!historyId || historyId === "temp" || !target.id)
-        throw new Error("temporary_history_unavailable");
-      await updateMessageById(historyId, target.id, content);
+      const owner = captureLocalMutationOwner(
+        historySelection,
+        historyId,
+        serverChatId
+      );
+      await updateMessageById(owner.conversation_id, target.id, content, owner);
     },
   });
 
@@ -3128,11 +3133,16 @@ export const useMessage = () => {
       const origin = historySelection?.getCurrent();
       const current = historySelection?.fence() ?? (() => true);
       try {
-        if (serverChatId)
-          throw new Error("native_history_mutation_unavailable");
-        if (!historyId || historyId === "temp")
-          throw new Error("temporary_history_unavailable");
-        const removed = await removeMessageById(historyId, target.id);
+        const owner = captureLocalMutationOwner(
+          historySelection,
+          historyId,
+          serverChatId
+        );
+        const removed = await removeMessageById(
+          owner.conversation_id,
+          target.id,
+          owner
+        );
         if (!current()) return;
         if (replyTarget?.id === target.id) clearReplyTarget();
         const remaining = messages.filter((row) => row.id !== target.id);
@@ -3174,6 +3184,7 @@ export const useMessage = () => {
   );
 
   const branchHandler = createBranchMessage({
+    historySelection,
     captureViewFence: historySelection?.fence,
     notification,
     historyId,
@@ -3202,7 +3213,7 @@ export const useMessage = () => {
     characterId: selectedCharacter?.id ?? null,
     chatTitle: serverChatTitle ?? null,
     messages,
-    history,
+    history
   });
 
   const createChatBranch = createSelectedForkAction(

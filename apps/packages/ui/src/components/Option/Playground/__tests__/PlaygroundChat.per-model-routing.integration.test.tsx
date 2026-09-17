@@ -94,7 +94,11 @@ const useMessageOptionState = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string, options?: Record<string, unknown>) => {
+    t: (
+      key: string,
+      defaultValue?: string,
+      options?: Record<string, unknown>
+    ) => {
       const template = defaultValue || key
       if (!options) {
         return template
@@ -177,7 +181,9 @@ describe("PlaygroundChat per-model mini composer routing", () => {
     await user.type(input, "follow-up for model a")
     await user.click(send)
 
-    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledTimes(1)
+    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledTimes(
+      1
+    )
     expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledWith({
       clusterId: "cluster-1",
       modelId: "model-a",
@@ -199,7 +205,9 @@ describe("PlaygroundChat per-model mini composer routing", () => {
 
     await user.click(modelA.send)
 
-    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenNthCalledWith(1, {
+    expect(
+      useMessageOptionState.value.sendPerModelReply
+    ).toHaveBeenNthCalledWith(1, {
       clusterId: "cluster-1",
       modelId: "model-a",
       message: "alpha"
@@ -209,12 +217,16 @@ describe("PlaygroundChat per-model mini composer routing", () => {
 
     await user.click(modelB.send)
 
-    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenNthCalledWith(2, {
+    expect(
+      useMessageOptionState.value.sendPerModelReply
+    ).toHaveBeenNthCalledWith(2, {
       clusterId: "cluster-1",
       modelId: "model-b",
       message: "beta"
     })
-    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledTimes(2)
+    expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledTimes(
+      2
+    )
     expect(modelB.input.value).toBe("")
   })
 })
@@ -228,7 +240,8 @@ it("individual comparison response forks carry stable model-qualified boundaries
   )
   expect(useMessageOptionState.value.createChatBranch).toHaveBeenCalledWith(
     "c1-a",
-    { model_id: "model-a", cluster_id: "cluster-1" }
+    { model_id: "model-a", cluster_id: "cluster-1" },
+    expect.any(Function)
   )
 })
 it.each(["blocked", "partial", "unknown"])(
@@ -255,23 +268,27 @@ it.each(["blocked", "partial", "unknown"])(
     ).not.toHaveBeenCalled()
   }
 )
-it("acknowledged comparison result adopts only its typed child ID", async () => {
-  useMessageOptionState.value.createCompareBranch.mockResolvedValue({
-    state: "committed",
-    operation_id: "op",
-    owner_key: "owner",
-    child_id: "child",
-    message_map: { "c1-a": "child-a" }
-  })
+it("child receipt callback leaves comparison mode without changing source split records", async () => {
+  useMessageOptionState.value.createCompareBranch.mockImplementation(
+    async ({ onOpened }: any) => {
+      onOpened("child")
+      return {
+        state: "committed",
+        operation_id: "op",
+        owner_key: "owner",
+        child_id: "child",
+        message_map: { "c1-a": "child-a" }
+      }
+    }
+  )
+  useMessageOptionState.value.setCompareSplitChat.mockClear()
+  useMessageOptionState.value.setCompareMode.mockClear()
   const user = userEvent.setup()
   render(<PlaygroundChat />)
   const { card } = await getCardElements("model-a")
   await user.click(
     within(card).getByRole("button", { name: "Open as full chat" })
   )
-  expect(useMessageOptionState.value.setCompareSplitChat).toHaveBeenCalledWith(
-    "cluster-1",
-    "model-a",
-    "child"
-  )
+  expect(useMessageOptionState.value.setCompareMode).toHaveBeenCalledWith(false)
+  expect(useMessageOptionState.value.setCompareSplitChat).not.toHaveBeenCalled()
 })

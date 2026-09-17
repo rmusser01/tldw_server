@@ -1,3 +1,4 @@
+import type { LocalHistoryOwnerV1 } from "./history-selection"
 import { ensureLocalProfileId } from "./history-selection"
 import {
   type ChatHistory as ChatHistoryType,
@@ -386,9 +387,7 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
 
 export const deleteByHistoryId = async (history_id: string) => {
   const db = new PageAssistDatabase()
-  await db.deleteMessage(history_id)
-  await db.removeChatHistory(history_id)
-  await db.deleteCompareState(history_id)
+  await db.deleteChatHistory(history_id)
   return history_id
 }
 
@@ -492,15 +491,22 @@ export const removeMessageByIndex = async (
 export const updateMessageById = async (
   history_id: string,
   message_id: string,
-  message: string
+  message: string,
+  owner?: LocalHistoryOwnerV1
 ) => {
-  await new PageAssistDatabase().updateMessage(history_id, message_id, message)
+  await new PageAssistDatabase().updateMessage(
+    history_id,
+    message_id,
+    message,
+    owner
+  )
 }
 export const removeMessageById = async (
   history_id: string,
-  message_id: string
+  message_id: string,
+  owner?: LocalHistoryOwnerV1
 ) => {
-  return new PageAssistDatabase().removeMessage(history_id, message_id)
+  return new PageAssistDatabase().removeMessage(history_id, message_id, owner)
 }
 
 // Delete every persisted message ordered after `message_id` (used by the edit +
@@ -1057,9 +1063,7 @@ export const deleteHistoriesByDateRange = async (
 
   const deletedIds: string[] = []
   for (const history of historiesToDelete) {
-    await db.deleteMessage(history.id)
-    await db.removeChatHistory(history.id)
-    await db.deleteCompareState(history.id)
+    await db.deleteChatHistory(history.id)
     deletedIds.push(history.id)
   }
 

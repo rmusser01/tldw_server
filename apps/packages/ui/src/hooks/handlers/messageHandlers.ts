@@ -1,3 +1,4 @@
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { type ChatHistory, type Message } from "~/store/option"
 import {
   formatToChatHistory,
@@ -139,6 +140,8 @@ export const createBranchMessage =
     history?: ChatHistory
     onServerChatMutated?: () => void
     serverOnly?: boolean
+    historySelection?: HistorySelectionController | null
+    onOpened?: (childId: string) => void
     notification: NotificationInstance
 
     captureViewFence?: () => () => boolean
@@ -178,14 +181,35 @@ export const createBranchMessage =
       const result = await commitLocalFork(prepared)
       observed = result
       if (result.state !== "committed" || !current()) return result
-      options.setHistory(formatToChatHistory(prepared.messages))
-      options.setMessages(formatToMessage(prepared.messages))
-      options.setContext?.(prepared.files?.files ?? [])
-      options.setSelectedSystemPrompt?.("")
-      options.setSystemPrompt?.(
-        prepared.history.last_used_prompt?.prompt_content ?? ""
+      const controller = options.historySelection
+      if (!controller) return result
+      await controller.loadConversation(
+        { historyId: result.child_id },
+        undefined,
+        (receipt) => {
+          const live = controller.getCurrent()
+          if (
+            live.status !== "ready" ||
+            live.owner !== receipt.owner ||
+            live.view !== receipt.view ||
+            receipt.owner.kind !== "local" ||
+            receipt.owner.owner_key !== result.owner_key ||
+            receipt.owner.conversation_id !== result.child_id ||
+            receipt.view.conversation_id !== result.child_id ||
+            receipt.view.owner_key !== result.owner_key
+          )
+            return
+          options.setHistory(formatToChatHistory(prepared.messages))
+          options.setMessages(formatToMessage(prepared.messages))
+          options.setContext?.(prepared.files?.files ?? [])
+          options.setSelectedSystemPrompt?.("")
+          options.setSystemPrompt?.(
+            prepared.history.last_used_prompt?.prompt_content ?? ""
+          )
+          options.setHistoryId(result.child_id)
+          options.onOpened?.(result.child_id)
+        }
       )
-      options.setHistoryId(result.child_id)
       return result
     } catch (error) {
       const code = error instanceof Error ? error.message : "local_fork_failed"

@@ -84,6 +84,7 @@ export const stripHistoryAuthority = <T>(value: T): T => {
 }
 export const sanitizeImportedHistory = (value: HistoryInfo): HistoryInfo => {
   const result = stripHistoryAuthority(value)
+  delete result.local_settings_guard
   delete result.local_owner_key
   delete result.server_scope_key
   return result
@@ -147,6 +148,39 @@ const ownedHistory = async (
     fail("owner_mismatch")
   return record
 }
+/** History replacement/deletion must not erase the fence for an uncertain external write. */
+export const assertNoPendingLocalSettingsWrite = (
+  history: HistoryInfo | undefined
+) => {
+  const guard = history?.local_settings_guard
+  if (guard && (!Array.isArray(guard.pending) || guard.pending.length))
+    fail("history_settings_write_pending")
+}
+
+/** ID-only legacy callers use the current profile; H1 actions must supply their captured owner. */
+export const withLocalMessageMutation = async <T,>(
+  conversation_id: string,
+  capturedOwner: LocalHistoryOwnerV1 | undefined,
+  mutate: () => Promise<T>
+): Promise<T> =>
+  db.transaction(
+    "rw",
+    [db.messages, db.chatHistories, db.userSettings],
+    async () => {
+      const profile = await db.userSettings.get("main")
+      const owner = capturedOwner ?? {
+        kind: "local" as const,
+        profile_id: profile?.history_profile_id ?? "",
+        owner_key: localKey(profile?.history_profile_id ?? ""),
+        conversation_id
+      }
+      if (!owner.profile_id || owner.conversation_id !== conversation_id)
+        fail("owner_mismatch")
+      await ownedHistory(owner)
+      return mutate()
+    }
+  )
+
 const tables = () => [
   db.chatHistories,
   db.messages,

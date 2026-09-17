@@ -1,4 +1,8 @@
-import { createSelectedForkAction, getCompareBranchBoundaryId } from "@/hooks/chat/chat-action-utils"
+import {
+  captureLocalMutationOwner,
+  createSelectedForkAction,
+  getCompareBranchBoundaryId
+} from "@/hooks/chat/chat-action-utils"
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
 import { useHistorySelectionContext } from "./useHistorySelection"
@@ -4377,7 +4381,8 @@ export const useChatActions = ({
     }
   }
 
-  const branchHandler = createBranchMessage({
+  const branchOptions = {
+    historySelection,
     captureViewFence: historySelection?.fence,
     notification,
     historyId,
@@ -4408,14 +4413,19 @@ export const useChatActions = ({
     chatTitle: serverChatTitle ?? null,
     messages,
     history
-  })
+  }
+  const branchHandler = createBranchMessage(branchOptions)
 
-  const createChatBranch = createSelectedForkAction(
+  const createChatBranch = (
+    messageId: string,
+    comparison?: { model_id: string; cluster_id: string | null },
+    onOpened?: (childId: string) => void
+  ) => createSelectedForkAction(
     historySelection,
-    branchHandler,
+    onOpened ? createBranchMessage({ ...branchOptions, onOpened }) : branchHandler,
     historyId,
     notification
-  )
+  )(messageId, comparison)
 
   const regenerateLastMessage = createRegenerateLastMessage({
     notification,
@@ -4453,10 +4463,12 @@ export const useChatActions = ({
     notification,
     captureViewFence: historySelection?.fence,
     mutate: async (target, content) => {
-      if (serverChatId) throw new Error("native_history_mutation_unavailable")
-      if (!historyId || historyId === "temp" || !target.id)
-        throw new Error("temporary_history_unavailable")
-      await updateMessageById(historyId, target.id, content)
+      const owner = captureLocalMutationOwner(
+        historySelection,
+        historyId,
+        serverChatId
+      )
+      await updateMessageById(owner.conversation_id, target.id, content, owner)
     },
     messages,
     history,
@@ -4474,10 +4486,16 @@ export const useChatActions = ({
       const origin = historySelection?.getCurrent()
       const current = historySelection?.fence() ?? (() => true)
       try {
-        if (serverChatId) throw new Error("native_history_mutation_unavailable")
-        if (!historyId || historyId === "temp")
-          throw new Error("temporary_history_unavailable")
-        const removed = await removeMessageById(historyId, target.id)
+        const owner = captureLocalMutationOwner(
+          historySelection,
+          historyId,
+          serverChatId
+        )
+        const removed = await removeMessageById(
+          owner.conversation_id,
+          target.id,
+          owner
+        )
         if (!current()) return
         if (replyTarget?.id === target.id) clearReplyTarget()
         const remaining = messages.filter((row) => row.id !== target.id)
@@ -4565,15 +4583,17 @@ export const useChatActions = ({
   const createCompareBranch = async ({
     clusterId,
     modelId,
-    open = true
+    open = true,
+    onOpened
   }: {
     clusterId: string
     modelId: string
     open?: boolean
+    onOpened?: (childId: string) => void
   }) => {
     const boundaryId = getCompareBranchBoundaryId(messages, clusterId, modelId)
     const handler = open
-      ? branchHandler
+      ? createBranchMessage({ ...branchOptions, onOpened })
       : createBranchMessage({
           notification,
           historyId,

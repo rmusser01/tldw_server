@@ -1,3 +1,4 @@
+import { withPlainLocalForkSettings } from "@/services/chat-settings"
 /** Independent local copies. Only this projector writes fork children. */
 import { db } from "./schema"
 import type { HistoryInfo, Message, SessionFiles, UploadedFile } from "./types"
@@ -36,6 +37,25 @@ export const forkRequestDigest = (request: ForkRequestV1): string =>
     input: request.input
   })
 type Source = Parameters<Parameters<typeof withLocalForkSource>[3]>[0]
+const withForkSource: typeof withLocalForkSource = (
+  owner,
+  projection,
+  mode,
+  operation,
+  opts
+) =>
+  withPlainLocalForkSettings(owner.conversation_id, (validateSettings) =>
+    withLocalForkSource(
+      owner,
+      projection,
+      mode,
+      async (source) => {
+        validateSettings(source.history)
+        return operation(source)
+      },
+      opts
+    )
+  )
 export type ComparisonForkBoundary = {
   model_id: string
   cluster_id: string | null
@@ -267,7 +287,7 @@ export const captureLocalForkSelection = (
     boundary.interpretation.kind === "legacy_linear_v1"
       ? boundary.interpretation.projection_id
       : undefined
-  return withLocalForkSource(
+  return withForkSource(
     owner,
     projection,
     "r",
@@ -377,8 +397,8 @@ const project = (
       )
         fail("unsupported_local_rich_state")
       const parent = linear
-        ? (request.input.selection.messages[index - 1]?.id ?? null)
-        : (row.parent_message_id ?? null)
+        ? request.input.selection.messages[index - 1]?.id ?? null
+        : row.parent_message_id ?? null
       if (parent && !message_map[parent]) fail("missing_parent")
       const depth = parent ? (depths.get(parent) ?? -1) + 1 : 0
       depths.set(id, depth)
@@ -453,7 +473,7 @@ export const prepareLocalFork = async (
   const owner = await getLocalHistoryOwner(
     request.input.selection.conversation_id
   )
-  const prepared = await withLocalForkSource(
+  const prepared = await withForkSource(
     owner,
     projectionId(request.input),
     "r",
@@ -480,7 +500,7 @@ export const commitLocalFork = async (
   const { request, owner } = trusted
   let committed = false
   try {
-    await withLocalForkSource(
+    await withForkSource(
       owner,
       projectionId(request.input),
       "rw",

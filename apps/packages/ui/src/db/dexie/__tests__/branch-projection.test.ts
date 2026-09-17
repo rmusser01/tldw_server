@@ -18,7 +18,7 @@ const memory: Record<string, any> = vi.hoisted(() => {
           ? [v.profile_id, v.client_session_id, v.owner_key, v.conversation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
-            : (v.id ?? v.sessionId ?? v.history_id)
+            : v.id ?? v.sessionId ?? v.history_id
       )
     tables[name] = {
       rows,
@@ -28,6 +28,13 @@ const memory: Record<string, any> = vi.hoisted(() => {
       add: async (v: any) => {
         if (rows.has(key(v))) throw new Error("duplicate")
         rows.set(key(v), structuredClone(v))
+      },
+      toArray: async () => structuredClone([...rows.values()]),
+      clear: async () => {
+        rows.clear()
+      },
+      bulkPut: async (vs: any[]) => {
+        for (const v of vs) rows.set(key(v), structuredClone(v))
       },
       bulkAdd: async (vs: any[]) => {
         for (const v of vs) rows.set(key(v), structuredClone(v))
@@ -39,6 +46,9 @@ const memory: Record<string, any> = vi.hoisted(() => {
       delete: async (id: any) => rows.delete(JSON.stringify(id)),
       where: (field: string) => ({
         equals: (v: any) => ({
+          delete: async () => {
+            for (const [k, r] of rows) if (r[field] === v) rows.delete(k)
+          },
           modify: async (patch: any) => {
             for (const [k, r] of rows)
               if (r[field] === v) rows.set(k, { ...r, ...patch })
@@ -79,8 +89,25 @@ const memory: Record<string, any> = vi.hoisted(() => {
   }
 })
 vi.mock("../schema", () => ({ db: memory }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {} }))
+const settingsStorage = vi.hoisted(() => ({
+  raw: undefined as any,
+  localRaw: undefined as any,
+  get: vi.fn(),
+  set: vi.fn()
+}))
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: (options: any) => ({
+    get: (key: string) => settingsStorage.get(key, options?.area ?? "sync"),
+    set: (key: string, value: unknown) =>
+      settingsStorage.set(key, value, options?.area ?? "sync")
+  })
+}))
+import { saveChatSettingsForKey } from "@/services/chat-settings"
 
-vi.mock("../nickname", () => ({ getAllModelNicknames: vi.fn() }))
+vi.mock("../nickname", () => ({
+  getAllModelNicknames: vi.fn(async () => ({}))
+}))
 import {
   captureLocalForkSelection,
   prepareLocalFork,
@@ -110,6 +137,19 @@ const row = (
 })
 let owner: any
 beforeEach(async () => {
+  settingsStorage.raw = undefined
+  settingsStorage.localRaw = undefined
+  settingsStorage.get
+    .mockReset()
+    .mockImplementation(async (_key, area) =>
+      area === "local" ? settingsStorage.localRaw : settingsStorage.raw
+    )
+  settingsStorage.set
+    .mockReset()
+    .mockImplementation(async (_key, value, area) => {
+      if (area === "local") settingsStorage.localRaw = value
+      else settingsStorage.raw = value
+    })
   for (const table of Object.values(memory))
     if ((table as any)?.rows) (table as any).rows.clear()
   await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
@@ -318,6 +358,10 @@ it("normal send rejects comparison and comparison forks materialize only A", asy
   expect(result.message_map).not.toHaveProperty("b1")
 })
 it("production scoped mutations reject cross-history and missing IDs", async () => {
+  await memory.chatHistories.put({
+    id: "other",
+    local_owner_key: owner.owner_key
+  })
   const database = new PageAssistDatabase()
   await expect(database.updateMessage("other", "u1", "bad")).rejects.toThrow(
     "message_owner_mismatch"
@@ -616,4 +660,494 @@ it("retained local file references remap to the child's independently owned file
   expect((await memory.messages.get(result.message_map.u2)).sources).toEqual([
     file.id
   ])
+})
+
+it.each(["edit", "delete"])(
+  "rejects captured-owner %s after profile switch in the mutation transaction",
+  async (action) => {
+    await memory.userSettings.put({
+      id: "main",
+      history_profile_id: "other-profile"
+    })
+    const database = new PageAssistDatabase()
+    const operation =
+      action === "edit"
+        ? database.updateMessage("source", "u2", "changed", owner)
+        : database.removeMessage("source", "u2", owner)
+    await expect(operation).rejects.toThrow("owner_mismatch")
+    expect((await memory.messages.get("u2")).content).toBe("u2")
+  }
+)
+it.each(["edit", "delete"])(
+  "rejects actual native-mirror %s despite local ambient IDs",
+  async (action) => {
+    await memory.chatHistories.update("source", { server_chat_id: "native" })
+    const database = new PageAssistDatabase()
+    await expect(
+      action === "edit"
+        ? database.updateMessage("source", "u2", "changed", owner)
+        : database.removeMessage("source", "u2", owner)
+    ).rejects.toThrow("unbound_server_mirror")
+    expect((await memory.messages.get("u2")).content).toBe("u2")
+  }
+)
+
+it.each([
+  {
+    assistantOverlay: {
+      kind: "persona",
+      id: "p",
+      name: "Persona",
+      updatedAt: "now"
+    }
+  },
+  { chatGenerationOverride: { enabled: true, temperature: 0.2 } },
+  { conversationContext: { world_book_ids: [7] } },
+  { autoSummaryEnabled: true },
+  { summary: { enabled: true, content: "old summary" } }
+])(
+  "blocks required external settings %j before child writes",
+  async (required) => {
+    settingsStorage.raw = { schemaVersion: 2, updatedAt: "now", ...required }
+    await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+      "unsupported_fork_chat_settings"
+    )
+    expect(memory.chatHistories.rows.size).toBe(1)
+  }
+)
+it.each(["malformed", "unavailable"])(
+  "fails closed for %s external settings",
+  async (kind) => {
+    if (kind === "malformed") settingsStorage.raw = "not a record"
+    else settingsStorage.get.mockRejectedValue(new Error("storage offline"))
+    await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+      "fork_chat_settings_unavailable"
+    )
+    expect(memory.chatHistories.rows.size).toBe(1)
+  }
+)
+
+it("migrates an exact legacy required record once, then ignores later browser sync changes", async () => {
+  settingsStorage.raw = {
+    schemaVersion: 2,
+    updatedAt: "old",
+    assistantOverlay: {
+      kind: "persona",
+      id: "p",
+      name: "Legacy",
+      updatedAt: "old"
+    }
+  }
+  await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+    "unsupported_fork_chat_settings"
+  )
+  expect(settingsStorage.localRaw).toEqual(settingsStorage.raw)
+  settingsStorage.raw = { schemaVersion: 2, updatedAt: "new" }
+  await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+    "unsupported_fork_chat_settings"
+  )
+  expect(settingsStorage.localRaw.assistantOverlay.id).toBe("p")
+})
+it("preserves the existing WebUI local record instead of overwriting it with legacy sync", async () => {
+  settingsStorage.localRaw = {
+    schemaVersion: 2,
+    updatedAt: "local",
+    assistantOverlay: { kind: "persona", id: "p" }
+  }
+  settingsStorage.raw = { schemaVersion: 2, updatedAt: "sync" }
+  await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+    "unsupported_fork_chat_settings"
+  )
+  expect(settingsStorage.localRaw.updatedAt).toBe("local")
+})
+it("positive extension-local empty baseline remains independent of later sync values", async () => {
+  const prepared = await prepareLocalFork(await request())
+  expect(settingsStorage.localRaw).toBeNull()
+  settingsStorage.raw = {
+    schemaVersion: 2,
+    updatedAt: "remote",
+    autoSummaryEnabled: true
+  }
+  expect(await commitLocalFork(prepared)).toMatchObject({ state: "committed" })
+})
+it("settings changed after preparation reject before child writes", async () => {
+  const prepared = await prepareLocalFork(await request())
+  expect(
+    await saveChatSettingsForKey("local:source", {
+      schemaVersion: 2,
+      updatedAt: "now",
+      autoSummaryEnabled: true
+    })
+  ).toBe(true)
+  expect(settingsStorage.localRaw).toMatchObject({ autoSummaryEnabled: true })
+  expect(await commitLocalFork(prepared)).toMatchObject({
+    state: "rejected",
+    code: "unsupported_fork_chat_settings"
+  })
+  expect(memory.chatHistories.rows.size).toBe(1)
+})
+it("excluded summary content updates do not invalidate a plain prepared fork", async () => {
+  const prepared = await prepareLocalFork(await request())
+  await saveChatSettingsForKey("local:source", {
+    schemaVersion: 2,
+    updatedAt: "now",
+    summary: { content: "old recap" }
+  })
+  expect(await commitLocalFork(prepared)).toMatchObject({ state: "committed" })
+})
+it("failed migration cannot certify absence, while a later ordinary edit still saves", async () => {
+  settingsStorage.set.mockRejectedValueOnce(new Error("uncertain write"))
+  await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+    "fork_chat_settings_unavailable"
+  )
+  expect(
+    (await memory.chatHistories.get("source")).local_settings_guard.pending
+  ).toHaveLength(1)
+  expect(
+    await saveChatSettingsForKey("local:source", {
+      schemaVersion: 2,
+      updatedAt: "retry",
+      authorNote: "new edit"
+    })
+  ).toBe(true)
+  await expect(captureLocalForkSelection(owner, view())).rejects.toThrow(
+    "fork_chat_settings_unavailable"
+  )
+  expect(settingsStorage.localRaw.authorNote).toBe("new edit")
+})
+it("serializes overlapping external writes and retains every in-flight token", async () => {
+  await request()
+  let release!: () => void
+  let writing = false
+  settingsStorage.set.mockImplementationOnce(async (_key, value) => {
+    writing = true
+    await new Promise<void>((resolve) => {
+      release = resolve
+    })
+    settingsStorage.localRaw = value
+  })
+  const first = saveChatSettingsForKey("local:source", {
+    schemaVersion: 2,
+    updatedAt: "A",
+    authorNote: "A"
+  })
+  await vi.waitFor(() => expect(writing).toBe(true))
+  const second = saveChatSettingsForKey("local:source", {
+    schemaVersion: 2,
+    updatedAt: "B"
+  })
+  const probe = captureLocalForkSelection(owner, view())
+  // B cannot settle before A; the critical section holds the history transaction during external I/O.
+  expect(
+    settingsStorage.set.mock.calls.filter((call) => call[1]?.updatedAt === "B")
+  ).toHaveLength(0)
+  release()
+  expect(await first).toBe(true)
+  expect(await second).toBe(true)
+  await expect(probe).rejects.toThrow("fork_chat_settings_unavailable")
+  expect(
+    (await memory.chatHistories.get("source")).local_settings_guard.pending
+  ).toEqual([])
+  expect(settingsStorage.localRaw.updatedAt).toBe("B")
+})
+
+it.each([false, true])(
+  "rechecks policy when external settings change between read and owning transaction (required=%s)",
+  async (required) => {
+    const prepared = await prepareLocalFork(await request())
+    settingsStorage.get.mockImplementationOnce(async () => {
+      const old = settingsStorage.localRaw
+      await saveChatSettingsForKey("local:source", {
+        schemaVersion: 2,
+        updatedAt: "raced",
+        ...(required
+          ? { autoSummaryEnabled: true }
+          : { summary: { content: "excluded old summary" } })
+      })
+      return old
+    })
+    expect(await commitLocalFork(prepared)).toMatchObject(
+      required
+        ? { state: "rejected", code: "unsupported_fork_chat_settings" }
+        : { state: "committed" }
+    )
+    expect(memory.chatHistories.rows.size).toBe(required ? 1 : 2)
+  }
+)
+it("a held legacy bootstrap cannot overwrite a newer local edit", async () => {
+  let release!: () => void
+  let reading = false
+  settingsStorage.get.mockImplementation(async (_key, area) => {
+    if (area === "local") return settingsStorage.localRaw
+    reading = true
+    await new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return { schemaVersion: 2, updatedAt: "old sync" }
+  })
+  const capture = captureLocalForkSelection(owner, view()).then(
+    (value) => value,
+    (error) => error
+  )
+  await vi.waitFor(() => expect(reading).toBe(true))
+  const write = saveChatSettingsForKey("local:source", {
+    schemaVersion: 2,
+    updatedAt: "new local",
+    authorNote: "required"
+  })
+  release()
+  await capture
+  expect(await write).toBe(true)
+  expect(settingsStorage.localRaw).toMatchObject({
+    updatedAt: "new local",
+    authorNote: "required"
+  })
+})
+it("import sanitation cannot install a foreign initialized settings guard", async () => {
+  const { sanitizeImportedHistory } = await import("../history-selection")
+  const imported = sanitizeImportedHistory({
+    ...(await memory.chatHistories.get("source")),
+    local_settings_guard: {
+      initialized: true,
+      revision: "foreign",
+      pending: ["foreign-write"]
+    }
+  })
+  expect(imported.local_settings_guard).toBeUndefined()
+})
+
+it.each(["required", "unavailable", "plain"])(
+  "actual selected fork action gates %s external settings",
+  async (kind) => {
+    const { createSelectedForkAction } = await import(
+      "@/hooks/chat/chat-action-utils"
+    )
+    const { createBranchMessage } = await import(
+      "@/hooks/handlers/messageHandlers"
+    )
+    if (kind === "required")
+      settingsStorage.raw = {
+        schemaVersion: 2,
+        updatedAt: "now",
+        autoSummaryEnabled: true
+      }
+    if (kind === "unavailable")
+      settingsStorage.get.mockRejectedValue(new Error("unavailable"))
+    const setMessages = vi.fn()
+    const notification: any = { error: vi.fn() }
+    const controller: any = {
+      getCurrent: () => ({ owner, view: view(), status: "ready" }),
+      fence: () => () => true
+    }
+    const handler = createBranchMessage({
+      historyId: "source",
+      setMessages,
+      setHistory: vi.fn(),
+      setHistoryId: vi.fn(),
+      notification,
+      captureViewFence: controller.fence
+    })
+    const result = await createSelectedForkAction(
+      controller,
+      handler,
+      "source",
+      notification
+    )("u2")
+    expect(result.state).toBe(kind === "plain" ? "committed" : "rejected")
+    expect(memory.chatHistories.rows.size).toBe(kind === "plain" ? 2 : 1)
+    expect(setMessages).not.toHaveBeenCalled()
+  }
+)
+it("a captured source owner cannot edit its independent child even within the same profile", async () => {
+  const prepared = await prepareLocalFork(await request())
+  const result = await commitLocalFork(prepared)
+  if (result.state !== "committed") throw new Error("fork failed")
+  await expect(
+    new PageAssistDatabase().updateMessage(
+      result.child_id,
+      result.message_map.u2,
+      "wrong owner",
+      owner
+    )
+  ).rejects.toThrow("owner_mismatch")
+  expect((await memory.messages.get(result.message_map.u2)).content).toBe("u2")
+})
+it("a profile transition queued before the scoped mutation is observed inside its transaction", async () => {
+  const profileChange = memory.transaction(
+    "rw",
+    [memory.userSettings],
+    async () => {
+      await memory.userSettings.put({
+        id: "main",
+        history_profile_id: "next-profile"
+      })
+    }
+  )
+  const deletion = new PageAssistDatabase().removeMessage("source", "u2", owner)
+  await profileChange
+  await expect(deletion).rejects.toThrow("owner_mismatch")
+  expect(await memory.messages.get("u2")).toBeDefined()
+})
+
+it.each([true, false])(
+  "same-ID import preserves the destination settings guard over a forged incoming guard (pending=%s)",
+  async (pending) => {
+    const guard = {
+      initialized: true,
+      revision: "destination",
+      pending: pending ? ["in-flight"] : []
+    }
+    await memory.chatHistories.update("source", { local_settings_guard: guard })
+    await new PageAssistDatabase().importChatHistoryV2(
+      [
+        {
+          history: {
+            ...(await memory.chatHistories.get("source")),
+            local_settings_guard: {
+              initialized: true,
+              revision: "forged",
+              pending: []
+            }
+          },
+          messages: []
+        }
+      ],
+      { replaceExisting: true }
+    )
+    expect(
+      (await memory.chatHistories.get("source")).local_settings_guard
+    ).toEqual(guard)
+  }
+)
+it("clear-and-import cannot erase a pending settings write", async () => {
+  await memory.chatHistories.update("source", {
+    local_settings_guard: {
+      initialized: true,
+      revision: "destination",
+      pending: ["in-flight"]
+    }
+  })
+  await expect(
+    new PageAssistDatabase().importChatHistoryV2(
+      [{ history: { id: "new", title: "new" }, messages: [] }],
+      { mergeData: false, replaceExisting: false }
+    )
+  ).rejects.toThrow("history_settings_write_pending")
+  expect(await memory.messages.get("u2")).toBeDefined()
+  expect(await memory.chatHistories.get("new")).toBeUndefined()
+})
+it("ordinary clear-and-import strips a foreign baseline and preserves clean destination guards for reused IDs", async () => {
+  const guard = { initialized: true, revision: "destination", pending: [] }
+  await memory.chatHistories.update("source", { local_settings_guard: guard })
+  await new PageAssistDatabase().importChatHistoryV2(
+    [
+      {
+        history: {
+          id: "source",
+          title: "replacement",
+          local_settings_guard: {
+            initialized: true,
+            revision: "forged",
+            pending: ["foreign"]
+          }
+        },
+        messages: []
+      },
+      {
+        history: {
+          id: "new",
+          title: "new",
+          local_settings_guard: {
+            initialized: true,
+            revision: "forged",
+            pending: []
+          }
+        },
+        messages: []
+      }
+    ],
+    { mergeData: false, replaceExisting: false }
+  )
+  expect(
+    (await memory.chatHistories.get("source")).local_settings_guard
+  ).toEqual(guard)
+  expect(
+    (await memory.chatHistories.get("new")).local_settings_guard
+  ).toBeUndefined()
+  expect(memory.messages.rows.size).toBe(0)
+})
+it.each(["removeChatHistory", "deleteChatHistory", "deleteAllChatHistory"])(
+  "%s refuses to erase a write started after an undo snapshot",
+  async (method) => {
+    const database = new PageAssistDatabase()
+    const snapshot = await memory.chatHistories.get("source")
+    await memory.chatHistories.update("source", {
+      local_settings_guard: {
+        initialized: true,
+        revision: "newer",
+        pending: ["in-flight"]
+      }
+    })
+    await expect(
+      (
+        database[method as keyof PageAssistDatabase] as (
+          id: string
+        ) => Promise<void>
+      ).call(database, "source")
+    ).rejects.toThrow("history_settings_write_pending")
+    expect(
+      (await memory.chatHistories.get("source")).local_settings_guard.revision
+    ).toBe("newer")
+    expect(snapshot.local_settings_guard).toBeUndefined()
+  }
+)
+it("the actual delete helper rejects a pending write without deleting messages or making stale undo applicable", async () => {
+  const { deleteByHistoryId, getFullChatData } = await import("../helpers")
+  const snapshot = await getFullChatData("source")
+  await memory.chatHistories.update("source", {
+    local_settings_guard: {
+      initialized: true,
+      revision: "newer",
+      pending: ["in-flight"]
+    }
+  })
+  await expect(deleteByHistoryId("source")).rejects.toThrow(
+    "history_settings_write_pending"
+  )
+  expect(snapshot!.historyInfo.local_settings_guard).toBeUndefined()
+  expect(memory.messages.rows.size).toBe(3)
+  expect(
+    (await memory.chatHistories.get("source")).local_settings_guard.pending
+  ).toEqual(["in-flight"])
+})
+it("clean deletion and same-owner undo retain the settled local baseline and rows", async () => {
+  const { deleteByHistoryId, getFullChatData, restoreChat } = await import(
+    "../helpers"
+  )
+  await request()
+  const snapshot = await getFullChatData("source")
+  await deleteByHistoryId("source")
+  expect(memory.messages.rows.size).toBe(0)
+  await restoreChat(snapshot!)
+  expect(
+    (await memory.chatHistories.get("source")).local_settings_guard
+  ).toEqual(snapshot!.historyInfo.local_settings_guard)
+  expect(memory.messages.rows.size).toBe(3)
+})
+it("grouped deletion uses the atomic pending guard before removing any target messages", async () => {
+  const { deleteHistoriesByDateRange } = await import("../helpers")
+  await memory.chatHistories.update("source", {
+    local_settings_guard: {
+      initialized: true,
+      revision: "newer",
+      pending: ["in-flight"]
+    }
+  })
+  vi.spyOn(PageAssistDatabase.prototype, "getChatHistories").mockResolvedValue([
+    await memory.chatHistories.get("source")
+  ])
+  await expect(deleteHistoriesByDateRange("pinned")).rejects.toThrow(
+    "history_settings_write_pending"
+  )
+  expect(memory.messages.rows.size).toBe(3)
 })
