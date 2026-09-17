@@ -1,0 +1,43 @@
+{
+  "task": "TASK13260.195",
+  "finding": "UAT253",
+  "verdict": "CLEAR",
+  "sourceFreezeSha256": "d6922372592bd4d937ca8c8e90318b150995d8047d2c7649890cd0f560133360",
+  "sourceHashesStable": true,
+  "tests": {
+    "passed": 93,
+    "skipped": 0,
+    "warnings": 8,
+    "seconds": 3.49,
+    "suites": 6,
+    "runnerExitCode": 0,
+    "officialPostgresRequired": true,
+    "focusedCases": {
+      "sqlite": 5,
+      "postgresql": 5
+    }
+  },
+  "causalEvidence": {
+    "authorPermanentRedFailures": 4,
+    "authorPermanentRedControls": 6,
+    "baselineProductionMatchesRecordedCommit": true,
+    "redRerunByReviewer": false
+  },
+  "static": {
+    "ruffBaseline": 2,
+    "ruffCurrent": 2,
+    "ruffAdded": 0,
+    "ruffRemoved": 0,
+    "banditProductionFindings": 0,
+    "banditTestsFindings": 0,
+    "banditErrors": 0,
+    "testBanditExclusion": "B101 only",
+    "compileFiles": 2
+  },
+  "findings": [],
+  "limits": [
+    "Actual endpoint handler with resolved DB and principal, not a live HTTP authentication flow.",
+    "Same-owner cross-media deletion/reference tests and existing request-scope controls do not establish a new foreign-owner/RLS authorization boundary.",
+    "Native original Media detail acceptance remains pending."
+  ]
+}

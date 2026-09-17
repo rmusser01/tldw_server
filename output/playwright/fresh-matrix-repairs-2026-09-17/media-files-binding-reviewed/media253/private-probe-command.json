@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-17T20:39:09.974Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    ".tmp/uat-repairs-231-246/media253/test_media_files_pg_probe.py",
+    "-q",
+    "-rs"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

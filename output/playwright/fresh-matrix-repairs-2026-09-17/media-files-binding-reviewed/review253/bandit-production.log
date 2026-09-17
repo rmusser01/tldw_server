@@ -1,0 +1,8 @@
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 55
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 55
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 91
+[tester]	WARNING	nosec encountered (B608), but no failed test on line 110

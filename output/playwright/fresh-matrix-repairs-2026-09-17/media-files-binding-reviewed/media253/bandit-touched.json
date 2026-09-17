@@ -1,0 +1,627 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-17T20:43:11Z",
+  "metrics": {
+    "./tldw_Server_API/app/core/DB_Management/media_db/repositories/media_files_repository.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 226,
+      "nosec": 0,
+      "skipped_tests": 3
+    },
+    "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py": {
+      "CONFIDENCE.HIGH": 29,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 29,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 114,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 29,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 29,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 340,
+      "nosec": 0,
+      "skipped_tests": 3
+    }
+  },
+  "results": [
+    {
+      "code": "47     media_id = add_media(media_db)\n48     assert media_db.get_media_file(media_id, \"original\") is None\n49     detail = get_full_media_details_rich(media_db, media_id)\n",
+      "col_offset": 4,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 48,
+      "line_range": [
+        48
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "49     detail = get_full_media_details_rich(media_db, media_id)\n50     assert detail[\"content\"][\"text\"] == \"Public synthetic source one.\"\n51     assert detail[\"has_original_file\"] is False\n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 50,
+      "line_range": [
+        50
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "50     assert detail[\"content\"][\"text\"] == \"Public synthetic source one.\"\n51     assert detail[\"has_original_file\"] is False\n52     assert detail[\"original_file_url\"] is None\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 51,
+      "line_range": [
+        51
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "51     assert detail[\"has_original_file\"] is False\n52     assert detail[\"original_file_url\"] is None\n53     monkeypatch.setattr(item_endpoint, \"_is_test_mode\", lambda: False)\n",
+      "col_offset": 4,
+      "end_col_offset": 46,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 52,
+      "line_range": [
+        52
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "60     )\n61     assert response.status_code == 200\n62     assert payload[\"content\"][\"text\"] == \"Public synthetic source one.\"\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 61,
+      "line_range": [
+        61
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "61     assert response.status_code == 200\n62     assert payload[\"content\"][\"text\"] == \"Public synthetic source one.\"\n63     assert payload[\"has_original_file\"] is False\n",
+      "col_offset": 4,
+      "end_col_offset": 71,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 62,
+      "line_range": [
+        62
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "62     assert payload[\"content\"][\"text\"] == \"Public synthetic source one.\"\n63     assert payload[\"has_original_file\"] is False\n64     assert response.headers[\"etag\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 63,
+      "line_range": [
+        63
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "63     assert payload[\"has_original_file\"] is False\n64     assert response.headers[\"etag\"]\n65 \n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 64,
+      "line_range": [
+        64
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "73     records = repo.list_for_media(media_id)\n74     assert [row[\"file_type\"] for row in records] == [\"original\", \"original\", \"thumbnail\"]\n75     assert records[0][\"uuid\"] == original_uuid\n",
+      "col_offset": 4,
+      "end_col_offset": 89,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 74,
+      "line_range": [
+        74
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "74     assert [row[\"file_type\"] for row in records] == [\"original\", \"original\", \"thumbnail\"]\n75     assert records[0][\"uuid\"] == original_uuid\n76     assert records[0][\"original_filename\"] == \"don't:bind?.txt\"\n",
+      "col_offset": 4,
+      "end_col_offset": 46,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 75,
+      "line_range": [
+        75
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "75     assert records[0][\"uuid\"] == original_uuid\n76     assert records[0][\"original_filename\"] == \"don't:bind?.txt\"\n77     latest = repo.get_for_media(media_id)\n",
+      "col_offset": 4,
+      "end_col_offset": 63,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 76,
+      "line_range": [
+        76
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "77     latest = repo.get_for_media(media_id)\n78     assert latest[\"uuid\"] == latest_uuid\n79     assert latest[\"file_size\"] == 42\n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 78,
+      "line_range": [
+        78
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "78     assert latest[\"uuid\"] == latest_uuid\n79     assert latest[\"file_size\"] == 42\n80     assert get_full_media_details_rich(media_db, media_id)[\"has_original_file\"] is True\n",
+      "col_offset": 4,
+      "end_col_offset": 36,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 79,
+      "line_range": [
+        79
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "79     assert latest[\"file_size\"] == 42\n80     assert get_full_media_details_rich(media_db, media_id)[\"has_original_file\"] is True\n81     repo.soft_delete(latest[\"id\"])\n",
+      "col_offset": 4,
+      "end_col_offset": 87,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 80,
+      "line_range": [
+        80
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "81     repo.soft_delete(latest[\"id\"])\n82     assert repo.get_for_media(media_id)[\"uuid\"] == original_uuid\n83     assert repo.get_for_media(media_id, include_deleted=True)[\"uuid\"] == latest_uuid\n",
+      "col_offset": 4,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 82,
+      "line_range": [
+        82
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "82     assert repo.get_for_media(media_id)[\"uuid\"] == original_uuid\n83     assert repo.get_for_media(media_id, include_deleted=True)[\"uuid\"] == latest_uuid\n84     assert len(repo.list_for_media(media_id)) == 2\n",
+      "col_offset": 4,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 83,
+      "line_range": [
+        83
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "83     assert repo.get_for_media(media_id, include_deleted=True)[\"uuid\"] == latest_uuid\n84     assert len(repo.list_for_media(media_id)) == 2\n85     assert len(repo.list_for_media(media_id, include_deleted=True)) == 3\n",
+      "col_offset": 4,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 84,
+      "line_range": [
+        84
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "84     assert len(repo.list_for_media(media_id)) == 2\n85     assert len(repo.list_for_media(media_id, include_deleted=True)) == 3\n86     repo.soft_delete(latest[\"id\"], hard_delete=True)\n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 85,
+      "line_range": [
+        85
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "87     repo.soft_delete(latest[\"id\"], hard_delete=True)\n88     assert len(repo.list_for_media(media_id, include_deleted=True)) == 2\n89 \n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 88,
+      "line_range": [
+        88
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "95     first_old = repo.get_for_media(first)\n96     assert repo.has_retained_references(\"shared.txt\", set()) is True\n97     assert repo.has_retained_references(\"shared.txt\", {first_old[\"id\"]}) is False\n",
+      "col_offset": 4,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 96,
+      "line_range": [
+        96
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "96     assert repo.has_retained_references(\"shared.txt\", set()) is True\n97     assert repo.has_retained_references(\"shared.txt\", {first_old[\"id\"]}) is False\n98     repo.insert(first, \"original\", \"replacement.txt\")\n",
+      "col_offset": 4,
+      "end_col_offset": 81,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 97,
+      "line_range": [
+        97
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "98     repo.insert(first, \"original\", \"replacement.txt\")\n99     assert repo.has_retained_references(\"shared.txt\", set()) is False\n100     repo.insert(second, \"original\", \"shared.txt\")\n",
+      "col_offset": 4,
+      "end_col_offset": 69,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 99,
+      "line_range": [
+        99
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "101     second_file = repo.get_for_media(second)\n102     assert repo.has_retained_references(\"shared.txt\", {first_old[\"id\"]}) is True\n103     repo.soft_delete_for_media(first)\n",
+      "col_offset": 4,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 102,
+      "line_range": [
+        102
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "103     repo.soft_delete_for_media(first)\n104     assert repo.list_for_media(first) == []\n105     assert all(row[\"deleted\"] for row in repo.list_for_media(first, include_deleted=True))\n",
+      "col_offset": 4,
+      "end_col_offset": 43,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 104,
+      "line_range": [
+        104
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "104     assert repo.list_for_media(first) == []\n105     assert all(row[\"deleted\"] for row in repo.list_for_media(first, include_deleted=True))\n106     assert repo.get_for_media(second)[\"uuid\"] == second_file[\"uuid\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 90,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 105,
+      "line_range": [
+        105
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "105     assert all(row[\"deleted\"] for row in repo.list_for_media(first, include_deleted=True))\n106     assert repo.get_for_media(second)[\"uuid\"] == second_file[\"uuid\"]\n107     repo.soft_delete_for_media(first, hard_delete=True)\n",
+      "col_offset": 4,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 106,
+      "line_range": [
+        106
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "107     repo.soft_delete_for_media(first, hard_delete=True)\n108     assert repo.list_for_media(first, include_deleted=True) == []\n109     assert repo.get_for_media(second)[\"uuid\"] == second_file[\"uuid\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 108,
+      "line_range": [
+        108
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "108     assert repo.list_for_media(first, include_deleted=True) == []\n109     assert repo.get_for_media(second)[\"uuid\"] == second_file[\"uuid\"]\n110 \n",
+      "col_offset": 4,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 109,
+      "line_range": [
+        109
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "122     rows = repo.list_for_media(media_id, include_deleted=True)\n123     assert [(row[\"uuid\"], bool(row[\"deleted\"])) for row in rows] == [(original_uuid, False)]\n124 \n",
+      "col_offset": 4,
+      "end_col_offset": 92,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_media_files_backend_contract.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 123,
+      "line_range": [
+        123
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

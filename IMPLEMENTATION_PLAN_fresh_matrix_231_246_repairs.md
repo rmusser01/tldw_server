@@ -6,7 +6,7 @@
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
 **Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
-**Task:** TASK13260 and children173–195.
+**Task:** TASK13260 and children173–196.
 
 ## Global constraints
 
@@ -58,7 +58,7 @@
 - [x]249: repair only the stale speech timeout fixture using current configuration storage; retain original timeout and sanitizer assertions, with independent verification.
 - [x]250: restore per-test console-spy isolation in the background proxy fixture; preserve all assertions and verify the seven baseline failures plus combined adjacency.
 - [x]248: use the existing captured Character request scope/lifetime for transport and every persistence boundary; actual-auth causal regression, same-owner/recovery controls, independent139focused/338adjacent review clear; native account-boundary verification pending.
-- [ ]246: correlate first-byte delivery using the existing actual stream path and bounded provider control; test a cause before changing budgets/forwarding. Repeat original TestBot with exact visible response and canonical reload on accepted source.
+- [x]246 implementation: correlate native late gzip delivery and prove installed Next compression buffers the first role frame; share no-transform headers across all three Character SSE branches. Independent35backend/8socket checks pass with zero skips. Exact TestBot native frame delivery and canonical reload on repaired source remain Stage4 requirements.
 - [ ] Review and commit disjoint units, recording tests and touched-scope static checks.
 
 ## Stage4: Combined verification and original native acceptance
@@ -76,7 +76,8 @@
 
 - [ ]251: repair actual PostgreSQL MCP permission-profile nullable filtering; retain scope controls and native Save packs acceptance.
 - [x]252: repair the baseline-confirmed protected-pool DDL test fixture while preserving the missing governance-table assertion and production guards; independent139combined tests, zero skips and no new static findings.
-- [ ]253: repair actual PostgreSQL MediaFiles detail read; retain original persisted source, owner/soft-delete controls and native full-content handoff acceptance.
+- [x]253 implementation: repair actual PostgreSQL MediaFiles bindings in six repository methods; independent93tests/zero skips and retention review clear. Original persisted source/native full-content handoff acceptance remains pending.
+- [ ]196 harness task: independently review a bounded source-upgrade launcher preserving original profiles, data, fixture holders and historical receipts, then record explicit new-runtime provenance for targeted acceptance. This is not a new UAT finding or a fresh-install matrix cell.
 
 ## Stage5: Repeat full fresh UAT
 

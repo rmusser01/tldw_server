@@ -1,0 +1,29 @@
+{
+  "ruffBaseline": [
+    {
+      "code": "I001",
+      "message": "Import block is un-sorted or un-formatted"
+    },
+    {
+      "code": "UP037",
+      "message": "Remove quotes from type annotation"
+    }
+  ],
+  "ruffFinal": [
+    {
+      "code": "I001",
+      "message": "Import block is un-sorted or un-formatted"
+    },
+    {
+      "code": "UP037",
+      "message": "Remove quotes from type annotation"
+    }
+  ],
+  "productionBandit": {
+    "findings": 0,
+    "errors": 0
+  },
+  "testBanditCodes": [
+    "B101"
+  ]
+}
