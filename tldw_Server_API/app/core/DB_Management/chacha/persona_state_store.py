@@ -4130,7 +4130,7 @@ class PersonaStateStore:
         query = f"SELECT COUNT(*) FROM persona_memory_entries WHERE {where_sql}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
         row = cursor.fetchone()
-        return row[0] if row else 0
+        return (row["count"] if self.backend_type == BackendType.POSTGRESQL else row[0]) if row else 0
 
     def set_persona_memory_archived(
         self,
