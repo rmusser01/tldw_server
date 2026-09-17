@@ -39,6 +39,12 @@ The source audits in `.tmp/uat-next-matrix-20260916/audits` and the retained mat
 
 ## Verification and release gate
 
+### Study240 metric compatibility
+
+Daily lapse/retention trusts the persisted `was_lapse` Boolean, including historical rows. The canonical schema has always made this field non-null with a false default; there is no reliable way to distinguish an old omitted/defaulted value from a deliberately recorded non-lapse. Do not invent a rating-based fallback or rewrite history. Historical rows explicitly recording a lapse retain it. Review-session correct recall also excludes Again0: an unsuccessful learning attempt is not yet a lapse of learned material. For current schedulers, other accepted ratings count as recall unless the recorded outcome says lapse; this includes Hard2 and preserves the actual scheduler behavior of API-only ratings1/4. Live increments and reconstruction must agree. Older tests that used rating1 as a presumed failure must use an actual Again0 or explicitly seed a historical lapse outcome.
+
+Verify both schedulers, new/review queues, all accepted ratings, repeated scheduled reviews, stored historical outcomes, session reconstruction, and existing date/deck/workspace/owner and caller-transaction boundaries. This is a metric correction; scheduler transitions remain unchanged.
+
 ### Follow-up247: tenant-scoped Media sequence maintenance
 
 TASK13260.189 was created before edits after the actual238 worker test proved owner1 insertion followed by owner2 SQLSTATE23505. Both scoped INSERTs use non-superuser/non-BYPASSRLS roles and admin0. Normal Media initialization rewinds its shared serial to1 from a tenant-filtered MAX; prior147 correctly excludes foreign module sequences but does not prevent this own-table rewind. Preserve allocated sequence high-water marks, explicit-ID migration/import repair, empty-table behavior and unrelated sequences. Diagnose concurrent allocation as well as sequential tenant initialization before selecting a minimal correction; a read/modify/setval race must not silently reintroduce rewind. Do not disable RLS or introduce elevated content writes. Required official PostgreSQL tests and original two-owner queued-upload acceptance apply.

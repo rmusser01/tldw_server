@@ -1,0 +1,23 @@
+{
+  "original_functions_retained_unchanged": true,
+  "original_functions": [
+    "_saved_card",
+    "_seed_review",
+    "analytics_db",
+    "fixed_analytics_clock",
+    "pg_analytics",
+    "test_actual_review_metrics_match_scheduler_outcome",
+    "test_analytics_preserves_caller_writes",
+    "test_analytics_preserves_visibility_and_deleted_filters",
+    "test_failed_owned_analytics_read_recovers_without_poisoning_queue",
+    "test_historical_metrics_trust_recorded_outcome",
+    "test_postgres_streak_uses_utc_days_with_offset_input",
+    "test_repeated_scheduled_hard_reviews_preserve_recall_metrics",
+    "test_saved_card_analytics_http_and_following_reads"
+  ],
+  "added_functions": [
+    "test_historical_session_reconstruction_matches_recorded_recall",
+    "test_lapse_metrics_keep_utc_day_boundaries",
+    "test_postgres_lapse_metrics_exclude_other_owner"
+  ]
+}

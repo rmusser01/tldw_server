@@ -36798,7 +36798,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         row = conn.execute(
             f"""
             SELECT COUNT(*) AS cards_reviewed,
-                   COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0) AS correct_count
+                   COALESCE(SUM(CASE WHEN NOT was_lapse AND rating <> 0 THEN 1 ELSE 0 END), 0) AS correct_count
               FROM flashcard_reviews
              WHERE review_session_id = ?{owner_filter}
             """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
@@ -37373,7 +37373,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 )
                 if resolved_review_session_id is not None:
-                    correct_increment = 1 if int(rating) >= 3 else 0
+                    # Again during learning is incorrect even before a mature lapse.
+                    correct_increment = int(not upd["was_lapse"] and int(rating) != 0)
                     conn.execute(
                         f"""
                         UPDATE flashcard_review_sessions
@@ -37448,12 +37449,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         deck_rows_params = (*deck_rows_params, *deck_owner_params)
 
         try:
-            # Daily review metrics
+            # Trust stored scheduler outcomes, including historical rows. Hard is
+            # successful recall; ratings alone cannot identify mature lapses.
             daily_row = self.execute_query(
                 """
                 SELECT
                     COUNT(*) AS reviewed_today,
-                    SUM(CASE WHEN rating < 3 THEN 1 ELSE 0 END) AS lapses_today,
+                    SUM(CASE WHEN fr.was_lapse THEN 1 ELSE 0 END) AS lapses_today,
                     AVG(answer_time_ms) AS avg_answer_time_ms_today
                 FROM flashcard_reviews fr
                 JOIN flashcards f ON f.id = fr.card_id AND f.deleted = 0

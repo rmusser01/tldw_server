@@ -52,7 +52,7 @@
 **Status:** In Progress
 
 - [x] Study235/242: actual Due and Cram re-rate14day preview, practice-only no write, repeated rating and singular/multiple completion. Independent100/0skip; native acceptance pending.
-- [ ] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Causal28fail/45controls, initial73green; combined adjacent checks and review underway.
+- [x] Analytics240: actual Hard versus true lapse outcomes on both DBs, explicit stored-outcome legacy policy and owner/date filters. Independent296pass/0skip, Bandit0/no added lint; original native statistics pending.
 - [ ] Media237/241/244: missing-auth initial render, late success/rejection after disconnect, delayed selection, actual wizard completion, preserved filters and old-owner rejection.
 - [ ] Chat/model231/232/236/243: correct surface copy, actionable sanitized400, qualified alias readiness/recovery and fresh ordinary-mode transition without private-state regressions.
 - [ ]246: correlate first-byte delivery using the existing actual stream path and bounded provider control; test a cause before changing budgets/forwarding. Repeat original TestBot with exact visible response and canonical reload on accepted source.

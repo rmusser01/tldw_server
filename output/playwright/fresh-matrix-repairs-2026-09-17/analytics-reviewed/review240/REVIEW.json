@@ -1,0 +1,54 @@
+{
+  "task": "TASK13260.182",
+  "finding": "UAT240",
+  "verdict": "CLEAR for source/test integration; native acceptance pending",
+  "findings": [],
+  "tests": {
+    "passed": 296,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 4,
+    "seconds": 233.22,
+    "official_postgres_required": true,
+    "log": "uat240-sidebar-independent.redacted.log"
+  },
+  "source_freeze_sha256": "15521a447de3aee657f0a505038a9cdf1e59c0660ba3561bc6eb4b571e572219",
+  "files": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "bf6e79fe0fc0c31262c8acbcc95e2cb0650e16bee6aeb366b1e2ced8aca0004d",
+      "verified": true
+    },
+    {
+      "path": "tldw_Server_API/tests/DB_Management/test_flashcard_analytics_backends.py",
+      "sha256": "56e4a5a14be9a57aa040054af631744cd766675f707bfe7aa8c979769665e3a0",
+      "verified": true
+    },
+    {
+      "path": "tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py",
+      "sha256": "223dca2a95ec5812b64d49c94af567732e5d6d357f2fe7154b530590e9d0f6c4",
+      "verified": true
+    },
+    {
+      "path": "tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+      "sha256": "d08aa1abaa0ad6aaa55f0066b5e9c9f215a2df4c66d8747bff600838ef85788d",
+      "verified": true
+    }
+  ],
+  "static": {
+    "ruff_baseline": 14,
+    "ruff_current": 14,
+    "ruff_new": 0,
+    "bandit_findings": 0,
+    "bandit_parse_errors": 0,
+    "tests_only_excluded_checks": [
+      "B101"
+    ],
+    "compile_files": 4
+  },
+  "limits": [
+    "No native browser/re-rate acceptance performed",
+    "No historical review data rewritten",
+    "Existing endpoint test lint diagnostics retained"
+  ]
+}

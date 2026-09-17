@@ -1,0 +1,478 @@
+[
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 57,
+      "row": 47
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager\nfrom tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint\nfrom tldw_Server_API.app.api.v1.endpoints.config_info import router as config_info_router\nfrom tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards_router\nfrom tldw_Server_API.app.api.v1.schemas.flashcards import DeckDeleteResponse, DeckShare, DeckShareDeleteResponse\nfrom tldw_Server_API.app.api.v1.schemas.study_packs import (\n    StudyPackJobAcceptedResponse,\n    StudyPackJobListResponse,\n    StudyPackJobStatusResponse,\n)\nfrom tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user\nfrom tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (\n    CharactersRAGDB,\n    CharactersRAGDBError,\n    ConflictError,\n    InputError,\n)\nfrom tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_rows\nfrom tldw_Server_API.app.core.Flashcards.asset_refs import extract_flashcard_asset_uuids\nfrom tldw_Server_API.app.core.Flashcards.scheduler_sm2 import SchedulerSettingsError\nfrom tldw_Server_API.app.core.StudyPacks.jobs import (\n    STUDY_PACKS_DOMAIN,\n    STUDY_PACKS_JOB_TYPE,\n    study_pack_jobs_queue,\n)\nfrom tldw_Server_API.tests.test_config import TestConfig\n\n",
+          "end_location": {
+            "column": 1,
+            "row": 49
+          },
+          "location": {
+            "column": 1,
+            "row": 22
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 1,
+      "row": 22
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 22,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 28,
+      "row": 209
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import tempfile\n        import os",
+          "end_location": {
+            "column": 28,
+            "row": 209
+          },
+          "location": {
+            "column": 1,
+            "row": 209
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 209
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 209,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 28,
+      "row": 209
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import os\n        import tempfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 210
+          },
+          "location": {
+            "column": 1,
+            "row": 209
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 209
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 209,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 87,
+      "row": 2157
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoint\n    from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (\n        ArtifactVerificationResult,\n    )\n",
+          "end_location": {
+            "column": 1,
+            "row": 2158
+          },
+          "location": {
+            "column": 1,
+            "row": 2154
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 2154
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 2154,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 28,
+      "row": 2233
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import tempfile\n        import os",
+          "end_location": {
+            "column": 28,
+            "row": 2233
+          },
+          "location": {
+            "column": 1,
+            "row": 2233
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 2233
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 2233,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 28,
+      "row": 2233
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import os\n        import tempfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 2234
+          },
+          "location": {
+            "column": 1,
+            "row": 2233
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 2233
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 2233,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 28,
+      "row": 2273
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import tempfile\n        import os",
+          "end_location": {
+            "column": 28,
+            "row": 2273
+          },
+          "location": {
+            "column": 1,
+            "row": 2273
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 2273
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 2273,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 28,
+      "row": 2273
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import os\n        import tempfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 2274
+          },
+          "location": {
+            "column": 1,
+            "row": 2273
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 2273
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 2273,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 28,
+      "row": 4376
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import tempfile\n        import os",
+          "end_location": {
+            "column": 28,
+            "row": 4376
+          },
+          "location": {
+            "column": 1,
+            "row": 4376
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 4376
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 4376,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 28,
+      "row": 4376
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import os\n        import tempfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 4377
+          },
+          "location": {
+            "column": 1,
+            "row": 4376
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 4376
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 4376,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 46,
+      "row": 4601
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    import io\n    import sqlite3\n    import zipfile\n    import tempfile\n    import os",
+          "end_location": {
+            "column": 46,
+            "row": 4601
+          },
+          "location": {
+            "column": 1,
+            "row": 4601
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 4601
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 4601,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 46,
+      "row": 4601
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "    import io\n    import os\n    import sqlite3\n    import tempfile\n    import zipfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 4602
+          },
+          "location": {
+            "column": 1,
+            "row": 4601
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 5,
+      "row": 4601
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 4601,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  },
+  {
+    "cell": null,
+    "code": "E401",
+    "end_location": {
+      "column": 28,
+      "row": 4656
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import tempfile\n        import os",
+          "end_location": {
+            "column": 28,
+            "row": 4656
+          },
+          "location": {
+            "column": 1,
+            "row": 4656
+          }
+        }
+      ],
+      "message": "Split imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 4656
+    },
+    "message": "Multiple imports on one line",
+    "noqa_row": 4656,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/multiple-imports-on-one-line"
+  },
+  {
+    "cell": null,
+    "code": "I001",
+    "end_location": {
+      "column": 28,
+      "row": 4656
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "fix": {
+      "applicability": "safe",
+      "edits": [
+        {
+          "content": "        import os\n        import tempfile\n",
+          "end_location": {
+            "column": 1,
+            "row": 4657
+          },
+          "location": {
+            "column": 1,
+            "row": 4656
+          }
+        }
+      ],
+      "message": "Organize imports"
+    },
+    "location": {
+      "column": 9,
+      "row": 4656
+    },
+    "message": "Import block is un-sorted or un-formatted",
+    "noqa_row": 4656,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+  }
+]

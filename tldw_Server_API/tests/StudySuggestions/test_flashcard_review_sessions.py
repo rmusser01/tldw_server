@@ -295,7 +295,7 @@ def test_review_flashcard_updates_session_aggregates_and_rollup(db: CharactersRA
     )
 
     db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=1, answer_time_ms=750, review_session_id=session["id"])
+    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
     db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
 
     session_row = db.get_flashcard_review_session(session["id"])
@@ -334,7 +334,7 @@ def test_flashcard_review_session_rollup_reconstructs_missing_aggregates(db: Cha
     rollup = db.get_flashcard_review_session_rollup(session["id"], repair_session_aggregates=False)
 
     assert rollup["cards_reviewed"] == 3  # nosec B101
-    assert rollup["correct_count"] == 2  # nosec B101
+    assert rollup["correct_count"] == 3  # nosec B101
     assert rollup["aggregate_source"] == "reconstructed"  # nosec B101
 
 
@@ -348,7 +348,7 @@ def test_flashcard_review_session_rollup_reconstructs_impossible_aggregates(db: 
     )
 
     db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=1, answer_time_ms=750, review_session_id=session["id"])
+    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
     db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
@@ -378,7 +378,7 @@ def test_flashcard_review_session_rollup_repairs_stale_aggregates_from_reviews(d
     )
 
     db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=1, answer_time_ms=750, review_session_id=session["id"])
+    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
     db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """
@@ -414,7 +414,7 @@ def test_flashcard_review_session_rollup_reload_after_conditional_repair_race(
     )
 
     db.review_flashcard(card_uuids[0], rating=4, answer_time_ms=600, review_session_id=session["id"])
-    db.review_flashcard(card_uuids[1], rating=1, answer_time_ms=750, review_session_id=session["id"])
+    db.review_flashcard(card_uuids[1], rating=0, answer_time_ms=750, review_session_id=session["id"])
     db.review_flashcard(card_uuids[2], rating=3, answer_time_ms=900, review_session_id=session["id"])
     db.execute_query(
         """

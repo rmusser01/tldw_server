@@ -1,0 +1,46 @@
+[
+  {
+    "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+    "baseline_sha256": "33f987c9e4c6acc3b1502c9f6e10dc66c6e17929f2258c4d67fa40e87b7fe06b",
+    "current_sha256": "bf6e79fe0fc0c31262c8acbcc95e2cb0650e16bee6aeb366b1e2ced8aca0004d",
+    "baseline_ruff": 0,
+    "current_ruff": 0,
+    "ruff_unchanged": true,
+    "bandit_findings": 0,
+    "bandit_errors": [],
+    "compiled": true
+  },
+  {
+    "path": "tldw_Server_API/tests/DB_Management/test_flashcard_analytics_backends.py",
+    "baseline_sha256": "e23e82ac69b0f94754214709153f29aecc0668125748c739df7bf2dd61b5c9d5",
+    "current_sha256": "56e4a5a14be9a57aa040054af631744cd766675f707bfe7aa8c979769665e3a0",
+    "baseline_ruff": 0,
+    "current_ruff": 0,
+    "ruff_unchanged": true,
+    "bandit_findings": 0,
+    "bandit_errors": [],
+    "compiled": true
+  },
+  {
+    "path": "tldw_Server_API/tests/StudySuggestions/test_flashcard_review_sessions.py",
+    "baseline_sha256": "09cda480fd0110c3596020f14f6b6dd60b5b5d88a2787839078d5ae7611b4ba8",
+    "current_sha256": "223dca2a95ec5812b64d49c94af567732e5d6d357f2fe7154b530590e9d0f6c4",
+    "baseline_ruff": 0,
+    "current_ruff": 0,
+    "ruff_unchanged": true,
+    "bandit_findings": 0,
+    "bandit_errors": [],
+    "compiled": true
+  },
+  {
+    "path": "tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "baseline_sha256": "a574278d41482ab8ebcee93d1ff649cde203749db2351608ce57872dc0abbca3",
+    "current_sha256": "d08aa1abaa0ad6aaa55f0066b5e9c9f215a2df4c66d8747bff600838ef85788d",
+    "baseline_ruff": 14,
+    "current_ruff": 14,
+    "ruff_unchanged": true,
+    "bandit_findings": 0,
+    "bandit_errors": [],
+    "compiled": true
+  }
+]
