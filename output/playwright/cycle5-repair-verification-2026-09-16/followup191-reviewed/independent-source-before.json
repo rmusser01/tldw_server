@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-17T02:34:54.102Z",
+  "manifestHash": "4cd119b828905a84d3223c5ed71a12100bab6eaaad9a3808d78d441a81a94f1f",
+  "reportHash": "29c29ce67d609a9f5235ab39851c87ba0fae9100f11c3351955423c72dd58649",
+  "owned": [
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+      "sha256": "7d6933c5ed7ff06e55e2ff335c48ccf5fb93d0ff209dd98a10e92a140f5c6e1c",
+      "current": "7d6933c5ed7ff06e55e2ff335c48ccf5fb93d0ff209dd98a10e92a140f5c6e1c",
+      "snapshot": "7d6933c5ed7ff06e55e2ff335c48ccf5fb93d0ff209dd98a10e92a140f5c6e1c"
+    },
+    {
+      "path": "apps/packages/ui/src/services/flashcards.ts",
+      "sha256": "923f290dce3b692d9d1d5160f43dc0fdd03fb4678cb1c34fffc221f762068aaa",
+      "current": "923f290dce3b692d9d1d5160f43dc0fdd03fb4678cb1c34fffc221f762068aaa",
+      "snapshot": "923f290dce3b692d9d1d5160f43dc0fdd03fb4678cb1c34fffc221f762068aaa"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "sha256": "8a0f75914c299b4fbd27fa700835330738f2872b6a82a0b3785f114b23259e4b",
+      "current": "8a0f75914c299b4fbd27fa700835330738f2872b6a82a0b3785f114b23259e4b",
+      "snapshot": "8a0f75914c299b4fbd27fa700835330738f2872b6a82a0b3785f114b23259e4b"
+    },
+    {
+      "path": "tldw_Server_API/tests/Flashcards/test_cram_scheduler_preview_contract.py",
+      "sha256": "9b47198183dedce4357f5abe812b425d0d1c20359ee62a11a2adfc0ccac0b0a2",
+      "current": "9b47198183dedce4357f5abe812b425d0d1c20359ee62a11a2adfc0ccac0b0a2",
+      "snapshot": "9b47198183dedce4357f5abe812b425d0d1c20359ee62a11a2adfc0ccac0b0a2"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx",
+      "sha256": "0339fc7f3ed25985e41a3267f683214aac8459b2e89465c921ca8f7441c6e5c3",
+      "current": "0339fc7f3ed25985e41a3267f683214aac8459b2e89465c921ca8f7441c6e5c3",
+      "snapshot": "0339fc7f3ed25985e41a3267f683214aac8459b2e89465c921ca8f7441c6e5c3"
+    }
+  ],
+  "external": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "5a7a43c34aaa15d0e328c145f96f5919b0c6c14b6a4147da389a410488d2ea3e"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/keyword_store.py",
+      "sha256": "2bd4ee82e97d9d046f4f7f736f2e19a41d1fb73fe665d650b860fc9d9c72be45"
+    },
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/chacha/note_store.py",
+      "sha256": "6dd5a2b86caaf2f04135d56b115bbbe4863bab2d63e7122307eaf9305d64902a"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "sha256": "b2b8a50a21974d313ed02d8005b5edd19a13547c98d45b2da455fae6825c0de3"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "sha256": "d0346c08e1a0bc9bd3bad2e1bb34ec6d2de5ec5aa7d1a22ad7e49d3f8e26d718"
+    }
+  ]
+}

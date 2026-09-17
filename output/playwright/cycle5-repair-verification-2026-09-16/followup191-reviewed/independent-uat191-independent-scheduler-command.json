@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-17T02:36:47.156Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Flashcards/test_scheduler_fsrs.py",
+    "tldw_Server_API/tests/Flashcards/test_flashcards_scheduler_schema.py",
+    "tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py::test_get_next_review_card_returns_400_for_input_error",
+    "tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py::test_get_next_review_card_returns_500_for_db_error",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

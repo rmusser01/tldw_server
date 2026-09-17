@@ -1,0 +1,38 @@
+{
+  "task": "TASK13260.129",
+  "productionHold": true,
+  "files": [
+    {
+      "path": ".tmp/uat191-repair-20260917/DESIGN191.md",
+      "sha256": "615296e899b20891a66fb90a24b306c8e296b52a57e2db14c9b1b65654fee8da"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/RED191.md",
+      "sha256": "5b198c0cee78f343a0cbf1a5adaa7455fbc51f406068deb8f020a88cf8bf9976"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/red-source-manifest.json",
+      "sha256": "40f80ff9e6d4333500d8be12c3b84b4bed09efcf7f6015e3d8a48d6707a6a2b6"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/frontend-causal-red.log",
+      "sha256": "c78367f3d17f2d71c489e2fdb61ad4a818d67edf59ebc7204ec1672caa1fb5ed"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/native-derived.json",
+      "sha256": "67aa709723ceacb9b44d10ceea864ece3d0ca85bcb087672af8af93d9dbf02f3"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/bandit-test.json",
+      "sha256": "d6787fe706c150be4778cf601c366dc82fef1cb60a883861e7b5be01d5842be4"
+    },
+    {
+      "path": ".tmp/uat191-repair-20260917/eslint-test-local.log",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17"
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/uat191-route-isolated-red.redacted.log",
+      "sha256": "663c314bc198008774e0be84082ad685eb25aea99e1e9c401dfbf584de28ea5a"
+    }
+  ]
+}

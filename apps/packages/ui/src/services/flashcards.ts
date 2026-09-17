@@ -784,6 +784,7 @@ export async function listFlashcards(params: {
   q?: string | null
   workspace_id?: string | null
   include_workspace_items?: boolean | null
+  include_scheduler_preview?: boolean
   limit?: number
   offset?: number
   order_by?: "due_at" | "created_at" | null
@@ -795,6 +796,7 @@ export async function listFlashcards(params: {
     q: params.q,
     workspace_id: params.workspace_id,
     include_workspace_items: params.include_workspace_items ?? false,
+    include_scheduler_preview: params.include_scheduler_preview,
     limit: params.limit,
     offset: params.offset,
     order_by: params.order_by

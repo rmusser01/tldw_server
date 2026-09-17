@@ -1,0 +1,66 @@
+{
+  "backend": [
+    {
+      "label": "route",
+      "passed": 26,
+      "skipped": 0,
+      "seconds": 28.12
+    },
+    {
+      "label": "adjacent",
+      "passed": 20,
+      "skipped": 0,
+      "deselected": 183,
+      "seconds": 12.89
+    },
+    {
+      "label": "scheduler",
+      "passed": 12,
+      "skipped": 0,
+      "seconds": 3.63
+    }
+  ],
+  "frontend": {
+    "passed": 39,
+    "files": 4,
+    "skipped": 0,
+    "seconds": 3.05,
+    "command": "bunx vitest run ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx ../packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx ../packages/ui/src/components/Flashcards/hooks/__tests__/useFlashcardQueries.cram-queue.test.tsx ../packages/ui/src/services/__tests__/flashcards.test.ts",
+    "sha256": "16bb329ff18c2400c70f3de3a3d8f3259423285966ba9c2959e1ce820a2edd50"
+  },
+  "copiedArtifacts": [
+    {
+      "path": "uat191-independent-route.redacted.log",
+      "sha256": "67121d2674acb06a26130ded657dd39827f735ba88bfa673977e3688b6912130"
+    },
+    {
+      "path": "uat191-independent-route-command.json",
+      "sha256": "2a67d3a7635af05e58a02a2ebd66bbf3640f65c9ada91f232a2872dd3ab97e6a"
+    },
+    {
+      "path": "uat191-independent-adjacent.redacted.log",
+      "sha256": "c4be36204abaf1328b12daf9d66eb35c0b5ff9c93d7d791a1db589e2e855cc83"
+    },
+    {
+      "path": "uat191-independent-adjacent-command.json",
+      "sha256": "4537b5517c32f71773b30f98778f795152e759bc9dfced738e8d4fb0733a7d44"
+    },
+    {
+      "path": "uat191-independent-scheduler.redacted.log",
+      "sha256": "8c21afcb4cee297c9986b7735f38e8465dc5d9d49008e02345d9c23d4cb0e54e"
+    },
+    {
+      "path": "uat191-independent-scheduler-command.json",
+      "sha256": "54ea85582298644a6987306f32dfc6b7c64bc1928c3ef871883ee06d399d4485"
+    }
+  ],
+  "knownSecretScanPassed": true,
+  "allOwnedUnchanged": true,
+  "externalChanges": [
+    {
+      "path": "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+      "sha256": "9725bc3772edee0b770bff906a28c83fa08b76bb4dbd8ca366b51e7b15a3af9b",
+      "unchanged": false
+    }
+  ]
+}

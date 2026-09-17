@@ -1,0 +1,48 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/services/flashcards.ts",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-17T02:31:46Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/Flashcards/hooks/useFlashcardQueries.ts": {
+      "loc": 1208,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-previews.test.tsx": {
+      "loc": 134,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/services/flashcards.ts": {
+      "loc": 1252,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2594,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

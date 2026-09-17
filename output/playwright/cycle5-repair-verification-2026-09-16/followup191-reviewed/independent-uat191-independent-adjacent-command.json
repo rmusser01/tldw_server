@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T02:36:03.749Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py",
+    "tldw_Server_API/tests/Flashcards/test_scheduler_fsrs.py",
+    "tldw_Server_API/tests/Flashcards/test_review_response_timestamp_contract.py",
+    "-k",
+    "review_next or fsrs_review or list_flashcard or flashcards_list or review_response or review_http",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

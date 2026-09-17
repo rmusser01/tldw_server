@@ -399,6 +399,7 @@ export function useCramQueueQuery(
           deck_id: deckId ?? undefined,
           tag: tag || undefined,
           due_status: "all",
+          include_scheduler_preview: true,
           order_by: "due_at",
           limit,
           offset,

@@ -1290,6 +1290,7 @@ def list_flashcards(
     deck_id: Optional[int] = None,
     workspace_id: Optional[str] = None,
     include_workspace_items: bool = False,
+    include_scheduler_preview: bool = False,
     tag: Optional[str] = None,
     due_status: Optional[str] = Query('all', pattern="^(new|learning|due|all)$"),
     q: Optional[str] = None,
@@ -1320,6 +1321,17 @@ def list_flashcards(
             q=q,
             include_deleted=False,
         )
+        if include_scheduler_preview:
+            decks: dict[int, dict[str, Any] | None] = {}
+            for card in items:
+                card_deck_id = card.get("deck_id")
+                deck = None
+                if card_deck_id is not None:
+                    card_deck_id = int(card_deck_id)
+                    if card_deck_id not in decks:
+                        decks[card_deck_id] = db.get_deck(card_deck_id)
+                    deck = decks[card_deck_id]
+                _attach_scheduler_preview(card, deck)
         total_int = int(total)
         return {
             "items": items,
@@ -1332,6 +1344,8 @@ def list_flashcards(
                 count=len(items),
             ),
         }
+    except (SchedulerSettingsError, FsrsSettingsError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list flashcards") from exc
 
