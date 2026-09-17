@@ -1,0 +1,22 @@
+{
+  "at": "2026-09-17T23:38:13.967Z",
+  "result": "10 passed, 6 warnings in 31.51s =======================",
+  "exitCode": 0,
+  "log": {
+    "path": ".tmp/fresh-uat-recovery-20260916/retry256-root-final-20260917.redacted.log",
+    "sha256": "37192a31d7325828b30db62b9a704df26731260eab67eb021ddc80f56c5d9d9c",
+    "retained": false,
+    "reason": "Full runtime test log omitted; bounded terminal result and source hashes retained."
+  },
+  "sourceHashes": {
+    "tldw_Server_API/app/core/Chat/chat_service.py": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721",
+    "tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py": "56be81875f970c642a2cff7cc608b8f961e467dcf0765744d13464b9068d7355"
+  },
+  "static": {
+    "ruffExit": 0,
+    "compileExit": 0,
+    "banditExit": 0,
+    "productionBanditFindings": 0,
+    "diffCheckExit": 0
+  }
+}

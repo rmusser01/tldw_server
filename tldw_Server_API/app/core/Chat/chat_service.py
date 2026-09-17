@@ -4365,7 +4365,14 @@ async def build_context_and_messages(
                 if _is_saved_chat_error_envelope({"role": "assistant", "content": tail.get("content", "")}):
                     retry_user_message_id = str(tail_rows[1]["id"])
                 else:
-                    raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
+                    saved_extra = (tail_metadata.get(tail_rows[1]["id"]) or {}).get("extra")
+                    saved_client_id = saved_extra.get("client_message_id") if isinstance(saved_extra, dict) else None
+                    saved_identity_is_valid = (
+                        isinstance(saved_client_id, str)
+                        and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", saved_client_id)
+                    )
+                    if not (client_message_id and saved_identity_is_valid and saved_client_id != client_message_id):
+                        raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
 
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0

@@ -146,3 +146,21 @@
 - New257/task199: source-only QA factual and broaderRowan searches return emptycontexts despite ready/readable originalPostgreSQLsource. Independent diagnosis active. New258/task200: fresh unconfiguredWebUI sends protected ingestion-capability request401; separately tracked from corrected231guidance.256 mandatoryPG initially blocked by sandbox reachability; realDockerfixture up, rerun with authorized local-network access. Do not skip PostgreSQL.
 
 - 23:34 UTC: UAT231/233/237/244/245/247 accepted and tasks closed after independent native and retention review. Total 258 findings: 250 verified, 5 awaiting native acceptance, 3 active repairs. Retained manifest c4f50b39282f2d6f71d8ac82763357608f7f6d9dffd475b3186fe0433fb95cbf. Running metadata hash changes are historical observations, not payload corruption. Full matrix remains held.
+
+## Task 257: restore owned PostgreSQL source retrieval in Knowledge QA
+
+**Backlog:** TASK13260.199. **Status:** In Progress. **Baseline:** 9bb3450cb8 (reviewed 256 source is present but disjoint and owned by root until commit).
+
+**Requirement:** Original ready Rowan source remains readable by ordinary Media full-text search, yet actual standard hybrid/chunk Knowledge QA returns empty contexts for both a facts question and Rowan. Establish the first failing actual PostgreSQL stage before editing production. Preserve owner isolation, legitimate no-match behavior, external-service failure semantics, and existing SQLite behavior. No blind threshold changes, reingestion, admin bypass, all-rows fallback, timeout/provider tuning or mocked successful native response.
+
+**Owned scope:** Narrow RAG retrieval/pipeline/stream implementation and focused RAG tests; use existing DB abstractions. If root cause requires a shared DB implementation change, report the precise proven boundary before expanding scope. Parent owns Git, Backlog/docs, frozen sources, browser/runtime/model/profiles. No commits, subagents or native operations by implementer.
+
+**Plan:**
+1. Read .tmp/uat-repairs-231-246/retrieval257-diagnosis/REVIEW.md and existing actual worker content-scope, dual-backend retrieval, and stream parity tests. Use the official PostgreSQL fixture with a restricted non-superuser/non-BYPASSRLS role. Reproduce through actual persistence and actual retrieval/stream adapter, with external embedding/reranker/generation controlled. Preserve normal same-owner Media FTS positive control.
+2. Trace safe counts at raw PostgreSQL FTS, normalization, merge/filter/rerank and emitted contexts; verify actual owner scope at the failing stage. Record causal RED and identify exact fault. Repair only that fault with existing supported interfaces. Do not swallow errors into successful empty output.
+3. Cover same-owner Rowan and facts question, hybrid with no vector results and media fallback when no chunks exist, no-match negative, other-owner exclusion, sequential pooled owner1→owner2→owner1 and cleanup/cancellation where affected. Keep actual DB/retriever boundaries real; do not mock the defective stage. Compare stream/non-stream behavior.
+4. Run official focused/adjacent SQLite/PostgreSQL checks with zero skips; scoped Ruff/compile/Bandit after activating .venv. Classify unchanged warnings and pytest B101 separately. Write report with commands, exit codes, source hashes, limitations and evidence. Parent independently reviews and repeats original native QA before closure.
+
+**Runner:** source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=retrieval257-UNIQUE node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs TESTS -q --tb=short. Use require_escalated for fixture network; sandbox refusal is not PostgreSQL unavailability. Never skip/substitute/disable PostgreSQL. Never print private profiles/config/credentials or raw runtime logs. Evidence .tmp/uat-repairs-231-246/retrieval257/. Maximum three failed implementation attempts before documented reassessment.
+
+**Success:** causal defect repaired with real restricted PostgreSQL evidence and unchanged isolation, independent review clear, original source-only native QA yields cited owned evidence. Full matrix stays held.

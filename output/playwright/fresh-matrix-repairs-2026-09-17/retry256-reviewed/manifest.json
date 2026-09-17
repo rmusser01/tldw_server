@@ -1,0 +1,117 @@
+{
+  "at": "2026-09-17T23:38:14.015Z",
+  "reviewedImplementation": [
+    256
+  ],
+  "nativeAcceptancePending": [
+    256
+  ],
+  "sourceBaseline": "6f6983b0620aae1f0892c6b0d3ae3bebfc105e02",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/retry256/root-verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/retry256/root-verification.json",
+      "sourceBytes": 877,
+      "sourceSha256": "9d390192138a5e69bac3414e8f4fdc6c70b7e2e1846818242f716d503f99b11e",
+      "bytes": 877,
+      "sha256": "9d390192138a5e69bac3414e8f4fdc6c70b7e2e1846818242f716d503f99b11e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/retry256/verification.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/retry256/verification.md",
+      "sourceBytes": 6738,
+      "sourceSha256": "31be44cbd8958288d1b26f61b31ca3136f6a6b9d46fe6e9add57fe6e553435ae",
+      "bytes": 6738,
+      "sha256": "31be44cbd8958288d1b26f61b31ca3136f6a6b9d46fe6e9add57fe6e553435ae",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/retry256-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/retry256-review/REVIEW.md",
+      "sourceBytes": 6004,
+      "sourceSha256": "4580a27554fec0cbf3be086f09894073975a2f6734ff1a020bec7ec60bb94e2b",
+      "bytes": 6004,
+      "sha256": "4580a27554fec0cbf3be086f09894073975a2f6734ff1a020bec7ec60bb94e2b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/retry256-review/ROUND1.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/retry256-review/ROUND1.md",
+      "sourceBytes": 3139,
+      "sourceSha256": "6b6ae0735a1a62f663cf7b5aa1bfb53fc2a148430e850649c27af9adfe7b55d9",
+      "bytes": 3139,
+      "sha256": "6b6ae0735a1a62f663cf7b5aa1bfb53fc2a148430e850649c27af9adfe7b55d9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/retry256-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/retry256-review/audit.json",
+      "sourceBytes": 691,
+      "sourceSha256": "2e6ab6b5aa6e054894fa2ae6816dafde48f327af952921c864ed9e7686b454ae",
+      "bytes": 691,
+      "sha256": "2e6ab6b5aa6e054894fa2ae6816dafde48f327af952921c864ed9e7686b454ae",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-brief.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-brief.md",
+      "sourceBytes": 3916,
+      "sourceSha256": "b8dd1b514688d871f78350a984a054dce6750ffb0cba27ec2733af845cd79040",
+      "bytes": 3916,
+      "sha256": "b8dd1b514688d871f78350a984a054dce6750ffb0cba27ec2733af845cd79040",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-report.md",
+      "sourceBytes": 2205,
+      "sourceSha256": "15cba52ea6ab3f4bd33685298a643af195c0ab5feac47692b83b243e640e7804",
+      "bytes": 2205,
+      "sha256": "15cba52ea6ab3f4bd33685298a643af195c0ab5feac47692b83b243e640e7804",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-review.diff",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-review.diff.gz",
+      "sourceBytes": 12057,
+      "sourceSha256": "4e37776dbc0a161d9b9538128323d34059263a2096d6275e6b049d564492ffc8",
+      "bytes": 3657,
+      "sha256": "84bb279700a5cdc3b0dff1af1356fad01cfd5ea14ab59efe5820cf0d74a9f07d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-review-round1.diff",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-256-review-round1.diff.gz",
+      "sourceBytes": 11162,
+      "sourceSha256": "d2030a353374367cfb26ddf775436426338a284936cd2de8b6c79565112c8b99",
+      "bytes": 3275,
+      "sha256": "f590829071f38cffad92fbf384d979f9921c13a73e6f7a5f52ccd5ab4195fece",
+      "encoding": "gzip"
+    },
+    {
+      "source": "tldw_Server_API/app/core/Chat/chat_service.py",
+      "path": "evidence/tldw_Server_API/app/core/Chat/chat_service.py.gz",
+      "sourceBytes": 316001,
+      "sourceSha256": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721",
+      "bytes": 59182,
+      "sha256": "6bac92076ba3e7cc4427051a44f3e2c2f1ebd64157cc35b5d8f26b23b7e184a6",
+      "encoding": "gzip"
+    },
+    {
+      "source": "tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+      "path": "evidence/tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py",
+      "sourceBytes": 51247,
+      "sourceSha256": "56be81875f970c642a2cff7cc608b8f961e467dcf0765744d13464b9068d7355",
+      "bytes": 51247,
+      "sha256": "56be81875f970c642a2cff7cc608b8f961e467dcf0765744d13464b9068d7355",
+      "encoding": "identity"
+    }
+  ]
+}
