@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
+    hasPersistentBackend: true,
     get: vi.fn(async (key: string) => state.storage.get(key)),
     set: vi.fn(async (key: string, value: ChatSettingsRecord) => {
       state.storage.set(key, value)

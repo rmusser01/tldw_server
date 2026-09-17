@@ -20,6 +20,7 @@ const storageState = vi.hoisted(() => {
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
+    hasPersistentBackend: true,
     get: storageState.get,
     set: storageState.set,
     remove: storageState.remove

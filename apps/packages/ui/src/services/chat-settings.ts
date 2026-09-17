@@ -1,5 +1,6 @@
 import { db } from "@/db/dexie/schema"
 import Dexie from "dexie"
+import { requirePersistentStorage } from "@/utils/persistent-storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatLinkedResearchPath } from "@/components/Option/Playground/research-run-status"
@@ -724,6 +725,7 @@ export const withPlainLocalForkSettings = async <T>(
       throw new Error("fork_chat_settings_unavailable")
     let raw: unknown
     try {
+      requirePersistentStorage(localChatSettingsStorage)
       raw = await localChatSettingsStorage.get(
         getChatSettingsStorageKey(`local:${historyId}`)
       )
@@ -762,6 +764,7 @@ const localSettingsWrite = async (
   historyId: string,
   operation: (initialized: boolean) => Promise<void>
 ) => {
+  requirePersistentStorage(localChatSettingsStorage)
   const token = crypto.randomUUID()
   await db.transaction("rw", [db.chatHistories], async () => {
     const history = await db.chatHistories.get(historyId)
@@ -782,7 +785,9 @@ const localSettingsWrite = async (
     const guard = history?.local_settings_guard
     if (!guard || !validSettingsGuard(guard) || !guard.pending.includes(token))
       throw new Error("fork_chat_settings_unavailable")
+    requirePersistentStorage(localChatSettingsStorage)
     await Dexie.waitFor(operation(guard.initialized === true))
+    requirePersistentStorage(localChatSettingsStorage)
     await db.chatHistories.update(historyId, {
       local_settings_guard: {
         initialized: true,
@@ -804,6 +809,7 @@ const requireSettingsRecord = (raw: unknown) => {
 }
 /** One local payload authority. null is the persisted, initialized empty baseline. */
 const ensureLocalChatSettingsBaseline = async (historyId: string) => {
+  requirePersistentStorage(localChatSettingsStorage)
   const history = await db.chatHistories.get(historyId)
   if (!history) throw new Error("missing_conversation")
   if (!validSettingsGuard(history.local_settings_guard))
@@ -816,6 +822,7 @@ const ensureLocalChatSettingsBaseline = async (historyId: string) => {
     const local = await localChatSettingsStorage.get(key)
     requireSettingsRecord(local)
     if (local !== undefined) return
+    requirePersistentStorage(storage)
     const legacy = await storage.get(key)
     requireSettingsRecord(legacy)
     await localChatSettingsStorage.set(key, legacy ?? null)

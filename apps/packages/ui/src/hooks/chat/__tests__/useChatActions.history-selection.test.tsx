@@ -1805,6 +1805,7 @@ vi.mock("@/utils/safe-storage", async (original) => {
       const area = options?.area ?? "sync"
       return new Proxy(storage, {
         get(target, key) {
+          if (key === "hasPersistentBackend") return true
           if (key === "get")
             return async (name: string) =>
               name.startsWith("chatSettings:")

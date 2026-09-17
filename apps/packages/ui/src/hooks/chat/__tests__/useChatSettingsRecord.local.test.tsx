@@ -10,6 +10,7 @@ vi.mock("@/utils/safe-storage", async () => {
   const { settings } = await import("./local-history-fixture")
   return {
     createSafeStorage: (options: any) => ({
+      hasPersistentBackend: true,
       get: async (key: string) => settings.get((options?.area ?? "sync") + key),
       set: async (key: string, value: any) => {
         settings.set((options?.area ?? "sync") + key, value)

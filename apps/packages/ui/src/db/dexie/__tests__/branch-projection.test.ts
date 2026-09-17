@@ -98,6 +98,7 @@ const settingsStorage = vi.hoisted(() => ({
 }))
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: (options: any) => ({
+    hasPersistentBackend: true,
     get: (key: string) => settingsStorage.get(key, options?.area ?? "sync"),
     set: (key: string, value: unknown) =>
       settingsStorage.set(key, value, options?.area ?? "sync")
