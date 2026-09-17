@@ -1,3 +1,5 @@
+import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
+import { createSelectedForkAction } from "@/hooks/chat/chat-action-utils";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import React from "react";
@@ -9,13 +11,9 @@ import { getContentFromCurrentTab } from "~/libs/get-html";
 // RAG now uses tldw_server endpoints instead of local embeddings
 import { ChatHistory, type MessageMetadataExtra } from "@/store/option";
 import {
-  deleteChatForEdit,
-  deleteChatAfterMessageId,
   generateID,
   getPromptById,
-  removeMessageByIndex,
   removeMessageById,
-  updateMessageByIndex,
   updateMessageById,
 } from "@/db/dexie/helpers";
 import { useTranslation } from "react-i18next";
@@ -3105,218 +3103,78 @@ export const useMessage = () => {
     }
   };
 
-  const editMessage = async (
-    index: number,
-    message: string,
-    isHuman: boolean,
-    isSend = true,
-  ) => {
-    const newHistory = history;
-
-    if (isHuman) {
-      const currentHumanMessage = (messages as ServerBackedMessage[])[index];
-      const updatedMessages = messages.map((msg, idx) =>
-        idx === index ? { ...msg, message } : msg,
-      );
-      if (!isSend) {
-        setMessages(updatedMessages);
-        const updatedHistory = newHistory.map((item, idx) =>
-          idx === index ? { ...item, content: message } : item,
-        );
-        setHistory(updatedHistory);
-        // TASK-12104: address the Dexie row by stable id (not UI array index),
-        // which is offset by any non-persisted greeting seed at UI index 0.
-        if (currentHumanMessage?.id) {
-          await updateMessageById(historyId, currentHumanMessage.id, message);
-        } else {
-          await updateMessageByIndex(historyId, index, message);
-        }
-        if (
-          serverChatId &&
-          (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
-          currentHumanMessage?.serverMessageId
-        ) {
-          try {
-            const srv = await tldwClient.getMessage(
-              currentHumanMessage.serverMessageId,
-            );
-            const ver = srv?.version;
-            if (ver != null) {
-              await tldwClient.editMessage(
-                currentHumanMessage.serverMessageId,
-                message,
-                Number(ver),
-                serverChatId ?? undefined,
-              );
-            }
-          } catch {}
-        }
-        return;
-      }
-      const previousMessages = updatedMessages.slice(0, index + 1);
-      setMessages(previousMessages);
-      const previousHistory = newHistory.slice(0, index);
-      setHistory(previousHistory);
-      // TASK-12104: id-address the edited row (and delete what follows it) so a
-      // greeting-offset UI index cannot overwrite/keep the wrong Dexie rows.
-      if (currentHumanMessage?.id) {
-        await updateMessageById(historyId, currentHumanMessage.id, message);
-        await deleteChatAfterMessageId(historyId, currentHumanMessage.id);
-      } else {
-        await updateMessageByIndex(historyId, index, message);
-        await deleteChatForEdit(historyId, index);
-      }
-      // Server-backed edit and cleanup
-      if (
-        serverChatId &&
-        (selectedCharacter?.id || serverChatAssistantKind === "persona")
-      ) {
-        if (currentHumanMessage?.serverMessageId) {
-          try {
-            const srv = await tldwClient.getMessage(
-              currentHumanMessage.serverMessageId,
-            );
-            const ver = srv?.version;
-            if (ver != null) {
-              await tldwClient.editMessage(
-                currentHumanMessage.serverMessageId,
-                message,
-                Number(ver),
-                serverChatId ?? undefined,
-              );
-            }
-          } catch {}
-        }
-        try {
-          const res: any = await tldwClient.listChatMessages(serverChatId, {
-            include_deleted: "false",
-          });
-          const list: any[] = Array.isArray(res) ? res : res?.messages || [];
-          const serverIds = list.map((m: any) => m.id);
-          const targetSrvId = currentHumanMessage?.serverMessageId;
-          const startIdx = targetSrvId ? serverIds.indexOf(targetSrvId) : -1;
-          if (startIdx >= 0) {
-            for (let i = startIdx + 1; i < list.length; i++) {
-              const m = list[i];
-              try {
-                await tldwClient.deleteMessage(
-                  m.id,
-                  Number(m.version),
-                  serverChatId ?? undefined,
-                );
-              } catch {}
-            }
-          }
-        } catch {}
-      }
-      const abortController = new AbortController();
-      await onSubmit({
-        message: message,
-        image: currentHumanMessage.images[0] || "",
-        isRegenerate: true,
-        messages: previousMessages,
-        memory: previousHistory,
-        controller: abortController,
-      });
-    } else {
-      // Assistant message edited
-      const currentAssistant = (messages as ServerBackedMessage[])[index];
-      const updatedMessages = messages.map((msg, idx) =>
-        idx === index ? { ...msg, message } : msg,
-      );
-      setMessages(updatedMessages);
-      const updatedHistory = newHistory.map((item, idx) =>
-        idx === index ? { ...item, content: message } : item,
-      );
-      setHistory(updatedHistory);
-      // TASK-12104: address the assistant Dexie row by stable id.
-      if (currentAssistant?.id) {
-        await updateMessageById(historyId, currentAssistant.id, message);
-      } else {
-        await updateMessageByIndex(historyId, index, message);
-      }
-      // Server-backed: update assistant server message too
-      if (
-        serverChatId &&
-        (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
-        currentAssistant?.serverMessageId
-      ) {
-        try {
-          const srv = await tldwClient.getMessage(
-            currentAssistant.serverMessageId,
-          );
-          const ver = srv?.version;
-          if (ver != null) {
-            await tldwClient.editMessage(
-              currentAssistant.serverMessageId,
-              message,
-              Number(ver),
-              serverChatId ?? undefined,
-            );
-          }
-        } catch {}
-      }
-    }
-  };
+  const editMessage = createEditMessage({
+    notification,
+    messages,
+    history,
+    historyId,
+    setMessages,
+    setHistory,
+    onSubmit,
+    validateBeforeSubmitFn: () => true,
+    captureViewFence: historySelection?.fence,
+    mutate: async (target, content) => {
+      if (serverChatId) throw new Error("native_history_mutation_unavailable");
+      if (!historyId || historyId === "temp" || !target.id)
+        throw new Error("temporary_history_unavailable");
+      await updateMessageById(historyId, target.id, content);
+    },
+  });
 
   const deleteMessage = React.useCallback(
     async (index: number) => {
       const target = messages[index];
-      if (!target) return;
-
-      const targetId = target.serverMessageId ?? target.id;
-      if (replyTarget?.id && targetId && replyTarget.id === targetId) {
-        clearReplyTarget();
-      }
-
-      if (target.serverMessageId) {
-        await tldwClient.initialize().catch(() => null);
-        let expectedVersion = target.serverMessageVersion;
-        if (expectedVersion == null) {
-          const serverMessage = await tldwClient.getMessage(
-            target.serverMessageId,
+      if (!target?.id) throw new Error("missing_message");
+      const origin = historySelection?.getCurrent();
+      const current = historySelection?.fence() ?? (() => true);
+      try {
+        if (serverChatId)
+          throw new Error("native_history_mutation_unavailable");
+        if (!historyId || historyId === "temp")
+          throw new Error("temporary_history_unavailable");
+        const removed = await removeMessageById(historyId, target.id);
+        if (!current()) return;
+        if (replyTarget?.id === target.id) clearReplyTarget();
+        const remaining = messages.filter((row) => row.id !== target.id);
+        setMessages(remaining);
+        setHistory(historyFromVisibleMessages(remaining));
+        const view = origin?.view;
+        if (
+          removed &&
+          view?.interpretation.kind === "parent_graph_v1" &&
+          view.cursor.kind !== "empty" &&
+          view.cursor.message_id === target.id
+        ) {
+          await historySelection?.choose(
+            removed.parent_message_id
+              ? { kind: "after_message", message_id: removed.parent_message_id }
+              : { kind: "empty" },
           );
-          expectedVersion = serverMessage?.version;
         }
-        if (expectedVersion == null) {
-          throw new Error("Missing server message version");
-        }
-        await tldwClient.deleteMessage(
-          target.serverMessageId,
-          Number(expectedVersion),
-          serverChatId ?? undefined,
-        );
-        invalidateServerChatHistory();
+      } catch (error) {
+        notification.error({
+          message: "Message deletion failed",
+          description:
+            error instanceof Error ? error.message : "message_delete_failed",
+        });
+        throw error;
       }
-
-      if (historyId) {
-        // TASK-12104: remove the Dexie row by stable id so a non-persisted
-        // greeting at UI index 0 does not shift us onto the wrong row. An
-        // unsaved greeting's id is absent from Dexie, so this is a safe no-op.
-        if (target.id) {
-          await removeMessageById(historyId, target.id);
-        } else {
-          await removeMessageByIndex(historyId, index);
-        }
-      }
-
-      setMessages(messages.filter((_, idx) => idx !== index));
-      setHistory(history.filter((_, idx) => idx !== index));
     },
     [
-      clearReplyTarget,
-      history,
       historyId,
-      invalidateServerChatHistory,
-      messages,
-      replyTarget?.id,
       serverChatId,
-      setHistory,
+      messages,
+      historySelection,
+      replyTarget?.id,
+      clearReplyTarget,
       setMessages,
+      setHistory,
+      notification,
     ],
   );
 
-  const createChatBranch = createBranchMessage({
+  const branchHandler = createBranchMessage({
+    captureViewFence: historySelection?.fence,
     notification,
     historyId,
     setHistory,
@@ -3347,64 +3205,21 @@ export const useMessage = () => {
     history,
   });
 
-  const createServerOnlyChatBranch = createBranchMessage({
-    notification,
+  const createChatBranch = createSelectedForkAction(
+    historySelection,
+    branchHandler,
     historyId,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setSelectedSystemPrompt,
-    setSystemPrompt: currentChatModelSettings.setSystemPrompt,
-    serverChatId,
-    setServerChatId,
-    setServerChatTitle,
-    setServerChatCharacterId,
-    setServerChatMetaLoaded,
-    serverChatState,
-    setServerChatState,
-    setServerChatVersion,
-    serverChatTopic,
-    setServerChatTopic,
-    serverChatClusterId,
-    setServerChatClusterId,
-    serverChatSource,
-    setServerChatSource,
-    serverChatExternalRef,
-    setServerChatExternalRef,
-    onServerChatMutated: invalidateServerChatHistory,
-    characterId: selectedCharacter?.id ?? null,
-    chatTitle: serverChatTitle ?? null,
-    messages,
-    history,
-    serverOnly: true,
-  });
+    notification,
+  );
 
   const regenerateLastMessage = createRegenerateLastMessage({
+    notification,
     validateBeforeSubmitFn: () => true,
     history,
     messages,
     setHistory,
     setMessages,
     onSubmit,
-    beforeSubmit: async ({ nextMessages }) => {
-      if (!serverChatId) return;
-      if (selectedCharacter?.id == null && serverChatCharacterId == null)
-        return;
-
-      const branchIndex = nextMessages.length - 1;
-      if (branchIndex < 0) return;
-
-      const branchedChatId = await createServerOnlyChatBranch(branchIndex);
-      if (!branchedChatId) {
-        throw new Error("Failed to create branch for regeneration");
-      }
-
-      return {
-        submitExtras: {
-          serverChatIdOverride: branchedChatId,
-        },
-      };
-    },
   });
 
   return {

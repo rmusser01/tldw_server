@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // that offset, and contrast them with the buggy index-addressed helpers.
 
 const { store } = vi.hoisted(() => {
-  const store = { messages: [] as any[] }
+  const store = { messages: [] as any[], failure: null as Error | null }
   return { store }
 })
 
@@ -20,10 +20,12 @@ vi.mock("@/db/dexie/chat", () => {
         .map((m) => ({ ...m }))
     }
     async removeMessage(_history_id: string, message_id: string) {
+      if (store.failure) throw store.failure
       const idx = store.messages.findIndex((m) => m.id === message_id)
       if (idx >= 0) store.messages.splice(idx, 1)
     }
     async updateMessage(_history_id: string, message_id: string, content: string) {
+      if (store.failure) throw store.failure
       const target = store.messages.find((m) => m.id === message_id)
       if (target) target.content = content
     }
@@ -71,6 +73,7 @@ const uiMessages = [
 
 describe("TASK-12104 message targeting by stable id", () => {
   beforeEach(() => {
+    store.failure = null
     seedDexie()
   })
 
@@ -123,4 +126,15 @@ describe("TASK-12104 message targeting by stable id", () => {
     const assistant = store.messages.find((m) => m.id === "assistant-1")
     expect(assistant?.content).toBe("hello (edited)") // assistant wrongly overwritten
   })
+})
+
+it("ID helpers expose owner failures instead of reporting false display success", async () => {
+  store.failure = new Error("message_owner_mismatch")
+  await expect(updateMessageById(HISTORY_ID, "user-1", "bad")).rejects.toThrow(
+    "message_owner_mismatch"
+  )
+  await expect(removeMessageById(HISTORY_ID, "user-1")).rejects.toThrow(
+    "message_owner_mismatch"
+  )
+  store.failure = null
 })

@@ -1,3 +1,5 @@
+import type { ForkResultV1 } from "@/types/history-selection"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Clock, DollarSign, Hash } from "lucide-react"
@@ -70,7 +72,7 @@ type PlaygroundCompareClusterProps = {
   editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
   deleteMessage: (index: number) => void
   toggleMessagePinned: (index: number) => Promise<void> | void
-  createChatBranch: (index: number) => void
+  createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}) => Promise<ForkResultV1>
   stopStreamingRequest: (...args: any[]) => void
   runContinue: () => void
   runSteeredContinue: (mode: "continue_as_user" | "impersonate_user") => void
@@ -110,7 +112,7 @@ type PlaygroundCompareClusterProps = {
     clusterId: string
     modelId: string
     open?: boolean
-  }) => Promise<string | null | undefined>
+  }) => Promise<ForkResultV1>
 }
 
 const PerModelMiniComposer: React.FC<{
@@ -232,6 +234,7 @@ export const PlaygroundCompareCluster = ({
     [t]
   )
   const notification = useAntdNotification()
+  const historySelection = useHistorySelectionContext()
   const [collapsed, setCollapsed] = React.useState(true)
   const [hiddenModels, setHiddenModels] = React.useState<string[]>([])
   const [normalizedPreviewEnabled, setNormalizedPreviewEnabled] =
@@ -351,6 +354,7 @@ export const PlaygroundCompareCluster = ({
   }
 
   const handleBulkSplit = async () => {
+    const current = historySelection?.fence() ?? (() => true)
     if (!compareFeatureEnabled) {
       return
     }
@@ -358,12 +362,13 @@ export const PlaygroundCompareCluster = ({
     const failedModels: string[] = []
     for (const modelKey of clusterSelection) {
       try {
-        const newHistoryId = await createCompareBranch({
+        const forkResult = await createCompareBranch({
           clusterId: block.clusterId,
           modelId: modelKey,
           open: false
         })
-        if (newHistoryId && historyId) {
+        const newHistoryId = forkResult.state === "committed" || forkResult.state === "legacy_completed" ? forkResult.child_id : null
+        if (newHistoryId && historyId && current()) {
           setCompareParentForHistory(newHistoryId, {
             parentHistoryId: historyId,
             clusterId: block.clusterId
@@ -434,7 +439,7 @@ export const PlaygroundCompareCluster = ({
           void toggleMessagePinned(block.userIndex)
         }}
         onNewBranch={() => {
-          createChatBranch(block.userIndex)
+          void createChatBranch(userMessage.id ?? "")
         }}
         isTTSEnabled={ttsEnabled}
         generationInfo={userMessage?.generationInfo}
@@ -767,21 +772,23 @@ export const PlaygroundCompareCluster = ({
           const threadPreviewItems = clusterMessagesForModel.slice(-4)
 
           const handleOpenFullChat = async () => {
+            const current = historySelection?.fence() ?? (() => true)
             if (!compareFeatureEnabled) {
               return
             }
-            const newHistoryId = await createCompareBranch({
+            const forkResult = await createCompareBranch({
               clusterId: block.clusterId,
               modelId: modelKey
             })
-            if (newHistoryId && historyId) {
+            const newHistoryId = forkResult.state === "committed" || forkResult.state === "legacy_completed" ? forkResult.child_id : null
+            if (newHistoryId && historyId && current()) {
               setCompareParentForHistory(newHistoryId, {
                 parentHistoryId: historyId,
                 clusterId: block.clusterId
               })
               setCompareSplitChat(block.clusterId, modelKey, newHistoryId)
             }
-            if (modelKey) {
+            if (newHistoryId && modelKey && current()) {
               setCompareMode(false)
               setSelectedModel(modelKey)
               setCompareSelectedModels([modelKey])
@@ -986,7 +993,7 @@ export const PlaygroundCompareCluster = ({
                   void toggleMessagePinned(index)
                 }}
                 onNewBranch={() => {
-                  createChatBranch(index)
+                  void createChatBranch(message.id ?? "", {model_id:modelKey,cluster_id:block.clusterId})
                 }}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}

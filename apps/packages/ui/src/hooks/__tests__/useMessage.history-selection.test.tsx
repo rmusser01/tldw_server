@@ -416,6 +416,8 @@ vi.mock("@/db/dexie/helpers", async (original) => {
   let id = 0
   return {
     formatSelectedHistory,
+    formatToChatHistory: (items:any[]) => items,
+    formatToMessage: (items:any[]) => items,
     saveMessage: vi.fn(async () => {}),
     updateLastUsedModel: vi.fn(async () => {}),
     updateLastUsedPrompt: vi.fn(async () => {}),
@@ -431,10 +433,7 @@ vi.mock("@/db/dexie/helpers", async (original) => {
   }
 })
 
-vi.mock("@/hooks/handlers/messageHandlers", () => ({
-  createBranchMessage: () => vi.fn(),
-  createRegenerateLastMessage: () => vi.fn()
-}))
+
 
 vi.mock("../chat-modes/tabChatMode", () => ({ tabChatMode: vi.fn() }))
 vi.mock("../chat-modes/documentChatMode", () => ({ documentChatMode: vi.fn() }))
@@ -1193,4 +1192,221 @@ it("native persona limitations remain visible before any owner operation", async
       description: "native_history_persona_unsupported"
     })
   )
+})
+
+describe("selected-history mutations", () => {
+  const visible = [
+    {
+      id: "greeting",
+      isBot: true,
+      name: "Assistant",
+      message: "welcome",
+      messageType: "character:greeting",
+      sources: []
+    },
+    {
+      id: "u-old",
+      isBot: false,
+      name: "You",
+      message: "question",
+      sources: []
+    },
+    { id: "a1", isBot: true, name: "Assistant", message: "same", sources: [] }
+  ]
+  it("editing and deleting A1 use its stable ID, preserving hidden same-text A2 and greeting", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    const persisted = new Map([
+      ["u-old", "question"],
+      ["a1", "same"],
+      ["a2", "same"]
+    ])
+    vi.mocked(helpers.updateMessageById).mockImplementation(
+      async (_owner, id, text) => {
+        persisted.set(id, text)
+      }
+    )
+    vi.mocked(helpers.removeMessageById).mockImplementation(
+      async (_owner, id) => {
+        persisted.delete(id)
+        return undefined as any
+      }
+    )
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = visible
+    const options = {
+      setMessages: mocks.setMessages,
+      setHistory: mocks.setHistory
+    }
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.editMessage(2, "edited", false, false)
+    })
+    expect(persisted.get("a1")).toBe("edited")
+    expect(persisted.get("a2")).toBe("same")
+    expect(persisted.get("u-old")).toBe("question")
+    await act(async () => {
+      await result.current.deleteMessage(2)
+    })
+    expect([...persisted.keys()]).toEqual(["u-old", "a2"])
+    expect(options.setMessages).toHaveBeenLastCalledWith(visible.slice(0, 2))
+    expect(helpers.removeMessageByIndex).not.toHaveBeenCalled()
+  })
+  it("edit-and-send and regeneration reject without owner writes or display truncation", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = visible
+    const options = {
+      setMessages: mocks.setMessages,
+      setHistory: mocks.setHistory
+    }
+    const { result } = renderHook(() => useMessage())
+    options.setMessages.mockClear()
+    options.setHistory.mockClear()
+    await expect(
+      result.current.editMessage(1, "new question", true, true)
+    ).rejects.toThrow("unsupported_history_edit_and_send:u-old")
+    await expect(result.current.regenerateLastMessage()).rejects.toThrow(
+      "unsupported_history_regeneration"
+    )
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(options.setHistory).not.toHaveBeenCalled()
+    expect(helpers.updateMessageById).not.toHaveBeenCalled()
+    expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  })
+  it("a held successful edit does not replace a newly selected conversation", async () => {
+    const helpers = await import("@/db/dexie/helpers")
+    let release!: () => void
+    vi.mocked(helpers.updateMessageById).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    let current = true
+    h1.controller.fence = () => () => current
+    mocks.storeState.serverChatId = null
+    mocks.storeState.messages = visible
+    const options = {
+      setMessages: mocks.setMessages,
+      setHistory: mocks.setHistory
+    }
+    const { result } = renderHook(() => useMessage())
+    options.setMessages.mockClear()
+    const editing = result.current.editMessage(2, "edited", false, false)
+    await vi.waitFor(() => expect(helpers.updateMessageById).toHaveBeenCalled())
+    current = false
+    release()
+    await editing
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+})
+
+it("deleting the selected local leaf follows only its captured parent", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const visible = [
+    { id: "u-old", isBot: false, message: "question", sources: [] },
+    { id: "a1", isBot: true, message: "same", sources: [] }
+  ]
+  const choose = vi.fn(async () => true)
+  h1.controller.choose = choose
+  vi.mocked(helpers.removeMessageById).mockResolvedValue({
+    id: "a1",
+    history_id: "history-1",
+    parent_message_id: "u-old"
+  } as any)
+  mocks.storeState.serverChatId = null
+  mocks.storeState.messages = visible
+  const options = {
+    setMessages: mocks.setMessages,
+    setHistory: mocks.setHistory
+  }
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.deleteMessage(1)
+  })
+  expect(choose).toHaveBeenCalledWith({
+    kind: "after_message",
+    message_id: "u-old"
+  })
+})
+it("late leaf deletion retains its storage result without moving a new view", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const visible = [{ id: "a1", isBot: true, message: "same", sources: [] }]
+  const choose = vi.fn(async () => true)
+  h1.controller.choose = choose
+  let current = true
+  h1.controller.fence = () => () => current
+  let release!: (row: any) => void
+  vi.mocked(helpers.removeMessageById).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve
+      })
+  )
+  mocks.storeState.serverChatId = null
+  mocks.storeState.messages = visible
+  const options = {
+    setMessages: mocks.setMessages,
+    setHistory: mocks.setHistory
+  }
+  const { result } = renderHook(() => useMessage())
+  options.setMessages.mockClear()
+  const pending = result.current.deleteMessage(0)
+  await vi.waitFor(() => expect(helpers.removeMessageById).toHaveBeenCalled())
+  current = false
+  release({ id: "a1", parent_message_id: "u-old" })
+  await pending
+  expect(choose).not.toHaveBeenCalled()
+  expect(options.setMessages).not.toHaveBeenCalled()
+})
+it("native plain edit/delete reject before any mutation or display change", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const visible = [
+    {
+      id: "a1",
+      serverMessageId: "a1",
+      isBot: true,
+      message: "same",
+      sources: []
+    }
+  ]
+  mocks.storeState.serverChatId = "tracked-chat-1"
+  mocks.storeState.messages = visible
+  const options = {
+    setMessages: mocks.setMessages,
+    setHistory: mocks.setHistory
+  }
+  const { result } = renderHook(() => useMessage())
+  options.setMessages.mockClear()
+  await expect(
+    result.current.editMessage(0, "bad", false, false)
+  ).rejects.toThrow("native_history_mutation_unavailable")
+  await expect(result.current.deleteMessage(0)).rejects.toThrow(
+    "native_history_mutation_unavailable"
+  )
+  expect(options.setMessages).not.toHaveBeenCalled()
+  expect(helpers.updateMessageById).not.toHaveBeenCalled()
+  expect(helpers.removeMessageById).not.toHaveBeenCalled()
+})
+
+const localForks = vi.hoisted(() => ({capture:vi.fn(),prepare:vi.fn(),commit:vi.fn()}))
+vi.mock("@/db/dexie/branch", () => ({
+  captureLocalForkSelection:localForks.capture,
+  prepareLocalFork:localForks.prepare,
+  commitLocalFork:localForks.commit,
+  forkRequestDigest:()=>"fork-digest"
+}))
+it("mounted branch action captures a stable boundary and returns the committed owner result", async () => {
+  const current = h1.controller.getCurrent()
+  current.owner = {kind:"local",profile_id:"profile",owner_key:"local-key",conversation_id:"history-1"}
+  current.view = {...current.view,owner_key:"local-key",conversation_id:"history-1"}
+  localForks.capture.mockResolvedValue({kind:"normal",selection:{conversation_id:"history-1"}})
+  localForks.prepare.mockResolvedValue({history:{id:"child"},messages:[],files:undefined})
+  localForks.commit.mockImplementation(async (prepared:any) => ({state:"committed",owner_key:"local-key",operation_id:"op",child_id:prepared.history.id,message_map:{a1:"child-a1"}}))
+  mocks.storeState.serverChatId = null
+  const {result} = renderHook(() => useMessage())
+  let outcome: any
+  await act(async () => {outcome = await result.current.createChatBranch("a1")})
+  expect(localForks.capture).toHaveBeenCalledWith(current.owner,expect.objectContaining({cursor:{kind:"after_message",message_id:"a1"}}),expect.any(Object))
+  expect(outcome).toMatchObject({state:"committed",owner_key:"local-key",child_id:"child",message_map:{a1:"child-a1"}})
 })

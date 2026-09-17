@@ -302,7 +302,13 @@ export class PageAssistDatabase {
   }
 
   async updateMessage(history_id: string, message_id: string, content: string) {
-    await db.messages.where('id').equals(message_id).modify({ content });
+    await db.transaction("rw", [db.messages], async () => {
+      const row = await db.messages.get(message_id);
+      if (!row) throw new Error("missing_message");
+      if (row.history_id !== history_id)
+        throw new Error("message_owner_mismatch");
+      await db.messages.update(message_id, { content });
+    });
   }
 
   async updateMessageMedia(
@@ -336,7 +342,20 @@ export class PageAssistDatabase {
   }
 
   async removeMessage(history_id: string, message_id: string) {
-    await db.messages.delete(message_id);
+    return db.transaction("rw", [db.messages], async () => {
+      const row = await db.messages.get(message_id);
+      if (!row) throw new Error("missing_message");
+      if (row.history_id !== history_id)
+        throw new Error("message_owner_mismatch");
+      const rows = await db.messages
+        .where("history_id")
+        .equals(history_id)
+        .toArray();
+      if (rows.some((child) => child.parent_message_id === message_id))
+        throw new Error("message_has_descendants");
+      await db.messages.delete(message_id);
+      return row;
+    });
   }
 
   async updateLastUsedModel(history_id: string, model_id: string) {

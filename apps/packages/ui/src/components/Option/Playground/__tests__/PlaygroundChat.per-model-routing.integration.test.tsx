@@ -141,8 +141,11 @@ vi.mock("./PlaygroundEmpty", () => ({
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
-  PlaygroundMessage: (props: { message: string }) => (
-    <div data-testid="playground-message-mock">{props.message}</div>
+  PlaygroundMessage: (props: { message: string; onNewBranch?: () => void }) => (
+    <div data-testid="playground-message-mock">
+      {props.message}
+      <button onClick={props.onNewBranch}>Fork this message</button>
+    </div>
   )
 }))
 
@@ -214,4 +217,61 @@ describe("PlaygroundChat per-model mini composer routing", () => {
     expect(useMessageOptionState.value.sendPerModelReply).toHaveBeenCalledTimes(2)
     expect(modelB.input.value).toBe("")
   })
+})
+
+it("individual comparison response forks carry stable model-qualified boundaries", async () => {
+  const user = userEvent.setup()
+  render(<PlaygroundChat />)
+  const { card } = await getCardElements("model-a")
+  await user.click(
+    within(card).getByRole("button", { name: "Fork this message" })
+  )
+  expect(useMessageOptionState.value.createChatBranch).toHaveBeenCalledWith(
+    "c1-a",
+    { model_id: "model-a", cluster_id: "cluster-1" }
+  )
+})
+it.each(["blocked", "partial", "unknown"])(
+  "%s comparison result does not leave compare mode or adopt a candidate child",
+  async (state) => {
+    useMessageOptionState.value.createCompareBranch.mockResolvedValue({
+      state,
+      operation_id: "op",
+      owner_key: "owner",
+      code: "failed",
+      candidate_child_id: "candidate"
+    })
+    useMessageOptionState.value.setCompareMode.mockClear()
+    useMessageOptionState.value.setCompareSplitChat.mockClear()
+    const user = userEvent.setup()
+    render(<PlaygroundChat />)
+    const { card } = await getCardElements("model-a")
+    await user.click(
+      within(card).getByRole("button", { name: "Open as full chat" })
+    )
+    expect(useMessageOptionState.value.setCompareMode).not.toHaveBeenCalled()
+    expect(
+      useMessageOptionState.value.setCompareSplitChat
+    ).not.toHaveBeenCalled()
+  }
+)
+it("acknowledged comparison result adopts only its typed child ID", async () => {
+  useMessageOptionState.value.createCompareBranch.mockResolvedValue({
+    state: "committed",
+    operation_id: "op",
+    owner_key: "owner",
+    child_id: "child",
+    message_map: { "c1-a": "child-a" }
+  })
+  const user = userEvent.setup()
+  render(<PlaygroundChat />)
+  const { card } = await getCardElements("model-a")
+  await user.click(
+    within(card).getByRole("button", { name: "Open as full chat" })
+  )
+  expect(useMessageOptionState.value.setCompareSplitChat).toHaveBeenCalledWith(
+    "cluster-1",
+    "model-a",
+    "child"
+  )
 })

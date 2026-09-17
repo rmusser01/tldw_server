@@ -1409,7 +1409,7 @@ export const PlaygroundChat = ({
                   void toggleMessagePinned(block.index)
                 }}
                 onNewBranch={() => {
-                  createChatBranch(block.index)
+                  void createChatBranch(message.id ?? "")
                 }}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}

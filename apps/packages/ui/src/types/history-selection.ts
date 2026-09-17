@@ -174,5 +174,29 @@ export type LocalForkProjectionV1 = {
 }
 
 export type ForkResultV1 =
-  | { readonly state: "committed" | "legacy_completed"; readonly operation_id: string; readonly child_conversation_id: string }
-  | { readonly state: "rejected" | "partial" | "unknown"; readonly operation_id: string; readonly code: string; readonly candidate_child_id?: string }
+  | {
+      readonly state: "committed"
+      readonly operation_id: string
+      readonly owner_key: string
+      readonly child_id: string
+      readonly message_map: Record<string, string>
+    }
+  | {
+      readonly state: "legacy_completed"
+      readonly operation_id: string
+      readonly owner_key: string
+      readonly child_id: string
+    }
+  | {
+      readonly state: "rejected" | "blocked"
+      readonly operation_id: string
+      readonly owner_key: string
+      readonly code: string
+    }
+  | {
+      readonly state: "unknown" | "partial"
+      readonly operation_id: string
+      readonly owner_key: string
+      readonly code: string
+      readonly candidate_child_id?: string
+    }

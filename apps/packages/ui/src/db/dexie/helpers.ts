@@ -487,31 +487,20 @@ export const removeMessageByIndex = async (
 // helpers above: the UI message list can contain non-persisted seed rows (e.g.
 // a character greeting at UI index 0) that are absent from Dexie, so an array
 // index does not line up with the Dexie row order. Addressing by the stable
-// message id avoids deleting/overwriting the wrong row. Rows whose id is not in
-// Dexie (like an unsaved greeting) are simply left untouched.
+// message id avoids deleting/overwriting the wrong row. Missing and cross-history
+// targets reject so the caller cannot falsely apply a successful display update.
 export const updateMessageById = async (
   history_id: string,
   message_id: string,
   message: string
 ) => {
-  try {
-    const db = new PageAssistDatabase()
-    await db.updateMessage(history_id, message_id, message)
-  } catch {
-    // temp chat will break
-  }
+  await new PageAssistDatabase().updateMessage(history_id, message_id, message)
 }
-
 export const removeMessageById = async (
   history_id: string,
   message_id: string
 ) => {
-  try {
-    const db = new PageAssistDatabase()
-    await db.removeMessage(history_id, message_id)
-  } catch {
-    // temp chat will break
-  }
+  return new PageAssistDatabase().removeMessage(history_id, message_id)
 }
 
 // Delete every persisted message ordered after `message_id` (used by the edit +

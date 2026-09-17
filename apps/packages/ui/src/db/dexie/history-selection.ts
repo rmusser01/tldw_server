@@ -513,6 +513,25 @@ const readSnapshot = async (
             : undefined
   return { snapshot, records, unsupported, stale }
 }
+/** Forks share the owner/profile fence and transaction, with a separately retained context policy. */
+export const withLocalForkSource = <T>(
+  owner: LocalHistoryOwnerV1,
+  projectionId: string | undefined,
+  mode: "r" | "rw",
+  operation: (source: {
+    snapshot: HistorySelectionSnapshotV1; records: Message[]; history: HistoryInfo;
+    files: import("./types").SessionFiles | undefined; comparison: boolean
+  }) => Promise<T>,
+  opts?: HistoryOperationOptions
+): Promise<T> => transaction(mode, opts, async () => {
+  const result = await readSnapshot(owner, projectionId)
+  if (result.stale) fail(result.stale)
+  if (result.unsupported && result.unsupported !== "unsupported_comparison_history") fail(result.unsupported)
+  return operation({snapshot: result.snapshot, records: result.records,
+    history: await ownedHistory(owner), files: await db.sessionFiles.get(owner.conversation_id),
+    comparison: result.unsupported === "unsupported_comparison_history"})
+})
+
 const capture = async (
   owner: LocalHistoryOwnerV1,
   view: HistoryViewSelectionV1,

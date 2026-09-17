@@ -120,7 +120,7 @@ export const SidePanelBody = ({
     [deleteMessage]
   )
   const handleNewBranch = React.useCallback(
-    (index: number) => createChatBranch(index),
+    (index: number) => createChatBranch(messagesRef.current[index]?.id ?? ""),
     [createChatBranch]
   )
   const handleSwipePrev = React.useCallback(
@@ -180,7 +180,7 @@ export const SidePanelBody = ({
       }
       const index = findIndex(timelineAction.messageId)
       if (index >= 0) {
-        void createChatBranch(index)
+        void createChatBranch(messagesRef.current[index]?.id ?? "")
       }
       onTimelineActionHandled?.()
       return
