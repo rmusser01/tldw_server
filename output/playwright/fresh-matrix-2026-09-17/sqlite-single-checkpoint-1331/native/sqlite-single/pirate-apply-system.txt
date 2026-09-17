@@ -1,0 +1,182 @@
+### Ran Playwright code
+```js
+await page.getByTestId('prompt-insert-system').click();
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub | tldw](http://127.0.0.1:18680/chat)
+### Page
+- Page URL: http://127.0.0.1:18680/chat
+- Page Title: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub | tldw
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-single/browser-evidence/1789651703115-8729af43-be2e-471d-afb9-970e789a758f-1.snapshot.txt)
+
+- generic [ref=f3e1]:
+  - generic [ref=f3e4]:
+    - link "Skip to main content" [ref=f3e5] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e6]:
+      - button "Expand sidebar" [ref=f3e7] [cursor=pointer]
+      - button "New Chat" [ref=f3e11] [cursor=pointer]
+      - generic [ref=f3e14]:
+        - button "Quick Ingest" [ref=f3e15] [cursor=pointer]
+        - button "Chat" [ref=f3e19] [cursor=pointer]
+        - button "Prompts" [ref=f3e22] [cursor=pointer]
+        - button "Characters" [ref=f3e26] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e31] [cursor=pointer]
+        - button "World Books" [ref=f3e35] [cursor=pointer]
+        - button "Notes" [ref=f3e38] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e42] [cursor=pointer]
+        - button "Media" [ref=f3e50] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e53] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e59] [cursor=pointer]
+        - button "Kanban" [ref=f3e65] [cursor=pointer]
+        - button "Watchlists" [ref=f3e67] [cursor=pointer]
+      - generic [ref=f3e72]:
+        - button "Open Notes Dock" [ref=f3e73] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e78] [cursor=pointer]
+        - button "Settings" [ref=f3e81] [cursor=pointer]
+    - main [ref=f3e85]:
+      - generic [ref=f3e86]:
+        - generic [ref=f3e89]:
+          - generic [ref=f3e90]:
+            - button "Expand sidebar" [ref=f3e91] [cursor=pointer]
+            - generic [ref=f3e93]:
+              - img "tldw Assistant" [ref=f3e94]
+              - generic [ref=f3e95]: tldw Assistant
+              - button "Companion Home" [ref=f3e96] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e100] [cursor=pointer]
+            - 'button "Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub" [ref=f3e1084] [cursor=pointer]'
+            - generic "Saved chat. History is persisted." [ref=f3e1086]: Saved
+          - generic [ref=f3e103]:
+            - button "Search - Open command palette" [ref=f3e104] [cursor=pointer]:
+              - generic [ref=f3e108]: Search
+              - generic [ref=f3e109]: ⌘K
+            - button "New saved chat" [ref=f3e1087] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=f3e1091] [cursor=pointer]: Temp
+            - button "Character chat" [ref=f3e1092] [cursor=pointer]: Character
+            - button "Share conversation" [ref=f3e1093] [cursor=pointer]
+            - button "Open settings" [ref=f3e110] [cursor=pointer]
+            - generic [ref=f3e122]:
+              - button "Notifications, 0 unread" [ref=f3e123] [cursor=pointer]
+              - status [ref=f3e127]: Notifications are active
+            - button "Switch to light theme" [ref=f3e128] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e135] [cursor=pointer]:
+              - generic [ref=f3e136]: "?"
+        - generic [ref=f3e137]:
+          - heading "Chat" [level=1] [ref=f3e1100]
+          - generic [ref=f3e1103]:
+            - paragraph [ref=f3e1104]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=f3e1105]:
+              - main [ref=f3e1106]:
+                - generic [ref=f3e1107]:
+                  - generic [ref=f3e1109]:
+                    - generic [ref=f3e1110]:
+                      - generic [ref=f3e1111]: Standard chat
+                      - generic [ref=f3e1112]: Conversation timeline
+                    - generic [ref=f3e1113]:
+                      - button "Switch to light theme" [ref=f3e1114] [cursor=pointer]
+                      - button "Enter focus chat" [ref=f3e1121] [cursor=pointer]:
+                        - generic [ref=f3e1127]: Focus
+                      - button "Shortcuts" [ref=f3e1128] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=f3e1132]
+                  - log "Chat messages" [ref=f3e1134]:
+                    - generic [ref=f3e1136]:
+                      - article "System message 1 of 3" [ref=f3e1137]:
+                        - generic [ref=f3e1143]:
+                          - generic [ref=f3e1145]:
+                            - generic [ref=f3e1146]: System prompt
+                            - generic [ref=f3e1147]: • 6:02 AM
+                          - paragraph [ref=f3e1149]: You are a helpful AI assistant.
+                          - generic [ref=f3e1150]:
+                            - generic [ref=f3e1151]:
+                              - generic [ref=f3e1152]: Was this helpful?
+                              - generic [ref=f3e1153]:
+                                - button "Helpful" [ref=f3e1154] [cursor=pointer]
+                                - button "Not helpful" [ref=f3e1157] [cursor=pointer]
+                                - button "More feedback" [ref=f3e1160] [cursor=pointer]
+                            - button "More actions" [ref=f3e1166] [cursor=pointer]: •••
+                      - article "User message 2 of 3" [ref=f3e1167]:
+                        - generic [ref=f3e1170]:
+                          - generic [ref=f3e1172]:
+                            - generic [ref=f3e1173]: You
+                            - generic [ref=f3e1174]: • 6:02 AM
+                          - paragraph [ref=f3e1176]: "Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — public synthetic UAT handbook This is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742. Visitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path. The Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint. The observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location. A visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions. Question: Who directs Rowan Observatory, where is it located, and when do public tours begin? Answer only these three facts in one short paragraph using the supplied source."
+                          - generic [ref=f3e1180]:
+                            - button "Copy to clipboard" [ref=f3e1181] [cursor=pointer]
+                            - button "Edit" [ref=f3e1186] [cursor=pointer]
+                            - button "More actions" [ref=f3e1190] [cursor=pointer]
+                      - article "Assistant message 3 of 3" [ref=f3e1198]:
+                        - generic [ref=f3e1204]:
+                          - generic [ref=f3e1206]:
+                            - generic [ref=f3e1207]: Assistant
+                            - generic [ref=f3e1208]: • 6:02 AM
+                          - paragraph [ref=f3e1211]: Dr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.
+                          - generic [ref=f3e1212]:
+                            - generic [ref=f3e1213]:
+                              - generic [ref=f3e1214]: Was this helpful?
+                              - generic [ref=f3e1215]:
+                                - button "Helpful" [ref=f3e1216] [cursor=pointer]
+                                - button "Not helpful" [ref=f3e1219] [cursor=pointer]
+                                - button "More feedback" [ref=f3e1222] [cursor=pointer]
+                            - button "More actions" [ref=f3e1228] [cursor=pointer]: •••
+                  - generic [ref=f3e1229]:
+                    - generic [ref=f3e1230]: Composer
+                    - generic [ref=f3e1238]:
+                      - button [aria-hidden] [ref=f3e1239]
+                      - button [aria-hidden] [ref=f3e1240]
+                      - generic [ref=f3e1241]:
+                        - generic [ref=f3e1243]:
+                          - button "Hide composer options" [expanded] [ref=f3e1244] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=f3e1249]
+                          - generic [ref=f3e1250]:
+                            - button "Improve prompt" [ref=f3e1253] [cursor=pointer]
+                            - generic [ref=f3e1258]:
+                              - button "Send message" [ref=f3e1259] [cursor=pointer]:
+                                - generic [ref=f3e1260]: Send
+                              - button "Open message delivery options" [ref=f3e1265] [cursor=pointer]
+                        - generic [ref=f3e1270]:
+                          - generic [ref=f3e1272]:
+                            - group "Mode and context controls" [ref=f3e1273]:
+                              - button "Modes" [ref=f3e1274] [cursor=pointer]
+                              - 'button "MCP tools: None, Not checked yet" [ref=f3e1281] [cursor=pointer]':
+                                - generic [ref=f3e1282]:
+                                  - generic [ref=f3e1283]: MCP
+                                  - generic [ref=f3e1284]: None
+                              - button "Search & Context" [ref=f3e1287] [cursor=pointer]
+                              - button "Select a Prompt" [ref=f3e1292] [cursor=pointer]:
+                                - generic [ref=f3e1295]: Pirate Prompt — SQLite Fresh 20260917
+                              - button "Select character or persona" [ref=f3e1296] [cursor=pointer]
+                              - button "Role-play setup" [ref=f3e1301] [cursor=pointer]
+                              - button "Buddy & Persona" [ref=f3e1308] [cursor=pointer]
+                            - group "Run input controls" [ref=f3e1314]:
+                              - button "OpenUI" [ref=f3e1315] [cursor=pointer]
+                              - button "Start dictation" [ref=f3e1321] [cursor=pointer]
+                              - generic [ref=f3e1325]:
+                                - button "Attach image" [ref=f3e1327] [cursor=pointer]
+                                - button "More attachments" [ref=f3e1331] [cursor=pointer]
+                              - button "More tools" [ref=f3e1334] [cursor=pointer]
+                              - button "Current Chat Model Settings" [ref=f3e1337] [cursor=pointer]:
+                                - generic [ref=f3e1341]: Chat Settings
+                          - generic "Active context" [ref=f3e1342]:
+                            - button "Custom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f3e1344] [cursor=pointer]:
+                              - generic "Provider status" [ref=f3e1349]: Healthy
+                            - button "System prompt Custom" [ref=f3e1350] [cursor=pointer]:
+                              - generic [ref=f3e1351]: System prompt
+                              - generic [ref=f3e1352]: Custom
+                            - button "Chat 3 messages" [ref=f3e1353] [cursor=pointer]:
+                              - generic [ref=f3e1354]: Chat
+                              - generic [ref=f3e1355]: 3 messages
+                            - button "Configure context window size" [ref=f3e1357] [cursor=pointer]:
+                              - generic [ref=f3e1358]: 573 + ~0 = 573 tokens
+                            - button "Saved" [ref=f3e1360] [cursor=pointer]
+                            - button "Advanced controls" [ref=f3e1362] [cursor=pointer]
+              - generic [ref=f3e1366]:
+                - button "Restore context sidechannel" [ref=f3e1367] [cursor=pointer]:
+                  - generic [ref=f3e1371]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=f3e1372]:
+                - button "Restore runtime sidechannel" [ref=f3e1373] [cursor=pointer]:
+                  - generic [ref=f3e1374]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - alert [ref=f3e497]: Chat | tldw

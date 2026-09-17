@@ -114,7 +114,7 @@ Stage3 remains active at23:45UTC: all180 identified defects have reviewed implem
 **Goal:** Recheck the authoritative journeys on new configuration/data/browser state after all confirmed repairs.
 **Success Criteria:** Both mode matrices account for every required row on one frozen source, with any newly observed issue tracked immediately. No blanket sign-off while confirmed product failures remain.
 **Tests:** The twelve-row named-journey protocol, real model generation, canonical persistence, user/permission isolation, connection recovery and natural expiry controls.
-**Status:** Not Started
+**Status:** In Progress
 
 - Check fetched dev ancestry before freezing; preserve the truthful original-baseline correction.
 - Explicitly record and exercise PostgreSQL as well as SQLite backend configurations in the fresh single-user and multi-user matrix. Reused dependencies and test infrastructure remain transparent.

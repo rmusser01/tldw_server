@@ -1,0 +1,27 @@
+### Result
+{"at":"2026-09-17T12:45:03.573Z","fault":[{"at":"2026-09-17T12:45:03.477Z","url":"http://127.0.0.1:18680/api/v1/chat/completions","originalProvider":"llama","originalModel":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","effectiveProvider":"ollama","effectiveModel":"uat-deliberately-unavailable-20260917","conversationId":"45351b4c-b213-4827-b855-712ad2c75579","clientMessageId":"pa_408b-d409-713-5449","mode":"one real backend request continued; no response fulfillment"}],"body":"Skip to main content\ntldw Assistant\nRemember this public UAT fact: the observatory code is ORBIT-742. Reply with the\nSaved\nSearch\n⌘K\nTemp\nCharacter\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nStandard chat\nConversation timeline\nFocus\nShortcuts\nArtifacts panel closed\nSystem prompt\n• 5:42 AM\n\nYou are a helpful AI assistant.\n\nWas this helpful?\n•••\nYou\n• 5:42 AM\n\nRemember this public UAT fact: the observatory code is ORBIT-742. Reply with the code only.\n\n•••\nAssistant\n• 5:43 AM\n\nORBIT-742\n\nWas this helpful?\n•••\nYou\n• 5:43 AM\n\nWhat observatory code did I give you? Reply with that code only.\n\n•••\nAssistant\n• 5:43 AM\n\nORBIT-742\n\nWas this helpful?\n•••\nYou\n• 5:45 AM\n\nRepeat the observatory code from our conversation. Reply with that code only.\n\n•••\n../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\n• 5:45 AM\n\nSomething went wrong while talking to your tldw server.\n\nTry again in a moment, or open Health & diagnostics to inspect server health.\n\nShow technical details\nRecommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial\nRetry same model\nSwitch model\nTry provider fallback\nContinue from partial\n•••\nComposer\nError\nSomething went wrong while talking to your tldw server.\nTry again in a moment, or open Health & diagnostics to inspect server health.\nRetry chat\nEdit provider\nSwitch provider\nView in Health & Diagnostics\nClose\nSEND\nModes\nMCP\nNone\nSearch & Context\nPrompt\nRole-play setup\nBuddy & Persona\nOpenUI\nAttach image\nMore tools\nChat Settings\nCustom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nHealthy\nChat\n7 messages\n122 + ~0 = 122 tokens\nSaved\nAdvanced controls\nContext rail\nRestore context sidechannel\nRuntime rail\nRestore runtime sidechannel"}
+### Ran Playwright code
+```js
+await (async page => {
+ await page.getByRole('dialog',{name:'Current Chat Model Settings',exact:true}).getByRole('button',{name:'Close',exact:true}).click();
+ page.__controlledFailure=[];
+ await page.route('**/api/v1/chat/completions',async route=>{
+  const req=route.request();const original=req.postDataJSON();
+  const altered={...original,api_provider:'ollama',model:'uat-deliberately-unavailable-20260917'};
+  page.__controlledFailure.push({at:new Date().toISOString(),url:req.url(),originalProvider:original.api_provider,originalModel:original.model,effectiveProvider:altered.api_provider,effectiveModel:altered.model,conversationId:original.conversation_id,clientMessageId:original.metadata?.tldw_client_message_id,mode:'one real backend request continued; no response fulfillment'});
+  await route.continue({postData:JSON.stringify(altered)});
+ },{times:1});
+ await page.getByRole('textbox',{name:'Type a message... (/ commands, @ mentions)',exact:true}).fill('Repeat the observatory code from our conversation. Reply with that code only.');
+ await page.getByRole('button',{name:'Send message',exact:true}).click();
+ await page.getByRole('button',{name:'Retry same model',exact:true}).waitFor({state:'visible',timeout:45000});
+ return {at:new Date().toISOString(),fault:page.__controlledFailure,body:await page.locator('body').innerText()};
+}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18680/chat
+- Page Title: Remember this public UAT fact: the observatory code is ORBIT-742. Reply with the | tldw
+- Console: 1 errors, 1 warnings
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T12-25-51-216Z.log#L29-L31
+

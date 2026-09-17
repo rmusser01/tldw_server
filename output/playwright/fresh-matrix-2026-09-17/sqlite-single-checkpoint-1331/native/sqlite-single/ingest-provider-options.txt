@@ -1,0 +1,292 @@
+### Page
+- Page URL: http://127.0.0.1:18680/chat
+- Page Title: Describe this attached public test icon in one sentence. | tldw
+### Snapshot
+```yaml
+- generic [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - generic [ref=f3e15]:
+      - link "Skip to main content" [ref=f3e16] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f3e17]:
+        - button "Expand sidebar" [ref=f3e18] [cursor=pointer]
+        - button "New Chat" [ref=f3e22] [cursor=pointer]
+        - generic [ref=f3e25]:
+          - button "Quick Ingest" [ref=f3e26] [cursor=pointer]
+          - button "Chat" [ref=f3e30] [cursor=pointer]
+          - button "Prompts" [ref=f3e33] [cursor=pointer]
+          - button "Characters" [ref=f3e37] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f3e42] [cursor=pointer]
+          - button "World Books" [ref=f3e46] [cursor=pointer]
+          - button "Notes" [ref=f3e49] [cursor=pointer]
+          - button "Knowledge QA" [ref=f3e53] [cursor=pointer]
+          - button "Media" [ref=f3e61] [cursor=pointer]
+          - button "Document Workspace" [ref=f3e64] [cursor=pointer]
+          - button "Research Workspace" [ref=f3e70] [cursor=pointer]
+          - button "Kanban" [ref=f3e76] [cursor=pointer]
+          - button "Watchlists" [ref=f3e78] [cursor=pointer]
+        - generic [ref=f3e83]:
+          - button "Open Notes Dock" [ref=f3e84] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f3e89] [cursor=pointer]
+          - button "Settings" [ref=f3e92] [cursor=pointer]
+      - main [ref=f3e96]:
+        - generic [ref=f3e97]:
+          - generic [ref=f3e100]:
+            - generic [ref=f3e101]:
+              - button "Expand sidebar" [ref=f3e102] [cursor=pointer]
+              - generic [ref=f3e104]:
+                - img "tldw Assistant" [ref=f3e105]
+                - generic [ref=f3e106]: tldw Assistant
+                - button "Companion Home" [ref=f3e107] [cursor=pointer]
+                - button "Show shortcuts" [ref=f3e111] [cursor=pointer]
+              - button "Describe this attached public test icon in one sentence." [ref=f3e115] [cursor=pointer]
+              - generic "Saved chat. History is persisted." [ref=f3e117]: Saved
+            - generic [ref=f3e118]:
+              - button "Search - Open command palette" [ref=f3e119] [cursor=pointer]:
+                - generic [ref=f3e123]: Search
+                - generic [ref=f3e124]: ⌘K
+              - button "New saved chat" [ref=f3e125] [cursor=pointer]
+              - button "Temporary chat (not saved)" [ref=f3e129] [cursor=pointer]: Temp
+              - button "Character chat" [ref=f3e130] [cursor=pointer]: Character
+              - button "Share conversation" [ref=f3e131] [cursor=pointer]
+              - button "Open settings" [ref=f3e138] [cursor=pointer]
+              - generic [ref=f3e150]:
+                - button "Notifications, 0 unread" [ref=f3e151] [cursor=pointer]
+                - status [ref=f3e155]: Notifications are active
+              - button "Switch to light theme" [ref=f3e156] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f3e163] [cursor=pointer]:
+                - generic [ref=f3e164]: "?"
+          - generic [ref=f3e165]:
+            - heading "Chat" [level=1] [ref=f3e166]
+            - generic [ref=f3e169]:
+              - paragraph [ref=f3e170]: Cockpit rails hidden. Chat and composer remain active.
+              - generic [ref=f3e171]:
+                - main [ref=f3e172]:
+                  - generic [ref=f3e173]:
+                    - generic [ref=f3e175]:
+                      - generic [ref=f3e176]:
+                        - generic [ref=f3e177]: Standard chat
+                        - generic [ref=f3e178]: Conversation timeline
+                      - generic [ref=f3e179]:
+                        - button "Switch to light theme" [ref=f3e180] [cursor=pointer]
+                        - button "Enter focus chat" [ref=f3e187] [cursor=pointer]:
+                          - generic [ref=f3e193]: Focus
+                        - button "Shortcuts" [ref=f3e194] [cursor=pointer]
+                        - button "Artifacts panel closed" [disabled] [ref=f3e198]
+                    - log "Chat messages" [ref=f3e200]:
+                      - generic [ref=f3e202]:
+                        - article "User message 1 of 2" [ref=f3e203]:
+                          - generic [ref=f3e206]:
+                            - generic [ref=f3e208]:
+                              - generic [ref=f3e209]: You
+                              - generic [ref=f3e210]: • 5:47 AM
+                            - paragraph [ref=f3e212]: Describe this attached public test icon in one sentence.
+                            - generic [ref=f3e214]:
+                              - generic [ref=f3e215]:
+                                - img "Uploaded Image" [ref=f3e216]
+                                - generic [ref=f3e217] [cursor=pointer]
+                              - button "Delete image" [ref=f3e218] [cursor=pointer]
+                            - button "More actions" [ref=f3e224] [cursor=pointer]: •••
+                        - article "Assistant message 2 of 2" [ref=f3e228]:
+                          - generic [ref=f3e234]:
+                            - generic [ref=f3e236]:
+                              - generic [ref=f3e237]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                              - generic [ref=f3e238]: • 5:47 AM
+                            - alert [ref=f3e240]:
+                              - paragraph [ref=f3e241]: Image support is not confirmed for this model.
+                              - paragraph [ref=f3e242]: Choose a model that supports images, or start a new text-only conversation.
+                              - button "Show technical details" [ref=f3e243] [cursor=pointer]
+                              - generic [ref=f3e244]:
+                                - generic [ref=f3e245]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                                - button "Retry same model" [ref=f3e246] [cursor=pointer]
+                                - button "Switch model" [ref=f3e247] [cursor=pointer]
+                                - button "Try provider fallback" [ref=f3e248] [cursor=pointer]
+                                - button "Continue from partial" [ref=f3e249] [cursor=pointer]
+                            - generic [ref=f3e251]:
+                              - generic [ref=f3e252]:
+                                - button "Previous response" [ref=f3e253] [cursor=pointer]
+                                - generic [ref=f3e256]: 2 of 2
+                                - button "Next response" [disabled] [ref=f3e257]
+                              - button "More actions" [ref=f3e260] [cursor=pointer]: •••
+                    - generic [ref=f3e261]:
+                      - generic [ref=f3e262]: Composer
+                      - generic [ref=f3e270]:
+                        - button [aria-hidden] [ref=f3e271]
+                        - button [aria-hidden] [ref=f3e272]
+                        - generic [ref=f3e273]:
+                          - alert [ref=f3e274]:
+                            - generic [ref=f3e275]:
+                              - generic [ref=f3e276]:
+                                - generic [ref=f3e277]: Error
+                                - generic [ref=f3e278]:
+                                  - heading "Image support is not confirmed for this model." [level=2] [ref=f3e279]
+                                  - generic [ref=f3e280]: Choose a model that supports images, or start a new text-only conversation.
+                              - generic [ref=f3e281]:
+                                - button "Retry chat" [ref=f3e282] [cursor=pointer]
+                                - button "Edit provider" [ref=f3e283] [cursor=pointer]
+                                - button "Switch provider" [ref=f3e284] [cursor=pointer]
+                                - button "View in Health & Diagnostics" [ref=f3e285] [cursor=pointer]
+                                - button "Close" [ref=f3e286] [cursor=pointer]
+                          - generic [ref=f3e288]:
+                            - button "Hide composer options" [expanded] [ref=f3e289] [cursor=pointer]
+                            - textbox "Type a message... (/ commands, @ mentions)" [ref=f3e294]
+                            - generic [ref=f3e295]:
+                              - button "Improve prompt" [ref=f3e298] [cursor=pointer]
+                              - generic [ref=f3e303]:
+                                - button "Send message" [ref=f3e304] [cursor=pointer]:
+                                  - generic [ref=f3e305]: Send
+                                - button "Open message delivery options" [ref=f3e310] [cursor=pointer]
+                          - generic [ref=f3e315]:
+                            - generic [ref=f3e317]:
+                              - group "Mode and context controls" [ref=f3e318]:
+                                - button "Modes" [ref=f3e319] [cursor=pointer]
+                                - 'button "MCP tools: None, Not checked yet" [ref=f3e326] [cursor=pointer]':
+                                  - generic [ref=f3e327]:
+                                    - generic [ref=f3e328]: MCP
+                                    - generic [ref=f3e329]: None
+                                - button "Search & Context" [ref=f3e332] [cursor=pointer]
+                                - button "Select a Prompt" [ref=f3e337] [cursor=pointer]:
+                                  - generic [ref=f3e340]: Prompt
+                                - button "Select character or persona" [ref=f3e341] [cursor=pointer]
+                                - button "Role-play setup" [ref=f3e346] [cursor=pointer]
+                                - button "Buddy & Persona" [ref=f3e353] [cursor=pointer]
+                              - group "Run input controls" [ref=f3e359]:
+                                - button "OpenUI" [ref=f3e360] [cursor=pointer]
+                                - button "Start dictation" [ref=f3e366] [cursor=pointer]
+                                - generic [ref=f3e370]:
+                                  - button "Attach image" [ref=f3e372] [cursor=pointer]
+                                  - button "More attachments" [ref=f3e376] [cursor=pointer]
+                                - button "More tools" [ref=f3e379] [cursor=pointer]
+                                - button "Current Chat Model Settings" [ref=f3e382] [cursor=pointer]:
+                                  - generic [ref=f3e386]: Chat Settings
+                            - generic "Active context" [ref=f3e387]:
+                              - button "Custom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=f3e389] [cursor=pointer]:
+                                - generic "Provider status" [ref=f3e394]: Healthy
+                              - button "Chat 2 messages" [ref=f3e395] [cursor=pointer]:
+                                - generic [ref=f3e396]: Chat
+                                - generic [ref=f3e397]: 2 messages
+                              - button "Configure context window size" [ref=f3e399] [cursor=pointer]:
+                                - generic [ref=f3e400]: 95 + ~0 = 95 tokens
+                              - button "Saved" [ref=f3e402] [cursor=pointer]
+                              - button "Advanced controls" [ref=f3e404] [cursor=pointer]
+                - generic [ref=f3e408]:
+                  - button "Restore context sidechannel" [ref=f3e409] [cursor=pointer]:
+                    - generic [ref=f3e413]: Context rail
+                  - tooltip "Restore context sidechannel"
+                - generic [ref=f3e414]:
+                  - button "Restore runtime sidechannel" [ref=f3e415] [cursor=pointer]:
+                    - generic [ref=f3e416]: Runtime rail
+                  - tooltip "Restore runtime sidechannel"
+        - generic [ref=f3e420]:
+          - dialog "Quick Ingest (1)":
+            - generic [ref=f3e421]:
+              - button "Close" [ref=f3e422] [cursor=pointer]:
+                - generic "Close" [ref=f3e423]:
+                  - img "close" [ref=f3e424]
+              - generic [ref=f3e427]: Quick Ingest (1)
+              - generic [ref=f3e429]:
+                - navigation "Ingest wizard progress" [ref=f3e430]:
+                  - list [ref=f3e431]:
+                    - listitem [ref=f3e432]:
+                      - 'button "Step 1: Add (completed)" [ref=f3e513] [cursor=pointer]':
+                        - generic [ref=f3e437]: Add
+                        - generic [ref=f3e516]: 1 items
+                    - listitem [ref=f3e439]:
+                      - 'button "Step 2: Configure (current)" [disabled] [ref=f3e517]':
+                        - generic [ref=f3e444]: Configure
+                    - listitem [ref=f3e446]:
+                      - 'button "Step 3: Review" [disabled] [ref=f3e447]':
+                        - generic [ref=f3e451]: Review
+                    - listitem [ref=f3e453]:
+                      - 'button "Step 4: Processing" [disabled] [ref=f3e454]':
+                        - generic [ref=f3e458]: Processing
+                    - listitem [ref=f3e460]:
+                      - 'button "Step 5: Results" [disabled] [ref=f3e461]':
+                        - generic [ref=f3e465]: Results
+                - generic [ref=f3e518]:
+                  - generic [ref=f3e519]:
+                    - generic [ref=f3e520]:
+                      - button "Quick preset" [ref=f3e521] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=f3e522]: ⚡
+                        - generic [ref=f3e523]: Quick
+                        - generic [ref=f3e524]: Process fast, skip analysis
+                      - button "Standard preset (Recommended)" [ref=f3e525] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=f3e526]: ★
+                        - generic [ref=f3e527]: Standard
+                        - generic [ref=f3e528]: (Recommended)
+                        - generic [ref=f3e530]: Analyze + chunk for RAG search
+                      - button "Deep preset" [ref=f3e531] [cursor=pointer]:
+                        - generic [aria-hidden] [ref=f3e532]: 🔬
+                        - generic [ref=f3e533]: Deep
+                        - generic [ref=f3e534]: All options, review before save
+                    - generic [ref=f3e535]: Presets are starting points. Adjust any settings below or in Advanced options to fit this run. Using custom settings (no preset match).
+                  - generic [ref=f3e538]:
+                    - generic [ref=f3e539]:
+                      - heading "Ingestion options" [level=5] [ref=f3e540]
+                      - text: Defaults apply only to items added after you change them.
+                    - generic [ref=f3e541]:
+                      - generic [ref=f3e542]:
+                        - generic [ref=f3e543]:
+                          - generic [ref=f3e544]: Analysis
+                          - switch "Ingestion options – analysis" [checked] [ref=f3e545] [cursor=pointer]
+                        - paragraph [ref=f3e548]: Generate AI summary and key findings
+                      - generic [ref=f3e549]:
+                        - generic [ref=f3e550]:
+                          - generic [ref=f3e551]: Chunking
+                          - switch "Ingestion options – chunking" [checked] [ref=f3e552] [cursor=pointer]
+                        - paragraph [ref=f3e555]: Split into searchable sections for Knowledge QA
+                      - generic [ref=f3e556]:
+                        - generic [ref=f3e557]:
+                          - generic [ref=f3e558]: Overwrite existing
+                          - switch "Ingestion options – overwrite existing" [ref=f3e559] [cursor=pointer]
+                        - paragraph [ref=f3e562]: Replace content if previously ingested
+                    - generic [ref=f3e563]:
+                      - generic [ref=f3e564]: Analysis provider
+                      - generic [ref=f3e565]:
+                        - combobox "Analysis provider" [expanded] [active] [ref=f3e567]:
+                          - text: llama
+                          - listbox:
+                            - option "llama.cpp"
+                            - option "kobold"
+                        - img "close-circle" [ref=f3e609] [cursor=pointer]
+                      - paragraph [ref=f3e568]: Configured providers are suggestions. This choice is only for this ingest.
+                    - generic [ref=f3e570]:
+                      - generic [ref=f3e571]:
+                        - strong [ref=f3e573]: Chunking mode
+                        - radiogroup "Chunking mode" [ref=f3e574]:
+                          - generic [ref=f3e575]:
+                            - generic [ref=f3e576] [cursor=pointer]:
+                              - radio "Auto" [checked]
+                              - generic "Auto" [ref=f3e577]
+                            - generic [ref=f3e578] [cursor=pointer]:
+                              - radio "Manual"
+                              - generic "Manual" [ref=f3e579]
+                      - generic [ref=f3e580]:
+                        - generic [ref=f3e581]:
+                          - generic [ref=f3e582]: Auto chunking goal
+                          - generic [ref=f3e583] [cursor=pointer]:
+                            - generic [ref=f3e584]:
+                              - generic "Balanced" [ref=f3e585]
+                              - combobox "Auto chunking goal" [ref=f3e586]
+                            - img "down" [ref=f3e588]
+                        - generic [ref=f3e591]:
+                          - generic [ref=f3e592]: Use AI to improve chunk boundaries
+                          - switch "Use AI to improve chunk boundaries" [ref=f3e593] [cursor=pointer]
+                    - button "Advanced options" [ref=f3e596] [cursor=pointer]
+                  - generic [ref=f3e599]:
+                    - button "Back" [ref=f3e600] [cursor=pointer]
+                    - button "Next" [ref=f3e604] [cursor=pointer]
+    - generic [ref=f3e617]:
+      - generic "llama.cpp" [ref=f3e618] [cursor=pointer]
+      - generic "kobold" [ref=f3e620] [cursor=pointer]
+      - generic "ooba" [ref=f3e622] [cursor=pointer]
+      - generic "tabbyapi" [ref=f3e624] [cursor=pointer]
+      - generic "vllm" [ref=f3e626] [cursor=pointer]
+      - generic "local-llm" [ref=f3e628] [cursor=pointer]
+      - generic "ollama" [ref=f3e630] [cursor=pointer]
+      - generic "aphrodite" [ref=f3e632] [cursor=pointer]
+      - generic "mlx" [ref=f3e634] [cursor=pointer]
+      - generic "custom-openai-api" [ref=f3e636] [cursor=pointer]
+  - alert [ref=f3e14]
+```
+

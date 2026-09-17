@@ -1,0 +1,18 @@
+### Result
+{"at":"2026-09-17T12:47:05.359Z","beforeCompletionRequests":4,"body":"Skip to main content\ntldw Assistant\nSaved\nSearch\n⌘K\nTemp\nCharacter\nNotifications are active\n?\nChat\n\nCockpit rails hidden. Chat and composer remain active.\n\nStandard chat\nConversation timeline\nFocus\nShortcuts\nArtifacts panel closed\nStart a new chat\n\nExperiment with different models, prompts, and knowledge sources here.\n\nStart chatting\nQuick Ingest\n\nCHAT MODES\n\nUse a different starting point when the conversation needs structure.\n\nExplore chat modes\nType / for commands like /search or /web\nSet a system prompt to customize AI behavior\nTake a quick tour\nComposer\nQUEUE\nModes\nMCP\nNone\nSearch & Context\nPrompt\nRole-play setup\nBuddy & Persona\nOpenUI\nAttach image\nMore tools\nChat Settings\nCustom / tldw:llama.cpp:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nHealthy\n73 + ~0 = 73 tokens\nSaved\nAdvanced controls\nContext rail\nRestore context sidechannel\nRuntime rail\nRestore runtime sidechannel"}
+### Ran Playwright code
+```js
+await (async page => {
+ const before=(page.__matrixEvents||[]).filter(e=>e.event==='request'&&e.url.endsWith('/chat/completions')).length;
+ await page.getByRole('textbox',{name:'Type a message... (/ commands, @ mentions)',exact:true}).fill('Describe this attached public test icon in one sentence.');
+ await page.getByRole('button',{name:'Send message',exact:true}).click();
+ return {at:new Date().toISOString(),beforeCompletionRequests:before,body:await page.locator('body').innerText()};
+}
+)(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18680/chat
+- Page Title: Describe this attached public test icon in one sentence. | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T12-25-51-216Z.log#L35
+

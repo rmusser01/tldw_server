@@ -1,0 +1,148 @@
+### Page
+- Page URL: http://127.0.0.1:18680/knowledge
+- Page Title: Knowledge | tldw
+### Snapshot
+```yaml
+- generic [ref=f3e1]:
+  - generic [ref=f3e15]:
+    - link "Skip to main content" [ref=f3e16] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e17]:
+      - button "Expand sidebar" [ref=f3e18] [cursor=pointer]
+      - button "New Chat" [ref=f3e22] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - button "Quick Ingest" [ref=f3e26] [cursor=pointer]
+        - button "Chat" [ref=f3e30] [cursor=pointer]
+        - button "Prompts" [ref=f3e33] [cursor=pointer]
+        - button "Characters" [ref=f3e37] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e42] [cursor=pointer]
+        - button "World Books" [ref=f3e46] [cursor=pointer]
+        - button "Notes" [ref=f3e49] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e53] [cursor=pointer]
+        - button "Media" [ref=f3e61] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e64] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e70] [cursor=pointer]
+        - button "Kanban" [ref=f3e76] [cursor=pointer]
+        - button "Watchlists" [ref=f3e78] [cursor=pointer]
+      - generic [ref=f3e83]:
+        - button "Open Notes Dock" [ref=f3e84] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e89] [cursor=pointer]
+        - button "Settings" [ref=f3e92] [cursor=pointer]
+    - main [ref=f3e96]:
+      - generic [ref=f3e97]:
+        - generic [ref=f3e100]:
+          - generic [ref=f3e101]:
+            - button "Expand sidebar" [ref=f3e102] [cursor=pointer]
+            - generic [ref=f3e104]:
+              - img "tldw Assistant" [ref=f3e105]
+              - generic [ref=f3e106]: tldw Assistant
+              - button "Companion Home" [ref=f3e107] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e111] [cursor=pointer]
+          - generic [ref=f3e118]:
+            - button "Search - Open command palette" [ref=f3e119] [cursor=pointer]:
+              - generic [ref=f3e123]: Search
+              - generic [ref=f3e124]: ⌘K
+            - button "Open settings" [ref=f3e138] [cursor=pointer]
+            - generic [ref=f3e150]:
+              - button "Notifications, 0 unread" [ref=f3e151] [cursor=pointer]
+              - status [ref=f3e155]: Notifications are active
+            - button "Switch to light theme" [ref=f3e156] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e163] [cursor=pointer]:
+              - generic [ref=f3e164]: "?"
+        - generic [ref=f3e1207]:
+          - link "Skip to search" [ref=f3e1208] [cursor=pointer]:
+            - /url: "#knowledge-search-input"
+          - main [ref=f3e1209]:
+            - generic [ref=f3e1212]:
+              - generic [ref=f3e1213]:
+                - 'button "Open source scope and saved profiles. Sources: 4 selected" [ref=f3e1214] [cursor=pointer]': "Sources: 4 selected"
+                - button "Custom" [ref=f3e1307] [cursor=pointer]
+                - button "Web fallback is currently disabled. Click to toggle." [ref=f3e1224] [cursor=pointer]: Web
+                - generic [ref=f3e1228]:
+                  - button "Choose answer model" [expanded] [active] [ref=f3e1229] [cursor=pointer]:
+                    - generic [ref=f3e1233]: "AI: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+                  - dialog "Answer model controls" [ref=f3e1299]:
+                    - generic [ref=f3e1300]:
+                      - paragraph [ref=f3e1301]: Answer model
+                      - paragraph [ref=f3e1302]: Applies to final answer generation for this search session.
+                    - generic [ref=f3e1303]:
+                      - text: Provider
+                      - combobox "Answer provider" [ref=f3e1304]:
+                        - option "Server default"
+                        - option "OpenAI"
+                        - option "AWS Bedrock"
+                        - option "Anthropic"
+                        - option "Cohere"
+                        - option "DeepSeek"
+                        - option "Qwen"
+                        - option "Google"
+                        - option "Groq"
+                        - option "Mistral"
+                        - option "HuggingFace"
+                        - option "OpenRouter"
+                        - option "Novita"
+                        - option "Poe"
+                        - option "Together"
+                        - option "Moonshot"
+                        - option "Z.AI"
+                        - option "MiniMax"
+                        - option "Llama.cpp" [selected]
+                        - option "Kobold.cpp"
+                        - option "Oobabooga"
+                        - option "TabbyAPI"
+                        - option "vLLM"
+                        - option "Ollama"
+                        - option "Aphrodite"
+                        - option "MLX"
+                        - option "Custom OpenAI API"
+                        - option "Custom OpenAI API 2"
+                    - generic [ref=f3e1305]:
+                      - text: Model
+                      - combobox "Answer model" [ref=f3e1306]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                - button "Refresh source health" [ref=f3e1236] [cursor=pointer]: "Sources ready: 6 of 8"
+                - button "Open Knowledge QA settings" [ref=f3e1237] [cursor=pointer]
+              - generic [ref=f3e1241]:
+                - generic [ref=f3e1242]:
+                  - heading "Ask Your Library" [level=1] [ref=f3e1245]
+                  - paragraph [ref=f3e1246]: Search selected personal-library sources and get cited answers
+                  - paragraph [ref=f3e1247]: Knowledge QA searches documents, media, notes, and other selected sources, then grounds answer claims in citations you can inspect.
+                  - paragraph [ref=f3e1248]: This page answers questions over searchable sources. Add or manage sources in their owner pages, then use /knowledge for QA.
+                - generic [ref=f3e1249]:
+                  - button "How it works" [expanded] [ref=f3e1250] [cursor=pointer]
+                  - list [ref=f3e1252]:
+                    - listitem [ref=f3e1253]:
+                      - generic [ref=f3e1254]: "1"
+                      - generic [ref=f3e1255]: Select sources
+                    - listitem [ref=f3e1257]:
+                      - generic [ref=f3e1258]: "2"
+                      - generic [ref=f3e1259]: Ask a question
+                    - listitem [ref=f3e1262]:
+                      - generic [ref=f3e1263]: "3"
+                      - generic [ref=f3e1264]: Review cited answer
+                - generic [ref=f3e1268]:
+                  - button "Explain the methodology used in this study" [ref=f3e1269] [cursor=pointer]
+                  - button "Summarize the key findings in my latest sources" [ref=f3e1270] [cursor=pointer]
+                  - button "What claims have direct citations?" [ref=f3e1271] [cursor=pointer]
+                  - button "Compare conclusions across my documents" [ref=f3e1272] [cursor=pointer]
+                - generic [ref=f3e1273]:
+                  - paragraph [ref=f3e1274]: No previous QA sessions yet.
+                  - button "Continue recent session" [disabled] [ref=f3e1275]
+                  - button "Select sources" [ref=f3e1279] [cursor=pointer]
+                - paragraph [ref=f3e1281]:
+                  - text: Need a full workspace?
+                  - link "Try Research Workspace →" [ref=f3e1282] [cursor=pointer]:
+                    - /url: /research-workspace
+              - generic [ref=f3e1283]:
+                - paragraph [ref=f3e1284]: Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
+                - generic [ref=f3e1285]:
+                  - textbox "Search your knowledge base" [ref=f3e1286]:
+                    - /placeholder: What are the pros and cons discussed?
+                  - button "Ask" [disabled] [ref=f3e1288]
+                - generic [ref=f3e1289]: Press / to focus, Cmd+K for new search
+          - generic [ref=f3e1291]:
+            - button "Switch to detailed view" [ref=f3e1292] [cursor=pointer]
+            - link "Help & Documentation" [ref=f3e1296] [cursor=pointer]:
+              - /url: https://github.com/rmusser01/tldw_server2#readme
+  - alert [ref=f3e14]: Knowledge | tldw
+```
+

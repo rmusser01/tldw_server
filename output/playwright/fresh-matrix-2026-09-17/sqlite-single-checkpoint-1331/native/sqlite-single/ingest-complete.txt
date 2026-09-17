@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T12:52:34.670Z","body":"Quick Ingest\nAdd\n1 items\nConfigure\nCustom\nReview\nReviewed\nProcessing\nResults\nSAVED WITH WARNINGS (1)\nrowan-observatory-public-20260917.txt\n\nAnalysis failed for chunk 1: Provider analysis was truncated before completion. Try a shorter source or a higher output limit.\n\nOpen in Media\n\nWhat's next?\n\nSearch in Knowledge\n\nTotal: 0 succeeded, 1 saved with warnings, 0 skipped, 0 not submitted, 0 failed, 0 cancelled · 1:14 elapsed\n\nIngest More\nDone"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("heading",{name:"Processing",exact:true}).waitFor({state:"hidden",timeout:40000}); return {at:new Date().toISOString(),body:await page.getByRole("dialog").innerText()}; })(page);
+```
+

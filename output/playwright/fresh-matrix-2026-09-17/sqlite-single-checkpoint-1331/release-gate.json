@@ -1,0 +1,105 @@
+{
+  "at": "2026-09-17T12:18:45.051Z",
+  "status": "RELEASED",
+  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "branch": "codex/fresh-install-uat-fixes",
+  "originDev": "59049e094e0845a4611ea725ae19b7c1754ea709",
+  "devOnlyCommits": 0,
+  "originalBranchStartedOnOlderBase": true,
+  "runId": "fresh-final-20260917",
+  "cells": [
+    {
+      "cell": "sqlite-single",
+      "apiPort": 18600,
+      "webPort": 18680
+    },
+    {
+      "cell": "sqlite-multi",
+      "apiPort": 18601,
+      "webPort": 18681
+    },
+    {
+      "cell": "pg-single",
+      "apiPort": 18602,
+      "webPort": 18682
+    },
+    {
+      "cell": "pg-multi",
+      "apiPort": 18603,
+      "webPort": 18683
+    }
+  ],
+  "issues": {
+    "verified": 230,
+    "pending": 0,
+    "unresolved": 0
+  },
+  "protocol": "12 named journeys per cell;48rows; not an invented ABC mapping",
+  "limits": [
+    "Reused installed dependencies/browser/model services; not clean OS installation",
+    "Full native matrix not yet executed",
+    "SQLite/PG single/multi cells run serially"
+  ],
+  "harness": [
+    {
+      "path": "PROTOCOL.md",
+      "sha256": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b"
+    },
+    {
+      "path": "ISOLATION.md",
+      "sha256": "d5ab9129c277bc7b0a4f1e0ad994a4721c557a6020ce4e516145e35c520c25c8"
+    },
+    {
+      "path": "LAUNCHER.md",
+      "sha256": "691a809d6d9fca4f1d244e2f2e34e9699a49776212bbe62bd96ae28ec7e4f88c"
+    },
+    {
+      "path": "matrix-launcher.mjs",
+      "sha256": "a26b3dc6c6c28b78183c92d101635495eb7fbfb4dea47d56f8e1ab9ff93e578d"
+    },
+    {
+      "path": "initialize-cell.py",
+      "sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da"
+    },
+    {
+      "path": "bootstrap-admin-cell.py",
+      "sha256": "39760bd3df7d7e05913ca24df22adf27afba731778c18cea8fb57cb6bf04894c"
+    },
+    {
+      "path": "pg-holder.mjs",
+      "sha256": "f7c589ffad5f6e7c7a11d9493fb9fdeeb872fd0abf53a29a2415e61ed9a244fc"
+    },
+    {
+      "path": "pg_role_adapter.py",
+      "sha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409"
+    },
+    {
+      "path": "test_hold_official_pg.py",
+      "sha256": "d6157777b00576b63e9031d15fbfcbd3a24a486e9752639f24714adb1be0e2a3"
+    },
+    {
+      "path": "pytest-holder.ini",
+      "sha256": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b"
+    },
+    {
+      "path": "matrix-browser.mjs",
+      "sha256": "99be0dfaa78ff38c7ff2366ca9a8516b343b6d8ffdfb225126698c0347d49381"
+    },
+    {
+      "path": "prepare-copies.mjs",
+      "sha256": "a784e0b4c247e0442e79a83dd0be4ec1688307f3ba39222305a04cdcd8f0bb40"
+    },
+    {
+      "path": "reviewed-pth-inventory.json",
+      "sha256": "49ab062bd922ac1f571fa0d6b663877fb5e75f340f25ba251e74b0ea70a91858"
+    },
+    {
+      "path": "observe-native.js",
+      "sha256": "6dcb52db48fa61c446f158b67d36c22a2f4d7ca9616db7b9db2fef08f701f8b3"
+    },
+    {
+      "path": "events-native.js",
+      "sha256": "953b6b0833033c4c7908ad75b4a8e8e9a2271a1b2ef608e0ed4a0b38b10f32ba"
+    }
+  ]
+}

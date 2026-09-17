@@ -1,0 +1,29 @@
+### Error
+TimeoutError: Timeout 5000ms exceeded.
+Call log:
+  - waiting for locator('aria-ref=f1e680')
+    - locator resolved to <button type="button" class="w-full text-left" data-notes-list-item="true" data-testid="notes-open-button-c219a2d1-41c8-42d7-ad03-02803aa7c512" aria-label="Open note Snippet: Chat with this media: rowan-observatory-public-20260917↵↵Rowan Observatory — pub">…</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    10 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div data-test-id="spotlight" class="react-joyride__spotlight"></div> from <div id="react-joyride-portal">…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+
+

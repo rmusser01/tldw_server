@@ -1,0 +1,7 @@
+### Result
+{"tag":"TEXTAREA","text":"[13 lines/1,971 chars in message]","html":"<textarea id=\"textarea-message\" data-testid=\"chat-input\" class=\"w-full resize-none bg-transparent text-base leading-6 text-text placeholder:text-text-muted/80 focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0  px-3 py-2\" aria-expanded=\"false\" rows=\"1\" tabindex=\"0\" placeholder=\"Type a message... (/ commands, @ mentions)\" style=\"min-height: 44px; height: 44px; max-height: 120px; overflow-y: hidden;\">[13 lines/1,971 chars in message]</textarea>"}
+### Ran Playwright code
+```js
+await (async page => { const box=page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}); return {tag:await box.evaluate(el=>el.tagName),text:await box.textContent(),html:await box.evaluate(el=>el.outerHTML)}; })(page);
+```
+

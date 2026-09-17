@@ -1,0 +1,5 @@
+### Ran Playwright code
+```js
+await page.getByRole('combobox', { name: 'Analysis provider' }).fill('llama');
+```
+

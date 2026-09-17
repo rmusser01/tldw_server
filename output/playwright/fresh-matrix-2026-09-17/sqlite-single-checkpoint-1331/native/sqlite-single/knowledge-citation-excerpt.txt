@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T12:56:05.626Z","source":"1\nrowan-observatory-public-20260917\nRelevance not measured\nDocument\nCited\nUsed in answer:\nS2\nS3\n\nThis is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742.\n\nShow less\nView\nCopy citation\nYes\nNo","focused":"<button type=\"button\" class=\"mt-2 text-xs font-medium text-primary hover:text-primaryStrong transition-colors\">Show less</button>"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Jump to source 1",exact:true}).first().click(); const source=page.getByRole("listitem",{name:"Source 1. Cited in answer. Press Enter to jump to citation 1.",exact:true}); await source.getByRole("button",{name:"Show more",exact:true}).click(); return {at:new Date().toISOString(),source:await source.innerText(),focused:await page.evaluate(()=>document.activeElement?.outerHTML?.slice(0,1800))}; })(page);
+```
+

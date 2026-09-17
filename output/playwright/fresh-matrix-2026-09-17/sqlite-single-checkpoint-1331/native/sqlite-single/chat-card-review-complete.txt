@@ -1,0 +1,171 @@
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Flashcards | tldw](http://127.0.0.1:18680/flashcards?tab=review)
+### Page
+- Page URL: http://127.0.0.1:18680/flashcards?tab=review
+- Page Title: Flashcards | tldw
+- Console: 2 errors, 4 warnings
+### Snapshot
+```yaml
+- generic [active] [ref=f1e11]:
+  - generic [ref=f1e12]:
+    - generic [ref=f1e14]:
+      - link "Skip to main content" [ref=f1e15] [cursor=pointer]:
+        - /url: "#main-content"
+      - generic [ref=f1e16]:
+        - button "Expand sidebar" [ref=f1e17] [cursor=pointer]
+        - button "New Chat" [ref=f1e21] [cursor=pointer]
+        - generic [ref=f1e24]:
+          - button "Quick Ingest" [ref=f1e25] [cursor=pointer]
+          - button "Chat" [ref=f1e29] [cursor=pointer]
+          - button "Prompts" [ref=f1e32] [cursor=pointer]
+          - button "Characters" [ref=f1e36] [cursor=pointer]
+          - button "Chat Dictionaries" [ref=f1e41] [cursor=pointer]
+          - button "World Books" [ref=f1e45] [cursor=pointer]
+          - button "Notes" [ref=f1e48] [cursor=pointer]
+          - button "Knowledge QA" [ref=f1e52] [cursor=pointer]
+          - button "Media" [ref=f1e60] [cursor=pointer]
+          - button "Document Workspace" [ref=f1e63] [cursor=pointer]
+          - button "Research Workspace" [ref=f1e69] [cursor=pointer]
+          - button "Kanban" [ref=f1e75] [cursor=pointer]
+          - button "Watchlists" [ref=f1e77] [cursor=pointer]
+        - generic [ref=f1e82]:
+          - button "Open Notes Dock" [ref=f1e83] [cursor=pointer]
+          - button "Open Quick Chat Helper (sidebar)" [ref=f1e88] [cursor=pointer]
+          - button "Settings" [ref=f1e91] [cursor=pointer]
+      - main [ref=f1e95]:
+        - generic [ref=f1e96]:
+          - generic [ref=f1e99]:
+            - generic [ref=f1e100]:
+              - button "Expand sidebar" [ref=f1e101] [cursor=pointer]
+              - generic [ref=f1e103]:
+                - img "tldw Assistant" [ref=f1e104]
+                - generic [ref=f1e105]: tldw Assistant
+                - button "Companion Home" [ref=f1e106] [cursor=pointer]
+                - button "Show shortcuts" [ref=f1e110] [cursor=pointer]
+            - generic [ref=f1e117]:
+              - button "Search - Open command palette" [ref=f1e118] [cursor=pointer]:
+                - generic [ref=f1e122]: Search
+                - generic [ref=f1e123]: ⌘K
+              - button "Open settings" [ref=f1e137] [cursor=pointer]
+              - generic [ref=f1e149]:
+                - button "Notifications, 0 unread" [ref=f1e150] [cursor=pointer]
+                - status [ref=f1e154]: Notifications are active
+              - button "Switch to light theme" [ref=f1e155] [cursor=pointer]
+              - button "Show keyboard shortcuts" [ref=f1e162] [cursor=pointer]:
+                - generic [ref=f1e163]: "?"
+          - generic [ref=f1e1681]:
+            - generic [ref=f1e1683]:
+              - generic [ref=f1e1685]:
+                - generic [ref=f1e1686]: Study workspace
+                - heading "Flashcards" [level=1] [ref=f1e1687]
+              - navigation "Flashcards modes" [ref=f1e1688]:
+                - generic [ref=f1e1689]: Study
+                - generic [ref=f1e1690]: Manage
+                - generic [ref=f1e1691]: Import / Export
+                - generic [ref=f1e1692]: Templates
+                - generic [ref=f1e1693]: Scheduler
+            - generic [ref=f1e1696]:
+              - tablist [ref=f1e1697]:
+                - generic [ref=f1e1699]:
+                  - tab "Study" [selected] [ref=f1e1701] [cursor=pointer]
+                  - tab "Manage" [ref=f1e1703] [cursor=pointer]
+                  - tab "Import / Export" [ref=f1e1705] [cursor=pointer]
+                  - tab "Templates" [ref=f1e1707] [cursor=pointer]
+                  - tab "Scheduler" [ref=f1e1709] [cursor=pointer]
+                - generic [ref=f1e1711]:
+                  - button "Test with Quiz" [disabled] [ref=f1e1713]
+                  - button "Keyboard Shortcuts" [ref=f1e1714] [cursor=pointer]
+              - generic [ref=f1e1720]:
+                - tabpanel "Study" [ref=f1e2018]:
+                  - generic [ref=f1e2019]:
+                    - generic [ref=f1e2020]:
+                      - generic [ref=f1e2021] [cursor=pointer]:
+                        - generic [ref=f1e2022]:
+                          - generic: Select deck
+                          - combobox [ref=f1e2023]
+                        - img "down" [ref=f1e2025]
+                      - radiogroup "segmented control" [ref=f1e2028]:
+                        - generic [ref=f1e2029]:
+                          - generic [ref=f1e2030] [cursor=pointer]:
+                            - radio "Due only" [checked]
+                            - generic "Due only" [ref=f1e2031]
+                          - generic [ref=f1e2032] [cursor=pointer]:
+                            - radio "Cram"
+                            - generic "Cram" [ref=f1e2033]
+                      - radiogroup "segmented control" [ref=f1e2034]:
+                        - generic [ref=f1e2035]:
+                          - generic [ref=f1e2036] [cursor=pointer]:
+                            - radio "Front first" [checked]
+                            - generic "Front first" [ref=f1e2037]
+                          - generic [ref=f1e2038] [cursor=pointer]:
+                            - radio "Back first"
+                            - generic "Back first" [ref=f1e2039]
+                    - region [ref=f1e2040]:
+                      - generic [ref=f1e2041]:
+                        - generic [ref=f1e2047]:
+                          - strong [ref=f1e2049]: Source reviews
+                          - generic [ref=f1e2050]: No source reviews due
+                        - button "Schedule" [ref=f1e2051] [cursor=pointer]
+                    - generic [ref=f1e2064]:
+                      - generic [ref=f1e2065]:
+                        - generic [ref=f1e2066]: Reviewed today
+                        - strong [ref=f1e2068]: "1"
+                      - generic [ref=f1e2069]:
+                        - generic [ref=f1e2070]: Retention rate
+                        - strong [ref=f1e2072]: 100.0%
+                      - generic [ref=f1e2073]:
+                        - generic [ref=f1e2074]: Lapse rate
+                        - strong [ref=f1e2076]: 0.0%
+                      - generic [ref=f1e2077]:
+                        - generic [ref=f1e2078]: Avg answer time
+                        - strong [ref=f1e2080]: 14.2s
+                      - generic [ref=f1e2081]:
+                        - generic [ref=f1e2082]: Study streak
+                        - strong [ref=f1e2084]: 1 day
+                    - generic [ref=f1e2195]:
+                      - img "No data" [ref=f1e2197]
+                      - generic [ref=f1e2209]: You're all caught up!
+                      - generic [ref=f1e2211]:
+                        - generic [ref=f1e2213]:
+                          - text: 🎉
+                          - strong [ref=f1e2216]: 1 cards reviewed this session
+                        - generic [ref=f1e2217]: No cards are due for review. Great job!
+                        - generic [ref=f1e2219]:
+                          - strong [ref=f1e2224]: "Next review: in 4 days"
+                          - generic [ref=f1e2225]: Monday, September 21 at 6:15 AM · 1 card due within the following hour
+                        - button "Re-rate last card, 9 seconds remaining" [ref=f1e2228] [cursor=pointer]:
+                          - generic [ref=f1e2233]:
+                            - text: Re-rate last card
+                            - timer [ref=f1e2234]: 9s
+                        - generic [ref=f1e2236]:
+                          - button "Practice again" [ref=f1e2238] [cursor=pointer]
+                          - button "Create more cards" [ref=f1e2241] [cursor=pointer]
+                    - generic [ref=f1e2244]:
+                      - generic [ref=f1e2245]: Study suggestions
+                      - generic [ref=f1e2248]: Loading study suggestions...
+                    - generic [ref=f1e2104]:
+                      - generic [ref=f1e2105]: Recent study sessions
+                      - list "Recent study sessions" [ref=f1e2253]:
+                        - listitem [ref=f1e2254]:
+                          - generic [ref=f1e2255]:
+                            - generic [ref=f1e2256]:
+                              - strong [ref=f1e2258]: All decks
+                              - button "Viewing completed session" [ref=f1e2259] [cursor=pointer]
+                            - generic [ref=f1e2261]:
+                              - generic [ref=f1e2262]: Completed
+                              - generic [ref=f1e2263]: Due review
+                              - generic [ref=f1e2264]: 1 card reviewed
+                            - generic [ref=f1e2265]: Completed 2026-09-17 06:15
+                - text: ": : : : : : : : : : : : : : :"
+    - generic:
+      - generic:
+        - generic [ref=f1e2267]:
+          - img "check-circle" [ref=f1e2268]
+          - generic [ref=f1e2271]: First card reviewed! Review daily for best results.
+        - generic [ref=f1e2273]:
+          - img "check-circle" [ref=f1e2274]
+          - generic [ref=f1e2277]: "Saved. Next review in 4 days (next review gap: 4 days)."
+  - alert [ref=f1e10]: Flashcards | tldw
+```
+

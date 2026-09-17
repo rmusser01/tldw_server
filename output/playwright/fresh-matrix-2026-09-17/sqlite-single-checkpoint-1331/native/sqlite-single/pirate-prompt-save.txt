@@ -1,0 +1,13 @@
+### Result
+{"at":"2026-09-17T13:26:40.946Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nPrompts\n\nCreate reusable prompts for recurring tasks, workflows, and team conventions.\n\nPROMPTS\nWORKSPACES\nCustom\nCopilot\nStudio\nTrash\nCOLLECTIONS\nAll Prompts\n0\nFavorites\n0\nRecently Used\n0\nMost Used\n0\nUntagged\n0\nTYPE\nAll\n0\nSystem\nQuick\nMixed\nRecipes\nSystem recipes\nUser recipes\nSYNC STATUS\nAll\n0\nLocal\nSynced\nPending\nConflict\nFILTER PRESETS\nSave current filters\nAll collections\nNew collection\nNew prompt\nExport\nJSON\nImport\nMerge\nShortcuts\n/\nAll\nAll usage\nAdd tags\nMatch any\nMatch all\nTable\nGallery\nComfortable\nCompact\nDense\nSave filters\nNo custom prompts yet\n\nCreate reusable prompts for recurring tasks, workflows, and team conventions.\n\nSave your favorite system prompt for summaries, explanations, or translations.\nCreate quick prompts for common actions like drafting emails or refining notes.\nCreate prompt\nOr start with a template\nStructured recipe\n\nStart with ordered blocks, labels, variables, and editable default instructions.\n\nBuild a recipe\nCode Review Assistant\n\nReviews code for bugs, style, and best practices\n\nUse this template\nMeeting Summary\n\nExtracts key points and action items from meeting notes\n\nUse this template\nResearch Analyst\n\nAnalyzes topics with structured research methodology\n\nUse this template\nBack to Prompts\nNew Prompt\nDraft saved just now\nCancel\nSaving...\nIdentity\nTitle\nAuthor\nPrompt Content\nConvert to structured\nAI Instructions (System Prompt)\n87 chars / ~22 tokens\nMessage Template (User Prompt)\n0 chars / ~0 tokens\nOrganization\nTags\nAdd tags...\nNotes\nAdvanced\nSYSTEM PROMPT\nYou are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.\nSystem: ~22 tokens\nUser: ~0 tokens\nTotal: ~22 tokens\n\nPrompts | tldw"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("textbox",{name:"* Title",exact:true}).fill("Pirate Prompt — SQLite Fresh 20260917"); await page.getByRole("textbox",{name:"AI Instructions (System Prompt)",exact:true}).fill("You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once."); await page.getByRole("button",{name:"Save",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Prompts | tldw](http://127.0.0.1:18680/prompts?edit=pa_6fd4-9289-3a9-cb59)
+### Page
+- Page URL: http://127.0.0.1:18680/prompts?edit=pa_6fd4-9289-3a9-cb59
+- Page Title: Prompts | tldw
+

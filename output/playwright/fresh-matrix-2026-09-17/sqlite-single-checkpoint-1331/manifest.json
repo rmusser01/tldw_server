@@ -1,0 +1,1624 @@
+{
+  "at": "2026-09-17T13:31:33.398Z",
+  "task": "TASK13260",
+  "frozenRevision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "runId": "fresh-final-20260917",
+  "status": "Partial matrix checkpoint; no full-UAT acceptance",
+  "credentialScan": {
+    "knownValues": 7,
+    "candidateFiles": 201,
+    "matches": 0,
+    "jwtMatches": 0,
+    "privateFilesExcluded": true
+  },
+  "files": [
+    {
+      "path": "PROTOCOL.md",
+      "sha256": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b",
+      "bytes": 17856,
+      "sourceSha256": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b",
+      "sourceBytes": 17856,
+      "compression": null
+    },
+    {
+      "path": "ISOLATION.md",
+      "sha256": "d5ab9129c277bc7b0a4f1e0ad994a4721c557a6020ce4e516145e35c520c25c8",
+      "bytes": 14073,
+      "sourceSha256": "d5ab9129c277bc7b0a4f1e0ad994a4721c557a6020ce4e516145e35c520c25c8",
+      "sourceBytes": 14073,
+      "compression": null
+    },
+    {
+      "path": "LAUNCHER.md",
+      "sha256": "691a809d6d9fca4f1d244e2f2e34e9699a49776212bbe62bd96ae28ec7e4f88c",
+      "bytes": 14682,
+      "sourceSha256": "691a809d6d9fca4f1d244e2f2e34e9699a49776212bbe62bd96ae28ec7e4f88c",
+      "sourceBytes": 14682,
+      "compression": null
+    },
+    {
+      "path": "matrix-launcher.mjs",
+      "sha256": "a26b3dc6c6c28b78183c92d101635495eb7fbfb4dea47d56f8e1ab9ff93e578d",
+      "bytes": 28177,
+      "sourceSha256": "a26b3dc6c6c28b78183c92d101635495eb7fbfb4dea47d56f8e1ab9ff93e578d",
+      "sourceBytes": 28177,
+      "compression": null
+    },
+    {
+      "path": "initialize-cell.py",
+      "sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "bytes": 1128,
+      "sourceSha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da",
+      "sourceBytes": 1128,
+      "compression": null
+    },
+    {
+      "path": "bootstrap-admin-cell.py",
+      "sha256": "39760bd3df7d7e05913ca24df22adf27afba731778c18cea8fb57cb6bf04894c",
+      "bytes": 2283,
+      "sourceSha256": "39760bd3df7d7e05913ca24df22adf27afba731778c18cea8fb57cb6bf04894c",
+      "sourceBytes": 2283,
+      "compression": null
+    },
+    {
+      "path": "pg-holder.mjs",
+      "sha256": "f7c589ffad5f6e7c7a11d9493fb9fdeeb872fd0abf53a29a2415e61ed9a244fc",
+      "bytes": 3094,
+      "sourceSha256": "f7c589ffad5f6e7c7a11d9493fb9fdeeb872fd0abf53a29a2415e61ed9a244fc",
+      "sourceBytes": 3094,
+      "compression": null
+    },
+    {
+      "path": "pg_role_adapter.py",
+      "sha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409",
+      "bytes": 7036,
+      "sourceSha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409",
+      "sourceBytes": 7036,
+      "compression": null
+    },
+    {
+      "path": "test_hold_official_pg.py",
+      "sha256": "d6157777b00576b63e9031d15fbfcbd3a24a486e9752639f24714adb1be0e2a3",
+      "bytes": 3080,
+      "sourceSha256": "d6157777b00576b63e9031d15fbfcbd3a24a486e9752639f24714adb1be0e2a3",
+      "sourceBytes": 3080,
+      "compression": null
+    },
+    {
+      "path": "pytest-holder.ini",
+      "sha256": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b",
+      "bytes": 19,
+      "sourceSha256": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b",
+      "sourceBytes": 19,
+      "compression": null
+    },
+    {
+      "path": "matrix-browser.mjs",
+      "sha256": "99be0dfaa78ff38c7ff2366ca9a8516b343b6d8ffdfb225126698c0347d49381",
+      "bytes": 6763,
+      "sourceSha256": "99be0dfaa78ff38c7ff2366ca9a8516b343b6d8ffdfb225126698c0347d49381",
+      "sourceBytes": 6763,
+      "compression": null
+    },
+    {
+      "path": "prepare-copies.mjs",
+      "sha256": "a784e0b4c247e0442e79a83dd0be4ec1688307f3ba39222305a04cdcd8f0bb40",
+      "bytes": 4868,
+      "sourceSha256": "a784e0b4c247e0442e79a83dd0be4ec1688307f3ba39222305a04cdcd8f0bb40",
+      "sourceBytes": 4868,
+      "compression": null
+    },
+    {
+      "path": "reviewed-pth-inventory.json",
+      "sha256": "49ab062bd922ac1f571fa0d6b663877fb5e75f340f25ba251e74b0ea70a91858",
+      "bytes": 1073,
+      "sourceSha256": "49ab062bd922ac1f571fa0d6b663877fb5e75f340f25ba251e74b0ea70a91858",
+      "sourceBytes": 1073,
+      "compression": null
+    },
+    {
+      "path": "observe-native.js",
+      "sha256": "6dcb52db48fa61c446f158b67d36c22a2f4d7ca9616db7b9db2fef08f701f8b3",
+      "bytes": 2404,
+      "sourceSha256": "6dcb52db48fa61c446f158b67d36c22a2f4d7ca9616db7b9db2fef08f701f8b3",
+      "sourceBytes": 2404,
+      "compression": null
+    },
+    {
+      "path": "events-native.js",
+      "sha256": "953b6b0833033c4c7908ad75b4a8e8e9a2271a1b2ef608e0ed4a0b38b10f32ba",
+      "bytes": 138,
+      "sourceSha256": "953b6b0833033c4c7908ad75b4a8e8e9a2271a1b2ef608e0ed4a0b38b10f32ba",
+      "sourceBytes": 138,
+      "compression": null
+    },
+    {
+      "path": "release-gate.json",
+      "sha256": "c692f5d8bb0f1c653e9172515477d0c90cb46002e4dea68fd916c1fa3ff629d0",
+      "bytes": 3044,
+      "sourceSha256": "c692f5d8bb0f1c653e9172515477d0c90cb46002e4dea68fd916c1fa3ff629d0",
+      "sourceBytes": 3044,
+      "compression": null
+    },
+    {
+      "path": "matrix-progress.json",
+      "sha256": "a3685d71a330f7423129b17aab1cee16a443739501f405ea050de9b59630a451",
+      "bytes": 9480,
+      "sourceSha256": "a3685d71a330f7423129b17aab1cee16a443739501f405ea050de9b59630a451",
+      "sourceBytes": 9480,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/after-audio-skip.txt",
+      "sha256": "c6e7fded95fb25ac8dd7ec63f33ebee5e543de01f3c3b6296412d1c810ebad4c",
+      "bytes": 3777,
+      "sourceSha256": "c6e7fded95fb25ac8dd7ec63f33ebee5e543de01f3c3b6296412d1c810ebad4c",
+      "sourceBytes": 3777,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/after-ingest-defaults.txt",
+      "sha256": "1f23c5434b5530ffefcb420cd6f7c849e7a8cd9ed5d3bb44f7475d889acc5c28",
+      "bytes": 3399,
+      "sourceSha256": "1f23c5434b5530ffefcb420cd6f7c849e7a8cd9ed5d3bb44f7475d889acc5c28",
+      "sourceBytes": 3399,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/after-mcp-skip.txt",
+      "sha256": "06f59dab64a9802c319a0c78935f458ff0cd5fd0feffb9d900c131992cfa9e2f",
+      "bytes": 3283,
+      "sourceSha256": "06f59dab64a9802c319a0c78935f458ff0cd5fd0feffb9d900c131992cfa9e2f",
+      "sourceBytes": 3283,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/after-provider.txt",
+      "sha256": "51d7c948af783c0d490bda704ac6ce4545d7ea9e403d7dfaae4eb43d4ec60d9a",
+      "bytes": 4282,
+      "sourceSha256": "51d7c948af783c0d490bda704ac6ce4545d7ea9e403d7dfaae4eb43d4ec60d9a",
+      "sourceBytes": 4282,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/answer-reuse-evidence.txt",
+      "sha256": "920db5098398e435b9d229e067647c5bf0abd091a8ab49ccd68bfb293bd40f1b",
+      "bytes": 139999,
+      "sourceSha256": "920db5098398e435b9d229e067647c5bf0abd091a8ab49ccd68bfb293bd40f1b",
+      "sourceBytes": 139999,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generate-dialog.txt",
+      "sha256": "3c88e879ff63170b653966fbd490872a97f23f5ba9dabe92a81d925e6664f65d",
+      "bytes": 15869,
+      "sourceSha256": "3c88e879ff63170b653966fbd490872a97f23f5ba9dabe92a81d925e6664f65d",
+      "sourceBytes": 15869,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generate-failure-evidence.txt",
+      "sha256": "35ac00a09c559d6b918b71adc8c4cb8092e3630a1088ff192bd5c873d68dec28",
+      "bytes": 158785,
+      "sourceSha256": "35ac00a09c559d6b918b71adc8c4cb8092e3630a1088ff192bd5c873d68dec28",
+      "sourceBytes": 158785,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generate-open.txt",
+      "sha256": "f169f286d786b5593e9fdd222c444d7281fb548d620575966467fc3907732bbd",
+      "bytes": 2808,
+      "sourceSha256": "f169f286d786b5593e9fdd222c444d7281fb548d620575966467fc3907732bbd",
+      "sourceBytes": 2808,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generate-start.txt",
+      "sha256": "07aa943ac54ac132075aeb7c135cf1e2dbc2a36f8b564577e8aea3f9feaea6fc",
+      "bytes": 2817,
+      "sourceSha256": "07aa943ac54ac132075aeb7c135cf1e2dbc2a36f8b564577e8aea3f9feaea6fc",
+      "sourceBytes": 2817,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generation-retry-evidence.txt",
+      "sha256": "e77603a68b8c5ce2f2f9dc0d54cbf0db12283a75e8bed47ce11a62cfab32d446",
+      "bytes": 160779,
+      "sourceSha256": "e77603a68b8c5ce2f2f9dc0d54cbf0db12283a75e8bed47ce11a62cfab32d446",
+      "sourceBytes": 160779,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generation-retry-start.txt",
+      "sha256": "f0d56211b16a28046f64b01f9534eb6ca5d6a26fa131c4789792cc5243828a54",
+      "bytes": 326,
+      "sourceSha256": "f0d56211b16a28046f64b01f9534eb6ca5d6a26fa131c4789792cc5243828a54",
+      "sourceBytes": 326,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-generation-state.txt",
+      "sha256": "3dae2001c72b208bf9ea887d58b547d496cafd10cc8b393c81a502efbf4eb655",
+      "bytes": 16734,
+      "sourceSha256": "3dae2001c72b208bf9ea887d58b547d496cafd10cc8b393c81a502efbf4eb655",
+      "sourceBytes": 16734,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-note-save.txt",
+      "sha256": "1a117f5481fcf01b0ba8ba332b510827eac7210d3ff310893f1ddad12210213b",
+      "bytes": 2443,
+      "sourceSha256": "1a117f5481fcf01b0ba8ba332b510827eac7210d3ff310893f1ddad12210213b",
+      "sourceBytes": 2443,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-notes-entry-snapshot.txt",
+      "sha256": "4cf78fa6cdde10368bb92773a0f000f04fe8bba44bb14248d20b26a20e4d668b",
+      "bytes": 13925,
+      "sourceSha256": "4cf78fa6cdde10368bb92773a0f000f04fe8bba44bb14248d20b26a20e4d668b",
+      "sourceBytes": 13925,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/biology-notes-entry.txt",
+      "sha256": "fb7453696df2fc0b234bfe1f30d64adcc6cb809cc1dc1d6c400c53540f0d70f5",
+      "bytes": 3739,
+      "sourceSha256": "fb7453696df2fc0b234bfe1f30d64adcc6cb809cc1dc1d6c400c53540f0d70f5",
+      "sourceBytes": 3739,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/characters-entry.txt",
+      "sha256": "ecad9374ca205ea2f5d7c5f76409e301db87ae6e79152ffd6179549b2343ec94",
+      "bytes": 4328,
+      "sourceSha256": "ecad9374ca205ea2f5d7c5f76409e301db87ae6e79152ffd6179549b2343ec94",
+      "sourceBytes": 4328,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-current.txt",
+      "sha256": "b0d3b6f6b16c45bda73aaaddb1d8e649f50b043ea61eae6b855327eea1d240ed",
+      "bytes": 13493,
+      "sourceSha256": "b0d3b6f6b16c45bda73aaaddb1d8e649f50b043ea61eae6b855327eea1d240ed",
+      "sourceBytes": 13493,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-dialog.txt",
+      "sha256": "0da461864cd6331cb11c38236efa79ca7b1de210791a0d59f59a700f37d8124a",
+      "bytes": 3840,
+      "sourceSha256": "0da461864cd6331cb11c38236efa79ca7b1de210791a0d59f59a700f37d8124a",
+      "sourceBytes": 3840,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-draft-review.txt",
+      "sha256": "34bbcfcd6024c2e8cac789faf5735359a927a99501a9d8bef192983d4ad2d46c",
+      "bytes": 14382,
+      "sourceSha256": "34bbcfcd6024c2e8cac789faf5735359a927a99501a9d8bef192983d4ad2d46c",
+      "sourceBytes": 14382,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-draft.txt",
+      "sha256": "97414ea89a3ee7e121dd65808ebdc2c0d9785b399981bb49d04cc06cb2f8cdaf",
+      "bytes": 13493,
+      "sourceSha256": "97414ea89a3ee7e121dd65808ebdc2c0d9785b399981bb49d04cc06cb2f8cdaf",
+      "sourceBytes": 13493,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-menu.txt",
+      "sha256": "5f10eb4bc9d7908491eaac846d02a2cd58d15e35a220496792477d6a0e126303",
+      "bytes": 15884,
+      "sourceSha256": "5f10eb4bc9d7908491eaac846d02a2cd58d15e35a220496792477d6a0e126303",
+      "sourceBytes": 15884,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-practice-complete.txt",
+      "sha256": "3e70a0060690924a2fc919150f398c6468b8b96e72444459e468424d6810e0cf",
+      "bytes": 8785,
+      "sourceSha256": "3e70a0060690924a2fc919150f398c6468b8b96e72444459e468424d6810e0cf",
+      "sourceBytes": 8785,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-practice-entry.txt",
+      "sha256": "7b20e8349e4b292197e0e2c247f49fec11aa7278e912b3975ea428bd51ed5d4f",
+      "bytes": 9853,
+      "sourceSha256": "7b20e8349e4b292197e0e2c247f49fec11aa7278e912b3975ea428bd51ed5d4f",
+      "sourceBytes": 9853,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-practice-rate.txt",
+      "sha256": "6cc7dd5e62313047bf5f9b866a2308c462f464e11cd545e695cfbd0e974d89b2",
+      "bytes": 1202,
+      "sourceSha256": "6cc7dd5e62313047bf5f9b866a2308c462f464e11cd545e695cfbd0e974d89b2",
+      "sourceBytes": 1202,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-rate-easy.txt",
+      "sha256": "49e4dde2805a4b8c857098e60b061d4a989c5ba5ed7fc4ab1589c404a19850c3",
+      "bytes": 9692,
+      "sourceSha256": "49e4dde2805a4b8c857098e60b061d4a989c5ba5ed7fc4ab1589c404a19850c3",
+      "sourceBytes": 9692,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-reload.txt",
+      "sha256": "54f76530021a9639257ba757b487cf7e6dbd7312bb3d220ea6f1cf2aef3ddebb",
+      "bytes": 874,
+      "sourceSha256": "54f76530021a9639257ba757b487cf7e6dbd7312bb3d220ea6f1cf2aef3ddebb",
+      "sourceBytes": 874,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-reloaded-snapshot.txt",
+      "sha256": "90e5fe82854f9967d328b7ca116c329ea5eebc6dfe8818f089cc052591fa91a1",
+      "bytes": 8907,
+      "sourceSha256": "90e5fe82854f9967d328b7ca116c329ea5eebc6dfe8818f089cc052591fa91a1",
+      "sourceBytes": 8907,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-rerate-hard.txt",
+      "sha256": "dc9a139fa84e06ab9aab13bcc08382d827d068bcf263022947cbc9e1fd8628a3",
+      "bytes": 155,
+      "sourceSha256": "dc9a139fa84e06ab9aab13bcc08382d827d068bcf263022947cbc9e1fd8628a3",
+      "sourceBytes": 155,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-reveal.txt",
+      "sha256": "49ad77445fc331b1c45a235035a9dd1211bf27470707126c00be02c491f0aa5d",
+      "bytes": 11282,
+      "sourceSha256": "49ad77445fc331b1c45a235035a9dd1211bf27470707126c00be02c491f0aa5d",
+      "sourceBytes": 11282,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-review-complete.txt",
+      "sha256": "c1986ae01020e1c8a4cdff122f048c2e4971c8fbb75f3dba62114fc9d55f6753",
+      "bytes": 9370,
+      "sourceSha256": "c1986ae01020e1c8a4cdff122f048c2e4971c8fbb75f3dba62114fc9d55f6753",
+      "sourceBytes": 9370,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-review-deltas.json",
+      "sha256": "210a82fbebae5b8347d7064cd1a091e8b06c7a01055e9fa4a29abf4e46a7182c",
+      "bytes": 5035,
+      "sourceSha256": "210a82fbebae5b8347d7064cd1a091e8b06c7a01055e9fa4a29abf4e46a7182c",
+      "sourceBytes": 5035,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-review-events-final.txt",
+      "sha256": "169529a8a74e421efc6a4f0b7ce8ccb0413e446d75bfe86bb5f94f3c95266b01",
+      "bytes": 257334,
+      "sourceSha256": "169529a8a74e421efc6a4f0b7ce8ccb0413e446d75bfe86bb5f94f3c95266b01",
+      "sourceBytes": 257334,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-review-events.txt",
+      "sha256": "40ace02730a56ba2add59c4d8bfde81666b1863fea4828ef634770b50ad3b3f9",
+      "bytes": 57,
+      "sourceSha256": "40ace02730a56ba2add59c4d8bfde81666b1863fea4828ef634770b50ad3b3f9",
+      "sourceBytes": 57,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-review-start.txt",
+      "sha256": "2f689c5ed42ba11bf246b82974329abae35c5dc13ea14b82dfdde33381ed1f66",
+      "bytes": 9225,
+      "sourceSha256": "2f689c5ed42ba11bf246b82974329abae35c5dc13ea14b82dfdde33381ed1f66",
+      "sourceBytes": 9225,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-save.txt",
+      "sha256": "da2f96127024d027cdf69cb0a5d327bbfcdc86e6e0687fa91562a26913ca18b7",
+      "bytes": 3808,
+      "sourceSha256": "da2f96127024d027cdf69cb0a5d327bbfcdc86e6e0687fa91562a26913ca18b7",
+      "sourceBytes": 3808,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-scheduled-rerate.txt",
+      "sha256": "9eb5a766d9524d0e3b1c34edaf34243ad61a9ecf2c1bb722d720be3675cb513c",
+      "bytes": 2230,
+      "sourceSha256": "9eb5a766d9524d0e3b1c34edaf34243ad61a9ecf2c1bb722d720be3675cb513c",
+      "sourceBytes": 2230,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-source-note-open.txt",
+      "sha256": "fe87240578a063f940e2b5efc28538c15cd23a395267035e72ccf69ae11849a8",
+      "bytes": 1121,
+      "sourceSha256": "fe87240578a063f940e2b5efc28538c15cd23a395267035e72ccf69ae11849a8",
+      "sourceBytes": 1121,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-source-note-snapshot.txt",
+      "sha256": "0239bda6492cf96f72ad1fffef6bd268e58025673d0faf1152c48d45ab124474",
+      "bytes": 15218,
+      "sourceSha256": "0239bda6492cf96f72ad1fffef6bd268e58025673d0faf1152c48d45ab124474",
+      "sourceBytes": 15218,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-study-entry.txt",
+      "sha256": "8d911d11de40e1097e4fdba574e5ec9d0edcbc1eb6429b50ca1c550375ed699c",
+      "bytes": 1014,
+      "sourceSha256": "8d911d11de40e1097e4fdba574e5ec9d0edcbc1eb6429b50ca1c550375ed699c",
+      "sourceBytes": 1014,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-card-study-snapshot.txt",
+      "sha256": "c95c631d5bfb05c786b36b6212b2e3ab7219fae6be566d0a97d46106257819ac",
+      "bytes": 7892,
+      "sourceSha256": "c95c631d5bfb05c786b36b6212b2e3ab7219fae6be566d0a97d46106257819ac",
+      "sourceBytes": 7892,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-controlled-failure.js",
+      "sha256": "7ca48b4dc733d31217ee6f4730275b1700698588bd743b0d40eaac4c72388f05",
+      "bytes": 1343,
+      "sourceSha256": "7ca48b4dc733d31217ee6f4730275b1700698588bd743b0d40eaac4c72388f05",
+      "sourceBytes": 1343,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-controlled-failure.txt",
+      "sha256": "83fb426aacafba021fc963189f9124c0352e8cd65835b1a708bf4415b7cd6098",
+      "bytes": 4267,
+      "sourceSha256": "83fb426aacafba021fc963189f9124c0352e8cd65835b1a708bf4415b7cd6098",
+      "sourceBytes": 4267,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-entry.txt",
+      "sha256": "e38ead59659e4d5e56110fe5b7dd4d9b6c12baca8716ab4d2299a10e823868f6",
+      "bytes": 9378,
+      "sourceSha256": "e38ead59659e4d5e56110fe5b7dd4d9b6c12baca8716ab4d2299a10e823868f6",
+      "sourceBytes": 9378,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-reload-settled.txt",
+      "sha256": "0a80f250dcf016eb43d5c92060b8dd9ae9686bd67a99e271eb7aaa1170b49a87",
+      "bytes": 12151,
+      "sourceSha256": "0a80f250dcf016eb43d5c92060b8dd9ae9686bd67a99e271eb7aaa1170b49a87",
+      "sourceBytes": 12151,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-retry-final-evidence.txt",
+      "sha256": "0f4e45858cf77af78ed433a60f68c6d4e7accc800639136c3968a49fc807666c",
+      "bytes": 92023,
+      "sourceSha256": "0f4e45858cf77af78ed433a60f68c6d4e7accc800639136c3968a49fc807666c",
+      "sourceBytes": 92023,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-retry-reload-snapshot.txt",
+      "sha256": "3968d46dcf9a7fa83b9e5681ea4b44cd89be06a7171881790a8678acd86f9317",
+      "bytes": 9434,
+      "sourceSha256": "3968d46dcf9a7fa83b9e5681ea4b44cd89be06a7171881790a8678acd86f9317",
+      "sourceBytes": 9434,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-retry-reload.txt",
+      "sha256": "36052733e77987d677557d6912651061219a6678aee823cd7d4c8467f010bc65",
+      "bytes": 472,
+      "sourceSha256": "36052733e77987d677557d6912651061219a6678aee823cd7d4c8467f010bc65",
+      "sourceBytes": 472,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-retry.js",
+      "sha256": "f242ff256cdd45c0d56ec2d67129816709f7b678ea43297a3f679522da527290",
+      "bytes": 344,
+      "sourceSha256": "f242ff256cdd45c0d56ec2d67129816709f7b678ea43297a3f679522da527290",
+      "sourceBytes": 344,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-retry.txt",
+      "sha256": "fdbf65c962233d6b40c3632897298031d9b925b63c6a8eeb5435b67a7ee96831",
+      "bytes": 57557,
+      "sourceSha256": "fdbf65c962233d6b40c3632897298031d9b925b63c6a8eeb5435b67a7ee96831",
+      "sourceBytes": 57557,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-save-card-open.txt",
+      "sha256": "4ce9b70889ba490592f1f43a4a5ce9802ea7ac9f077329cc65b8ba36363ac8eb",
+      "bytes": 1798,
+      "sourceSha256": "4ce9b70889ba490592f1f43a4a5ce9802ea7ac9f077329cc65b8ba36363ac8eb",
+      "sourceBytes": 1798,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-settings-open.txt",
+      "sha256": "cbd4d072109ed2fcc0e9522347fe17e0ebc369b10b82b528d97866d14e50587b",
+      "bytes": 18317,
+      "sourceSha256": "cbd4d072109ed2fcc0e9522347fe17e0ebc369b10b82b528d97866d14e50587b",
+      "sourceBytes": 18317,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-turn1-result.txt",
+      "sha256": "00534a3c0ba9b542aa47d8a8b74a9a3a8484101c29ededa3fa944cc9c8997df9",
+      "bytes": 16716,
+      "sourceSha256": "00534a3c0ba9b542aa47d8a8b74a9a3a8484101c29ededa3fa944cc9c8997df9",
+      "sourceBytes": 16716,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-turn1-send.txt",
+      "sha256": "37245a1c09a71a11756600394309189725b609defa007d54eb2643150c8810f3",
+      "bytes": 1749,
+      "sourceSha256": "37245a1c09a71a11756600394309189725b609defa007d54eb2643150c8810f3",
+      "sourceBytes": 1749,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-turn1.js",
+      "sha256": "a61b37dd211412dde866a4c8aa2c225d612f3f503423fee67e75b4dca297d760",
+      "bytes": 387,
+      "sourceSha256": "a61b37dd211412dde866a4c8aa2c225d612f3f503423fee67e75b4dca297d760",
+      "sourceBytes": 387,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-turn2-send.txt",
+      "sha256": "4ee2a48733da6365802a122c4a3e54d52b2465400afb618b17831b53fc273fbc",
+      "bytes": 2086,
+      "sourceSha256": "4ee2a48733da6365802a122c4a3e54d52b2465400afb618b17831b53fc273fbc",
+      "sourceBytes": 2086,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-turn2.js",
+      "sha256": "8d465015416f844afb79870d2867312e246a3b508530c4f49597d7cbad1606f4",
+      "bytes": 467,
+      "sourceSha256": "8d465015416f844afb79870d2867312e246a3b508530c4f49597d7cbad1606f4",
+      "sourceBytes": 467,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-two-turn-evidence.txt",
+      "sha256": "856ef3af70d78ab3cac34b201264fb9a927a1343881b19158cd0c1c438ee676b",
+      "bytes": 19293,
+      "sourceSha256": "856ef3af70d78ab3cac34b201264fb9a927a1343881b19158cd0c1c438ee676b",
+      "sourceBytes": 19293,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/chat-two-turn-reload.txt",
+      "sha256": "c5d6e3392b096a64373922e866ad2ab804663762b5d9e6283ed72c4c58a03775",
+      "bytes": 872,
+      "sourceSha256": "c5d6e3392b096a64373922e866ad2ab804663762b5d9e6283ed72c4c58a03775",
+      "sourceBytes": 872,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/citation-media-link.txt",
+      "sha256": "7e5c908e8e02b9db32e768230160113309493b9987d787772355e842535a410c",
+      "bytes": 20933,
+      "sourceSha256": "7e5c908e8e02b9db32e768230160113309493b9987d787772355e842535a410c",
+      "sourceBytes": 20933,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/citation-media-tab.txt",
+      "sha256": "b4e46019603b5b460e0430450224a65e8197d38b1fa7161d555b0a2da4b6b518",
+      "bytes": 228,
+      "sourceSha256": "b4e46019603b5b460e0430450224a65e8197d38b1fa7161d555b0a2da4b6b518",
+      "sourceBytes": 228,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/composer-dom-read.txt",
+      "sha256": "e73cdfabddb255fd64b2467a1e1e4b73ac4a77f9440eff6a90c6deebe4797cf8",
+      "bytes": 858,
+      "sourceSha256": "e73cdfabddb255fd64b2467a1e1e4b73ac4a77f9440eff6a90c6deebe4797cf8",
+      "sourceBytes": 858,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/first-chat-observer.txt",
+      "sha256": "999d8b829d4285f236486123711662856ff31a2d4020e611156e6ee5e4a34ed4",
+      "bytes": 1030,
+      "sourceSha256": "999d8b829d4285f236486123711662856ff31a2d4020e611156e6ee5e4a34ed4",
+      "sourceBytes": 1030,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/first-chat-prompt.txt",
+      "sha256": "7cfd3811f7dc442e8c2074838a73d45702ae8d7a2c0343ce3de665f0e9e577c8",
+      "bytes": 162,
+      "sourceSha256": "7cfd3811f7dc442e8c2074838a73d45702ae8d7a2c0343ce3de665f0e9e577c8",
+      "sourceBytes": 162,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/first-chat-result.txt",
+      "sha256": "8d2c5f95bdafd7ea70f82842c524f8b2dff6cafa471f66b295c7bcd162834724",
+      "bytes": 1474,
+      "sourceSha256": "8d2c5f95bdafd7ea70f82842c524f8b2dff6cafa471f66b295c7bcd162834724",
+      "sourceBytes": 1474,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/first-chat-send.txt",
+      "sha256": "30b5c312b8b0f9d568ea769666ec383e58835fe15bc32b8e28413d1921665073",
+      "bytes": 3294,
+      "sourceSha256": "30b5c312b8b0f9d568ea769666ec383e58835fe15bc32b8e28413d1921665073",
+      "sourceBytes": 3294,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/first-chat-step.txt",
+      "sha256": "341b6dae89ae6062bf998f0a30c939db220af5f0b778767df4e7c217d2c3710c",
+      "bytes": 4475,
+      "sourceSha256": "341b6dae89ae6062bf998f0a30c939db220af5f0b778767df4e7c217d2c3710c",
+      "sourceBytes": 4475,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/flashcard-failure-log-excerpt.json",
+      "sha256": "3345b5e41ba66af52a1c645db9299d620b6763efb3772daa3f84ecfd0ddc636d",
+      "bytes": 19212,
+      "sourceSha256": "3345b5e41ba66af52a1c645db9299d620b6763efb3772daa3f84ecfd0ddc636d",
+      "sourceBytes": 19212,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/fresh-handoff-current.txt",
+      "sha256": "a432c5f73433d959a7c5bbfae083f50c3c42c327e7ab88c6d51e886f3ed343c8",
+      "bytes": 9145,
+      "sourceSha256": "a432c5f73433d959a7c5bbfae083f50c3c42c327e7ab88c6d51e886f3ed343c8",
+      "sourceBytes": 9145,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/home-ready.txt",
+      "sha256": "4f42385e3fbc1761d8dfa07beab1523c312976d2a4b51dd6d72ecf842f38382b",
+      "bytes": 12233,
+      "sourceSha256": "4f42385e3fbc1761d8dfa07beab1523c312976d2a4b51dd6d72ecf842f38382b",
+      "sourceBytes": 12233,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-attach.js",
+      "sha256": "c4e61640227ad462999755e3e02cd7b72a7ecc487664a812b72b3d152b175499",
+      "bytes": 512,
+      "sourceSha256": "c4e61640227ad462999755e3e02cd7b72a7ecc487664a812b72b3d152b175499",
+      "sourceBytes": 512,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-attach.txt",
+      "sha256": "2e9b9a78db21bcb4f69bbd1ef9931ab860afc0afcd65a0a0672835eb4844eba5",
+      "bytes": 671,
+      "sourceSha256": "2e9b9a78db21bcb4f69bbd1ef9931ab860afc0afcd65a0a0672835eb4844eba5",
+      "sourceBytes": 671,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-final-evidence.txt",
+      "sha256": "00062434a63351dede73f4cbc1374ccfb4426f6d88f3a3dada6e90fa095f08a4",
+      "bytes": 119365,
+      "sourceSha256": "00062434a63351dede73f4cbc1374ccfb4426f6d88f3a3dada6e90fa095f08a4",
+      "sourceBytes": 119365,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-guard-settled.txt",
+      "sha256": "7b3dbefb7a629e77478db3d93b501ce0c0e63dd457e5c7f3379339891c50fe72",
+      "bytes": 11470,
+      "sourceSha256": "7b3dbefb7a629e77478db3d93b501ce0c0e63dd457e5c7f3379339891c50fe72",
+      "sourceBytes": 11470,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-guard.js",
+      "sha256": "fdc361e650add6adb04ecc762e7b66b9ed620de081fecabc82b663ae25bc576e",
+      "bytes": 485,
+      "sourceSha256": "fdc361e650add6adb04ecc762e7b66b9ed620de081fecabc82b663ae25bc576e",
+      "sourceBytes": 485,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-guard.txt",
+      "sha256": "5fbf76ae8657180b76ff8e25acccb735b0a4875253f5e94ce8f8ed5137e79443",
+      "bytes": 1843,
+      "sourceSha256": "5fbf76ae8657180b76ff8e25acccb735b0a4875253f5e94ce8f8ed5137e79443",
+      "sourceBytes": 1843,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-reload.txt",
+      "sha256": "cd515ec62a91e8208e03509e8520efc31824d4f472000d085c930f7ef69846dc",
+      "bytes": 872,
+      "sourceSha256": "cd515ec62a91e8208e03509e8520efc31824d4f472000d085c930f7ef69846dc",
+      "sourceBytes": 872,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-retry-guard.txt",
+      "sha256": "8d54e899d0a3eefdb63b263b84f37101e3a602bc3ae57ca3d7f81fbf4eade00f",
+      "bytes": 12690,
+      "sourceSha256": "8d54e899d0a3eefdb63b263b84f37101e3a602bc3ae57ca3d7f81fbf4eade00f",
+      "sourceBytes": 12690,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/image-upload.txt",
+      "sha256": "507f8f3cfb28e54a9683b2c1ae6d0544d4aec4945521a287d7a8a04003fd12c5",
+      "bytes": 10592,
+      "sourceSha256": "507f8f3cfb28e54a9683b2c1ae6d0544d4aec4945521a287d7a8a04003fd12c5",
+      "sourceBytes": 10592,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-browse.txt",
+      "sha256": "2687094effe4313b2dc1f87f0c4f390c0725b5f4e6eeaf1c6b49b225b4433937",
+      "bytes": 463,
+      "sourceSha256": "2687094effe4313b2dc1f87f0c4f390c0725b5f4e6eeaf1c6b49b225b4433937",
+      "sourceBytes": 463,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-complete.txt",
+      "sha256": "9a6ee5b14927e63a30b8fedb2b78c49b8ec4f474c04cad0d5969a4d5c85a96a7",
+      "bytes": 780,
+      "sourceSha256": "9a6ee5b14927e63a30b8fedb2b78c49b8ec4f474c04cad0d5969a4d5c85a96a7",
+      "sourceBytes": 780,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-configure.txt",
+      "sha256": "049f9030a25dfe2569cfbc42da53964f02221cc76397991fe6f70a1cbba16379",
+      "bytes": 17930,
+      "sourceSha256": "049f9030a25dfe2569cfbc42da53964f02221cc76397991fe6f70a1cbba16379",
+      "sourceBytes": 17930,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-minimize.txt",
+      "sha256": "3b2da42d467f357167c1f31f5e6c776730db391b3d98bdc3293308314955b6cd",
+      "bytes": 12521,
+      "sourceSha256": "3b2da42d467f357167c1f31f5e6c776730db391b3d98bdc3293308314955b6cd",
+      "sourceBytes": 12521,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-provider-options.txt",
+      "sha256": "9e73b87f78c61b83456241189a3447c392d0f754e2261b805300ffbd11c3c2b5",
+      "bytes": 18976,
+      "sourceSha256": "9e73b87f78c61b83456241189a3447c392d0f754e2261b805300ffbd11c3c2b5",
+      "sourceBytes": 18976,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-provider-selected.txt",
+      "sha256": "c32cfb5098b48ced28d0bc89d056ec96bfe928b512e9ad2c12c6c4ddf8252bdd",
+      "bytes": 18016,
+      "sourceSha256": "c32cfb5098b48ced28d0bc89d056ec96bfe928b512e9ad2c12c6c4ddf8252bdd",
+      "sourceBytes": 18016,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-provider.txt",
+      "sha256": "7dbdcb20d441c27a943b47383017f6ba73a29c15ca66deb41027b8811c2acda3",
+      "bytes": 114,
+      "sourceSha256": "7dbdcb20d441c27a943b47383017f6ba73a29c15ca66deb41027b8811c2acda3",
+      "sourceBytes": 114,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-resume.txt",
+      "sha256": "49544464d21e0abf2f6847e28ea62d44aa4f1cbf3f53718a16585dc6819445b5",
+      "bytes": 15591,
+      "sourceSha256": "49544464d21e0abf2f6847e28ea62d44aa4f1cbf3f53718a16585dc6819445b5",
+      "sourceBytes": 15591,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-review.txt",
+      "sha256": "f759a2cb4a772753bbf3378afff19404970e679aba70ba0c3d45a52620fc8918",
+      "bytes": 14514,
+      "sourceSha256": "f759a2cb4a772753bbf3378afff19404970e679aba70ba0c3d45a52620fc8918",
+      "sourceBytes": 14514,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-start.txt",
+      "sha256": "70255501d03d39fb8ebbe9ae0e0f63e99b8e9829649b4c7369fdb4ff91aeee68",
+      "bytes": 15151,
+      "sourceSha256": "70255501d03d39fb8ebbe9ae0e0f63e99b8e9829649b4c7369fdb4ff91aeee68",
+      "sourceBytes": 15151,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-terminal-evidence.txt",
+      "sha256": "884c795831a4840d9e1c71ca52257d03bd36558e09251ebb227329bccda1939a",
+      "bytes": 228742,
+      "sourceSha256": "884c795831a4840d9e1c71ca52257d03bd36558e09251ebb227329bccda1939a",
+      "sourceBytes": 228742,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/ingest-upload.txt",
+      "sha256": "50df01fc61558beab646c4378b996f820315f6a58f588fc279f94b30a0387ef7",
+      "bytes": 15779,
+      "sourceSha256": "50df01fc61558beab646c4378b996f820315f6a58f588fc279f94b30a0387ef7",
+      "sourceBytes": 15779,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/key-save-redacted.txt",
+      "sha256": "13d84b05d61f2567a89b191510acb4a01dce28869ff2b8ad54673ffb5d5492a2",
+      "bytes": 969,
+      "sourceSha256": "13d84b05d61f2567a89b191510acb4a01dce28869ff2b8ad54673ffb5d5492a2",
+      "sourceBytes": 969,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-answer-snapshot.txt",
+      "sha256": "90b5b76b992e6859ddd58739c299335329c2fd627b2f296e40ce123e8a0a31e4",
+      "bytes": 19082,
+      "sourceSha256": "90b5b76b992e6859ddd58739c299335329c2fd627b2f296e40ce123e8a0a31e4",
+      "sourceBytes": 19082,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-citation-excerpt.txt",
+      "sha256": "294cb42b7ce88c3d63f3be02840c355b9ecb00e5375ee2698f60b30b9ada6b62",
+      "bytes": 1147,
+      "sourceSha256": "294cb42b7ce88c3d63f3be02840c355b9ecb00e5375ee2698f60b30b9ada6b62",
+      "sourceBytes": 1147,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-model-picker.txt",
+      "sha256": "93358016f74756f3062a181f0c7b34ec1785d59c30c9cb331234dfdd535a81ba",
+      "bytes": 8677,
+      "sourceSha256": "93358016f74756f3062a181f0c7b34ec1785d59c30c9cb331234dfdd535a81ba",
+      "sourceBytes": 8677,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-open.txt",
+      "sha256": "a451a42901a979242a44cc29dd650f326d36f9c38246933ef282c36879ff754b",
+      "bytes": 3932,
+      "sourceSha256": "a451a42901a979242a44cc29dd650f326d36f9c38246933ef282c36879ff754b",
+      "sourceBytes": 3932,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-provider-models.txt",
+      "sha256": "d11ca923b1c03c1ccbbbf701cd3bea15a5376f9b89d7f1edc9b67d57db53896f",
+      "bytes": 8529,
+      "sourceSha256": "d11ca923b1c03c1ccbbbf701cd3bea15a5376f9b89d7f1edc9b67d57db53896f",
+      "sourceBytes": 8529,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-provider-select.txt",
+      "sha256": "184f3278521211fb9646fac20882cd3fef7b7ceed6a717acb9fd567e70890c5f",
+      "bytes": 1809,
+      "sourceSha256": "184f3278521211fb9646fac20882cd3fef7b7ceed6a717acb9fd567e70890c5f",
+      "sourceBytes": 1809,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-query-evidence.txt",
+      "sha256": "8e3b8e97f3e63fe54042eebf0fd62c9b9e400488309f9c32d13378f9681363e5",
+      "bytes": 270085,
+      "sourceSha256": "8e3b8e97f3e63fe54042eebf0fd62c9b9e400488309f9c32d13378f9681363e5",
+      "sourceBytes": 270085,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-question-send.txt",
+      "sha256": "b1d6329fae1541de2817eeb5e3dda11966fede76f27afc6f71a6ae3185a20ff8",
+      "bytes": 1832,
+      "sourceSha256": "b1d6329fae1541de2817eeb5e3dda11966fede76f27afc6f71a6ae3185a20ff8",
+      "sourceBytes": 1832,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-settings.txt",
+      "sha256": "a2235e7cfb83513bf42d394c042c28b6d8030fc8642839d9369970e8f739a90a",
+      "bytes": 14015,
+      "sourceSha256": "a2235e7cfb83513bf42d394c042c28b6d8030fc8642839d9369970e8f739a90a",
+      "sourceBytes": 14015,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-snapshot.txt",
+      "sha256": "e4fdd3d4776f90f5387f5cc3737749886bc490b197d6ea7b0bc46ab71337abfb",
+      "bytes": 6733,
+      "sourceSha256": "e4fdd3d4776f90f5387f5cc3737749886bc490b197d6ea7b0bc46ab71337abfb",
+      "sourceBytes": 6733,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-source-view-actual.txt",
+      "sha256": "f6d103d6560445e2f2c992ffdce361065b1164dd10717e01dba4a80538baa74d",
+      "bytes": 20796,
+      "sourceSha256": "f6d103d6560445e2f2c992ffdce361065b1164dd10717e01dba4a80538baa74d",
+      "sourceBytes": 20796,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/knowledge-source-view.txt",
+      "sha256": "c33d0e6a8b002bcfeef25a0bc4d17d484b6ab74fb422234991f19fcefea86a02",
+      "bytes": 254,
+      "sourceSha256": "c33d0e6a8b002bcfeef25a0bc4d17d484b6ab74fb422234991f19fcefea86a02",
+      "sourceBytes": 254,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-chat-pre-send.txt",
+      "sha256": "8aa0aee74043f96412ce7f4f78a7537f083b798e7b312b48c9c9f6a5e504d5d3",
+      "bytes": 12592,
+      "sourceSha256": "8aa0aee74043f96412ce7f4f78a7537f083b798e7b312b48c9c9f6a5e504d5d3",
+      "sourceBytes": 12592,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-chat-reload.txt",
+      "sha256": "2fb034fc59770c246e4ae85aedbe51875d13b302d1370f4225148c4c2d5c57e0",
+      "bytes": 838,
+      "sourceSha256": "2fb034fc59770c246e4ae85aedbe51875d13b302d1370f4225148c4c2d5c57e0",
+      "sourceBytes": 838,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-handoff-expanded.txt",
+      "sha256": "e9b7b11d318a0590fd12dafead76222efb6ff39c1745805ee029fb9cc7044e4e",
+      "bytes": 2320,
+      "sourceSha256": "e9b7b11d318a0590fd12dafead76222efb6ff39c1745805ee029fb9cc7044e4e",
+      "sourceBytes": 2320,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-search-current.txt",
+      "sha256": "2ff7ed1675c9e4915735938f65b39af823a96ebd0c8f60e951eaf2297a9635a5",
+      "bytes": 8554,
+      "sourceSha256": "2ff7ed1675c9e4915735938f65b39af823a96ebd0c8f60e951eaf2297a9635a5",
+      "sourceBytes": 8554,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-source-chat-result.txt",
+      "sha256": "97a8037e372c3b39522709660bcf5aa81108e643a94bb74d1f0b41ed983e8aa8",
+      "bytes": 63326,
+      "sourceSha256": "97a8037e372c3b39522709660bcf5aa81108e643a94bb74d1f0b41ed983e8aa8",
+      "sourceBytes": 63326,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-source-chat-send-final.txt",
+      "sha256": "92691566fc121436b3425208d7c1ba83fde181b90ccf0c26994e1518f85e61e4",
+      "bytes": 1046,
+      "sourceSha256": "92691566fc121436b3425208d7c1ba83fde181b90ccf0c26994e1518f85e61e4",
+      "sourceBytes": 1046,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-source-chat-send.txt",
+      "sha256": "2a52b807eb5eb1d8cb79a21fdf6ddf6b6588b890cdefc0e02edae54946e9133d",
+      "bytes": 73,
+      "sourceSha256": "2a52b807eb5eb1d8cb79a21fdf6ddf6b6588b890cdefc0e02edae54946e9133d",
+      "sourceBytes": 73,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-source-chat-submitted.txt",
+      "sha256": "5e25918001f8fa53c1bcbc8899cefd3e9df69f9702173e4bb3a43c6f27f604de",
+      "bytes": 62,
+      "sourceSha256": "5e25918001f8fa53c1bcbc8899cefd3e9df69f9702173e4bb3a43c6f27f604de",
+      "sourceBytes": 62,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-source-snapshot.txt",
+      "sha256": "3278a31a527dde871060461aaf77c836f1aee20c06822916dcec75dac9a9201b",
+      "bytes": 14709,
+      "sourceSha256": "3278a31a527dde871060461aaf77c836f1aee20c06822916dcec75dac9a9201b",
+      "sourceBytes": 14709,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-tab-observer.txt",
+      "sha256": "16c1d488a512d3283bfaa7ef1e0ff28c924b1c7a5b9d8c4ef37d7a1510017cc8",
+      "bytes": 2596,
+      "sourceSha256": "16c1d488a512d3283bfaa7ef1e0ff28c924b1c7a5b9d8c4ef37d7a1510017cc8",
+      "sourceBytes": 2596,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-to-chat-handoff-actual.txt",
+      "sha256": "0b01b1858e4a9bdbd53af5b8644a030269958660610d3cc3505136077ebde7af",
+      "bytes": 4107,
+      "sourceSha256": "0b01b1858e4a9bdbd53af5b8644a030269958660610d3cc3505136077ebde7af",
+      "sourceBytes": 4107,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-to-chat-handoff.txt",
+      "sha256": "2f5fa0cc24aaea8d3e4321de54e1bbd60bc7471ed7d9c556a55a40d96ad29858",
+      "bytes": 160,
+      "sourceSha256": "2f5fa0cc24aaea8d3e4321de54e1bbd60bc7471ed7d9c556a55a40d96ad29858",
+      "sourceBytes": 160,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/media-to-fresh-chat.txt",
+      "sha256": "2f5fa0cc24aaea8d3e4321de54e1bbd60bc7471ed7d9c556a55a40d96ad29858",
+      "bytes": 160,
+      "sourceSha256": "2f5fa0cc24aaea8d3e4321de54e1bbd60bc7471ed7d9c556a55a40d96ad29858",
+      "sourceBytes": 160,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/note-actions.txt",
+      "sha256": "ddc1e05aba90626a07211a9bbcf3d3bdb89e29b804b46426f1c1009eabae7896",
+      "bytes": 14834,
+      "sourceSha256": "ddc1e05aba90626a07211a9bbcf3d3bdb89e29b804b46426f1c1009eabae7896",
+      "sourceBytes": 14834,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/note-backlink-chat.txt",
+      "sha256": "7c47e2e64b749d6432697361949222e88e04be194a5a14b0ebe1387cb1c86c3b",
+      "bytes": 13404,
+      "sourceSha256": "7c47e2e64b749d6432697361949222e88e04be194a5a14b0ebe1387cb1c86c3b",
+      "sourceBytes": 13404,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/note-open-conversation.txt",
+      "sha256": "294b94a1a82ce43f1f489a2d3e1196eb8f69a575bae3d91161bf5048fb6c170d",
+      "bytes": 13739,
+      "sourceSha256": "294b94a1a82ce43f1f489a2d3e1196eb8f69a575bae3d91161bf5048fb6c170d",
+      "sourceBytes": 13739,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/notes-tour-skipped.txt",
+      "sha256": "065eb2f4708441626be7c94ebad0dddc8e1bb996b730a9a84d61fa321091ea6b",
+      "bytes": 12202,
+      "sourceSha256": "065eb2f4708441626be7c94ebad0dddc8e1bb996b730a9a84d61fa321091ea6b",
+      "sourceBytes": 12202,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/observe-first-chat.js",
+      "sha256": "8498f27284a599bff28e4dd5f77531695eec2728b34545d87a8e7fc0b2e36a7a",
+      "bytes": 861,
+      "sourceSha256": "8498f27284a599bff28e4dd5f77531695eec2728b34545d87a8e7fc0b2e36a7a",
+      "sourceBytes": 861,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/observe.txt",
+      "sha256": "d4c3d748175c40710ecc316c46c8f3e796a573587d50ca4717212300303dd9e7",
+      "bytes": 2782,
+      "sourceSha256": "d4c3d748175c40710ecc316c46c8f3e796a573587d50ca4717212300303dd9e7",
+      "sourceBytes": 2782,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-apply-system.txt",
+      "sha256": "050f9e5f0fff872d9ac01045f7d58be628ed3d4452e22be0303054d836b36459",
+      "bytes": 13986,
+      "sourceSha256": "050f9e5f0fff872d9ac01045f7d58be628ed3d4452e22be0303054d836b36459",
+      "sourceBytes": 13986,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-chat-result.txt",
+      "sha256": "27b982a6baed0e5fce330534a7529d7b0c5cd71f7192a019558f06e9780c6549",
+      "bytes": 371558,
+      "sourceSha256": "27b982a6baed0e5fce330534a7529d7b0c5cd71f7192a019558f06e9780c6549",
+      "sourceBytes": 371558,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-chat-send.txt",
+      "sha256": "e441a7ac45c1cc32d2734bce9206bb2fe7b88367aa827cb54a8397d2e55dcbdf",
+      "bytes": 4426,
+      "sourceSha256": "e441a7ac45c1cc32d2734bce9206bb2fe7b88367aa827cb54a8397d2e55dcbdf",
+      "sourceBytes": 4426,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-prompt-actions.txt",
+      "sha256": "6eee66a201e11bbaf398c9250a9a6ae2c9cda9f13d7f184bc9a18bb1ae26efc2",
+      "bytes": 1762,
+      "sourceSha256": "6eee66a201e11bbaf398c9250a9a6ae2c9cda9f13d7f184bc9a18bb1ae26efc2",
+      "sourceBytes": 1762,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-prompt-save.txt",
+      "sha256": "6c724b292d3390a59d6cbceb9013c35efe6d4f91059c7cb3139c343f7611cc52",
+      "bytes": 2694,
+      "sourceSha256": "6c724b292d3390a59d6cbceb9013c35efe6d4f91059c7cb3139c343f7611cc52",
+      "sourceBytes": 2694,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-reload.txt",
+      "sha256": "314286b7e49e5c808b295018840a08604989b5ba18c52edf08f788f2409ab587",
+      "bytes": 991,
+      "sourceSha256": "314286b7e49e5c808b295018840a08604989b5ba18c52edf08f788f2409ab587",
+      "sourceBytes": 991,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-reloaded-evidence.txt",
+      "sha256": "c7cc9591f8b1de1f748b32a0b674d29088612ea188c3882606910150ccf7332c",
+      "bytes": 48882,
+      "sourceSha256": "c7cc9591f8b1de1f748b32a0b674d29088612ea188c3882606910150ccf7332c",
+      "sourceBytes": 48882,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/pirate-use-in-chat.txt",
+      "sha256": "449130d4dce3cd3eba1f91fd509e1648f406ddc9f0be415196981244753d310b",
+      "bytes": 16197,
+      "sourceSha256": "449130d4dce3cd3eba1f91fd509e1648f406ddc9f0be415196981244753d310b",
+      "sourceBytes": 16197,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/privacy-ack.txt",
+      "sha256": "d60673fdcd7f926740bdfaad53b0ad42cf38b24850b0862fbd2d88dcc4ded1c6",
+      "bytes": 119,
+      "sourceSha256": "d60673fdcd7f926740bdfaad53b0ad42cf38b24850b0862fbd2d88dcc4ded1c6",
+      "sourceBytes": 119,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/prompts-entry.txt",
+      "sha256": "2c8054cedc88a4e3c52a188eba10574c3fe423f651b6b011f1d2254c4d5ef118",
+      "bytes": 3021,
+      "sourceSha256": "2c8054cedc88a4e3c52a188eba10574c3fe423f651b6b011f1d2254c4d5ef118",
+      "sourceBytes": 3021,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-llama-snapshot.txt",
+      "sha256": "2889adc6b91d120510a8e428ac6af5cc3d73dcd28311f01b8f6ed5946c022f9e",
+      "bytes": 6769,
+      "sourceSha256": "2889adc6b91d120510a8e428ac6af5cc3d73dcd28311f01b8f6ed5946c022f9e",
+      "sourceBytes": 6769,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-llama.txt",
+      "sha256": "a6dce8cfc3655e2697e5d5ad1e6d4626f6780e1d549289bd6e79cc149ac0953c",
+      "bytes": 107,
+      "sourceSha256": "a6dce8cfc3655e2697e5d5ad1e6d4626f6780e1d549289bd6e79cc149ac0953c",
+      "sourceBytes": 107,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-model.txt",
+      "sha256": "b8f3d4425cd059ae011b0b2083d5021c050b3e032613d7e68bdd7ef5bf4da6c7",
+      "bytes": 7149,
+      "sourceSha256": "b8f3d4425cd059ae011b0b2083d5021c050b3e032613d7e68bdd7ef5bf4da6c7",
+      "sourceBytes": 7149,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-save.txt",
+      "sha256": "07ea3e748f69a5b69f801a82ddebd3b5716aa18c16d5d2d9edf27b46f19d60b9",
+      "bytes": 7540,
+      "sourceSha256": "07ea3e748f69a5b69f801a82ddebd3b5716aa18c16d5d2d9edf27b46f19d60b9",
+      "sourceBytes": 7540,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-selected-validate.txt",
+      "sha256": "8a454f974f919bf03a70afd96b0dae885f384a24444267bd73c7c6e49f5e4775",
+      "bytes": 7401,
+      "sourceSha256": "8a454f974f919bf03a70afd96b0dae885f384a24444267bd73c7c6e49f5e4775",
+      "sourceBytes": 7401,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-step.txt",
+      "sha256": "64dee8b88d85aed41314889a6ff4d970ede1c3ed22fbbe64f8721f1e4c57e391",
+      "bytes": 5727,
+      "sourceSha256": "64dee8b88d85aed41314889a6ff4d970ede1c3ed22fbbe64f8721f1e4c57e391",
+      "sourceBytes": 5727,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-url.txt",
+      "sha256": "961a47e03bf69d0ca532e218a9706ebb35a4cc1be93e456db82779bcd6248c7c",
+      "bytes": 133,
+      "sourceSha256": "961a47e03bf69d0ca532e218a9706ebb35a4cc1be93e456db82779bcd6248c7c",
+      "sourceBytes": 133,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/provider-validate.txt",
+      "sha256": "223cd098e9cc9c00afe9db188329101817f1efc8c443583a3df9401337e9f307",
+      "bytes": 7262,
+      "sourceSha256": "223cd098e9cc9c00afe9db188329101817f1efc8c443583a3df9401337e9f307",
+      "sourceBytes": 7262,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/quick-ingest-open.txt",
+      "sha256": "32300be098d391716fa1d0a75c77f0d580f81b1b393c0f91059e605471e747cc",
+      "bytes": 2027,
+      "sourceSha256": "32300be098d391716fa1d0a75c77f0d580f81b1b393c0f91059e605471e747cc",
+      "sourceBytes": 2027,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/quick-ingest-snapshot.txt",
+      "sha256": "b42932e6d884619b1bcf2b1d58bca8b8e45509c17bccb9f447306681c7ceba77",
+      "bytes": 14376,
+      "sourceSha256": "b42932e6d884619b1bcf2b1d58bca8b8e45509c17bccb9f447306681c7ceba77",
+      "sourceBytes": 14376,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/read-first-chat.js",
+      "sha256": "290b5029fc36bd03417623b3d4a7feceffce3f3638222abdbbb41be7708c43f9",
+      "bytes": 143,
+      "sourceSha256": "290b5029fc36bd03417623b3d4a7feceffce3f3638222abdbbb41be7708c43f9",
+      "sourceBytes": 143,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/resume-key-handoff.txt",
+      "sha256": "f8d88f292c03c733f5e5a63781b5e19df19b7f84541e004f383181fc30f29971",
+      "bytes": 1070,
+      "sourceSha256": "f8d88f292c03c733f5e5a63781b5e19df19b7f84541e004f383181fc30f29971",
+      "sourceBytes": 1070,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/saved-note-open.txt",
+      "sha256": "6d0cb0bf3b6363d6d90d653c61f49e4859c9d2289e6e61f882f4958c93c36ba4",
+      "bytes": 3868,
+      "sourceSha256": "6d0cb0bf3b6363d6d90d653c61f49e4859c9d2289e6e61f882f4958c93c36ba4",
+      "sourceBytes": 3868,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/saved-note-selected-after-tour.txt",
+      "sha256": "c12df202d597d3a98324e6afbd33ac18f2ed63d0e54559425a77d0f1886f6856",
+      "bytes": 13747,
+      "sourceSha256": "c12df202d597d3a98324e6afbd33ac18f2ed63d0e54559425a77d0f1886f6856",
+      "sourceBytes": 13747,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/saved-note-selected.txt",
+      "sha256": "4e96b014559692bd0be5c0a9444c5c798dc79c0f97c0c88a1bb7556e5fc60ac5",
+      "bytes": 1575,
+      "sourceSha256": "4e96b014559692bd0be5c0a9444c5c798dc79c0f97c0c88a1bb7556e5fc60ac5",
+      "sourceBytes": 1575,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/saved-note-settled.txt",
+      "sha256": "954cb1c631ef9b4496d004845d55c05385c05c82c42a74a56f25bae557d20f4f",
+      "bytes": 12346,
+      "sourceSha256": "954cb1c631ef9b4496d004845d55c05385c05c82c42a74a56f25bae557d20f4f",
+      "sourceBytes": 12346,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/saved-note-snapshot.txt",
+      "sha256": "d2650924fa526b98da481d8e4c90ad2488a41bb50a4d8f8a2716c28cdeedd7f9",
+      "bytes": 12328,
+      "sourceSha256": "d2650924fa526b98da481d8e4c90ad2488a41bb50a4d8f8a2716c28cdeedd7f9",
+      "sourceBytes": 12328,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/setup-console.txt",
+      "sha256": "0175ee523165bf0a1975e4fdc716f9e18b1ae36ec05f9ed7b8bead0f32064c41",
+      "bytes": 1554,
+      "sourceSha256": "0175ee523165bf0a1975e4fdc716f9e18b1ae36ec05f9ed7b8bead0f32064c41",
+      "sourceBytes": 1554,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/setup-local.txt",
+      "sha256": "87ae68c245b12d3d4526c044cba81ef56c0c0e14297a0b9afee7b69e4c9d20d1",
+      "bytes": 4320,
+      "sourceSha256": "87ae68c245b12d3d4526c044cba81ef56c0c0e14297a0b9afee7b69e4c9d20d1",
+      "sourceBytes": 4320,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/setup-snapshot.txt",
+      "sha256": "e34a29cd98dd6bb52718a3db84235ab21cb99e1b9524d8406eeb539ef911ccd9",
+      "bytes": 3179,
+      "sourceSha256": "e34a29cd98dd6bb52718a3db84235ab21cb99e1b9524d8406eeb539ef911ccd9",
+      "sourceBytes": 3179,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-after-provider.json",
+      "sha256": "6ac26d86717ba655eceacafceeae4ce88d59a16cfdabecf1f767dfd0b44a244d",
+      "bytes": 2207,
+      "sourceSha256": "6ac26d86717ba655eceacafceeae4ce88d59a16cfdabecf1f767dfd0b44a244d",
+      "sourceBytes": 2207,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-answer-actions-snapshot.txt",
+      "sha256": "87436960e411684d490cf781997ae1f3a68e2f7eee5aec4377a5026e6746c580",
+      "bytes": 13381,
+      "sourceSha256": "87436960e411684d490cf781997ae1f3a68e2f7eee5aec4377a5026e6746c580",
+      "sourceBytes": 13381,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-answer-actions.txt",
+      "sha256": "abd24670b6ac00f978aa69530ee504e3eb2a1c16da7c2a620bd929b821953106",
+      "bytes": 1738,
+      "sourceSha256": "abd24670b6ac00f978aa69530ee504e3eb2a1c16da7c2a620bd929b821953106",
+      "sourceBytes": 1738,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-answer-menu.txt",
+      "sha256": "d461fc0b8669726eb18291d18fa82efaeef4d1b99aeac878749031ede4343a75",
+      "bytes": 15741,
+      "sourceSha256": "d461fc0b8669726eb18291d18fa82efaeef4d1b99aeac878749031ede4343a75",
+      "sourceBytes": 15741,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-answer-save-note.txt",
+      "sha256": "30ba377b2a239f4952a4d97d07923cbac5c2896a463f30719163f15832c3b27a",
+      "bytes": 14088,
+      "sourceSha256": "30ba377b2a239f4952a4d97d07923cbac5c2896a463f30719163f15832c3b27a",
+      "sourceBytes": 14088,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-chat-reloaded-snapshot.txt",
+      "sha256": "87436960e411684d490cf781997ae1f3a68e2f7eee5aec4377a5026e6746c580",
+      "bytes": 13381,
+      "sourceSha256": "87436960e411684d490cf781997ae1f3a68e2f7eee5aec4377a5026e6746c580",
+      "sourceBytes": 13381,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-open-actual.txt",
+      "sha256": "3592e4929313aefe046b7e4e01280df93afc86f7242383871cef77acac5828c5",
+      "bytes": 16934,
+      "sourceSha256": "3592e4929313aefe046b7e4e01280df93afc86f7242383871cef77acac5828c5",
+      "sourceBytes": 16934,
+      "compression": null
+    },
+    {
+      "path": "native/sqlite-single/source-open.txt",
+      "sha256": "c2177aae42a67166ed74609bd488d3dbe95c6711080bf0e8469af12fddcbeda0",
+      "bytes": 153,
+      "sourceSha256": "c2177aae42a67166ed74609bd488d3dbe95c6711080bf0e8469af12fddcbeda0",
+      "sourceBytes": 153,
+      "compression": null
+    },
+    {
+      "path": "audits/sqlite-single-chat-review.md",
+      "sha256": "57f2e23c8d0fd045b2ac2d4a31495995ff09c64e8b99b134dd0c115af6135d29",
+      "bytes": 7616,
+      "sourceSha256": "57f2e23c8d0fd045b2ac2d4a31495995ff09c64e8b99b134dd0c115af6135d29",
+      "sourceBytes": 7616,
+      "compression": null
+    },
+    {
+      "path": "audits/sqlite-single-five-card-diagnosis.md",
+      "sha256": "de22807d31c5ebc8826ca6ecb01a48805e552c854f2612314c260e7d29ac1933",
+      "bytes": 8584,
+      "sourceSha256": "de22807d31c5ebc8826ca6ecb01a48805e552c854f2612314c260e7d29ac1933",
+      "sourceBytes": 8584,
+      "compression": null
+    },
+    {
+      "path": "audits/sqlite-single-rerate-preview-diagnosis.md",
+      "sha256": "081d24fdef7a3f3652bd8eee04cfa0afba5899d89319b4dbd4a61a094e6d7038",
+      "bytes": 6264,
+      "sourceSha256": "081d24fdef7a3f3652bd8eee04cfa0afba5899d89319b4dbd4a61a094e6d7038",
+      "sourceBytes": 6264,
+      "compression": null
+    },
+    {
+      "path": "audits/sqlite-single-source-reuse-review.md",
+      "sha256": "5893f776a65c5544be258cc8f5285b3db24048bc52b2a3790384d040db05c8f1",
+      "bytes": 11174,
+      "sourceSha256": "5893f776a65c5544be258cc8f5285b3db24048bc52b2a3790384d040db05c8f1",
+      "sourceBytes": 11174,
+      "compression": null
+    },
+    {
+      "path": "fixtures/rowan-observatory-public-20260917.txt",
+      "sha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "bytes": 1917,
+      "sourceSha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "sourceBytes": 1917,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/complete.json",
+      "sha256": "fc61f7ec4ba3a138ccf735cd1f388a5c86678b544ba38c1c91646fa29c55af6f",
+      "bytes": 488,
+      "sourceSha256": "fc61f7ec4ba3a138ccf735cd1f388a5c86678b544ba38c1c91646fa29c55af6f",
+      "sourceBytes": 488,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/independent-review-manifest.json",
+      "sha256": "b4ed103e6c981485b4ad5cc03158e41696fd877e89ab16ad96a2466f39a56f9d",
+      "bytes": 10915,
+      "sourceSha256": "b4ed103e6c981485b4ad5cc03158e41696fd877e89ab16ad96a2466f39a56f9d",
+      "sourceBytes": 10915,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/independent-review.md",
+      "sha256": "05a093615cddec154791ebc1d33cd3cf27b987a28f732aaf7713e5f2883d390d",
+      "bytes": 3639,
+      "sourceSha256": "05a093615cddec154791ebc1d33cd3cf27b987a28f732aaf7713e5f2883d390d",
+      "sourceBytes": 3639,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/pg-multi-archive-manifest.json.gz",
+      "sha256": "cd604b1a09bdf6ecb1378b3269ad44483018ce4cc234564755f957606118aeb4",
+      "bytes": 1800899,
+      "sourceSha256": "09120994a7b5346c5372b2954de1e077caa375626cef796a12070a579a666c03",
+      "sourceBytes": 7890727,
+      "compression": "gzip"
+    },
+    {
+      "path": "copy-preparation/pg-multi-dependency-copy.json",
+      "sha256": "25b364bcdc49a328cd2714dd29498d724c74a606ae2967ab827934bc7aab7c60",
+      "bytes": 483,
+      "sourceSha256": "25b364bcdc49a328cd2714dd29498d724c74a606ae2967ab827934bc7aab7c60",
+      "sourceBytes": 483,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/pg-multi-preflight.json",
+      "sha256": "53c06daa58a7621c40fc7f7a42bceda9f45c35be2e365f527122656d3e63c83a",
+      "bytes": 4413,
+      "sourceSha256": "53c06daa58a7621c40fc7f7a42bceda9f45c35be2e365f527122656d3e63c83a",
+      "sourceBytes": 4413,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/pg-single-archive-manifest.json.gz",
+      "sha256": "7c01cd4684b2c2bef9130f8db79af94f8293b6ed42b0a08f9a762f6f400e98b7",
+      "bytes": 1800898,
+      "sourceSha256": "f9a6d30e6a8faef5635df40d5ee026e18ebc225d344bf29b62a8bcca7f2b2f4f",
+      "sourceBytes": 7890728,
+      "compression": "gzip"
+    },
+    {
+      "path": "copy-preparation/pg-single-dependency-copy.json",
+      "sha256": "d3c28b1913e84d5f6403f12224e08b788010cd9fefdeefb2e27e6d62ed26b4fa",
+      "bytes": 484,
+      "sourceSha256": "d3c28b1913e84d5f6403f12224e08b788010cd9fefdeefb2e27e6d62ed26b4fa",
+      "sourceBytes": 484,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/pg-single-preflight.json",
+      "sha256": "b63f7759da78803d075dda11971d76a49381987cc2cceeff95b038bef974e273",
+      "bytes": 4426,
+      "sourceSha256": "b63f7759da78803d075dda11971d76a49381987cc2cceeff95b038bef974e273",
+      "sourceBytes": 4426,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/python-dependency-copy.json",
+      "sha256": "b816c912f53544085c8fdbf22b7710f2cc0cc9135053b4912a73a2147ccb02ce",
+      "bytes": 2387,
+      "sourceSha256": "b816c912f53544085c8fdbf22b7710f2cc0cc9135053b4912a73a2147ccb02ce",
+      "sourceBytes": 2387,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-multi-archive-manifest.json.gz",
+      "sha256": "cd6858d9dc4c49e25f55246c7bb22c1be2ab908f7a5626563ae360637c497722",
+      "bytes": 1800901,
+      "sourceSha256": "703f3cd208450440ee4ce31ba51526200257f363fc7fa3fb07c4811d4fa9cb36",
+      "sourceBytes": 7890731,
+      "compression": "gzip"
+    },
+    {
+      "path": "copy-preparation/sqlite-multi-dependency-copy.json",
+      "sha256": "45c6b7ed5c219655df155c81e3c852143a420f0ad75bebab129829492cde8db1",
+      "bytes": 487,
+      "sourceSha256": "45c6b7ed5c219655df155c81e3c852143a420f0ad75bebab129829492cde8db1",
+      "sourceBytes": 487,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-multi-preflight.json",
+      "sha256": "8d3eeebef2ce2f23a812ce8c187b88d7475b53a0ab78f48680348efd04532b3d",
+      "bytes": 4465,
+      "sourceSha256": "8d3eeebef2ce2f23a812ce8c187b88d7475b53a0ab78f48680348efd04532b3d",
+      "sourceBytes": 4465,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-single-archive-manifest.json.gz",
+      "sha256": "faa956e558aafbda2f54dc316b26ab1eabcb2b5e8bf448f89930868ab428744d",
+      "bytes": 1800903,
+      "sourceSha256": "26255fe54e27f7e92d849bbf810a7224c655602e3e2f9514eb6cbcce3c96bba1",
+      "sourceBytes": 7890732,
+      "compression": "gzip"
+    },
+    {
+      "path": "copy-preparation/sqlite-single-dependency-copy.json",
+      "sha256": "b2e5fa5fc3ea432991f1a7172f12d7b9b54505164e7072f3fea144eb55713f9b",
+      "bytes": 488,
+      "sourceSha256": "b2e5fa5fc3ea432991f1a7172f12d7b9b54505164e7072f3fea144eb55713f9b",
+      "sourceBytes": 488,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-single-first-browser.txt",
+      "sha256": "cfa2a647954793fff69efe0714a5da7dad597eab6103da3f398e5cd1da324625",
+      "bytes": 795,
+      "sourceSha256": "cfa2a647954793fff69efe0714a5da7dad597eab6103da3f398e5cd1da324625",
+      "sourceBytes": 795,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-single-initial-health.json",
+      "sha256": "98dffe67f3ad8b6d2d1002001abefa1354f326fc24e3f617268877c5faecfcf1",
+      "bytes": 264,
+      "sourceSha256": "98dffe67f3ad8b6d2d1002001abefa1354f326fc24e3f617268877c5faecfcf1",
+      "sourceBytes": 264,
+      "compression": null
+    },
+    {
+      "path": "copy-preparation/sqlite-single-preflight.json",
+      "sha256": "88ad9c650b86a03be72ddd04a8fcc7debf23c414ade12f459384e0121685e873",
+      "bytes": 4478,
+      "sourceSha256": "88ad9c650b86a03be72ddd04a8fcc7debf23c414ade12f459384e0121685e873",
+      "sourceBytes": 4478,
+      "compression": null
+    },
+    {
+      "path": "controller/FRESH_INSTALL_UAT_MATRIX_2026_09_17.md",
+      "sha256": "e8f60c16c02461d825b2b36d0a29d8c6e5c3f12fb8bacc452aa514d3c801c1c0",
+      "bytes": 10529,
+      "sourceSha256": "e8f60c16c02461d825b2b36d0a29d8c6e5c3f12fb8bacc452aa514d3c801c1c0",
+      "sourceBytes": 10529,
+      "compression": null
+    }
+  ]
+}

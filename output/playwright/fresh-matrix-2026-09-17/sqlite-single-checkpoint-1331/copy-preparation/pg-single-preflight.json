@@ -1,0 +1,42 @@
+{
+  "sourceRoot": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single",
+  "sourceCommit": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "pythonVenv": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv",
+  "python": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python",
+  "sourcePaths": [
+    "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single",
+    "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/mcp-unified/src",
+    "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/packages/tldw_profile_core/src"
+  ],
+  "sourceHashes": {
+    "pyproject.toml": "ef1f624f563b48231b28456087e7f8dfcd4025f2e824a449f0f7817665fe1e74",
+    "tldw_Server_API/app/main.py": "4d1e9b900eb83eb3f3a119f8dc0a63708ea38f1ec4d2633ae280635d8dcb290a",
+    "tldw_Server_API/app/core/Utils/Utils.py": "0769c5615efa58a0cafa3de60b9f2a061fcb3566d8b5acd22a319a284db379b8",
+    "tldw_Server_API/Config_Files/config.txt": "f20050cf590d246785eff468fa63dc44b2a77094111842c7f600f5353db6b22c",
+    "tldw_Server_API/Config_Files/mcp_modules.yaml": "346952773d6ac9a8a12b03f09a0afe5cb1dea14aedbdda8f0e4f3c77849bd2ad",
+    "apps/tldw-frontend/next.config.mjs": "7a78b19818d04e6d23e12ededa457217996eb1abf2154e929ce9d47d60d7ead1",
+    "apps/tldw-frontend/tsconfig.json": "5b71ff79e9d16197f41df2609b33985081fec39360b47966c19c8875202aa8bb",
+    "apps/tldw-frontend/scripts/live-tier-uat/profile.mjs": "d65edd9a1f490587661816fd4cb8311ce91f50506d05f220034578d8a5da2ae2",
+    "apps/tldw-frontend/scripts/onboarding-uat/profile.mjs": "20ede4e5a9cafa12d3f40a3de13f783fd834c14e821b3015f16bd0f893bc5fb1"
+  },
+  "pythonOrigins": {
+    "prefix": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv",
+    "origins": {
+      "tldw_Server_API": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/tldw_Server_API/__init__.py",
+      "mcp_unified": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/mcp-unified/src/mcp_unified/__init__.py",
+      "tldw_profile_core": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/packages/tldw_profile_core/src/tldw_profile_core/__init__.py",
+      "uvicorn": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/uvicorn/__init__.py",
+      "fastapi": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/fastapi/__init__.py",
+      "pydantic": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/pydantic/__init__.py",
+      "psycopg": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/psycopg/__init__.py"
+    }
+  },
+  "frontend": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/tldw-frontend",
+  "dependencyOrigins": {
+    "next/package.json": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/package.json",
+    "react/package.json": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/node_modules/.bun/react@18.3.1/node_modules/react/package.json",
+    "react-dom/package.json": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/node_modules/.bun/react-dom@18.3.1+f4eacebf2041cd4f/node_modules/react-dom/package.json",
+    "typescript/package.json": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/node_modules/.bun/typescript@5.9.3/node_modules/typescript/package.json"
+  },
+  "nextCli": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/bin/next"
+}

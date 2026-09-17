@@ -1,0 +1,13 @@
+### Result
+{"at":"2026-09-17T13:27:11.132Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nPrompts\n\nCreate reusable prompts for recurring tasks, workflows, and team conventions.\n\nPROMPTS\nWORKSPACES\nCustom\nCopilot\nStudio\nTrash\nCOLLECTIONS\nAll Prompts\n1\nFavorites\n0\nRecently Used\n0\nMost Used\n0\nUntagged\n1\nTYPE\nAll\n1\nSystem\n1\nQuick\nMixed\nRecipes\nSystem recipes\nUser recipes\nSYNC STATUS\nAll\n1\nLocal\nSynced\n1\nPending\nConflict\nFILTER PRESETS\nSave current filters\nAll collections\nNew collection\nNew prompt\nExport\nJSON\nImport\nMerge\nShortcuts\n/\nAll\nAll usage\nAdd tags\nMatch any\nMatch all\nTable\nGallery\nComfortable\nCompact\nDense\nSave filters\n0 prompts selected\n\t\t\nTitle\n\tPrompt\tTags\t\nUpdated\n\tSync\tActions\n\n\t\n\t\nPirate Prompt — SQLite Fresh 20260917\n\t\nSYSTEM\nYou are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.\n\t\n\t\nJust now\nLast used: Unknown\n\t\nSynced\n#1\n\t\n1-1 of 1 prompts\n1\n20 / page\nPrompt Added\nPrompt has been added successfully\nPull from Server\nUnlink from Server\nUse in chat\nQuick test\nCopy share link\nDuplicate Prompt\nVersion history\nDelete\n\nPrompts | tldw"}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Back to Prompts",exact:true}).click(); await page.getByRole("button",{name:"More actions",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Prompts | tldw](http://127.0.0.1:18680/prompts)
+### Page
+- Page URL: http://127.0.0.1:18680/prompts
+- Page Title: Prompts | tldw
+

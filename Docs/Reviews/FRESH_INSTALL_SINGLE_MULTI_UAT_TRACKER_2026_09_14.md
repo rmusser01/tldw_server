@@ -1,6 +1,10 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Latest checkpoint: all 230 findings verified; 0 unresolved or awaiting acceptance.** UAT230 passes independent native Settings entry/reload/logout-login on db2b0602. The repair gate is released for fresh matrix preparation; no row of the new48-row matrix has run yet. The matrix uses SQLite/PostgreSQL × single/multi-user, with12 named journeys per configuration. [Final repair ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json). [Settings acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native230-settings-probe-accepted/README.md).
+- **Fresh-run findings:236 total —230 previously verified,6 new unresolved (231–236).** SQLite single-user setup and ordinary Chat succeed. New231 is incorrect extension wording;232 hides actionable unavailable-model guidance;233 duplicates a terminal ingest warning in the API result;234 cuts off successful flashcard generation at the frontend proxy;235 shows stale scheduling intervals during re-rate;236 blocks Character Chat despite the usable model. The frozen48-row matrix continues with product source unchanged.
+
+- **Fresh matrix running:** frozen `8f8774e6c868b304a96d95ab82e28389c129a78b`, four isolated configurations; SQLite single-user setup and Chat are underway. [Live matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_17.md).
+
+- **Repair-gate checkpoint: all 230 prior findings verified; 0 unresolved or awaiting acceptance at release.** UAT230 passes independent native Settings entry/reload/logout-login on db2b0602. The repair gate is released for fresh matrix preparation; this was the pre-execution gate; current execution is in the linked live matrix. The matrix uses SQLite/PostgreSQL × single/multi-user, with12 named journeys per configuration. [Final repair ledger](../../output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-230-verified-before-fresh-matrix.json). [Settings acceptance](../../output/playwright/cycle5-repair-verification-2026-09-16/native230-settings-probe-accepted/README.md).
 
 - **Task reconciliation:**38 older repair tasks/127 criteria audited against82 retained inputs and updated through Backlog CLI. PostgreSQL full-matrix TASK13260.75 remains pending. [Per-criterion evidence](../../output/playwright/cycle5-repair-verification-2026-09-16/older-task-criteria-reconciled/review.json).
 
@@ -2451,3 +2455,44 @@ UAT183 additional v25/v36 fixtures are verified and committed2b867ca78b. All17 o
 - TASK13260.171. Normal administrator Settings/login produces two /openapi.json404 responses on quickstart WebUI18583. The Settings Billing capability probe bypasses the existing API-client guard; Next quickstart does not proxy this route. This is a separate integration/console defect from the now-verified Graph225 reads.
 - Repair uses the existing quickstart guard before the current Settings fetch; direct-backend advertised Billing discovery, missing capabilities, timeout, abort and stale-target handling must remain covered. Causal mounted regression, independent review and original native acceptance precede the full rerun.
 - Original evidence: [retained console](../../output/playwright/cycle5-repair-verification-2026-09-16/native225-original-suggestion-reads-accepted/native/console-from-line43.redacted.txt). No retry-loop or missing-required-Billing claim is established.
+
+## UAT-234 — P1: Quickstart proxy cuts off successful five-card generation at30seconds
+
+- Status: open, TASK13260.176; frozen source remains unchanged.
+- Fresh SQLite single-user exact five-fact Notes-to-five-cards request begins13:09:48.169UTC and receives raw500 Internal Server Error at13:10:18.159. The backend completes the same request200 in30558ms at13:10:18.710; the frontend logs exact-path Failed to proxy /ECONNRESET. Backend response arrives551ms after the browser failure. No draft reaches the user.
+- Source diagnosis: flashcard client allows180000ms; quickstart external rewrites provide no experimental.proxyTimeout, so installed Next16.1.4 defaults to30000ms. The backend awaits generation plus verification in one nonstreaming request. This is a proxy/endpoint budget mismatch; no claim that the backend generated exactly5 without its lost body.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/biology-generate-failure-evidence.txt`, `biology-generation-state.txt`, `flashcard-failure-log-excerpt.json`. One unchanged ordinary retry assesses recoverability; it cannot close234. Dependent exact-five-card study remains unverified until a usable result.
+
+## UAT-233 — P3: Terminal ingest result repeats identical warnings
+
+- Status: open, TASK13260.175; no source repair during the frozen matrix.
+- Actual SQLite single-user ingestjob1 completes with media1/UUID9023fb11-1882-49e6-b351-d7ee4df1bb32 and two equal provider-analysis truncation warnings. Both terminal200 readbacks repeat the same string. The UI displays one warning and accurately reports saved-with-warnings; the source and chunks remain intact.
+- The initial provider analysis did fail at its output limit. That operational failure is retained separately from this duplicate-result defect; no successful analysis is claimed.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/ingest-terminal-evidence.txt`, `ingest-complete.txt`, `source-open-actual.txt`.
+
+## UAT-232 — P3: Chat hides actionable unavailable-model guidance
+
+- Status: open, TASK13260.174; no source repair during the frozen matrix.
+- Fresh SQLite single-user at `8f8774e6c868b304a96d95ab82e28389c129a78b`,12:45UTC: one controlled request is continued to the real backend with an unavailable Ollama model. Actual400 returns `model_not_available` with precise provider/model guidance. The visible error instead says a generic server failure and recommends health diagnostics.
+- Retry uses the original working model and same conversation/client-message IDs, returns200 and persists exactly one answer; normal reload contains seven canonical messages, including the system row, with no duplicate retried user. This is a messaging defect, not a failed Retry.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/chat-controlled-failure.txt`, `chat-retry.txt`, `chat-retry-final-evidence.txt`. No provider response was mocked. The failed request is a backend model-availability rejection, not an upstream generation failure.
+
+## UAT-231 — P3, unresolved — Fresh WebUI console recovery guidance refers to the extension
+
+- TASK13260.173. Fresh SQLite single-user browser on frozen8f8774e6c8 logs three unconfigured-client warnings directing the user to Settings in the extension. The shared client hardcodes this wording in ensureConfigForRequest. Console has0errors/4warnings; the fourth is expected manual API-key guidance.
+- Original native evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/setup-console.txt`; provider discovery with blank model, selection and validation succeed. No functional setup blockage is established.
+- Separate residual console path from007 visible connection copy and164 visible Model Settings empty-state messaging. Keep the source frozen during this matrix, then add focused surface-aware regression, minimal wording correction and native repeat.
+
+## UAT-235 — P2: Re-rate shows stale scheduling intervals
+
+- Status: open, TASK13260.177; frozen product source unchanged.
+- Scheduled Cram Good returns200/version3/10-day interval at13:16:55UTC, including authoritative next Hard14days. Native Re-rate immediately restores a view showing Hard6days/Good10days/Easy13days from the earlier version. Clicking Hard returns200/version4/14days at13:21:59; normal reload confirms October1 due date and three scheduled review events.
+- Re-rate intentionally adds a scheduling event rather than undoing the prior one; the third review/session is expected. The defect is the displayed six-day prediction for the actual fourteen-day result. One practice-only rating generated no review POST and left scheduling unchanged.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/chat-card-scheduled-rerate.txt`, `chat-card-review-events-final.txt`, `chat-card-review-deltas.json`, `chat-card-reloaded-snapshot.txt`. Harness wait expected wrong completion wording after successful Hard click; its timeout is preserved separately.
+
+## UAT-236 — P2: Character Chat rejects the working configured model
+
+- Status: open, TASK13260.178. Exact TestBot creation succeeds but its native library Chat entry shows selected-model-missing/unavailable despite successful ordinary real Chat with the configured Gemma/llama backend. No character completion is sent.
+- Three bounded entry attempts: initial; recommended Open model settings → choose the available llama.cpp catalog entry → normal return; actual Chat picker → select same usable model → Characters/library entry. All block. The third attempt visibly changed Chat model display from Custom/qualified ID to LLaMa.cpp/raw path before the still-failing entry. No further retry or state injection.
+- Frozen source has a llama versus llama.cpp readiness alias mismatch; an independent audit is checking remaining selection/storage boundaries because the third outcome means that alias alone may not explain every attempt. Settings uses a direct-storage selection path; do not claim a proven second defect from source alone.
+- Evidence: `.tmp/uat-next-matrix-20260916/native/sqlite-single/testbot-availability-recovery.txt`, `testbot-model-settings-snapshot.txt`, `testbot-model-reselected.txt`, `testbot-chat-model-reselected.txt`, `testbot-chat-recovery-final.txt`, `testbot-three-attempts-final.txt`. Exact BEEP BOOP, canonical Character persistence and transition acceptance are blocked.

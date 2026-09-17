@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-17T12:22:03.016Z",
+  "cell": "pg-multi",
+  "command": "cp -ac",
+  "reusedInstallation": true,
+  "trees": [
+    "apps/node_modules",
+    "apps/tldw-frontend/node_modules",
+    "apps/packages/ui/node_modules"
+  ],
+  "copiedAliasTarget": ".",
+  "removedCopiedCaches": [
+    "apps/node_modules/.vite",
+    "apps/tldw-frontend/node_modules/.vite",
+    "apps/packages/ui/node_modules/.vite",
+    "apps/packages/ui/node_modules/.cache"
+  ],
+  "noNextBuildCopied": true
+}

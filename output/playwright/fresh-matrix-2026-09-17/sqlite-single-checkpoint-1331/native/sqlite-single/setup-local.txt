@@ -1,0 +1,83 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Solo, local install Single-' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18680/
+- Page Title: Home | tldw
+- Console: 0 errors, 4 warnings
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-single/browser-evidence/1789648018176-b01126f4-5335-40b0-85f5-14c5d4bf8122-1.snapshot.txt)
+
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - main [ref=e16]:
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - paragraph [ref=e21]: Solo onboarding
+          - generic [ref=e22]:
+            - generic [ref=e23]:
+              - heading "First-time setup" [level=1] [ref=e24]
+              - paragraph [ref=e25]: Configure the minimum needed to reach a successful first chat.
+            - button "Skip for now" [ref=e26] [cursor=pointer]
+        - region "Setup readiness" [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - heading "Setup readiness" [level=2] [ref=e30]
+              - paragraph [ref=e31]: Chat must be ready. RAG and speech can be configured later.
+            - button "Retry" [ref=e32] [cursor=pointer]
+          - generic [ref=e33]:
+            - generic [ref=e34]:
+              - generic [ref=e35]:
+                - generic [ref=e36]:
+                  - paragraph [ref=e37]: Chat
+                  - paragraph [ref=e38]: First-chat lane
+                - generic [ref=e39]: ready with warnings
+              - group [ref=e40]:
+                - generic "Chat details" [ref=e41] [cursor=pointer]
+            - generic [ref=e42]:
+              - generic [ref=e43]:
+                - generic [ref=e44]:
+                  - paragraph [ref=e45]: Embeddings/RAG
+                  - paragraph [ref=e46]: Optional lane
+                - generic [ref=e47]: ready with warnings
+              - group [ref=e48]:
+                - generic "Embeddings/RAG details" [ref=e49] [cursor=pointer]
+            - generic [ref=e50]:
+              - generic [ref=e51]:
+                - generic [ref=e52]:
+                  - paragraph [ref=e53]: Speech
+                  - paragraph [ref=e54]: Optional lane
+                - generic [ref=e55]: ready with warnings
+              - group [ref=e56]:
+                - generic "Speech details" [ref=e57] [cursor=pointer]
+        - region [ref=e83]:
+          - generic [ref=e88]:
+            - heading "Privacy and security" [level=2] [ref=e89]
+            - paragraph [ref=e90]: Confirm the access and secret-storage behavior for this setup.
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - term [ref=e93]: Auth mode
+              - definition [ref=e94]: single_user
+              - paragraph [ref=e95]: This flow assumes solo single-user setup. Multi-user mode should use the operator guide.
+            - generic [ref=e96]:
+              - term [ref=e97]: Browser access
+              - definition [ref=e98]: Unknown browser access
+              - paragraph [ref=e99]: Backend metadata is used for this classification.
+            - generic [ref=e100]:
+              - term [ref=e101]: Single-user auth
+              - definition [ref=e102]: Manual API key required
+              - paragraph [ref=e103]: Local backend access does not confirm that this browser is signed in. Automatic access also requires an enabled WebUI quickstart session. Other deployments require your server's single-user API key.
+            - generic [ref=e104]:
+              - term [ref=e105]: Provider secrets
+              - definition [ref=e106]: Stored by backend, returned masked
+              - paragraph [ref=e110]: Raw API keys are submitted only to the setup endpoint and are not displayed again by this UI.
+          - generic [ref=e111]:
+            - checkbox "I understand local or remote setup access and provider secret storage." [ref=e112]
+            - generic [ref=e113]: I understand local or remote setup access and provider secret storage.
+          - generic [ref=e114]:
+            - button "Back" [ref=e115] [cursor=pointer]
+            - button "Continue" [disabled] [ref=e116]
+  - alert [ref=e10]

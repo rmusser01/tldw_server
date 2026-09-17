@@ -1,0 +1,15 @@
+### Result
+{"at":"2026-09-17T13:25:34.676Z","url":"http://127.0.0.1:18680/notes?source_ref_id=3b597cff-d69c-4e95-86b6-7e4b4895050b","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nSkip to notes list\nSkip to editor\n\nKeyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.\n\nNOTES\n3 TOTAL\nVIEWS\nNotes\nTrash\nList\nTimeline\nInbox\nCollection\nGraph\nORGANIZE\nDate modified (newest first)\nFILTERS\nCaptured\nSearch tips\nFilter by tag\nBrowse tags\n1 available\nFor in-note search, use browser Ctrl/Cmd+F.\nRECENT NOTES\nSnippet: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub\nBiology Basics — Fresh SQLite 20260917\nSnippet: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub\nRESULTS\nImport\nSync folder\nExport\nBiology Basics — Fresh SQLite 20260917\nThe mitochondria is the powerhouse of the cell.\n9/17/2026, 6:08:49 AM\nSnippet: Chat with this media: rowan-observatory-public-20260917 Rowan Observat...\nDr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.\nLinked to conversation: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub · msg 29c95eaa-b8c9-4567-a4b6-0ed23f278bc8\n9/17/2026, 6:08:13 AM\nSnippet: Chat with this media: rowan-observatory-public-20260917 Rowan Observat...\nDr. Mira Vale directs Rowan Observatory, which is located at Cedar Ridge. Public tours begin at 18:00 every Friday.\nLinked to conversation: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub · msg 29c95eaa-b8c9-4567-a4b6-0ed23f278bc8\n9/17/2026, 6:04:30 AM\nShowing 1-3 of 3\n1\n20 / page\nSnippet: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub\nSaved 16m ago\nLinked to conversation: Chat with this media: rowan-observatory-public-20260917 Rowan Observatory — pub · msg 29c95eaa-b8c9-4567-a4b6-0ed23f278bc8\nSave\nSave & new\nEdit\nSplit\nPreview\nCreate study pack\nGenerate title\nKeyboard shortcuts\nTags\nAll changes saved\nCONNECTIONS\nMarkdown\nWYSIWYG\nFORMATTING\nASSIST\nSummarize\nExpand outline\nSuggest tags\nMarkdown + LaTeX supported\n19 words · 115 chars · 1 min read\nVersion 1 · Last saved 9/17/2026, 6:08:13 AM\nOrigin: Saved from Chat\n\nLoading...\n\nPlease wait while we get things ready.\n\nLoading..."}
+### Ran Playwright code
+```js
+await (async page => { await page.getByRole("button",{name:"Prompts",exact:true}).click(); return {at:new Date().toISOString(),url:page.url(),body:await page.locator("body").innerText()}; })(page);
+```
+### Open tabs
+- 0: [Knowledge | tldw](http://127.0.0.1:18680/knowledge)
+- 1: (current) [Prompts | tldw](http://127.0.0.1:18680/prompts)
+### Page
+- Page URL: http://127.0.0.1:18680/prompts
+- Page Title: Prompts | tldw
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T12-57-02-253Z.log#L34-L36
+

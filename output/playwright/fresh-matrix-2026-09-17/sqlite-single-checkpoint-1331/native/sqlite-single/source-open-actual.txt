@@ -1,0 +1,262 @@
+### Ran Playwright code
+```js
+await page.getByRole('button', { name: 'Open rowan-observatory-public' }).click();
+```
+### Page
+- Page URL: http://127.0.0.1:18680/media?id=1
+- Page Title: Media | tldw
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-single/browser-evidence/1789649612097-61200888-299e-4879-a01a-3fc3b2c98332-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T12-25-51-216Z.log#L41-L44
+
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e15]:
+    - link "Skip to main content" [ref=f3e16] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=f3e17]:
+      - button "Expand sidebar" [ref=f3e18] [cursor=pointer]
+      - button "New Chat" [ref=f3e22] [cursor=pointer]
+      - generic [ref=f3e25]:
+        - button "Quick Ingest" [ref=f3e26] [cursor=pointer]
+        - button "Chat" [ref=f3e30] [cursor=pointer]
+        - button "Prompts" [ref=f3e33] [cursor=pointer]
+        - button "Characters" [ref=f3e37] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=f3e42] [cursor=pointer]
+        - button "World Books" [ref=f3e46] [cursor=pointer]
+        - button "Notes" [ref=f3e49] [cursor=pointer]
+        - button "Knowledge QA" [ref=f3e53] [cursor=pointer]
+        - button "Media" [ref=f3e61] [cursor=pointer]
+        - button "Document Workspace" [ref=f3e64] [cursor=pointer]
+        - button "Research Workspace" [ref=f3e70] [cursor=pointer]
+        - button "Kanban" [ref=f3e76] [cursor=pointer]
+        - button "Watchlists" [ref=f3e78] [cursor=pointer]
+      - generic [ref=f3e83]:
+        - button "Open Notes Dock" [ref=f3e84] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=f3e89] [cursor=pointer]
+        - button "Settings" [ref=f3e92] [cursor=pointer]
+    - main [ref=f3e96]:
+      - generic [ref=f3e97]:
+        - generic [ref=f3e100]:
+          - generic [ref=f3e101]:
+            - button "Expand sidebar" [ref=f3e102] [cursor=pointer]
+            - generic [ref=f3e104]:
+              - img "tldw Assistant" [ref=f3e105]
+              - generic [ref=f3e106]: tldw Assistant
+              - button "Companion Home" [ref=f3e107] [cursor=pointer]
+              - button "Show shortcuts" [ref=f3e111] [cursor=pointer]
+          - generic [ref=f3e118]:
+            - button "Search - Open command palette" [ref=f3e119] [cursor=pointer]:
+              - generic [ref=f3e123]: Search
+              - generic [ref=f3e124]: ⌘K
+            - button "Open settings" [ref=f3e138] [cursor=pointer]
+            - generic [ref=f3e150]:
+              - button "Notifications, 0 unread" [ref=f3e151] [cursor=pointer]
+              - status [ref=f3e155]: Notifications are active
+            - button "Switch to light theme" [ref=f3e156] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=f3e163] [cursor=pointer]:
+              - generic [ref=f3e164]: "?"
+        - generic [ref=f3e863]:
+          - generic [ref=f3e865]:
+            - generic [ref=f3e866]:
+              - generic [ref=f3e867]:
+                - heading "Media Inspector" [level=1] [ref=f3e868]
+                - generic [ref=f3e869]:
+                  - generic [ref=f3e870]: 1 / 1
+                  - button "Trash" [ref=f3e871] [cursor=pointer]
+                  - button "Bulk" [ref=f3e875] [cursor=pointer]
+              - generic [ref=f3e878]:
+                - button "Show media only" [pressed] [ref=f3e879] [cursor=pointer]:
+                  - generic [ref=f3e880]: Media
+                  - generic [ref=f3e881]: "1"
+                - button "Show notes only" [ref=f3e882] [cursor=pointer]:
+                  - generic [ref=f3e883]: Notes
+                  - generic [ref=f3e884]: "0"
+            - generic [ref=f3e886]:
+              - generic [ref=f3e887]:
+                - generic [ref=f3e888]: Find media
+                - button "Collapse find media panel" [expanded] [ref=f3e890] [cursor=pointer]
+              - generic [ref=f3e893]:
+                - generic [ref=f3e894]:
+                  - textbox "Search media (title/content)" [ref=f3e899]
+                  - button "Search syntax help" [ref=f3e901] [cursor=pointer]: "?"
+                - button "Search" [ref=f3e902] [cursor=pointer]
+                - generic [ref=f3e903]:
+                  - generic [ref=f3e904]:
+                    - generic [ref=f3e905]: Filters
+                    - button "Clear all" [ref=f3e909] [cursor=pointer]
+                  - generic [ref=f3e910]:
+                    - generic [ref=f3e911]: Search mode
+                    - generic [ref=f3e912]:
+                      - button "Full-text search" [pressed] [ref=f3e913] [cursor=pointer]: Full-text
+                      - button "Metadata search" [ref=f3e914] [cursor=pointer]: Metadata
+                  - generic [ref=f3e915]:
+                    - generic [ref=f3e916]: Sort by
+                    - generic [ref=f3e917] [cursor=pointer]:
+                      - generic [ref=f3e918]:
+                        - generic "Relevance" [ref=f3e919]
+                        - combobox [ref=f3e920]
+                      - img "down" [ref=f3e922]
+                  - generic [ref=f3e925]:
+                    - generic [ref=f3e926]: Date range
+                    - generic [ref=f3e927]:
+                      - generic [ref=f3e928]:
+                        - text: Start date
+                        - textbox "Start date" [ref=f3e929]
+                      - generic [ref=f3e930]:
+                        - text: End date
+                        - textbox "End date" [ref=f3e931]
+                  - button "Advanced search" [ref=f3e933] [cursor=pointer]
+                  - generic [ref=f3e937] [cursor=pointer]:
+                    - checkbox "Favorites only" [ref=f3e938]
+                    - generic [ref=f3e941]: Favorites only
+                  - generic [ref=f3e942]:
+                    - button "Media types" [ref=f3e943] [cursor=pointer]
+                    - generic [ref=f3e949] [cursor=pointer]:
+                      - checkbox "Filter by Document" [ref=f3e950]
+                      - generic [ref=f3e951]: Document
+                  - button "Keywords" [ref=f3e953] [cursor=pointer]
+                  - generic [ref=f3e958]:
+                    - generic [ref=f3e959]: Exclude keywords
+                    - generic [ref=f3e961]:
+                      - generic [ref=f3e962]:
+                        - generic: Exclude keyword
+                        - combobox "Exclude keyword" [ref=f3e964]
+                      - img "down" [ref=f3e966]
+                    - generic [ref=f3e969]: Use excluded keywords to remove items containing those terms.
+                    - generic [ref=f3e970]: 0 exclude keyword suggestions available
+                - generic [ref=f3e971]:
+                  - generic [ref=f3e972]:
+                    - generic [ref=f3e973]: Collection
+                    - combobox "Collection" [ref=f3e974]:
+                      - option "All items" [selected]
+                  - paragraph [ref=f3e975]: Create collections from bulk selection to organize related items.
+            - generic [ref=f3e976]:
+              - generic [ref=f3e978]:
+                - generic [ref=f3e979]:
+                  - generic [ref=f3e980]:
+                    - generic [ref=f3e981]: Results
+                    - generic [ref=f3e982]: 1 / 1
+                  - generic [ref=f3e983]:
+                    - button "Standard view" [pressed] [ref=f3e984] [cursor=pointer]
+                    - button "Compact view" [ref=f3e990] [cursor=pointer]
+                - 'button "Select media: rowan-observatory-public-20260917" [ref=f3e993] [cursor=pointer]':
+                  - generic [ref=f3e994]:
+                    - button "Add to favorites" [ref=f3e999]
+                    - generic [ref=f3e1002]:
+                      - generic [ref=f3e1003]:
+                        - generic [ref=f3e1004]: MEDIA
+                        - generic [ref=f3e1005]: document
+                        - generic [ref=f3e1006]: 1m ago
+                      - generic [ref=f3e1007]: rowan-observatory-public-20260917
+              - generic [ref=f3e1008]:
+                - generic [ref=f3e1009]:
+                  - generic [ref=f3e1010]: 1 of 1 results
+                  - generic [ref=f3e1011]:
+                    - generic [ref=f3e1012]: "Per page:"
+                    - combobox "Per page:" [ref=f3e1013]:
+                      - option "20" [selected]
+                      - option "50"
+                      - option "100"
+                - button "? for shortcuts" [ref=f3e1015] [cursor=pointer]:
+                  - generic [ref=f3e1016]: "?"
+                  - generic [ref=f3e1017]: for shortcuts
+            - button "Library tools" [ref=f3e1019] [cursor=pointer]
+          - button "Collapse sidebar" [ref=f3e1024] [cursor=pointer]
+          - generic [ref=f3e1028]:
+            - generic [ref=f3e1030]:
+              - generic [ref=f3e1031] [cursor=pointer]:
+                - checkbox "Show chapters/sections panel" [checked] [ref=f3e1032]
+                - generic [ref=f3e1033]: Show chapters/sections panel
+              - generic [ref=f3e1034] [cursor=pointer]:
+                - checkbox "Allow generated fallback structure" [checked] [ref=f3e1035]
+                - generic [ref=f3e1036]: Allow generated fallback structure
+              - generic [ref=f3e1037]: "Generated sections: 2"
+            - generic [ref=f3e1038]:
+              - complementary "Chapters and sections" [ref=f3e1039]:
+                - generic [ref=f3e1040]:
+                  - generic [ref=f3e1041]: Chapters/Sections
+                  - textbox "Jump to 12.5 or title" [ref=f3e1046]
+                  - generic [ref=f3e1047]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                - tree [ref=f3e1048]:
+                  - generic [ref=f3e1049]:
+                    - button "1 Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create..." [ref=f3e1052] [cursor=pointer]:
+                      - generic [ref=f3e1053]: "1"
+                      - generic [ref=f3e1054]: Rowan Observatory — public synthetic UAT handbook This is fictional public test material, create...
+                    - button "2 Generated Section 2" [ref=f3e1057] [cursor=pointer]:
+                      - generic [ref=f3e1058]: "2"
+                      - generic [ref=f3e1059]: Generated Section 2
+              - generic [ref=f3e1060]:
+                - button "Create study pack" [ref=f3e1062] [cursor=pointer]
+                - generic [ref=f3e1063]:
+                  - generic [ref=f3e1064]: Showing rowan-observatory-public-20260917
+                  - generic [ref=f3e1066]:
+                    - generic [ref=f3e1067]:
+                      - button "Previous" [disabled] [ref=f3e1068]
+                      - generic [ref=f3e1071]: 1/1
+                      - button "Next" [disabled] [ref=f3e1072]
+                    - heading "rowan-observatory-public-20260917" [level=3] [ref=f3e1075]
+                    - generic [ref=f3e1076]:
+                      - button "Chat with this media" [ref=f3e1077] [cursor=pointer]
+                      - button "Analyze" [ref=f3e1080] [cursor=pointer]
+                      - button "Actions" [ref=f3e1084] [cursor=pointer]
+                  - generic [ref=f3e1090]:
+                    - generic [ref=f3e1091]:
+                      - generic [ref=f3e1092]: 306 Words
+                      - generic [ref=f3e1096]: 2 min read
+                      - generic "Reading progress" [ref=f3e1097]: 0% read
+                      - generic [ref=f3e1098]: "Chunking: Completed"
+                      - generic [ref=f3e1099]: "Vector: Pending"
+                    - button "Metadata details Show" [ref=f3e1101] [cursor=pointer]:
+                      - generic [ref=f3e1102]: Metadata details
+                      - generic [ref=f3e1103]: Show
+                    - generic [ref=f3e1105]:
+                      - generic [ref=f3e1106]:
+                        - generic: Add keywords...
+                        - combobox [ref=f3e1108]
+                      - img "down" [ref=f3e1110]
+                    - generic [ref=f3e1113]:
+                      - generic [ref=f3e1114]:
+                        - button "Content" [ref=f3e1115] [cursor=pointer]
+                        - generic [ref=f3e1119]:
+                          - generic [ref=f3e1120] [cursor=pointer]:
+                            - generic [ref=f3e1121]:
+                              - generic "Auto" [ref=f3e1122]
+                              - combobox "Display mode" [ref=f3e1123]
+                            - img "down" [ref=f3e1125]
+                          - group "Text size" [ref=f3e1128]:
+                            - button "Text size S" [ref=f3e1129] [cursor=pointer]: S
+                            - button "Text size M" [pressed] [ref=f3e1130] [cursor=pointer]: M
+                            - button "Text size L" [ref=f3e1131] [cursor=pointer]: L
+                          - button "Edit content" [ref=f3e1132] [cursor=pointer]
+                          - button "Find in content" [ref=f3e1135] [cursor=pointer]
+                      - region "Media content" [ref=f3e1142]:
+                        - generic [ref=f3e1143]:
+                          - paragraph [ref=f3e1144]: Rowan Observatory — public synthetic UAT handbook
+                          - paragraph [ref=f3e1145]: This is fictional public test material, created for acceptance testing. Rowan Observatory is located at Cedar Ridge. Its director is Dr. Mira Vale. The observatory opened in 2019. Its main telescope is named Selene. Public tours begin at 18:00 every Friday. The public booking code is ORBIT-742.
+                          - paragraph [ref=f3e1146]: Visitors enter through the east gate and meet the guide in the copper-domed visitor hall. Tour groups are limited to twelve people. The observatory lends red-light torches to visitors so that everyone can preserve night vision. The accessible path from the visitor hall to the viewing platform is level and paved. Assistance dogs are welcome on this path.
+                          - paragraph [ref=f3e1147]: The Selene telescope has a mirror diameter of sixty centimeters. It is used for public demonstrations of the Moon, bright planets and star clusters. Staff check the weather at 16:00 on tour days. If thick cloud prevents observing, the guide runs an indoor demonstration in the visitor hall. The indoor session explains how lenses and mirrors collect light and why distant stars appear faint.
+                          - paragraph [ref=f3e1148]: The observatory library keeps a printed observing log. Each entry records the date, sky conditions, target and name of the observer. Dr. Mira Vale reviews this log every Monday. Volunteers may add sketches but must label estimates clearly. The library also keeps maps showing Cedar Ridge and its surrounding walking paths. These maps are educational examples and do not represent a real location.
+                          - paragraph [ref=f3e1149]: A visitor who loses an item should ask the guide at the east gate. Found items are kept in the visitor hall for thirty days. Questions about public tours should mention the booking code ORBIT-742. The director, location, opening year, telescope name, tour schedule and booking code above are the authoritative facts for this synthetic source. Do not infer a different director or schedule from real-world institutions.
+                    - generic [ref=f3e1150]:
+                      - generic [ref=f3e1151]:
+                        - button "Analysis" [ref=f3e1152] [cursor=pointer]
+                        - button "Generate" [ref=f3e1157] [cursor=pointer]
+                      - generic [ref=f3e1161]: No analysis yet
+                    - generic [ref=f3e1163]:
+                      - button "Statistics" [ref=f3e1164] [cursor=pointer]
+                      - generic [ref=f3e1169]:
+                        - generic [ref=f3e1170]:
+                          - generic [ref=f3e1171]: Words
+                          - generic [ref=f3e1172]: "306"
+                        - generic [ref=f3e1173]:
+                          - generic [ref=f3e1174]: Characters
+                          - generic [ref=f3e1175]: "1914"
+                        - generic [ref=f3e1176]:
+                          - generic [ref=f3e1177]: Paragraphs
+                          - generic [ref=f3e1178]: "6"
+                    - button "Metadata" [ref=f3e1180] [cursor=pointer]
+                    - button "Document Intelligence" [ref=f3e1185] [cursor=pointer]
+                    - button "Version History" [ref=f3e1191] [cursor=pointer]
+                    - button "Delete item" [ref=f3e1201] [cursor=pointer]
+  - alert [ref=f3e14]: Media | tldw

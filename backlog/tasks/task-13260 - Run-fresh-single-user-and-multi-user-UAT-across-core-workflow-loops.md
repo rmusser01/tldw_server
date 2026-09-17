@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-17 12:16'
+updated_date: '2026-09-17 13:32'
 labels:
   - uat
   - testing
@@ -190,12 +190,16 @@ User correction from side conversation, 2026-09-16: do not start another full UA
 11:52UTC checkpoint:230 findings,229verified/1unresolved230. Independent original Graph225 native acceptance closes163/164; committed backend e1ccad4be7 stable3669hashes, two successful read rounds after normal reload. Worker unavailable and privileged targeted profile limits explicit. TASK13260.171 owns separate Settings OpenAPI404. Fresh matrix still Not Started; tracker/230-row ledger current.
 
 Repair gate released for fresh preparation: all230 findings have verified bounded outcomes, including independent native230 Settings entry/reload/logout-login.38 older tasks/127ACs reconciled against82retained inputs and closed. Full fresh48-row matrix not started;13260.75 remains pending for PostgreSQL full workflow execution. Freeze full source commit, four isolated archives/dependency copies, ordinary startup/operator bootstrap/browser state, actual SQLite/PostgreSQL single/multi journeys. Reused dependencies/models and baseline static limits remain explicit.
+
+Fresh matrix released at frozen8f8774e6c868b304a96d95ab82e28389c129a78b after all230 prior findings verified. All4 archives/dependency preflights pass independent audit. SQLite single-user normal initialization/setup first-chat200/manual API-key UI handoff/ordinary Chat200 completed. Two turns and controlled real-backend unavailable-model400 to Retry200 retain one conversation/client-message identity and seven canonical messages after reload. New UAT231/TASK13260.173 console wording and UAT232/TASK13260.174 error guidance are recorded; frozen product source unchanged. Actual public PNG guard/Retry/reload is bounded text-only acceptance; no vision-success or true-hidden claim. Source ingestion now running. PostgreSQL and other cells remain pending in Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_17.md.
+
+2026-09-17 13:31UTC: Frozen fresh matrix8f877 continues. New231–235 unresolved; no product changes. SQLite single setup/Chat/source workflows recorded, row7 exact pirate Prompt save/sync/application/realARRR/reload passes. Biology generation blocked234 at30s proxy; one ordinary retry also fails. Row9 clean Note/backlink/card/practice/scheduled/reload supported; re-rate intentionally adds event but displays stale interval235. Three other cells including bothPG still pending. Partial native/preparation/audit evidence retained under output/playwright/fresh-matrix-2026-09-17/sqlite-single-checkpoint-1331;201files, known-credential scan0. Independent packet verification underway.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fresh cycle5 UAT remains in progress on frozen ab527eb3b4 with fetched dev59049e included. Five new findings126-130 and reopened068 are tracked for bounded repairs after the current matrices finish. Several core workflows and naturalmulti expiry pass; full acceptance and subsequent repair verification remain pending. Existing dependency reuse, external Wikipedia denial, unavailable vision and native hidden-tab tooling limits remain explicit.
+Work remains In Progress. All230 prior findings met bounded repair acceptance before the fresh matrix. Current four-cell matrix uses frozen8f877; SQLite single-user is active, other cells remain pending including PostgreSQL. Five new findings231–235 require later repairs and repeat acceptance. No full UAT signoff.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

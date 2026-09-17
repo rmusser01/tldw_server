@@ -1,0 +1,215 @@
+{
+  "at": "2026-09-17T12:25:17.991269+00:00",
+  "task": "TASK13260",
+  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
+  "run_id": "fresh-final-20260917",
+  "disposition": "clear-bounded-copy-preflight-evidence",
+  "inputs": [
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/release-gate.json",
+      "sha256": "c692f5d8bb0f1c653e9172515477d0c90cb46002e4dea68fd916c1fa3ff629d0"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/complete.json",
+      "sha256": "fc61f7ec4ba3a138ccf735cd1f388a5c86678b544ba38c1c91646fa29c55af6f"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/8f8774e6c868b304a96d95ab82e28389c129a78b.tar",
+      "sha256": "8b76fd0b8c3b2a858821bfad9976be5602dd139e8a827dfba4a02f2b3d96873a",
+      "bytes": 694169600
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/PROTOCOL.md",
+      "sha256": "31eb6a32988a6b03245c4a165c98b1bcbd0799909d331dc82e7f1f852c015c5b"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/ISOLATION.md",
+      "sha256": "d5ab9129c277bc7b0a4f1e0ad994a4721c557a6020ce4e516145e35c520c25c8"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/LAUNCHER.md",
+      "sha256": "691a809d6d9fca4f1d244e2f2e34e9699a49776212bbe62bd96ae28ec7e4f88c"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/matrix-launcher.mjs",
+      "sha256": "a26b3dc6c6c28b78183c92d101635495eb7fbfb4dea47d56f8e1ab9ff93e578d"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/initialize-cell.py",
+      "sha256": "8accf03f3387ba12d4bd0a73e4f4cf2ff694feed6f7338fe195674ae83ab27da"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/bootstrap-admin-cell.py",
+      "sha256": "39760bd3df7d7e05913ca24df22adf27afba731778c18cea8fb57cb6bf04894c"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/pg-holder.mjs",
+      "sha256": "f7c589ffad5f6e7c7a11d9493fb9fdeeb872fd0abf53a29a2415e61ed9a244fc"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/pg_role_adapter.py",
+      "sha256": "da240198b82842155a9aa5a27fcf4bfa0b178711c7fa72fea52a8096f780f409"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/test_hold_official_pg.py",
+      "sha256": "d6157777b00576b63e9031d15fbfcbd3a24a486e9752639f24714adb1be0e2a3"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/pytest-holder.ini",
+      "sha256": "713f986ee48be06ad4bff2a700d39514a9f69e34b3547af52366c0a274e30e5b"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/matrix-browser.mjs",
+      "sha256": "99be0dfaa78ff38c7ff2366ca9a8516b343b6d8ffdfb225126698c0347d49381"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/prepare-copies.mjs",
+      "sha256": "a784e0b4c247e0442e79a83dd0be4ec1688307f3ba39222305a04cdcd8f0bb40"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/reviewed-pth-inventory.json",
+      "sha256": "49ab062bd922ac1f571fa0d6b663877fb5e75f340f25ba251e74b0ea70a91858"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/observe-native.js",
+      "sha256": "6dcb52db48fa61c446f158b67d36c22a2f4d7ca9616db7b9db2fef08f701f8b3"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/events-native.js",
+      "sha256": "953b6b0833033c4c7908ad75b4a8e8e9a2271a1b2ef608e0ed4a0b38b10f32ba"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-single-archive-manifest.json",
+      "sha256": "26255fe54e27f7e92d849bbf810a7224c655602e3e2f9514eb6cbcce3c96bba1"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-single-preflight.json",
+      "sha256": "88ad9c650b86a03be72ddd04a8fcc7debf23c414ade12f459384e0121685e873"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-single-dependency-copy.json",
+      "sha256": "b2e5fa5fc3ea432991f1a7172f12d7b9b54505164e7072f3fea144eb55713f9b"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-multi-archive-manifest.json",
+      "sha256": "703f3cd208450440ee4ce31ba51526200257f363fc7fa3fb07c4811d4fa9cb36"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-multi-preflight.json",
+      "sha256": "8d3eeebef2ce2f23a812ce8c187b88d7475b53a0ab78f48680348efd04532b3d"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/sqlite-multi-dependency-copy.json",
+      "sha256": "45c6b7ed5c219655df155c81e3c852143a420f0ad75bebab129829492cde8db1"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-single-archive-manifest.json",
+      "sha256": "f9a6d30e6a8faef5635df40d5ee026e18ebc225d344bf29b62a8bcca7f2b2f4f"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-single-preflight.json",
+      "sha256": "b63f7759da78803d075dda11971d76a49381987cc2cceeff95b038bef974e273"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-single-dependency-copy.json",
+      "sha256": "d3c28b1913e84d5f6403f12224e08b788010cd9fefdeefb2e27e6d62ed26b4fa"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-multi-archive-manifest.json",
+      "sha256": "09120994a7b5346c5372b2954de1e077caa375626cef796a12070a579a666c03"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-multi-preflight.json",
+      "sha256": "53c06daa58a7621c40fc7f7a42bceda9f45c35be2e365f527122656d3e63c83a"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/pg-multi-dependency-copy.json",
+      "sha256": "25b364bcdc49a328cd2714dd29498d724c74a606ae2967ab827934bc7aab7c60"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/reviewed-pth-inventory.json",
+      "sha256": "49ab062bd922ac1f571fa0d6b663877fb5e75f340f25ba251e74b0ea70a91858"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/python-dependency-copy.json",
+      "sha256": "b816c912f53544085c8fdbf22b7710f2cc0cc9135053b4912a73a2147ccb02ce"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/__editable__.backlog_py-0.1.0.pth.disabled-uat",
+      "sha256": "2ae4a1124838e72c6b37d29c1b4ed08913d23972ade4c951eb4b0531e3227c3b"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/__editable__.tldw_server-0.1.32.pth.disabled-uat",
+      "sha256": "ab8939c2313f9bf2aa500a387e86b5d24ebfde0616732b02f8c97dd1526e2196"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/_virtualenv.pth",
+      "sha256": "69ac3d8f27e679c81b94ab30b3b56e9cd138219b1ba94a1fa3606d5a76a1433d"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/coloredlogs.pth",
+      "sha256": "dda83a855986efa5cd87f0248b0199c0086eb0e8e7fece7d6741959c5ce39536"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/distutils-precedence.pth",
+      "sha256": "2638ce9e2500e572a5e0de7faed6661eb569d1b696fcba07b0dd223da5f5d224"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/google_auth-1.6.3-py3.5-nspkg.pth",
+      "sha256": "c47e604f1738522a583f7aab6cffb80821cd18157dede051e10aa185e0af065e"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/lib/python3.11/site-packages/pytest-cov.pth",
+      "sha256": "f47446a60fdf5905e84e7d7c892baf92f8d5a3226d0da1599b9c014eab6c7ddb"
+    }
+  ],
+  "checks": {
+    "cells": [
+      {
+        "cell": "sqlite-single",
+        "archive_created_at": "2026-09-17T12:19:22.204Z",
+        "tracked_entries": 33433,
+        "preflight_source_hashes": 9,
+        "python_origins": 7,
+        "frontend_origins": 4
+      },
+      {
+        "cell": "sqlite-multi",
+        "archive_created_at": "2026-09-17T12:20:02.539Z",
+        "tracked_entries": 33433,
+        "preflight_source_hashes": 9,
+        "python_origins": 7,
+        "frontend_origins": 4
+      },
+      {
+        "cell": "pg-single",
+        "archive_created_at": "2026-09-17T12:20:43.768Z",
+        "tracked_entries": 33433,
+        "preflight_source_hashes": 9,
+        "python_origins": 7,
+        "frontend_origins": 4
+      },
+      {
+        "cell": "pg-multi",
+        "archive_created_at": "2026-09-17T12:21:24.504Z",
+        "tracked_entries": 33433,
+        "preflight_source_hashes": 9,
+        "python_origins": 7,
+        "frontend_origins": 4
+      }
+    ],
+    "tracked_entry_count": 33433,
+    "regular_files": 33432,
+    "symlinks": 1,
+    "identical_archive_entries": true,
+    "entry_digest": "37e5b78a8201b03859a15e874b8dd30f7db1c48d7cff4288fab18e914f59bba2",
+    "harness_hashes": 15,
+    "reviewed_pth": 7,
+    "copied_inactive_editable_hooks": 2,
+    "tar_sha256_match": true
+  },
+  "report": {
+    "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/independent-review.md",
+    "sha256": "05a093615cddec154791ebc1d33cd3cf27b987a28f732aaf7713e5f2883d390d"
+  }
+}

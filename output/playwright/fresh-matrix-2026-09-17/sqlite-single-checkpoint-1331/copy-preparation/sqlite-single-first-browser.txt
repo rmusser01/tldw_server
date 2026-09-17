@@ -1,0 +1,20 @@
+### Browser `fresh-final-20260917-sqlite-single` opened with pid 17336.
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18680');
+```
+### Page
+- Page URL: http://127.0.0.1:18680/
+### Snapshot
+- [Snapshot](/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-fresh-final-20260917-sqlite-single/browser-evidence/1789647950576-8107e269-6d88-4d4b-9888-f9a3f513dc7a-1.snapshot.txt)
+### Events
+- New console entries: .playwright-cli/console-2026-09-17T12-25-51-216Z.log#L1-L2
+
+- generic [active]:
+  - dialog [ref=e1]:
+    - generic [ref=e2]:
+      - progressbar [ref=e3]
+      - status [ref=e7]: Loading...
+      - paragraph [ref=e8]: Please wait while we get things ready.
+      - generic [ref=e9]: Loading...
+  - alert [ref=e10]

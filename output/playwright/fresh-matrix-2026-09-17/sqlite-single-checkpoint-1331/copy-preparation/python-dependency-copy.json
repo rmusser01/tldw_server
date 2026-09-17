@@ -1,0 +1,71 @@
+{
+  "at": "2026-09-17T12:19:18.468Z",
+  "from": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv",
+  "to": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv",
+  "command": "cp -ac",
+  "reusedInstallation": true,
+  "disabledCopiedPthOnly": [
+    "__editable__.backlog_py-0.1.0.pth",
+    "__editable__.tldw_server-0.1.32.pth"
+  ],
+  "before": [
+    {
+      "path": "__editable__.backlog_py-0.1.0.pth",
+      "sha256": "2ae4a1124838e72c6b37d29c1b4ed08913d23972ade4c951eb4b0531e3227c3b"
+    },
+    {
+      "path": "__editable__.tldw_server-0.1.32.pth",
+      "sha256": "ab8939c2313f9bf2aa500a387e86b5d24ebfde0616732b02f8c97dd1526e2196"
+    },
+    {
+      "path": "_virtualenv.pth",
+      "sha256": "69ac3d8f27e679c81b94ab30b3b56e9cd138219b1ba94a1fa3606d5a76a1433d"
+    },
+    {
+      "path": "coloredlogs.pth",
+      "sha256": "dda83a855986efa5cd87f0248b0199c0086eb0e8e7fece7d6741959c5ce39536"
+    },
+    {
+      "path": "distutils-precedence.pth",
+      "sha256": "2638ce9e2500e572a5e0de7faed6661eb569d1b696fcba07b0dd223da5f5d224"
+    },
+    {
+      "path": "google_auth-1.6.3-py3.5-nspkg.pth",
+      "sha256": "c47e604f1738522a583f7aab6cffb80821cd18157dede051e10aa185e0af065e"
+    },
+    {
+      "path": "pytest-cov.pth",
+      "sha256": "f47446a60fdf5905e84e7d7c892baf92f8d5a3226d0da1599b9c014eab6c7ddb"
+    }
+  ],
+  "after": [
+    {
+      "path": "__editable__.backlog_py-0.1.0.pth.disabled-uat",
+      "sha256": "2ae4a1124838e72c6b37d29c1b4ed08913d23972ade4c951eb4b0531e3227c3b"
+    },
+    {
+      "path": "__editable__.tldw_server-0.1.32.pth.disabled-uat",
+      "sha256": "ab8939c2313f9bf2aa500a387e86b5d24ebfde0616732b02f8c97dd1526e2196"
+    },
+    {
+      "path": "_virtualenv.pth",
+      "sha256": "69ac3d8f27e679c81b94ab30b3b56e9cd138219b1ba94a1fa3606d5a76a1433d"
+    },
+    {
+      "path": "coloredlogs.pth",
+      "sha256": "dda83a855986efa5cd87f0248b0199c0086eb0e8e7fece7d6741959c5ce39536"
+    },
+    {
+      "path": "distutils-precedence.pth",
+      "sha256": "2638ce9e2500e572a5e0de7faed6661eb569d1b696fcba07b0dd223da5f5d224"
+    },
+    {
+      "path": "google_auth-1.6.3-py3.5-nspkg.pth",
+      "sha256": "c47e604f1738522a583f7aab6cffb80821cd18157dede051e10aa185e0af065e"
+    },
+    {
+      "path": "pytest-cov.pth",
+      "sha256": "f47446a60fdf5905e84e7d7c892baf92f8d5a3226d0da1599b9c014eab6c7ddb"
+    }
+  ]
+}
