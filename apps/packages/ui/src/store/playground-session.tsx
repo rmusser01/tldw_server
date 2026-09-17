@@ -1,3 +1,4 @@
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
@@ -14,6 +15,7 @@ const createMemoryStorage = (): StateStorage => ({
 
 export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
+  historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
   serverChatId: string | null
   trackedAssistantSelection: AssistantSelection | null
@@ -54,6 +56,7 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
 }
 
 const initialState: PlaygroundSessionData = {
+  historySelectionReference: null,
   historyId: null,
   serverChatId: null,
   trackedAssistantSelection: null,
@@ -137,6 +140,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         typeof window !== "undefined" ? localStorage : createMemoryStorage()
       ),
       partialize: (state) => ({
+        historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,
         trackedAssistantSelection: state.trackedAssistantSelection,

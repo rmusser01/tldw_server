@@ -1,3 +1,6 @@
+import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
+import { formatSelectedHistory } from "@/db/dexie/helpers";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
@@ -380,6 +383,15 @@ const normalizeChatWorkflowMode = (
   value === "character" ? "character" : "standard";
 
 export const Playground = () => {
+  return <HistorySelectionProvider storageKey="tldw-h1-playground-reference" onCapture={capture => {
+    const display = formatSelectedHistory(capture);
+    useStoreMessageOption.getState().setHistory(display.history);
+    useStoreMessageOption.getState().setMessages(display.messages);
+  }}><PlaygroundContent /></HistorySelectionProvider>;
+};
+
+const PlaygroundContent = () => {
+  const historySelection = useHistorySelectionContext()!;
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
@@ -569,7 +581,7 @@ export const Playground = () => {
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
-  } = useMessageOption();
+  } = useMessageOption({ hydrateServerChat: true });
   const setUploadedFiles = useStoreMessageOption(
     (state) => state.setUploadedFiles,
   );
@@ -1685,6 +1697,18 @@ export const Playground = () => {
   ]);
 
   const initializePlayground = React.useCallback(async () => {
+    let handoff;
+    let storedHistoryReference;
+    try { handoff = parseHistorySelectionHandoff(location.search || location.hash || ""); storedHistoryReference = historySelection.getStoredReference(); }
+    catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    if (handoff) {
+      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
+      if (loaded && historySelection.getCurrent().capture) {
+        setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
+        setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
+      }
+      return;
+    }
     if (routeCharacterIntentChatId) {
       if (serverChatId !== routeCharacterIntentChatId) {
         setServerChatId(routeCharacterIntentChatId);
@@ -1714,7 +1738,7 @@ export const Playground = () => {
     }
 
     // 1. Try session persistence first (restores exact state from nav-away)
-    if (shouldRestorePersistedSessionOnInit) {
+    if (storedHistoryReference || shouldRestorePersistedSessionOnInit) {
       const restoreOutcome = await restoreSession();
       if (restoreOutcome !== "not-restored") return;
     }
@@ -1733,8 +1757,11 @@ export const Playground = () => {
       const recentChat = await getRecentChatFromWebUI();
       if (recentChat) {
         setHistoryId(recentChat.history.id);
-        setHistory(formatToChatHistory(recentChat.messages));
-        setMessages(formatToMessage(recentChat.messages));
+        await historySelection.loadConversation({ historyId: recentChat.history.id });
+        if (historySelection.getCurrent().capture?.status !== "captured") {
+          setHistory(formatToChatHistory(recentChat.messages));
+          setMessages(formatToMessage(recentChat.messages));
+        }
 
         const lastUsedPrompt = recentChat?.history?.last_used_prompt;
         if (lastUsedPrompt) {
@@ -4175,6 +4202,7 @@ export const Playground = () => {
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
+                  <HistorySelectionReview selection={historySelection} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
                   <PlaygroundChat
                     showStarterDeck={showStarterDeck}
                     searchQuery={threadSearchQuery.trim()}

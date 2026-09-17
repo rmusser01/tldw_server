@@ -1,3 +1,4 @@
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import type { ChatHistory, Message as ChatMessage, ToolChoice } from "@/store/option"
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
@@ -52,6 +53,7 @@ export type ChatModelSettingsSnapshot = {
 }
 
 export type SidepanelChatSnapshot = {
+  historySelectionReference?: HistorySelectionReference | null
   history: ChatHistory
   messages: ChatMessage[]
   chatMode: "normal" | "rag" | "vision"

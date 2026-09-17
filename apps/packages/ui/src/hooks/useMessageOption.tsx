@@ -39,6 +39,8 @@ import type { ChatScope } from "@/types/chat-scope";
 type PersonaMemoryMode = "read_only" | "read_write";
 
 type UseMessageOptionOptions = {
+  /** Only the chat surface owns hydration; toolbars and settings are passive. */
+  hydrateServerChat?: boolean;
   forceCompareEnabled?: boolean;
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
@@ -263,6 +265,7 @@ export const useMessageOption = (
   });
 
   useServerChatLoader({
+    enabled: opts.hydrateServerChat === true,
     ensureServerChatHistoryId,
     notification,
     t,

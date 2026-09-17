@@ -1583,7 +1583,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setHistoryId,
     serverChatId,
     setServerChatId
-  } = useMessageOption({ scope: chatScope })
+  } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
 
   // RAG state from store
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)

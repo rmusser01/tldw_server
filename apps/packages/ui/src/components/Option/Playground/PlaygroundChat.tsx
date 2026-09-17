@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
@@ -155,6 +156,7 @@ export const PlaygroundChat = ({
   onDismissReturnedResearchRun,
   onDynamicUIAction
 }: PlaygroundChatProps) => {
+  const historySelection = useHistorySelectionContext()
   const { t } = useTranslation(["playground", "common"])
   const notification = useAntdNotification()
   const [
@@ -1149,6 +1151,14 @@ export const PlaygroundChat = ({
   const handleVariantSwipe = React.useCallback(
     (messageId: string | undefined, direction: "prev" | "next") => {
       if (!messageId) return
+      if (historySelection) {
+        const message = messages.find(row => row.id === messageId)
+        const variants = message?.variants || []
+        const currentIndex = message?.activeVariantIndex ?? variants.length - 1
+        const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
+        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        return
+      }
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== messageId) return msg
@@ -1165,7 +1175,7 @@ export const PlaygroundChat = ({
         })
       )
     },
-    [setMessages]
+    [historySelection, messages, setMessages]
   )
 
   return (
@@ -1451,8 +1461,8 @@ export const PlaygroundChat = ({
                 message_type={resolvedMessageType}
                 variants={message.variants}
                 activeVariantIndex={message.activeVariantIndex}
-                onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
-                onSwipeNext={() => handleVariantSwipe(message.id, "next")}
+                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
+                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
                 onMessageSteeringModeChange={setMessageSteeringMode}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}

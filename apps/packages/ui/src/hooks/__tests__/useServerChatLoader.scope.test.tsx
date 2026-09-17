@@ -1,5 +1,6 @@
+import React from "react"
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import type { TFunction } from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -32,6 +33,8 @@ const mocks = vi.hoisted(() => {
 
   return {
     store,
+    selection: null as any,
+    renderedMessages: [] as any[],
     getHistoriesWithMetadata: vi.fn(),
     initialize: vi.fn(),
     listChatMessages: vi.fn(),
@@ -45,9 +48,11 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => mocks.selection }))
+
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
-    messages: [],
+    messages: mocks.renderedMessages,
     streaming: false,
     isProcessing: false,
     setHistory: mocks.setHistory,
@@ -102,6 +107,8 @@ describe("useServerChatLoader scoped local history", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mocks.selection = null
+    mocks.renderedMessages = []
     mocks.store.serverChatId = "chat-a"
     mocks.store.serverChatTitle = "Chat A"
     mocks.store.serverChatMetaLoaded = true
@@ -171,4 +178,43 @@ describe("useServerChatLoader scoped local history", () => {
     )
     expect(notification.error).not.toHaveBeenCalled()
   })
+  it("does not overwrite the visible selected path when a delayed display load follows an explicit choice", async () => {
+    let epoch = 0
+    const list = deferred<any[]>()
+    mocks.listChatMessages.mockReturnValue(list.promise)
+    mocks.selection = { fence: () => { const captured = epoch; return () => captured === epoch }, getCurrent: () => ({ owner: { kind: "native", conversation_id: "chat-a" }, capture: { status: "captured" } }) }
+    function Surface() {
+      const [rows, setRows] = React.useState<any[]>([])
+      mocks.renderedMessages = rows
+      mocks.setMessages.mockImplementation(setRows)
+      useServerChatLoader({ ensureServerChatHistoryId: async () => "mirror", notification: { error: vi.fn() }, t: ((key: string) => key) as any })
+      return <><button onClick={() => { epoch++; setRows([{ id: "selected-a", message: "Selected answer A" }]) }}>Choose A</button><output>{rows.map(row => row.id + ":" + row.message).join("/")}</output></>
+    }
+    render(<Surface />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    fireEvent.click(screen.getByText("Choose A"))
+    await act(async () => { list.resolve([{ id: "latest-b", role: "assistant", content: "Wrong latest B", timestamp: "2026-01-01" }]); await vi.runOnlyPendingTimersAsync() })
+    expect(screen.getByRole("status").textContent).toBe("selected-a:Selected answer A")
+  })
+
+})
+
+it("keeps an ancestor toolbar loader from fetching or overwriting the selected surface", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.selection = null
+  mocks.renderedMessages = [{ id: "chosen", message: "Chosen answer", isBot: true }]
+  const ensureServerChatHistoryId = vi.fn()
+  renderHook(() => useServerChatLoader({
+    ensureServerChatHistoryId,
+    notification: { error: vi.fn() },
+    t: ((key: string) => key) as TFunction,
+    enabled: false
+  }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(mocks.setHistory).not.toHaveBeenCalled()
+  expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
+  vi.useRealTimers()
 })

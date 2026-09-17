@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import { shallow } from "zustand/shallow"
 import type { TFunction } from "i18next"
@@ -44,6 +45,7 @@ type UseServerChatLoaderOptions = {
   notification: NotificationApi
   t: TFunction
   scope?: ChatScope
+  enabled?: boolean
 }
 
 type PreserveLocalMessagesArgs = {
@@ -599,8 +601,12 @@ export const useServerChatLoader = ({
   ensureServerChatHistoryId,
   notification,
   t,
-  scope
+  scope,
+  enabled = true
 }: UseServerChatLoaderOptions) => {
+  const selection = useHistorySelectionContext()
+  const selectionRef = React.useRef(selection)
+  selectionRef.current = selection
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const {
     messages,
@@ -695,6 +701,11 @@ export const useServerChatLoader = ({
   }, [])
 
   React.useEffect(() => {
+    if (!enabled) {
+      serverChatLoadRef.current.controller?.abort()
+      serverChatLoadRef.current.inFlight = false
+      return
+    }
     if (!serverChatId) return
     if (
       shouldSkipLoadedServerChatReload({
@@ -723,8 +734,9 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      let selectionCurrent = selectionRef.current?.fence() || (() => true)
       const canCommitCurrentLoad = () =>
-        shouldCommitServerChatLoadResult({
+        selectionCurrent() && shouldCommitServerChatLoadResult({
           requestedChatId: serverChatId,
           activeServerChatId: serverChatLoadRef.current.chatId,
           requestController: controller,
@@ -743,6 +755,11 @@ export const useServerChatLoader = ({
           setIsLoading(true)
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
+          if (selectionRef.current?.getCurrent().error === "unbound_server_mirror") {
+            setServerChatLoadState("failed")
+            setServerChatLoadError("unbound_server_mirror")
+            return
+          }
           await tldwClient.initialize().catch(() => null)
 
           let assistantName = "Assistant"
@@ -973,6 +990,14 @@ export const useServerChatLoader = ({
             }
           )
 
+          if (!canCommitCurrentLoad()) return
+          const currentSelection = selectionRef.current?.getCurrent()
+          if (selectionRef.current && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
+            if (!await selectionRef.current.loadConversation({ serverChatId, scope, temporary: temporaryChat })) return
+            selectionCurrent = selectionRef.current.fence()
+            if (!canCommitCurrentLoad()) return
+          }
+          const hasSelectedHistory = selectionRef.current?.getCurrent().capture?.status === "captured"
           const mappedMessages = mapServerChatMessagesToPlaygroundMessages({
             serverMessages: list,
             assistantName,
@@ -1002,12 +1027,12 @@ export const useServerChatLoader = ({
             isProcessing: processingRef.current
           })
 
-          if (!shouldPreserveLocal && !shouldPreserveAtCommit) {
+          if (!hasSelectedHistory && !shouldPreserveLocal && !shouldPreserveAtCommit) {
             setHistory(history)
             setMessages(mappedMessages)
           }
           const shouldApplyDeferredAssistantPresentation =
-            !shouldPreserveLocal && !shouldPreserveAtCommit
+            !hasSelectedHistory && !shouldPreserveLocal && !shouldPreserveAtCommit
           if (shouldApplyDeferredAssistantPresentation) {
             void deferredAssistantPresentationPromise
               .then((presentation) => {
@@ -1032,7 +1057,7 @@ export const useServerChatLoader = ({
                 })
               })
           }
-          if (!temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
+          if (!selectionRef.current && !temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
             if (!canCommitCurrentLoad()) {
               return
             }
@@ -1163,6 +1188,7 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    enabled,
     ensureServerChatHistoryId,
     notification,
     serverChatAssistantId,

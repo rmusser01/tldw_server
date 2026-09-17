@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
 import { browser } from "wxt/browser"
@@ -289,4 +289,20 @@ describe("ControlRow role-play handoff behavior", () => {
     })
     expect(window.open).not.toHaveBeenCalled()
   })
+})
+
+import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
+it("keeps H1 full-page expansion distinct from the explicit WebUI draft handoff", async () => {
+  const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
+  const webui = vi.fn()
+  ;(browser as unknown as MutableBrowser).tabs.create = mocks.tabsCreate
+  render(<HistorySelectionContext.Provider value={{ reference, owner: { kind: "local" }, prepareExpansionPath: async () => historySelectionExpansionPath({ reference, owner: { kind: "local" } as any }) } as any}>
+    <ControlRow {...defaultProps()} onOpenChatInWebUi={webui} />
+  </HistorySelectionContext.Provider>)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  await waitFor(() => expect(mocks.tabsCreate.mock.calls.at(-1)?.[0].url).toContain("historySelection="))
+  const url = mocks.tabsCreate.mock.calls.at(-1)![0].url
+  expect(url.startsWith("chrome-extension://review/options.html#/chat?")).toBe(true)
+  expect(parseHistorySelectionHandoff(url)).toEqual({ ...reference, owner_kind: "local" })
+  expect(webui).not.toHaveBeenCalled()
 })

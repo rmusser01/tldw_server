@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { MemoryRouter } from "react-router-dom"
-import { render, waitFor } from "@testing-library/react"
+import { MemoryRouter, useNavigate } from "react-router-dom"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import OptionLayout, { useOptionLayoutShellOverrides } from "../Layout"
 
 const storeMessageOptionMock = vi.hoisted(() =>
@@ -70,7 +71,7 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
 }))
 
 vi.mock("@/components/Layouts/Header", () => ({
-  Header: () => <div data-testid="header" />
+  Header: () => { const selection = useHistorySelectionContext(); return <div data-testid="header" data-history-controller={selection ? "present" : "absent"} /> }
 }))
 
 vi.mock("@/components/Layouts/QuickIngestButton", () => ({
@@ -358,4 +359,38 @@ describe("OptionLayout bypass block (#2889)", () => {
     expect(main).toHaveAttribute("id", "main-content")
     expect(main).toHaveAttribute("tabindex", "-1")
   })
+})
+
+it("places the chat controller above both shell consumers and route content", () => {
+  delete (globalThis as any).__tldwOptionShell
+  function Probe() {
+    const selection = useHistorySelectionContext()
+    return <output data-testid="selection-probe">{selection ? "present" : "absent"}</output>
+  }
+  const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Probe /></OptionLayout></MemoryRouter>)
+  expect(view.getByTestId("header")).toHaveAttribute("data-history-controller", "present")
+  expect(view.getByTestId("selection-probe")).toHaveTextContent("present")
+})
+
+it("reuses the shell controller and gives chat route reentry a fresh lifetime", () => {
+  delete (globalThis as any).__tldwOptionShell
+  const seen: any[] = []
+  function Probe() {
+    const selection = useHistorySelectionContext()
+    const navigate = useNavigate()
+    seen.push(selection?.getReference ?? null)
+    return <><button onClick={() => navigate("/settings")}>Leave</button><button onClick={() => navigate("/chat")}>Return</button></>
+  }
+  function Content() {
+    const current = useHistorySelectionContext()
+    return current ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />
+  }
+  const view = render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><Content /></OptionLayout></MemoryRouter>)
+  const first = seen.at(-1)
+  expect(first).toBeTypeOf("function")
+  fireEvent.click(view.getByText("Leave"))
+  expect(seen.at(-1)).toBeNull()
+  fireEvent.click(view.getByText("Return"))
+  expect(seen.at(-1)).toBeTypeOf("function")
+  expect(seen.at(-1)).not.toBe(first)
 })

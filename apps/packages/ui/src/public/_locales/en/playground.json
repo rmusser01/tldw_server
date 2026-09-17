@@ -3338,27 +3338,6 @@
   "documentProcessing_ingestMissingMediaId": {
     "message": "Ingest completed without a media id."
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Slice of life"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Dungeon crawl"
-  },
-  "actor_preset.romance": {
-    "message": "Romance"
-  },
-  "actor_preset.workSession": {
-    "message": "Work session"
-  },
-  "actor_templateMode.merge": {
-    "message": "Merge with templates"
-  },
-  "actor_templateMode.override": {
-    "message": "Override templates"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignore when templates active"
-  },
   "actor_preset_sliceOfLife": {
     "message": "Slice of life"
   },
@@ -3379,5 +3358,110 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignore when templates active"
+  },
+  "composer_rolePlaySaveError": {
+    "message": "Scene settings could not be saved. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayApplyError": {
+    "message": "Settings could not be applied. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayRestoreError": {
+    "message": "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
+  },
+  "historySelection_region": {
+    "message": "Conversation history selection"
+  },
+  "historySelection_loading": {
+    "message": "Loading selected history"
+  },
+  "historySelection_pending": {
+    "message": "History confirmation pending"
+  },
+  "historySelection_pendingMessage": {
+    "message": "The original choices are retained. Check the same confirmation before creating another interpretation."
+  },
+  "historySelection_checkConfirmation": {
+    "message": "Check original confirmation"
+  },
+  "historySelection_changed": {
+    "message": "Conversation history changed"
+  },
+  "historySelection_changedMessage": {
+    "message": "Your choices are retained. Refresh the source, then review missing messages or choose a new boundary."
+  },
+  "historySelection_reason": {
+    "message": "Reason"
+  },
+  "historySelection_refresh": {
+    "message": "Refresh history"
+  },
+  "historySelection_unavailable": {
+    "message": "Selected history unavailable"
+  },
+  "historySelection_unavailableMessage": {
+    "message": "You can still read this conversation. A supported, verified history owner is required to continue from a selection."
+  },
+  "historySelection_bind": {
+    "message": "Connect this conversation"
+  },
+  "historySelection_review": {
+    "message": "Review conversation history"
+  },
+  "historySelection_empty": {
+    "message": "Use no prior messages"
+  },
+  "historySelection_expand": {
+    "message": "Expand in full page"
+  },
+  "historySelection_counts": {
+    "message": "Complete source / included path"
+  },
+  "historySelection_instructions": {
+    "message": "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+  },
+  "historySelection_source": {
+    "message": "Complete source messages"
+  },
+  "historySelection_imageOnly": {
+    "message": "Image or attachment only"
+  },
+  "historySelection_emptyMessage": {
+    "message": "Empty message"
+  },
+  "historySelection_include": {
+    "message": "Include"
+  },
+  "historySelection_omitted": {
+    "message": "Omitted alternative"
+  },
+  "historySelection_position": {
+    "message": "Path position"
+  },
+  "historySelection_up": {
+    "message": "Move earlier"
+  },
+  "historySelection_down": {
+    "message": "Move later"
+  },
+  "historySelection_chooseBoundary": {
+    "message": "Continue after this message"
+  },
+  "historySelection_beforeFirst": {
+    "message": "Before first included message"
+  },
+  "historySelection_throughLast": {
+    "message": "Through last included message"
+  },
+  "historySelection_confirmEffect": {
+    "message": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+  },
+  "historySelection_confirm": {
+    "message": "Confirm selected history"
+  },
+  "historySelection_cancel": {
+    "message": "Cancel review"
+  },
+  "historySelection_expandDescription": {
+    "message": "Opens this selected history in the extension full page. Active streaming stays in this panel."
   }
 }
