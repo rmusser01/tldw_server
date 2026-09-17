@@ -4,7 +4,7 @@ Date: 2026-09-16. Design tracking: TASK-13261. Implementation tracking: TASK-132
 
 Status: focused specification following the reviewed D1–D6 decisions. This document specifies H1; it does not claim implemented parity. The [review closure](2026-09-16-chatbook-chat-parity-review-closure.md) remains the authority for the full program. The [implementation plan](../../IMPLEMENTATION_PLAN_chatbook_h1_history_selection.md) turns this specification into five deliveries.
 
-Implementation checkpoint, 2026-09-17: the shared contract, native/local owner adapters, mounted selection/review/restore UI and ordinary/overlay normal-send admission/settlement have passed their task reviews and required fix reviews. Native tracked-character integration, safe fork projection, uncertain fork outcomes and final real-browser/owner qualification remain in progress or unstarted; H1 is not complete.
+Implementation checkpoint, 2026-09-17: the shared contract, native/local owner adapters, mounted selection/review/restore UI, ordinary/overlay sends and supported native tracked-character sends have passed task review and required fix reviews. Safe fork projection, uncertain fork outcomes and final real-browser/owner qualification remain in progress or unstarted; H1 is not complete. The [verification record](../Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md) distinguishes reviewed evidence and outstanding acceptance checks.
 
 ## 1. Outcome and scope
 

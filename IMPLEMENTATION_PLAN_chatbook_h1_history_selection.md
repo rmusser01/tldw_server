@@ -355,7 +355,7 @@ Execution evidence: `f93b78c5d9` implements local/native client owners and Dexie
 
 **Tests:** H1-A/B/C/D/G, actual mounted submit and restore paths, in-flight admission races and comparison regressions.
 
-**Status:** In Progress.
+**Status:** Complete (mounted/client and native acknowledgement scope; final real-browser qualification remains Stage 5).
 
 ### Task 3.1: shared view cursor and history review
 
@@ -425,12 +425,14 @@ Execution evidence: `0e71a732d4` implements ordinary/overlay selected-history pr
 
 **Interfaces:** Native tracked characters use the existing versioned server-owned `POST /api/v1/chat/completions` path: finalized selection plus new current inputs, `save_to_db=true`, verified conversation/workspace and frozen explicit model/provider/request values. The owner validates selected history and saved behavior and atomically admits the new inputs. Client-managed normal/overlay requests retain Task3.2's stateless inference path. Do not send a full client-composed historical transcript to server-owned admission, append the user twice, or invent a saved-prompt preview service.
 
-- [ ] Establish the verified originating native owner/capture and finalize the explicit request before dispatch. Use only new system/user/tool input supported by the native contract; do not fetch a mutable live character to substitute for saved behavior. Precisely gate unsupported persona, multi-character, steering or asset requirements before the operation rather than dropping them.
-- [ ] Integrate both actual mounted tracked-character send branches. Prove selected A1 excludes alternate A2, including equal text, and saved supported single-character behavior survives live source-card modification/deletion. Reuse the actual-factory native evidence and add missing mounted/transport coverage.
-- [ ] Consume returned admission/result identities from the actual stream and retain accepted/unknown outcomes in the originating scope. Native completion owns its append/settlement; do not add separate generic or legacy persistence. A disconnected or unparseable stream is not proof of non-commit and cannot trigger replay/fallback.
-- [ ] Make the versioned terminal persistence acknowledgement independent of the optional legacy metadata flag. Require the actual saved ID after successful settlement; failed save or cancellation cannot fabricate it, and provider-supplied admission/result fields cannot substitute for owner acknowledgements. Verify both the native endpoint wiring and streaming handler, including spoofed provider IDs and unchanged unversioned behavior with metadata disabled. Run touched Python checks and Bandit for this narrow correction.
-- [ ] Validate request/config lease before dispatch and preserve server ownership once dispatched. View changes do not redirect native persistence; conditional stream/display updates cannot overwrite a new view. Account/connection changes stop local consumption without claiming the server rolled back.
-- [ ] Verify workspace query, explicit provider/model inputs, zero legacy stream calls, exact native persistence ownership, first-send creation fencing and visible unsupported/recovery behavior in both surfaces. Run affected tests/static checks, commit, and pass independent review before Stage3 completion.
+- [x] Establish the verified originating native owner/capture and finalize the explicit request before dispatch. Use only new system/user/tool input supported by the native contract; do not fetch a mutable live character to substitute for saved behavior. Precisely gate unsupported persona, multi-character, steering or asset requirements before the operation rather than dropping them.
+- [x] Integrate both actual mounted tracked-character send branches. Prove selected A1 excludes alternate A2, including equal text, and saved supported single-character behavior survives live source-card modification/deletion. Reuse the actual-factory native evidence and add missing mounted/transport coverage.
+- [x] Consume returned admission/result identities from the actual stream and retain accepted/unknown outcomes in the originating scope. Native completion owns its append/settlement; do not add separate generic or legacy persistence. A disconnected or unparseable stream is not proof of non-commit and cannot trigger replay/fallback.
+- [x] Make the versioned terminal persistence acknowledgement independent of the optional legacy metadata flag. Require the actual saved ID after successful settlement; failed save or cancellation cannot fabricate it, and provider-supplied admission/result fields cannot substitute for owner acknowledgements. Verify both the native endpoint wiring and streaming handler, including spoofed provider IDs and unchanged unversioned behavior with metadata disabled. Run touched Python checks and Bandit for this narrow correction.
+- [x] Validate request/config lease before dispatch and preserve server ownership once dispatched. View changes do not redirect native persistence; conditional stream/display updates cannot overwrite a new view. Account/connection changes stop local consumption without claiming the server rolled back.
+- [x] Verify workspace query, explicit provider/model inputs, zero legacy stream calls, exact native persistence ownership, first-send creation fencing and visible unsupported/recovery behavior in both surfaces. Run affected tests/static checks, commit, and pass independent review before Stage3 completion.
+
+Execution evidence: native tracked-character integration `4822de5d71` and recovery-presentation fix `5d62386395` passed independent task review and scoped fix review. The sole P2 (native admission labeled as a response known not to be saved) is resolved with persistence-aware unknown-outcome wording, preserving admission/text and client-managed semantics. Evidence: 222 UI tests, final affected mounted 53 tests, and fix coverage 64 tests; these runs overlap. Native acknowledgement/endpoint tests passed 113 with one pre-existing heartbeat skip and 10 disclosed warnings. Focused types, Ruff, compile and production/test Bandit pass; two known expanded prompt-sync diagnostics remain. The endpoint tests use real SQLite, not new PostgreSQL coverage. Actual browser/IndexedDB and combined first-create/real-loader qualification remain Stage 5.
 
 ## Stage 4: isolated local forks and honest pending outcomes
 
@@ -440,7 +442,7 @@ Execution evidence: `0e71a732d4` implements ordinary/overlay selected-history pr
 
 **Tests:** H1-E/F/G, exact membership/order, cross-model parent normalization, source deletion/edit/file removal, deferred API failures and two-view dispatch claims.
 
-**Status:** Not Started.
+**Status:** In Progress (Task 4.1 preparation; implementation dispatch follows the reviewed Stage 3 milestone).
 
 ### Task 4.1: one allowlisted local copy projector
 
@@ -449,6 +451,7 @@ Dependency closure required: the unused `types/history-selection.ts` fork result
 **Files:**
 
 - Modify `apps/packages/ui/src/db/dexie/branch.ts`, `types.ts` and `helpers.ts` where exports/call signatures change.
+- Modify the existing `db/dexie/history-selection.ts` seam narrowly for coherent owner-authorized fork capture and retained-policy digests. Preserve normal-send and mirror ownership gates; exclude source-only ingestion controls from fork identity while changed retained files/content still reject inside commit. No parallel owner service.
 - Modify `apps/packages/ui/src/db/dexie/chat.ts` only where existing stable-ID edit/delete operations need conversation ownership enforcement for selected-history controls; reuse those operations instead of adding a parallel mutation service.
 - Modify `apps/packages/ui/src/hooks/handlers/messageHandlers.ts`, `hooks/chat/useChatActions.ts`, `hooks/chat/chat-action-utils.ts`, `hooks/useMessage.tsx` and `hooks/useMessageOption.tsx`.
 - Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`, `PlaygroundCompareCluster.tsx` and `components/Sidepanel/Chat/body.tsx`.
@@ -502,7 +505,7 @@ Dependency closure required: the unused `types/history-selection.ts` fork result
 
 - Create `apps/tldw-frontend/e2e/workflows/chat-history-selection.spec.ts`.
 - Create `apps/extension/tests/e2e/chat-history-selection.spec.ts`.
-- Create `Docs/Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_16.md` when execution begins; update date if the actual run is later.
+- Update `Docs/Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md`, created as an explicitly incomplete checkpoint during execution. Retain precise commands, review dispositions and capability limits; replace pending statuses only with qualifying evidence.
 - Regenerate `apps/tldw-frontend/lib/api/openapi.fingerprint.json` using `apps/tldw-frontend/scripts/generate-api-types.mjs`; its `lib/api/generated/openapi.json` and `schema.d.ts` outputs remain ignored build artifacts.
 - Update this plan, H1 spec implementation status, TASK-13261.1 and the parity inventory only where evidence supports a changed status.
 
@@ -525,7 +528,7 @@ node_modules/.bin/playwright test tests/e2e/chat-history-selection.spec.ts --pro
 - [ ] Run touched Python security validation:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat/history_selection.py tldw_Server_API/app/core/Chat/history_context.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/core/Chat/persistence_service.py tldw_Server_API/app/core/DB_Management/chacha/message_store.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/api/v1/endpoints/character_messages.py tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py tldw_Server_API/app/api/v1/schemas/history_selection_schemas.py tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py tldw_Server_API/app/api/v1/schemas/chat_session_schemas.py -f json -o /tmp/bandit_chatbook_h1.json
+source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chat/history_selection.py tldw_Server_API/app/core/Chat/history_context.py tldw_Server_API/app/core/Chat/chat_service.py tldw_Server_API/app/core/Chat/streaming_pipeline.py tldw_Server_API/app/core/Chat/streaming_utils.py tldw_Server_API/app/core/Chat/persistence_service.py tldw_Server_API/app/core/DB_Management/chacha/message_store.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py tldw_Server_API/app/core/DB_Management/backends/pg_rls_policies.py tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/api/v1/endpoints/character_messages.py tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py tldw_Server_API/app/api/v1/schemas/history_selection_schemas.py tldw_Server_API/app/api/v1/schemas/chat_request_schemas.py tldw_Server_API/app/api/v1/schemas/chat_session_schemas.py -f json -o /tmp/bandit_chatbook_h1.json
 ```
 
 If additional Python is touched, add it to the scope. Compare existing findings with the baseline; fix all new findings introduced by the change. Record code compile/lint checks and `git diff --check`.
