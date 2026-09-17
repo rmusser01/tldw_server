@@ -55,8 +55,12 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({ capabilities: { hasFlashcards: true }, loading: false })
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const { default: ICU } = await import("@/i18n/icu-format")
+  const formatter = createInstance().use(ICU)
+  await formatter.init({ lng: "en", fallbackLng: false, resources: {} })
+  return { useTranslation: () => ({
     t: (
       key: string,
       defaultValueOrOptions?:
@@ -67,16 +71,12 @@ vi.mock("react-i18next", () => ({
     ) => {
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) {
-        return defaultValueOrOptions.defaultValue.replace(
-          /\{\{(\w+)\}\}/g,
-          (_match, token: string) =>
-            String((defaultValueOrOptions as Record<string, unknown>)[token] ?? `{{${token}}}`)
-        )
+        return formatter.t(key, defaultValueOrOptions)
       }
       return key
     }
-  })
-}))
+  }) }
+})
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
@@ -319,7 +319,7 @@ describe("ReviewTab cram mode", () => {
     )
     await waitFor(() => {
       expect(
-        screen.getByText("1 cards practiced in this cram session")
+        screen.getByText("1 card practiced in this cram session")
       ).toBeInTheDocument()
     })
   })
@@ -352,7 +352,7 @@ describe("ReviewTab cram mode", () => {
     )
     await waitFor(() => {
       expect(
-        screen.getByText("1 cards practiced in this cram session")
+        screen.getByText("1 card practiced in this cram session")
       ).toBeInTheDocument()
     })
     expect(screen.getByTestId("flashcards-review-empty-card")).toBeInTheDocument()

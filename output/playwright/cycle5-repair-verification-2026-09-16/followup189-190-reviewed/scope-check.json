@@ -1,0 +1,6 @@
+{
+  "exactTwoReviewTabReplacements": true,
+  "exactOneEnglishResourceAddition": true,
+  "redTestByteIdentical": true,
+  "addedLinesTrailingWhitespace": false
+}

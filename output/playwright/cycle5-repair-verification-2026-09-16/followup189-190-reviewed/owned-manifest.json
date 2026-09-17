@@ -1,0 +1,32 @@
+{
+  "tasks": [
+    "TASK13260.127",
+    "TASK13260.128"
+  ],
+  "files": [
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "sha256": "b2b8a50a21974d313ed02d8005b5edd19a13547c98d45b2da455fae6825c0de3",
+      "snapshot": "review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+      "baseline": "baseline/ReviewTab.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/assets/locale/en/option.json",
+      "sha256": "e1e1060b7f1fbbcb5805debbb0577f1066991b2568fcd33bb036eaa117a0bd14",
+      "snapshot": "review-snapshot/apps/packages/ui/src/assets/locale/en/option.json",
+      "baseline": "baseline/option.json"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "sha256": "d0346c08e1a0bc9bd3bad2e1bb34ec6d2de5ec5aa7d1a22ad7e49d3f8e26d718",
+      "snapshot": "review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+      "baseline": "baseline/ReviewTab.cram-mode.test.tsx"
+    },
+    {
+      "path": "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx",
+      "sha256": "5b9bac23b1472ff3cab60804f8204c3b32fd9bbaca67ddc0a256ec051860e523",
+      "snapshot": "review-snapshot/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx",
+      "baseline": null
+    }
+  ]
+}

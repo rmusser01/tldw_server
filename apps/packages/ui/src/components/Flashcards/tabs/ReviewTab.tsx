@@ -1718,7 +1718,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                 ? t("option:flashcards.noCardsYet", {
                     defaultValue: "No flashcards yet"
                   })
-                : isCramMode && cramTagFilter
+                : isCramMode && cramTagFilter && !hasCramPracticeCards
                   ? t("option:flashcards.cramNoCardsForTag", {
                       defaultValue: "No cards match this cram tag filter."
                     })
@@ -1866,7 +1866,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                           {isCramMode
                             ? t("option:flashcards.reviewedThisCramSession", {
                                 defaultValue:
-                                  "{{count}} cards practiced in this cram session",
+                                  "{count, plural, one {# card practiced in this cram session} other {# cards practiced in this cram session}}",
                                 count: reviewedCount
                               })
                             : t("option:flashcards.reviewedThisSession", {

@@ -1,0 +1,63 @@
+{
+  "eslint": {
+    "before": [
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+        "errors": 0,
+        "warnings": 2
+      },
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx",
+        "errors": 0,
+        "warnings": 0
+      },
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+        "errors": 0,
+        "warnings": 19
+      }
+    ],
+    "after": [
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+        "errors": 0,
+        "warnings": 2
+      },
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx",
+        "errors": 0,
+        "warnings": 0
+      },
+      {
+        "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+        "errors": 0,
+        "warnings": 19
+      }
+    ],
+    "sameDiagnostics": true
+  },
+  "tsc": {
+    "baselineCount": 90,
+    "currentCount": 90,
+    "sameDiagnostics": true,
+    "ownedDiagnostics": []
+  },
+  "bandit": {
+    "findings": 0,
+    "errors": [
+      {
+        "filename": "./apps/packages/ui/src/components/Flashcards/tabs/ReviewTab.tsx",
+        "reason": "syntax error while parsing AST from file"
+      },
+      {
+        "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-completion.test.tsx",
+        "reason": "syntax error while parsing AST from file"
+      },
+      {
+        "filename": "./apps/packages/ui/src/components/Flashcards/tabs/__tests__/ReviewTab.cram-mode.test.tsx",
+        "reason": "syntax error while parsing AST from file"
+      }
+    ],
+    "limitation": "Bandit is a Python scanner; TSX syntax errors are not JavaScript security coverage."
+  }
+}
