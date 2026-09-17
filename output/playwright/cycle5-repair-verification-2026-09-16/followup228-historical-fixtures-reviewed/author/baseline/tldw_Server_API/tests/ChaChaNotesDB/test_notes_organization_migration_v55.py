@@ -15,65 +15,16 @@ def _assert_canonical_uuid4(value: str) -> None:
     assert str(parsed) == value
 
 
-def _build_v54_fixture(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, list[int]]:
-    def initialize_historical(db: CharactersRAGDB) -> None:
-        with db.transaction() as conn:
-            db._apply_schema_v4(conn)
-            for prior in range(4, 54):
-                db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=54, initial_version=4)
-            assert db._get_db_version(conn) == 54
-            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            assert {"note_folder_sync_suppressions", "note_attachments"}.isdisjoint(tables)
-            # Folders were an optional runtime backfill before V55, outside the
-            # numbered steps. Preserve the original fixture's existing tree.
-            conn.execute("""
-                CREATE TABLE note_folders(
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT NOT NULL,
-                  path TEXT UNIQUE NOT NULL COLLATE NOCASE,
-                  parent_id INTEGER REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  deleted BOOLEAN NOT NULL DEFAULT 0,
-                  client_id TEXT NOT NULL DEFAULT 'unknown',
-                  version INTEGER NOT NULL DEFAULT 1
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE note_folder_memberships(
-                  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-                  folder_id INTEGER NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
-                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  PRIMARY KEY(note_id, folder_id)
-                )
-            """)
-
-    # The maintained V4 template includes two later portable-ID declarations.
-    # Remove only those known V55 additions before constructing the old schema.
-    historical_v4 = CharactersRAGDB._FULL_SCHEMA_SQL_V4
-    column = "  sync_id       TEXT    NOT NULL,\n"
-    assert historical_v4.count(column) == 2
-    historical_v4 = historical_v4.replace(column, "")
-    for table in ("keywords", "keyword_collections"):
-        index = f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_sync_id_unique ON {table}(sync_id);"
-        assert historical_v4.count(index) == 1
-        historical_v4 = historical_v4.replace(index, "")
-    with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, "_FULL_SCHEMA_SQL_V4", historical_v4)
-        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 54)
-        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
-        db = CharactersRAGDB(str(db_path), client_id="migration-v55-fixture")
+def _build_v54_fixture(db_path: Path) -> dict[str, list[int]]:
+    db = CharactersRAGDB(str(db_path), client_id="migration-v55-fixture")
     try:
-        note_id = str(uuid.uuid4())
+        note_id = db.add_note(title="migration note", content="fixture")
         with db.transaction() as conn:
-            conn.execute("INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?)",
-                         (note_id, "migration note", "fixture", "migration-v55-fixture"))
             has_sync_id = {
                 table: "sync_id"
                 in {row["name"] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
                 for table in ("keywords", "keyword_collections", "note_folders")
             }
-            assert not any(has_sync_id.values())
             keyword_rows = []
             for keyword, deleted in (("active-keyword", 0), ("deleted-keyword", 1)):
                 if has_sync_id["keywords"]:
@@ -136,6 +87,22 @@ def _build_v54_fixture(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[s
     finally:
         db.close_connection()
 
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE IF EXISTS note_folder_sync_suppressions")
+        for table, index_name in (
+            ("keywords", "idx_keywords_sync_id_unique"),
+            ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
+            ("note_folders", "idx_note_folders_sync_id_unique"),
+        ):
+            columns = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')")}
+            if "sync_id" in columns:
+                conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN sync_id")
+        conn.execute(
+            "UPDATE db_schema_version SET version = 54 WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        )
+
     return {
         "keywords": keyword_rows,
         "keyword_collections": collection_rows,
@@ -143,9 +110,9 @@ def _build_v54_fixture(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[s
     }
 
 
-def test_v54_migration_adds_stable_unique_sync_ids_and_preserves_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v54_migration_adds_stable_unique_sync_ids_and_preserves_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "notes-organization-v54.sqlite"
-    original_ids = _build_v54_fixture(db_path, monkeypatch)
+    original_ids = _build_v54_fixture(db_path)
 
     migrated = CharactersRAGDB(str(db_path), client_id="migration-v55")
     try:

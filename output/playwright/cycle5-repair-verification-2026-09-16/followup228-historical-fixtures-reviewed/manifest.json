@@ -1,0 +1,309 @@
+{
+  "at": "2026-09-17T11:08:32.556Z",
+  "files": [
+    {
+      "file": "author/snapshot/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py",
+      "source": ".tmp/uat228-repair-20260917/review-snapshot/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py",
+      "original_sha256": "b35a71d91b581c50a21cb40de81912a152ecffa8961c4ef53a3510ebee7d41a6",
+      "sha256": "b35a71d91b581c50a21cb40de81912a152ecffa8961c4ef53a3510ebee7d41a6",
+      "bytes": 10780,
+      "normalization": "none"
+    },
+    {
+      "file": "author/baseline/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py",
+      "source": ".tmp/uat228-repair-20260917/baseline/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v55.py",
+      "original_sha256": "973aaa4ee65d3c93c7995ec1f0ec3588c1b7d87ac07777b0e35e57412d8c1c60",
+      "sha256": "973aaa4ee65d3c93c7995ec1f0ec3588c1b7d87ac07777b0e35e57412d8c1c60",
+      "bytes": 8561,
+      "normalization": "none"
+    },
+    {
+      "file": "author/snapshot/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py",
+      "source": ".tmp/uat228-repair-20260917/review-snapshot/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py",
+      "original_sha256": "78dcefe108031b1fd2327918e085effa1cd98a4e7792852ccb478dd2e4bba70e",
+      "sha256": "78dcefe108031b1fd2327918e085effa1cd98a4e7792852ccb478dd2e4bba70e",
+      "bytes": 16367,
+      "normalization": "none"
+    },
+    {
+      "file": "author/baseline/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py",
+      "source": ".tmp/uat228-repair-20260917/baseline/tldw_Server_API/tests/ChaChaNotesDB/test_notes_organization_migration_v57.py",
+      "original_sha256": "35463d3007e8e7db1719f66b7dfe29c6d8122e27621e7798ce2a7d7b4db177ff",
+      "sha256": "35463d3007e8e7db1719f66b7dfe29c6d8122e27621e7798ce2a7d7b4db177ff",
+      "bytes": 15354,
+      "normalization": "none"
+    },
+    {
+      "file": "author/PLAN228.md",
+      "source": ".tmp/uat228-repair-20260917/PLAN228.md",
+      "original_sha256": "0e1481d56b7a28d2425a9bc86eb5b100dfec2a7d24638e5d1b7df4b9269cc034",
+      "sha256": "0e1481d56b7a28d2425a9bc86eb5b100dfec2a7d24638e5d1b7df4b9269cc034",
+      "bytes": 312,
+      "normalization": "none"
+    },
+    {
+      "file": "author/IMPLEMENTATION228.md",
+      "source": ".tmp/uat228-repair-20260917/IMPLEMENTATION228.md",
+      "original_sha256": "e9ade710b75a7565ffb3255b3ae85101296e4d0881b596519f8a4d542043ace5",
+      "sha256": "e9ade710b75a7565ffb3255b3ae85101296e4d0881b596519f8a4d542043ace5",
+      "bytes": 4795,
+      "normalization": "none"
+    },
+    {
+      "file": "author/owned-manifest.json",
+      "source": ".tmp/uat228-repair-20260917/owned-manifest.json",
+      "original_sha256": "667f7507516fc37e0bf4004e71db23a060f25771b35619e4fb75d269f216d3ef",
+      "sha256": "667f7507516fc37e0bf4004e71db23a060f25771b35619e4fb75d269f216d3ef",
+      "bytes": 819,
+      "normalization": "none"
+    },
+    {
+      "file": "author/owned.patch",
+      "source": ".tmp/uat228-repair-20260917/owned.patch",
+      "original_sha256": "eb88114d965b1fe914c91e881211cdbbe4797dd92e8a437665b484a87c5b81c1",
+      "sha256": "549de864d050d260cf7e43b8203a47821b5fbf95f1f0d674718ffe0d8f13d54d",
+      "bytes": 7908,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author/baseline-manifest.json",
+      "source": ".tmp/uat228-repair-20260917/baseline-manifest.json",
+      "original_sha256": "b70848a5087b17126aada5f22e7e961303af33b80009f31717d4c4132d8fc00c",
+      "sha256": "b70848a5087b17126aada5f22e7e961303af33b80009f31717d4c4132d8fc00c",
+      "bytes": 367,
+      "normalization": "none"
+    },
+    {
+      "file": "author/assertion-parity.json",
+      "source": ".tmp/uat228-repair-20260917/assertion-parity.json",
+      "original_sha256": "88494151e6df3f169bcc35ed98c471ef19c034dcf4fd3eb6336edf47f55d6312",
+      "sha256": "88494151e6df3f169bcc35ed98c471ef19c034dcf4fd3eb6336edf47f55d6312",
+      "bytes": 401,
+      "normalization": "none"
+    },
+    {
+      "file": "author/ruff.json",
+      "source": ".tmp/uat228-repair-20260917/ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author/bandit-tests.json",
+      "source": ".tmp/uat228-repair-20260917/bandit-tests.json",
+      "original_sha256": "0a271eb056f61187a1f97030b8438bf93ec3c23bc86ed3c7b6cdd65f119d95ee",
+      "sha256": "0728fee225a424b6ceb34676b0b366305a9ddd2ea4e8e7fb8a5f1844525b6100",
+      "bytes": 1178,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author/test_transaction_format_probe.py",
+      "source": ".tmp/uat228-repair-20260917/test_transaction_format_probe.py",
+      "original_sha256": "17751663e4903925e139ecdfcf0d142270a1fe9ed1ccd34df44e89b0845dd84c",
+      "sha256": "17751663e4903925e139ecdfcf0d142270a1fe9ed1ccd34df44e89b0845dd84c",
+      "bytes": 1021,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat168-organization-history-baseline-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-baseline-command.json",
+      "original_sha256": "866eb229a530804dc24207c4c60ec4092dd0f074895cb6e4015cae2696e2c7d3",
+      "sha256": "866eb229a530804dc24207c4c60ec4092dd0f074895cb6e4015cae2696e2c7d3",
+      "bytes": 478,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat168-organization-history-baseline.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-baseline.redacted.log",
+      "original_sha256": "4275075721292cc6a524cdfcaf207c97b74e8f50b7fc6c33b49c59a907849f66",
+      "sha256": "a9046b4595784cfac77bf0b41e17e82c66430acc7007af22b70bccea19247adf",
+      "bytes": 142005,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author/receipts/uat168-organization-history-first-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-first-command.json",
+      "original_sha256": "131b6e2f2c99e2aa5576d0ae66df3dd333af239c71b0c4ea64e8871d515644fb",
+      "sha256": "131b6e2f2c99e2aa5576d0ae66df3dd333af239c71b0c4ea64e8871d515644fb",
+      "bytes": 445,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat168-organization-history-first.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat168-organization-history-first.redacted.log",
+      "original_sha256": "b5864139747d35c9329046d5f5e45d408e449d60c5256dc3d03690163b5a8d95",
+      "sha256": "3f3da4b383f9a9cdf230fbb5519ff49ad03cbb363be5487bb73db1ca3dd58258",
+      "bytes": 137233,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "author/receipts/uat228-historical-green-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-historical-green-command.json",
+      "original_sha256": "75d882c60894d28b986f15b6a90f426d4204d7e48ba0be9e45be8519a38b29c2",
+      "sha256": "75d882c60894d28b986f15b6a90f426d4204d7e48ba0be9e45be8519a38b29c2",
+      "bytes": 445,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-historical-green.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-historical-green.redacted.log",
+      "original_sha256": "efb381baf8128da79d7ac2b3fecb7da02031bd5c78dac3556fb443d77642e886",
+      "sha256": "efb381baf8128da79d7ac2b3fecb7da02031bd5c78dac3556fb443d77642e886",
+      "bytes": 45339,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-final-green-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-final-green-command.json",
+      "original_sha256": "506f0983090ffdc8387996f5c390217f68395e775e7572db249f0f3c2e9e4e52",
+      "sha256": "506f0983090ffdc8387996f5c390217f68395e775e7572db249f0f3c2e9e4e52",
+      "bytes": 445,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-final-green.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-final-green.redacted.log",
+      "original_sha256": "ed272842112b7e7313ad51be080215ce9fdd8c43ebceb6935c964f3b4a9d6780",
+      "sha256": "ed272842112b7e7313ad51be080215ce9fdd8c43ebceb6935c964f3b4a9d6780",
+      "bytes": 41726,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-historical-final-green-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-historical-final-green-command.json",
+      "original_sha256": "e8f0a436e8d8ffa45843031895350e784c9faa4336d1c0c3c42b953273d404d8",
+      "sha256": "e8f0a436e8d8ffa45843031895350e784c9faa4336d1c0c3c42b953273d404d8",
+      "bytes": 445,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-historical-final-green.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-historical-final-green.redacted.log",
+      "original_sha256": "e5ec9ba66181215c1a5a54ab1d322486bfd18111a08c5ff3ecdb5e112dcc44ee",
+      "sha256": "e5ec9ba66181215c1a5a54ab1d322486bfd18111a08c5ff3ecdb5e112dcc44ee",
+      "bytes": 9957,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-transaction-format-probe-command.json",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-transaction-format-probe-command.json",
+      "original_sha256": "75528a54c7b7082546d9133b491039939f7270f1c6901bd714ffb1f32d019f5d",
+      "sha256": "75528a54c7b7082546d9133b491039939f7270f1c6901bd714ffb1f32d019f5d",
+      "bytes": 345,
+      "normalization": "none"
+    },
+    {
+      "file": "author/receipts/uat228-transaction-format-probe.redacted.log",
+      "source": ".tmp/fresh-uat-recovery-20260916/uat228-transaction-format-probe.redacted.log",
+      "original_sha256": "ef9dc30665795b73849508c65681fcad6b8b324bc28aa63522859c6fe6236362",
+      "sha256": "331b85d9799dd4107d4e84b9affdf6c4a8f21acb299cef58f55ccf49d4eba605",
+      "bytes": 37815,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/reviewer-manifest.json",
+      "source": ".tmp/uat228-independent-20260917/reviewer-manifest.json",
+      "original_sha256": "3c554ab78bd263fc8c5cfa5fadb84019fcb477cd2f87c0772a972cb032016c48",
+      "sha256": "3c554ab78bd263fc8c5cfa5fadb84019fcb477cd2f87c0772a972cb032016c48",
+      "bytes": 3149,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/REVIEW228.md",
+      "source": ".tmp/uat228-independent-20260917/REVIEW228.md",
+      "original_sha256": "a0805ecfbba3a544cd1c5408fbca4e78108ba3b428087fce400922bf147d4f95",
+      "sha256": "a0805ecfbba3a544cd1c5408fbca4e78108ba3b428087fce400922bf147d4f95",
+      "bytes": 4475,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/bandit.json",
+      "source": ".tmp/uat228-independent-20260917/bandit.json",
+      "original_sha256": "6d9f0eef5451c057bfb46d70ad69557a75f45374c763d4a5f4d003a3d52ff586",
+      "sha256": "0c7a76783e9c351f1a8e741c31f2ad8f0d95729f6150a8ddee6aabc9cbcd1dd3",
+      "bytes": 1178,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/bandit.stderr",
+      "source": ".tmp/uat228-independent-20260917/bandit.stderr",
+      "original_sha256": "d81cf6c1fc03af785c4903049978ba7d33d2902dd560846921db5fd1f09ac3eb",
+      "sha256": "d81cf6c1fc03af785c4903049978ba7d33d2902dd560846921db5fd1f09ac3eb",
+      "bytes": 386,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/bandit.stdout",
+      "source": ".tmp/uat228-independent-20260917/bandit.stdout",
+      "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/dependency-timing.json",
+      "source": ".tmp/uat228-independent-20260917/dependency-timing.json",
+      "original_sha256": "1d8a993f8f685af9679a40455f56de84d119b4cf19285b5fc7e26a26693ad35c",
+      "sha256": "1d8a993f8f685af9679a40455f56de84d119b4cf19285b5fc7e26a26693ad35c",
+      "bytes": 392,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/independent-assertion-parity.json",
+      "source": ".tmp/uat228-independent-20260917/independent-assertion-parity.json",
+      "original_sha256": "7f816b6f4ab9f8e9de48662a1f0a2725e7e2b046ff5d721850862fad11d899ff",
+      "sha256": "7f816b6f4ab9f8e9de48662a1f0a2725e7e2b046ff5d721850862fad11d899ff",
+      "bytes": 659,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/independent-command.json",
+      "source": ".tmp/uat228-independent-20260917/independent-command.json",
+      "original_sha256": "ef7995ad449f7a15373328d087eeb1703c76b17f0b23243cd3a31e78353c2400",
+      "sha256": "ef7995ad449f7a15373328d087eeb1703c76b17f0b23243cd3a31e78353c2400",
+      "bytes": 445,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/independent.redacted.log",
+      "source": ".tmp/uat228-independent-20260917/independent.redacted.log",
+      "original_sha256": "9f192d70d2075177ffc04475ca89cb4f2915e01a654ec3babda478efa2d0a7b6",
+      "sha256": "9f192d70d2075177ffc04475ca89cb4f2915e01a654ec3babda478efa2d0a7b6",
+      "bytes": 9958,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/ruff.json",
+      "source": ".tmp/uat228-independent-20260917/ruff.json",
+      "original_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "bytes": 3,
+      "normalization": "trailing text whitespace and final newline"
+    },
+    {
+      "file": "independent/source-after.json",
+      "source": ".tmp/uat228-independent-20260917/source-after.json",
+      "original_sha256": "3c799399ea2149ef23fc79143a8b3af2639d1064f1cc6d68b2a117b7cbfeee07",
+      "sha256": "3c799399ea2149ef23fc79143a8b3af2639d1064f1cc6d68b2a117b7cbfeee07",
+      "bytes": 1269,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/source-before.json",
+      "source": ".tmp/uat228-independent-20260917/source-before.json",
+      "original_sha256": "55d89724416d002a62de43e55440df160ea937658b2e07aa1d4b6e415567d4be",
+      "sha256": "55d89724416d002a62de43e55440df160ea937658b2e07aa1d4b6e415567d4be",
+      "bytes": 1357,
+      "normalization": "none"
+    },
+    {
+      "file": "independent/static-summary.json",
+      "source": ".tmp/uat228-independent-20260917/static-summary.json",
+      "original_sha256": "383dc17c5aecefc4605c57b7746abb46eda390eef1ed69907b88d898e17b56df",
+      "sha256": "383dc17c5aecefc4605c57b7746abb46eda390eef1ed69907b88d898e17b56df",
+      "bytes": 796,
+      "normalization": "none"
+    }
+  ]
+}

@@ -125,25 +125,9 @@ def _postgres_db(backend: _MigrationBackend) -> CharactersRAGDB:
 def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
     tmp_path: Path,
     client_id: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "notes-organization-v56.sqlite"
-
-    def initialize_historical(db: CharactersRAGDB) -> None:
-        with db.transaction() as conn:
-            db._apply_schema_v4(conn)
-            for prior in range(4, 56):
-                db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=56, initial_version=4)
-            assert db._get_db_version(conn) == 56
-            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            assert "note_attachments" not in tables
-            columns = {row["name"] for row in conn.execute("PRAGMA table_info(keywords)")}
-            assert "sync_id" in columns and "merged_into_sync_id" not in columns
-
-    with monkeypatch.context() as patch:
-        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 56)
-        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
-        initial = CharactersRAGDB(str(db_path), client_id=client_id)
+    initial = CharactersRAGDB(str(db_path), client_id=client_id)
     try:
         with initial.transaction() as conn:
             conn.execute(
@@ -154,10 +138,11 @@ def test_sqlite_v56_to_v57_is_a_non_destructive_version_step(
                 "SELECT id FROM keywords WHERE sync_id = ?",
                 ("11111111-1111-4111-8111-111111111111",),
             ).fetchone()["id"]
-            before = dict(conn.execute("SELECT * FROM keywords WHERE id = ?", (keyword_id,)).fetchone())
-            initial._migrate_from_v56_to_v57(conn)
-            assert initial._get_db_version(conn) == 57
-            assert dict(conn.execute("SELECT * FROM keywords WHERE id = ?", (keyword_id,)).fetchone()) == before
+            conn.execute("DROP TABLE note_attachments")
+            conn.execute(
+                "UPDATE db_schema_version SET version = 56 WHERE schema_name = ?",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            )
     finally:
         initial.close_connection()
 
