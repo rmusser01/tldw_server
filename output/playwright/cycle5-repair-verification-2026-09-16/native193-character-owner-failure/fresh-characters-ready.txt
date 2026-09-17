@@ -1,0 +1,173 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=cards)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Chat | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+- 11: [Notes | tldw](http://127.0.0.1:18583/notes)
+- 12: (current) [Characters | tldw](http://127.0.0.1:18583/characters)
+### Page
+- Page URL: http://127.0.0.1:18583/characters
+- Page Title: Characters | tldw
+### Snapshot
+```yaml
+- generic [active] [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+          - generic [ref=e113]:
+            - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+              - generic [ref=e118]: Search
+              - generic [ref=e119]: ⌘K
+            - button "Open settings" [ref=e120] [cursor=pointer]
+            - generic [ref=e132]:
+              - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+              - status [ref=e137]: Notifications are active
+            - button "Switch to light theme" [ref=e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+              - generic [ref=e146]: "?"
+        - generic [ref=e148]:
+          - generic [ref=e149]:
+            - heading "Characters" [level=1] [ref=e150]
+            - paragraph [ref=e151]: Create reusable characters you can pick from the chat header and reuse across conversations.
+          - generic [ref=e152]:
+            - link "Skip to characters content" [ref=e153] [cursor=pointer]:
+              - /url: "#characters-main-content"
+            - main [ref=e154]:
+              - button [aria-hidden] [ref=e159] [cursor=pointer]: Upload character
+              - generic [ref=e160]: "Keyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal"
+              - generic [ref=e162]:
+                - button "New character" [ref=e163] [cursor=pointer]
+                - button "Import character" [ref=e165] [cursor=pointer]
+                - generic [ref=e170]:
+                  - textbox "Search characters" [ref=e171]
+                  - generic [ref=e172]: /
+                - radiogroup "View mode" [ref=e174]:
+                  - generic [ref=e175]:
+                    - generic [ref=e176] [cursor=pointer]:
+                      - radio [checked]
+                      - generic "Table view" [ref=e177]
+                    - generic [ref=e180] [cursor=pointer]:
+                      - radio
+                      - generic "Gallery view" [ref=e181]
+                - radiogroup "Character list view" [ref=e188]:
+                  - generic [ref=e189]:
+                    - generic [ref=e190] [cursor=pointer]:
+                      - radio "Active" [checked]
+                      - generic "Active characters" [ref=e191]: Active
+                    - generic [ref=e192] [cursor=pointer]:
+                      - radio "Trash"
+                      - generic "Recently deleted characters" [ref=e193]: Trash
+                - button "Filters" [ref=e194] [cursor=pointer]
+                - button "Display options" [ref=e199] [cursor=pointer]:
+                  - generic [ref=e200]: Display
+              - status [ref=e203]: 2 characters found
+              - generic [ref=e208]:
+                - table [ref=e212]:
+                  - rowgroup [ref=e220]:
+                    - row [ref=e221]:
+                      - columnheader "Select all on page" [ref=e222]:
+                        - checkbox "Select all on page" [ref=e225] [cursor=pointer]
+                      - columnheader "Name" [ref=e227] [cursor=pointer]
+                      - columnheader "Tags" [ref=e238]
+                      - columnheader "Creator" [ref=e239] [cursor=pointer]
+                      - columnheader "Activity" [ref=e250] [cursor=pointer]
+                      - columnheader "Actions" [ref=e261]
+                  - rowgroup [ref=e262]:
+                    - row [ref=e263]:
+                      - cell "Select Helpful AI Assistant" [ref=e264]:
+                        - checkbox "Select Helpful AI Assistant" [ref=e267] [cursor=pointer]
+                      - cell [ref=e269]:
+                        - generic [ref=e276]:
+                          - button "Edit name inline for Helpful AI Assistant" [ref=e279]: Helpful AI Assistant
+                          - button "Edit description inline for Helpful AI Assistant" [ref=e283]: A default, friendly assistant created automatically by the system.
+                      - cell [ref=e286]:
+                        - generic [ref=e287]:
+                          - button "default" [ref=e288] [cursor=pointer]
+                          - button "neutral" [ref=e290] [cursor=pointer]
+                          - button "Show and filter +1 hidden tags" [ref=e292]: "+1"
+                      - cell "System" [ref=e293]
+                      - cell "5h ago Updated 5h ago" [ref=e295]:
+                        - generic [ref=e296]:
+                          - generic [ref=e297]: 5h ago
+                          - generic [ref=e298]: Updated 5h ago
+                      - cell [ref=e299]:
+                        - generic [ref=e300]:
+                          - button "Chat as Helpful AI Assistant" [ref=e301] [cursor=pointer]
+                          - button "Edit character Helpful AI Assistant" [ref=e304] [cursor=pointer]
+                          - button "Delete character Helpful AI Assistant" [ref=e307] [cursor=pointer]
+                          - button "Add Helpful AI Assistant to favorites" [ref=e311] [cursor=pointer]
+                          - button "More actions for Helpful AI Assistant" [ref=e314] [cursor=pointer]
+                    - row [ref=e319]:
+                      - cell "Select Default Assistant" [ref=e320]:
+                        - checkbox "Select Default Assistant" [ref=e323] [cursor=pointer]
+                      - cell [ref=e325]:
+                        - generic [ref=e332]:
+                          - button "Edit name inline for Default Assistant" [ref=e335]: Default Assistant
+                          - button "Edit description inline for Default Assistant" [ref=e339]: A general-purpose assistant.
+                      - cell [ref=e342]
+                      - cell "System" [ref=e343]
+                      - cell "5h ago Updated 5h ago" [ref=e345]:
+                        - generic [ref=e346]:
+                          - generic [ref=e347]: 5h ago
+                          - generic [ref=e348]: Updated 5h ago
+                      - cell [ref=e349]:
+                        - generic [ref=e350]:
+                          - button "Chat as Default Assistant" [ref=e351] [cursor=pointer]
+                          - button "Edit character Default Assistant" [ref=e354] [cursor=pointer]
+                          - button "Delete character Default Assistant" [ref=e357] [cursor=pointer]
+                          - button "Add Default Assistant to favorites" [ref=e361] [cursor=pointer]
+                          - button "More actions for Default Assistant" [ref=e364] [cursor=pointer]
+                - list [ref=e369]:
+                  - listitem "Previous Page" [ref=e370]:
+                    - button [disabled] [ref=e371]:
+                      - img "left" [ref=e372]
+                  - listitem "1" [ref=e375] [cursor=pointer]
+                  - listitem "Next Page" [ref=e377]:
+                    - button [disabled] [ref=e378]:
+                      - img "right" [ref=e379]
+                  - listitem [ref=e382]:
+                    - generic [ref=e383]:
+                      - generic [ref=e384]:
+                        - generic "10 / page" [ref=e385]
+                        - combobox "Page Size" [ref=e386]
+                      - img "down" [ref=e388]
+  - alert [ref=e10]
+```

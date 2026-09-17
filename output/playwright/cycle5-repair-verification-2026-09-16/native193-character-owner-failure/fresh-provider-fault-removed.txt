@@ -1,0 +1,7 @@
+### Result
+{"at":"2026-09-17T03:16:08.362Z","removed":true,"faults":[]}
+### Ran Playwright code
+```js
+await (async page=>{await page.unroute('**/api/v1/chats/*/complete-v2*');return{at:new Date().toISOString(),removed:true,faults:page.__uat031Faults??[]};}
+)(page);
+```

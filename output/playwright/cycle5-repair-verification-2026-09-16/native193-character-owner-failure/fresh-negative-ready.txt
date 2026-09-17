@@ -1,0 +1,257 @@
+### Open tabs
+- 0: [](about:blank)
+- 1: [For this fictional Cedar fixture, the coordinator is Leo Park and the return box | tldw](http://127.0.0.1:18580/chat)
+- 2: [Llama.cpp · Admin · tldw](http://127.0.0.1:18580/admin/llamacpp)
+- 3: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
+- 4: [Flashcards | tldw](http://127.0.0.1:18583/flashcards?tab=cards)
+- 5: [](http://127.0.0.1:18582/settings/model)
+- 6: [](http://127.0.0.1:18580/notifications)
+- 7: [tldw_server/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md at main · rmusser01/tldw_server · GitHub](https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md)
+- 8: [Media | tldw](http://127.0.0.1:18580/media)
+- 9: [](http://127.0.0.1:18583/settings/model)
+- 10: [Chat | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+- 11: [Notes | tldw](http://127.0.0.1:18583/notes)
+- 12: (current) [For this fictional acceptance fixture, reply with exactly: CITRINE RETRY VERIFIED. | tldw](http://127.0.0.1:18583/chat?mode=character&characterId=2)
+### Page
+- Page URL: http://127.0.0.1:18583/chat?mode=character&characterId=2
+- Page Title: For this fictional acceptance fixture, reply with exactly: CITRINE RETRY VERIFIED. | tldw
+- Console: 2 errors, 2 warnings
+### Snapshot
+```yaml
+- generic [ref=e11]:
+  - generic [ref=e14]:
+    - link "Skip to main content" [ref=e15] [cursor=pointer]:
+      - /url: "#main-content"
+    - generic [ref=e16]:
+      - button "Expand sidebar" [ref=e17] [cursor=pointer]
+      - button "New Chat" [ref=e21] [cursor=pointer]
+      - generic [ref=e24]:
+        - button "Quick Ingest" [ref=e25] [cursor=pointer]
+        - button "Chat" [ref=e29] [cursor=pointer]
+        - button "Prompts" [ref=e32] [cursor=pointer]
+        - button "Characters" [ref=e36] [cursor=pointer]
+        - button "Chat Dictionaries" [ref=e41] [cursor=pointer]
+        - button "World Books" [ref=e45] [cursor=pointer]
+        - button "Notes" [ref=e48] [cursor=pointer]
+        - button "Knowledge QA" [ref=e52] [cursor=pointer]
+        - button "Media" [ref=e60] [cursor=pointer]
+        - button "Document Workspace" [ref=e63] [cursor=pointer]
+        - button "Research Workspace" [ref=e69] [cursor=pointer]
+        - button "Kanban" [ref=e75] [cursor=pointer]
+        - button "Watchlists" [ref=e77] [cursor=pointer]
+      - generic [ref=e82]:
+        - button "Open Notes Dock" [ref=e83] [cursor=pointer]
+        - button "Open Quick Chat Helper (sidebar)" [ref=e88] [cursor=pointer]
+        - button "Settings" [ref=e91] [cursor=pointer]
+    - main [ref=e95]:
+      - generic [ref=e96]:
+        - generic [ref=e99]:
+          - generic [ref=e100]:
+            - button "Expand sidebar" [ref=e101] [cursor=pointer]
+            - generic [ref=e103]:
+              - img "tldw Assistant" [ref=e104]
+              - generic [ref=e105]: tldw Assistant
+              - button "Companion Home" [ref=e106] [cursor=pointer]
+              - button "Show shortcuts" [ref=e110] [cursor=pointer]
+            - 'button "For this fictional acceptance fixture, reply with exactly: CITRINE RETRY VERIFIED." [ref=e721] [cursor=pointer]'
+            - generic [ref=e391]:
+              - generic "Saved chat. History is persisted." [ref=e392]: Saved
+              - generic "Character mode is active." [ref=e393]: "Character: Helpful AI Assistant"
+          - generic [ref=e113]:
+            - button "Search - Open command palette" [ref=e114] [cursor=pointer]:
+              - generic [ref=e118]: Search
+              - generic [ref=e119]: ⌘K
+            - button "New saved chat" [ref=e399] [cursor=pointer]
+            - button "Temporary chat (not saved)" [ref=e403] [cursor=pointer]: Temp
+            - button "Character chat" [ref=e404] [cursor=pointer]: Character
+            - button "Share conversation" [disabled] [ref=e405]
+            - button "Open settings" [ref=e120] [cursor=pointer]
+            - generic [ref=e132]:
+              - button "Notifications, 0 unread" [ref=e133] [cursor=pointer]
+              - status [ref=e137]: Notifications are active
+            - button "Switch to light theme" [ref=e138] [cursor=pointer]
+            - button "Show keyboard shortcuts" [ref=e145] [cursor=pointer]:
+              - generic [ref=e146]: "?"
+        - generic [ref=e147]:
+          - heading "Chat" [level=1] [ref=e412]
+          - generic [ref=e415]:
+            - paragraph [ref=e416]: Cockpit rails hidden. Chat and composer remain active.
+            - generic [ref=e417]:
+              - main [ref=e418]:
+                - generic [ref=e419]:
+                  - generic [ref=e421]:
+                    - generic [ref=e422]:
+                      - generic [ref=e423]:
+                        - text: Character Chat
+                        - generic [ref=e424]: Helpful AI Assistant
+                      - generic [ref=e425]: Conversation timeline
+                    - generic [ref=e426]:
+                      - button "Switch to light theme" [ref=e427] [cursor=pointer]
+                      - button "Enter focus chat" [ref=e434] [cursor=pointer]:
+                        - generic [ref=e440]: Focus
+                      - button "Shortcuts" [ref=e441] [cursor=pointer]
+                      - button "Artifacts panel closed" [disabled] [ref=e445]
+                  - log "Chat messages" [ref=e447]:
+                    - generic [ref=e449]:
+                      - article "Assistant message 1 of 3" [ref=e722]:
+                        - generic [ref=e490]:
+                          - generic [ref=e492]:
+                            - generic [ref=e493]: Helpful AI Assistant
+                            - generic [ref=e494]: • 8:13 PM
+                            - generic [ref=e495]: greeting
+                          - paragraph [ref=e828]: Hello! I'm your Helpful AI Assistant. How can I support you today?
+                          - generic [ref=e502]:
+                            - button "Copy to clipboard" [ref=e503] [cursor=pointer]:
+                              - generic [ref=e504]: Copy
+                            - button "Edit" [ref=e509] [cursor=pointer]
+                            - button "More actions" [ref=e520] [cursor=pointer]
+                      - article "User message 2 of 3" [ref=e724]:
+                        - generic [ref=e727]:
+                          - generic [ref=e729]:
+                            - generic [ref=e730]: You
+                            - generic [ref=e731]: • 8:15 PM
+                          - paragraph [ref=e733]: "For this fictional acceptance fixture, reply with exactly: CITRINE RETRY VERIFIED."
+                          - generic [ref=e737]:
+                            - button "Copy to clipboard" [ref=e738] [cursor=pointer]:
+                              - generic [ref=e739]: Copy
+                            - button "Edit" [ref=e744] [cursor=pointer]
+                            - button "More actions" [ref=e749] [cursor=pointer]
+                      - article "Assistant message 3 of 3" [ref=e757]:
+                        - generic [ref=e763]:
+                          - generic [ref=e765]:
+                            - generic [ref=e766]: Helpful AI Assistant
+                            - generic [ref=e767]: • 8:15 PM
+                          - alert [ref=e769]:
+                            - paragraph [ref=e770]: Something went wrong while talking to your tldw server.
+                            - paragraph [ref=e771]: Try again in a moment, or open Health & diagnostics to inspect server health.
+                            - button "Show technical details" [ref=e772] [cursor=pointer]
+                            - generic [ref=e773]:
+                              - generic [ref=e774]: "Recommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial"
+                              - button "Retry same model" [ref=e775] [cursor=pointer]
+                              - button "Switch model" [ref=e776] [cursor=pointer]
+                              - button "Try provider fallback" [ref=e777] [cursor=pointer]
+                              - button "Continue from partial" [ref=e778] [cursor=pointer]
+                          - generic [ref=e782]:
+                            - button "Copy to clipboard" [ref=e783] [cursor=pointer]:
+                              - generic [ref=e784]: Copy
+                            - button "Edit" [ref=e789] [cursor=pointer]
+                            - button "Regenerate" [ref=e794] [cursor=pointer]:
+                              - generic [ref=e795]: Redo
+                            - button "Generation Info" [ref=e800] [cursor=pointer]:
+                              - generic [ref=e801]: Info
+                            - button "More actions" [ref=e805] [cursor=pointer]
+                  - generic [ref=e525]:
+                    - generic [ref=e526]: Composer
+                    - generic [ref=e537]:
+                      - button [aria-hidden] [ref=e538]
+                      - button [aria-hidden] [ref=e539]
+                      - generic [ref=e540]:
+                        - alert [ref=e810]:
+                          - generic [ref=e811]:
+                            - generic [ref=e812]:
+                              - generic [ref=e813]: Error
+                              - generic [ref=e814]:
+                                - heading "Something went wrong while talking to your tldw server." [level=2] [ref=e815]
+                                - generic [ref=e816]: Try again in a moment, or open Health & diagnostics to inspect server health.
+                            - generic [ref=e817]:
+                              - button "Retry chat" [ref=e818] [cursor=pointer]
+                              - button "Edit provider" [ref=e819] [cursor=pointer]
+                              - button "Switch provider" [ref=e820] [cursor=pointer]
+                              - button "View in Health & Diagnostics" [ref=e821] [cursor=pointer]
+                              - button "Close" [ref=e822] [cursor=pointer]
+                        - generic [ref=e542]:
+                          - button "Hide composer options" [expanded] [ref=e543] [cursor=pointer]
+                          - textbox "Type a message... (/ commands, @ mentions)" [active] [ref=e548]
+                          - generic [ref=e549]:
+                            - button "Improve prompt" [ref=e552] [cursor=pointer]
+                            - generic [ref=e557]:
+                              - button "Send message" [ref=e558] [cursor=pointer]:
+                                - generic [ref=e559]: Send
+                              - button "Open message delivery options" [ref=e564] [cursor=pointer]
+                        - generic [ref=e569]:
+                          - generic [ref=e570]:
+                            - generic [ref=e571]:
+                              - group [ref=e572]:
+                                - heading "Context setup" [level=3] [ref=e573]
+                                - generic [ref=e574]:
+                                  - button "Modes" [ref=e575] [cursor=pointer]
+                                  - button "OpenUI" [ref=e581] [cursor=pointer]
+                                  - button "Saved" [ref=e588] [cursor=pointer]
+                                - generic [ref=e589]:
+                                  - button "Search & Context" [ref=e590] [cursor=pointer]
+                                  - button "Web search" [ref=e595] [cursor=pointer]:
+                                    - generic [ref=e599]: Web
+                                - generic [ref=e600]:
+                                  - button "Select a Prompt" [ref=e601] [cursor=pointer]:
+                                    - generic [ref=e604]: Prompt
+                                  - button "Helpful AI Assistant" [ref=e605] [cursor=pointer]
+                                  - button "Role-play setup" [ref=e611] [cursor=pointer]
+                                  - button "Buddy & Persona" [ref=e618] [cursor=pointer]
+                              - group [ref=e624]:
+                                - heading "Model, tools, and run" [level=3] [ref=e625]
+                                - generic [ref=e626]:
+                                  - 'button "Health & diagnostics. Server: Online. Open detailed diagnostics to troubleshoot or inspect health checks." [ref=e627] [cursor=pointer]'
+                                  - 'button "MCP tools: None, Not checked yet" [ref=e631] [cursor=pointer]':
+                                    - generic [ref=e632]:
+                                      - generic [ref=e633]: MCP
+                                      - generic [ref=e634]: None
+                                  - button "LLaMa.cpp / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=e637] [cursor=pointer]:
+                                    - generic "Provider status" [ref=e641]: Healthy
+                                - generic [ref=e642]:
+                                  - generic [ref=e643]:
+                                    - button "Start dictation" [ref=e644] [cursor=pointer]
+                                    - button "Configure context window size" [ref=e648] [cursor=pointer]:
+                                      - generic [ref=e649]: 95 + ~0 = 95 tokens
+                                    - button "Current Chat Model Settings" [ref=e650] [cursor=pointer]:
+                                      - generic [ref=e654]:
+                                        - generic [ref=e655]: Chat Settings
+                                        - generic [ref=e656]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf • No prompt
+                                  - generic [ref=e657]:
+                                    - generic [ref=e658]:
+                                      - button "Attach image" [ref=e660] [cursor=pointer]:
+                                        - generic [ref=e661]: Attach
+                                      - button "More attachments" [ref=e665] [cursor=pointer]
+                                    - button "More tools" [ref=e668] [cursor=pointer]:
+                                      - generic [ref=e669]: +Tools
+                            - button "Advanced controls" [ref=e671] [cursor=pointer]
+                          - generic "Active context" [ref=e675]:
+                            - button "Model ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf" [ref=e676] [cursor=pointer]:
+                              - generic [ref=e677]: Model
+                              - generic [ref=e678]: ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf
+                            - button "Character Helpful AI Assistant" [ref=e679] [cursor=pointer]:
+                              - generic [ref=e680]: Character
+                              - generic [ref=e681]: Helpful AI Assistant
+                            - 'generic "Character context: Included" [ref=e682]':
+                              - generic [ref=e683]: Character context
+                              - generic [ref=e684]: Included
+                            - button "Chat 3 messages" [ref=e826] [cursor=pointer]:
+                              - generic [ref=e686]: Chat
+                              - generic [ref=e687]: 3 messages
+                        - generic [ref=e827]: Type a message and press Enter to send
+                        - status [ref=e689]:
+                          - generic [ref=e690]: Add expression images for Helpful AI Assistant.
+                          - generic [ref=e691]:
+                            - link "Edit expressions" [ref=e692] [cursor=pointer]:
+                              - /url: /characters?from=chat-emote-nudge&focus=expressions&characterId=2
+                            - button "Dismiss expression image setup" [ref=e693] [cursor=pointer]: Dismiss
+                        - generic [ref=e694]:
+                          - generic [ref=e695]:
+                            - generic [ref=e696]: Startup templates
+                            - textbox "Template name" [ref=e697]
+                            - button "Save current" [ref=e698] [cursor=pointer]
+                            - generic [ref=e700] [cursor=pointer]:
+                              - generic [ref=e701]:
+                                - generic: Launch saved template
+                                - combobox [ref=e702]
+                              - img "down" [ref=e704]
+                          - paragraph [ref=e707]: Save your current model, prompt, character, and pinned-source setup to reuse it before first send.
+              - generic [ref=e708]:
+                - button "Restore context sidechannel" [ref=e709] [cursor=pointer]:
+                  - generic [ref=e713]: Context rail
+                - tooltip "Restore context sidechannel"
+              - generic [ref=e714]:
+                - button "Restore runtime sidechannel" [ref=e715] [cursor=pointer]:
+                  - generic [ref=e716]: Runtime rail
+                - tooltip "Restore runtime sidechannel"
+  - alert [ref=e10]: Chat | tldw
+```
