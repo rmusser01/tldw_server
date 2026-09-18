@@ -1,0 +1,729 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-18T02:10:30Z",
+  "metrics": {
+    "./tldw_Server_API/app/core/Character_Chat/world_book_manager.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2172,
+      "nosec": 0,
+      "skipped_tests": 6
+    },
+    "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py": {
+      "CONFIDENCE.HIGH": 34,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 34,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 111,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 34,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 34,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2283,
+      "nosec": 0,
+      "skipped_tests": 6
+    }
+  },
+  "results": [
+    {
+      "code": "54     world_book_id = service.create_world_book(\"Lifecycle book\", description=\"before\")\n55     assert service.get_world_book(world_book_id)[\"description\"] == \"before\"\n56     assert [book[\"id\"] for book in service.list_world_books()] == [world_book_id]\n",
+      "col_offset": 4,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 55,
+      "line_range": [
+        55
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "55     assert service.get_world_book(world_book_id)[\"description\"] == \"before\"\n56     assert [book[\"id\"] for book in service.list_world_books()] == [world_book_id]\n57 \n",
+      "col_offset": 4,
+      "end_col_offset": 81,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 56,
+      "line_range": [
+        56
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "57 \n58     assert service.update_world_book(world_book_id, description=\"after\", expected_version=1)\n59     assert service.get_world_book(world_book_id)[\"description\"] == \"after\"\n",
+      "col_offset": 4,
+      "end_col_offset": 92,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 58,
+      "line_range": [
+        58
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "58     assert service.update_world_book(world_book_id, description=\"after\", expected_version=1)\n59     assert service.get_world_book(world_book_id)[\"description\"] == \"after\"\n60     with pytest.raises(ConflictError, match=\"Version mismatch\"):\n",
+      "col_offset": 4,
+      "end_col_offset": 74,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 59,
+      "line_range": [
+        59
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "63     entry_id = service.add_entry(world_book_id, [\"first\"], \"entry before\", priority=2)\n64     assert service.get_entry(entry_id)[\"content\"] == \"entry before\"\n65     assert [entry[\"id\"] for entry in service.get_entries(world_book_id)] == [entry_id]\n",
+      "col_offset": 4,
+      "end_col_offset": 67,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 64,
+      "line_range": [
+        64
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "64     assert service.get_entry(entry_id)[\"content\"] == \"entry before\"\n65     assert [entry[\"id\"] for entry in service.get_entries(world_book_id)] == [entry_id]\n66 \n",
+      "col_offset": 4,
+      "end_col_offset": 86,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 65,
+      "line_range": [
+        65
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "66 \n67     assert service.update_entry(entry_id, keywords=[\"updated\"], content=\"entry after\", priority=8)\n68     assert service.get_entry(entry_id)[\"content\"] == \"entry after\"\n",
+      "col_offset": 4,
+      "end_col_offset": 98,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 67,
+      "line_range": [
+        67
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "67     assert service.update_entry(entry_id, keywords=[\"updated\"], content=\"entry after\", priority=8)\n68     assert service.get_entry(entry_id)[\"content\"] == \"entry after\"\n69     assert service.get_entries(world_book_id)[0][\"keywords\"] == [\"updated\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 68,
+      "line_range": [
+        68
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "68     assert service.get_entry(entry_id)[\"content\"] == \"entry after\"\n69     assert service.get_entries(world_book_id)[0][\"keywords\"] == [\"updated\"]\n70 \n",
+      "col_offset": 4,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 69,
+      "line_range": [
+        69
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "70 \n71     assert service.attach_to_character(world_book_id, character_id, enabled=True, priority=1)[\"success\"]\n72     assert service.attach_to_character(world_book_id, character_id, enabled=False, priority=9)[\"success\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 104,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 71,
+      "line_range": [
+        71
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "71     assert service.attach_to_character(world_book_id, character_id, enabled=True, priority=1)[\"success\"]\n72     assert service.attach_to_character(world_book_id, character_id, enabled=False, priority=9)[\"success\"]\n73     attached = service.get_character_world_books(character_id, enabled_only=False)\n",
+      "col_offset": 4,
+      "end_col_offset": 105,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 72,
+      "line_range": [
+        72
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "73     attached = service.get_character_world_books(character_id, enabled_only=False)\n74     assert [(row[\"id\"], bool(row[\"attachment_enabled\"]), row[\"attachment_priority\"]) for row in attached] == [\n75         (world_book_id, False, 9)\n76     ]\n77     assert service.detach_from_character(world_book_id, character_id)[\"success\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 74,
+      "line_range": [
+        74,
+        75,
+        76
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "76     ]\n77     assert service.detach_from_character(world_book_id, character_id)[\"success\"]\n78     assert service.get_character_world_books(character_id, enabled_only=False) == []\n",
+      "col_offset": 4,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 77,
+      "line_range": [
+        77
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "77     assert service.detach_from_character(world_book_id, character_id)[\"success\"]\n78     assert service.get_character_world_books(character_id, enabled_only=False) == []\n79 \n",
+      "col_offset": 4,
+      "end_col_offset": 84,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 78,
+      "line_range": [
+        78
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "79 \n80     assert service.delete_entry(entry_id)\n81     assert service.get_entry(entry_id) is None\n",
+      "col_offset": 4,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 80,
+      "line_range": [
+        80
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "80     assert service.delete_entry(entry_id)\n81     assert service.get_entry(entry_id) is None\n82     assert service.get_entries(world_book_id) == []\n",
+      "col_offset": 4,
+      "end_col_offset": 46,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 81,
+      "line_range": [
+        81
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "81     assert service.get_entry(entry_id) is None\n82     assert service.get_entries(world_book_id) == []\n83 \n",
+      "col_offset": 4,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 82,
+      "line_range": [
+        82
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "83 \n84     assert service.delete_world_book(world_book_id)\n85     assert service.get_world_book(world_book_id) is None\n",
+      "col_offset": 4,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 84,
+      "line_range": [
+        84
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "84     assert service.delete_world_book(world_book_id)\n85     assert service.get_world_book(world_book_id) is None\n86     assert service.list_world_books() == []\n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 85,
+      "line_range": [
+        85
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "85     assert service.get_world_book(world_book_id) is None\n86     assert service.list_world_books() == []\n87 \n",
+      "col_offset": 4,
+      "end_col_offset": 43,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 86,
+      "line_range": [
+        86
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "89     purge_entry_id = service.add_entry(purge_id, [\"purge\"], \"remove\")\n90     assert service.delete_world_book(purge_id, hard_delete=True)\n91     assert service.get_world_book(purge_id) is None\n",
+      "col_offset": 4,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 90,
+      "line_range": [
+        90
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "90     assert service.delete_world_book(purge_id, hard_delete=True)\n91     assert service.get_world_book(purge_id) is None\n92     assert service.get_entry(purge_entry_id) is None\n",
+      "col_offset": 4,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 91,
+      "line_range": [
+        91
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "91     assert service.get_world_book(purge_id) is None\n92     assert service.get_entry(purge_entry_id) is None\n93 \n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 92,
+      "line_range": [
+        92
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "102             entry_id = service.add_entry(world_book_id, [\"temporary\"], \"temporary content\")\n103             assert service.get_entry(entry_id)[\"content\"] == \"temporary content\"\n104             raise RuntimeError(\"rollback lifecycle entry\")\n",
+      "col_offset": 12,
+      "end_col_offset": 80,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 103,
+      "line_range": [
+        103
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "105 \n106     assert service.get_entries(world_book_id) == []\n107 \n",
+      "col_offset": 4,
+      "end_col_offset": 51,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 106,
+      "line_range": [
+        106
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "114     character_id = db.add_character_card({\"name\": f\"Rollback {operation}\"})\n115     assert service.attach_to_character(world_book_id, character_id)[\"success\"]\n116 \n",
+      "col_offset": 4,
+      "end_col_offset": 78,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 115,
+      "line_range": [
+        115
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "119             if operation == \"update-entry\":\n120                 assert service.update_entry(entry_id, content=\"pending\")\n121             elif operation == \"delete-entry\":\n",
+      "col_offset": 16,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 120,
+      "line_range": [
+        120
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "121             elif operation == \"delete-entry\":\n122                 assert service.delete_entry(entry_id)\n123             elif operation == \"detach\":\n",
+      "col_offset": 16,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 122,
+      "line_range": [
+        122
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "123             elif operation == \"detach\":\n124                 assert service.detach_from_character(world_book_id, character_id)[\"success\"]\n125             else:\n",
+      "col_offset": 16,
+      "end_col_offset": 92,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 124,
+      "line_range": [
+        124
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "125             else:\n126                 assert service.delete_world_book(world_book_id)\n127             raise RuntimeError(\"rollback lifecycle mutation\")\n",
+      "col_offset": 16,
+      "end_col_offset": 63,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 126,
+      "line_range": [
+        126
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "129     if operation == \"update-entry\":\n130         assert service.get_entry(entry_id)[\"content\"] == \"seed content\"\n131     elif operation == \"delete-entry\":\n",
+      "col_offset": 8,
+      "end_col_offset": 71,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 130,
+      "line_range": [
+        130
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "131     elif operation == \"delete-entry\":\n132         assert service.get_entry(entry_id) is not None\n133     elif operation == \"detach\":\n",
+      "col_offset": 8,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 132,
+      "line_range": [
+        132
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "133     elif operation == \"detach\":\n134         assert service.get_character_world_books(character_id)\n135     else:\n",
+      "col_offset": 8,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 134,
+      "line_range": [
+        134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "135     else:\n136         assert service.get_world_book(world_book_id) is not None\n",
+      "col_offset": 8,
+      "end_col_offset": 64,
+      "filename": "./tldw_Server_API/tests/DB_Management/test_world_book_lifecycle_backends.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 136,
+      "line_range": [
+        136
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

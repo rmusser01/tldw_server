@@ -1,0 +1,33 @@
+{
+  "task": "TASK13260.210",
+  "baseline": "0d7f2a23c9",
+  "causalRed": {
+    "label": "worldbook210-red-20260917190503",
+    "result": "4 failed, 4 warnings",
+    "facts": [
+      "PostgreSQL add_entry cannot enter BackendConnectionWrapper as a context manager.",
+      "SQLite add_entry committed inside a caller transaction and escaped rollback."
+    ]
+  },
+  "causalGreen": {
+    "label": "worldbook210-green2-20260917190821",
+    "result": "12 passed, 4 warnings, 0 skips"
+  },
+  "combinedOfficialFixture": {
+    "label": "worldbook210-final-20260917190855",
+    "result": "57 passed, 5 warnings, 0 skips",
+    "commandReceiptSha256": "d7cc1b4ff9d3607a2d45015df357451353afd0fb9d28ce05c4c3a5868496d150",
+    "privateLogSha256": "baea0c7e0aa4fb2f0c61a54cf7807ff90b8a1d2ce5f9afa618215ae55e0e27f7"
+  },
+  "adjacent": {
+    "permissionsAndNegatives": "10 passed, 3 warnings",
+    "worldBookUnits": "10 passed, 2 skipped; not an acceptance substitute",
+    "legacyMockSuite": "29 passed, 10 failed, pending baseline attribution"
+  },
+  "static": {
+    "compile": "pass",
+    "bandit": "0 production findings; 34 low test-only B101 findings",
+    "banditSha256": "6d9864d0d32c07e3210ee3b329777754bab7fcdead31c0172d7046b8d2c34fd7",
+    "ruff": "I001, SIM118, SIM118; same diagnostics on baseline 0d7f2a23c9"
+  }
+}
