@@ -1,0 +1,29 @@
+{
+  "review_issue": "P2: cookie-session authSource alone can represent an inactive stored marker",
+  "red": {
+    "command": "./apps/packages/ui/node_modules/.bin/vitest run --config .tmp/uat-repairs-231-246/capability258-review/vitest.config.mjs --silent",
+    "result_before_fix": "exit 1; 2 failed, 1 passed; foreign-origin and wrong-mode cookie markers dispatched the protected request"
+  },
+  "green": [
+    {
+      "command": "./apps/packages/ui/node_modules/.bin/vitest run --config .tmp/uat-repairs-231-246/capability258-review/vitest.config.mjs --silent",
+      "result": "exit 0; 3 passed"
+    },
+    {
+      "command": "cd apps/packages/ui && bunx vitest run src/services/__tests__/server-capabilities.test.ts src/services/__tests__/tldw-api-client.quickstart-auth.test.ts src/services/__tests__/chat-surface-scope.test.ts src/services/tldw/__tests__/single-user-credential.test.ts --silent",
+      "result": "exit 0; 117 passed"
+    }
+  ],
+  "static": {
+    "diff_check": "exit 0",
+    "eslint": "exit 0; 0 errors, 560 warnings across the three scoped files",
+    "compiler_comparison": "90 baseline diagnostics, 90 current diagnostics, 0 added, 0 removed",
+    "bandit": "exit 0; 0 findings; 3 TypeScript parsing errors, so not TypeScript security assurance"
+  },
+  "sha256": {
+    "apps/packages/ui/src/services/tldw/TldwApiClient.ts": "01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca",
+    "apps/packages/ui/src/services/tldw/server-capabilities.ts": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899",
+    "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts": "e39691f62e7db3d0576f385c13fed3a6b4a4777bfce635fe4e21ec9199b71b67"
+  },
+  "retained_command_failure": "One combined validation attempt used a repository-relative Vitest executable after changing into apps/packages/ui and exited 127. It made no source edits; both intended suites were rerun successfully from their correct working directories."
+}

@@ -1,0 +1,182 @@
+{
+  "task": "UAT258 / TASK13260.200 round1 scoped re-review",
+  "at": "2026-09-18T00:27:09.003Z",
+  "verdict": "CHANGES_REQUESTED_TESTS_ONLY",
+  "productionVerdict": "Prior P2 corrected; no additional production changes requested",
+  "checks": [
+    {
+      "name": "Actual-client causal negatives and positive now independently pass3/3",
+      "pass": true
+    },
+    {
+      "name": "Client change only exposes existing active-cookie predicate",
+      "pass": true
+    },
+    {
+      "name": "Guard directly reuses canonical cookie helper",
+      "pass": true
+    },
+    {
+      "name": "Reviewed three source/test bytes match author round1 hashes",
+      "pass": true
+    },
+    {
+      "name": "All initial review/red evidence remains byte-identical",
+      "pass": true
+    },
+    {
+      "name": "Maintained capability tests mock the predicate and config",
+      "pass": true
+    },
+    {
+      "name": "Existing quickstart suite lacks capability-dispatch integration",
+      "pass": true
+    }
+  ],
+  "findings": [
+    {
+      "priority": "P2",
+      "file": "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts",
+      "line": 13,
+      "title": "Retain the real-client cookie regression in maintained tests",
+      "detail": "The two normalized invalid-cookie negatives and exact-origin positive only exist in scratch cookie-guard.review.test.ts. Maintained capability tests replace both getConfig and isActiveCookieSessionConfig, while adjacent quickstart tests never invoke capability discovery. Copy/adapt the three causal cases into a maintained integration suite using real client normalization and cookie predicate, with mocked I/O. Do not count scratch evidence as CI coverage."
+    }
+  ],
+  "independentTest": {
+    "command": "apps/packages/ui/node_modules/.bin/vitest run --config .tmp/uat-repairs-231-246/capability258-review/vitest.config.mjs --silent --reporter=json --outputFile=.tmp/uat-repairs-231-246/capability258-review/ROUND1-cookie-guard.json",
+    "exitCode": 0,
+    "passed": 3
+  },
+  "authorAdjacentTests": "117 passed as recorded; not redundantly rerun in this scoped correction review",
+  "static": {
+    "diff_check": "exit 0",
+    "eslint": "exit 0; 0 errors, 560 warnings across the three scoped files",
+    "compiler_comparison": "90 baseline diagnostics, 90 current diagnostics, 0 added, 0 removed",
+    "bandit": "exit 0; 0 findings; 3 TypeScript parsing errors, so not TypeScript security assurance"
+  },
+  "originalProof": [
+    {
+      "name": "REVIEW.md",
+      "expected": "3fd7ba75614076f37bb6b80860865fb222a1d31ab7d72034c5e112d6222a76ab",
+      "actual": "3fd7ba75614076f37bb6b80860865fb222a1d31ab7d72034c5e112d6222a76ab"
+    },
+    {
+      "name": "audit.mjs",
+      "expected": "5652acbce240eb0e54b675877b6c531b5256fd100302bd11ce95a39a7cb716fd",
+      "actual": "5652acbce240eb0e54b675877b6c531b5256fd100302bd11ce95a39a7cb716fd"
+    },
+    {
+      "name": "audit.json",
+      "expected": "7650e714d3b45e5c2fba8410570f30fe84967c67e896c0c08365b136f412b65b",
+      "actual": "7650e714d3b45e5c2fba8410570f30fe84967c67e896c0c08365b136f412b65b"
+    },
+    {
+      "name": "cookie-guard.review.test.ts",
+      "expected": "c574c78695f2d2e170f65b87af19c591f028d533d0ffd5f73156b6f43e1d4f9c",
+      "actual": "c574c78695f2d2e170f65b87af19c591f028d533d0ffd5f73156b6f43e1d4f9c"
+    },
+    {
+      "name": "cookie-guard.json",
+      "expected": "7f43f5360a57aded4c70ceac53721c546deba305c5b6c6f8275d72a7830b4b07",
+      "actual": "7f43f5360a57aded4c70ceac53721c546deba305c5b6c6f8275d72a7830b4b07"
+    },
+    {
+      "name": "focused.json",
+      "expected": "19f9dfa1711250022dcbef2035cea86a92770420b293b32ea36176d3e6efb152",
+      "actual": "19f9dfa1711250022dcbef2035cea86a92770420b293b32ea36176d3e6efb152"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "bytes": 266613,
+      "sha256": "01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/server-capabilities.ts",
+      "bytes": 30298,
+      "sha256": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts",
+      "bytes": 39203,
+      "sha256": "e39691f62e7db3d0576f385c13fed3a6b4a4777bfce635fe4e21ec9199b71b67"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts",
+      "bytes": 16279,
+      "sha256": "fd7943f6af19523964d2fe039ffc67dc6164359f8798f527b971c8c7b95fdfa5"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/__tests__/browser-networking.test.ts",
+      "bytes": 3503,
+      "sha256": "1685eedbb38ff27acd9aca0adcea365804746ba523017dfb4cf161ef4356ce7e"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/browser-networking.ts",
+      "bytes": 6160,
+      "sha256": "64a6bb5cbe4a4bc691672e83313b29113ed0e80b2a8215ea0a8e57291762118b"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/runtime-auth-override.ts",
+      "bytes": 1025,
+      "sha256": "2738762e85bd0ed05c5a7a394e67c73365f735d744cc36c872c835cfdb0a3806"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/single-user-credential.ts",
+      "bytes": 15200,
+      "sha256": "f95fa3c3ffc2b946dcf87edfdc207e72d537f3f4396599cabd11706277e816fd"
+    },
+    {
+      "path": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-258-report.md",
+      "bytes": 5066,
+      "sha256": "25723a50e2d1f4ae92d5b93738e8309a408860dcd5a9dcf185bcd85585cd7580"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258/round1-evidence.json",
+      "bytes": 1972,
+      "sha256": "4cafc544255c9ff332e3e1bdf80f2227d227f3845deb89e5477f251362022bd4"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258/compiler-comparison.json",
+      "bytes": 80,
+      "sha256": "16c2bb49ccccfda426988c23196d48648bb050bee7e34ee7cb0945d0f15df1e1"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-source.diff",
+      "bytes": 16166,
+      "sha256": "dc1d9bd0aff2e95877ac18eeb6c7a5682e571f7ca0331151d1e9cd55dcfd2fdd"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-cookie-guard.json",
+      "bytes": 1810,
+      "sha256": "bf8e4b6fbe95f0fca0e04065c8d1f2f079204ce59eb6a3044b5c550fa9552b65"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-cookie-guard.log",
+      "bytes": 143,
+      "sha256": "1c65b8baf1290b93f3b1bbfdc399c8904c0c08d0b800f5d45beef25727a8f847"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/cookie-guard.review.test.ts",
+      "bytes": 5299,
+      "sha256": "c574c78695f2d2e170f65b87af19c591f028d533d0ffd5f73156b6f43e1d4f9c"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/vitest.config.mjs",
+      "bytes": 740,
+      "sha256": "ae3d56321f2e0e02f0f1cac8c634ea427627348171d8417529f6f6a14b4ed004"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-audit.mjs",
+      "bytes": 5431,
+      "sha256": "c136389edc51bc5374948e2e207e31a7d8242f259bc2a1b196a411e15a697971"
+    }
+  ],
+  "limits": [
+    "Production fix is approved in scope; requested correction is maintained tests only.",
+    "No product/test files edited and no native runtime/browser/model/DB actions. Only ROUND1 review artifacts authored.",
+    "Compiler/lint/Bandit results are author evidence; Bandit does not parse TypeScript.",
+    "No source-level review implies native fresh-context verification or full-matrix acceptance."
+  ]
+}

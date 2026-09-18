@@ -445,7 +445,7 @@ export const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean
   }
 }
 
-const isActiveCookieSessionConfig = (
+export const isActiveCookieSessionConfig = (
   config: TldwConfig | null | undefined,
   quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
 ): boolean =>

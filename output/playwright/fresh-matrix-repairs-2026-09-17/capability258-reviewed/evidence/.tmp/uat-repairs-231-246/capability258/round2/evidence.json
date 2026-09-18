@@ -1,0 +1,64 @@
+{
+  "issue": "UAT258 / TASK13260.200 maintained cookie readiness coverage",
+  "status": "pass",
+  "productionFilesChanged": [],
+  "testFilesChanged": [
+    "apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts"
+  ],
+  "sourceSha256": {
+    "apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts": "385bc1afbd8f8d2fa36d2cfe51ea18458e263e14c55cbedf84b40f92aaa0b8c1"
+  },
+  "coverage": {
+    "actualClientSingleton": true,
+    "initializesStoredConfig": true,
+    "assertsReadiness": true,
+    "publicDiscoveryPersists": true,
+    "protectedDispatch": {
+      "foreignOriginCookieMarker": 0,
+      "sameOriginMultiUserCookieMarker": 0,
+      "exactOriginSingleUserCookieMarker": 1
+    },
+    "cleanup": [
+      "mock storage",
+      "mock session storage",
+      "local storage",
+      "runtime override",
+      "quickstart environment",
+      "singleton initialization"
+    ]
+  },
+  "commands": [
+    {
+      "command": "bunx vitest run src/services/__tests__/tldw-api-client.quickstart-auth.test.ts --silent",
+      "workdir": "apps/packages/ui",
+      "exitCode": 0,
+      "testsPassed": 25
+    },
+    {
+      "command": "bunx vitest run src/services/__tests__/server-capabilities.test.ts src/services/__tests__/tldw-api-client.quickstart-auth.test.ts src/services/__tests__/chat-surface-scope.test.ts src/services/tldw/__tests__/single-user-credential.test.ts --silent",
+      "workdir": "apps/packages/ui",
+      "exitCode": 0,
+      "testsPassed": 120
+    },
+    {
+      "command": "./node_modules/.bin/eslint --config eslint.config.mjs --stdin --stdin-filename src/services/__tests__/tldw-api-client.quickstart-auth.test.ts",
+      "workdir": "apps/tldw-frontend",
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 1,
+      "note": "The shared UI file is outside the frontend config base path. This invocation linted its exact current bytes through the repository frontend ESLint configuration; the warning is the pre-existing line-64 any cast."
+    },
+    {
+      "command": "source .venv/bin/activate && python -m bandit -r apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts -f json -o .tmp/uat-repairs-231-246/capability258/round2/bandit.json",
+      "workdir": ".",
+      "exitCode": 0,
+      "findings": 0,
+      "parserErrors": 1,
+      "note": "Bandit does not parse TypeScript and is not TypeScript security assurance."
+    }
+  ],
+  "compiler": {
+    "baselineComparisonRun": false,
+    "reason": "This is a test-only change and the request limits compiler baseline comparison to changed diagnostics."
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "task": "UAT258 / TASK13260.200 tests-only round2 review",
+  "at": "2026-09-18T00:41:12.558Z",
+  "verdict": "CLEAR bounded source/test review",
+  "closedFinding": "Round1 P2: actual-client capability cookie readiness regression is now maintained CI-discovered coverage.",
+  "checks": [
+    {
+      "name": "Maintained test bytes match reviewed author evidence",
+      "pass": true
+    },
+    {
+      "name": "Only maintained additions are singleton import and three-case integration block",
+      "pass": true
+    },
+    {
+      "name": "Both production files and existing capability suite remain frozen after round1",
+      "pass": true
+    },
+    {
+      "name": "Maintained cases exercise real client config readiness and capability discovery",
+      "pass": true
+    },
+    {
+      "name": "Cases preserve public discovery and assert exact protected dispatch counts",
+      "pass": true
+    },
+    {
+      "name": "Nested setup and teardown reset singleton authority state",
+      "pass": true
+    },
+    {
+      "name": "Independent canonical-config run passes all25 maintained suite cases",
+      "pass": true
+    },
+    {
+      "name": "Original causal failure and round1 review bytes preserved",
+      "pass": true
+    }
+  ],
+  "independentTests": {
+    "command": "../../tldw-frontend/node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.quickstart-auth.test.ts --silent --reporter=json --outputFile=<review>/ROUND2-focused.json",
+    "workdir": "apps/packages/ui",
+    "passed": 25,
+    "failed": 0,
+    "cases": [
+      {
+        "name": "TldwApiClient quickstart auth bootstrap server capability cookie readiness keeps public discovery available while using actual client readiness for 'foreign-origin cookie marker'",
+        "status": "passed"
+      },
+      {
+        "name": "TldwApiClient quickstart auth bootstrap server capability cookie readiness keeps public discovery available while using actual client readiness for 'same-origin multi-user cookie marker'",
+        "status": "passed"
+      },
+      {
+        "name": "TldwApiClient quickstart auth bootstrap server capability cookie readiness keeps public discovery available while using actual client readiness for 'exact-origin single-user cookie marker'",
+        "status": "passed"
+      }
+    ]
+  },
+  "sourceParity": [
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca",
+      "sameAsRound1": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/server-capabilities.ts",
+      "sha256": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899",
+      "sameAsRound1": true
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts",
+      "sha256": "e39691f62e7db3d0576f385c13fed3a6b4a4777bfce635fe4e21ec9199b71b67",
+      "sameAsRound1": true
+    }
+  ],
+  "authorEvidence": {
+    "adjacentTests": 120,
+    "lintErrors": 0,
+    "lintExistingWarnings": 1,
+    "banditFindings": 0,
+    "banditTypeScriptParseErrors": 1,
+    "compilerRepeated": false
+  },
+  "limits": [
+    "Review limited to new maintained cases, cleanup and frozen source parity; production semantic review is preserved in ROUND1.",
+    "The real TldwApiClient singleton, initialize/getConfig/ensureConfigForRequest and actual cookie predicate execute. Storage and transport boundaries are mocked; OpenAPI discovery response is stubbed.",
+    "No protected server, browser, runtime, model or DB operation was performed. Passing maintained tests does not constitute native UAT acceptance.",
+    "Independent25-case run uses repository UI Vitest configuration. Author120 adjacent tests and lint are recorded without redundant broad reruns.",
+    "Bandit cannot parse this TypeScript test; zero findings is not TypeScript security certification. No new compiler comparison was requested for this bounded tests-only change.",
+    "Original and round1 artifacts are unchanged. Review created only ROUND2-prefixed artifacts."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-audit.json",
+      "bytes": 7618,
+      "sha256": "0c993d61798b38b828cb8599ee4f2ab48212e0306ef8cad162def29e6948ce78"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258/round2/evidence.json",
+      "bytes": 2610,
+      "sha256": "232aaa28ea63d8401a525dad53dd4f106304a0a939e79fc6c36a105a88a9c0fb"
+    },
+    {
+      "path": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-258-round2-report.md",
+      "bytes": 1853,
+      "sha256": "c9c05f5f6e33eafbfa7f08a81d01cf3b74b131ad68f28bc3a00817c82deab8cf"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts",
+      "bytes": 20145,
+      "sha256": "385bc1afbd8f8d2fa36d2cfe51ea18458e263e14c55cbedf84b40f92aaa0b8c1"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-single/apps/packages/ui/src/services/__tests__/tldw-api-client.quickstart-auth.test.ts",
+      "bytes": 16279,
+      "sha256": "fd7943f6af19523964d2fe039ffc67dc6164359f8798f527b971c8c7b95fdfa5"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "bytes": 266613,
+      "sha256": "01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/server-capabilities.ts",
+      "bytes": 30298,
+      "sha256": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts",
+      "bytes": 39203,
+      "sha256": "e39691f62e7db3d0576f385c13fed3a6b4a4777bfce635fe4e21ec9199b71b67"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND2-focused.json",
+      "bytes": 9500,
+      "sha256": "08f841a06601c955a49d97fde5004fb7678f3633fa32d8429cb1a39ef2c6ed69"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND2-focused.log",
+      "bytes": 320,
+      "sha256": "24ff0eb7a5a8e67593c86f21848685819f44b59e13bb8c5cafc66c4e56618465"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/REVIEW.md",
+      "bytes": 3543,
+      "sha256": "3fd7ba75614076f37bb6b80860865fb222a1d31ab7d72034c5e112d6222a76ab"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/audit.json",
+      "bytes": 10114,
+      "sha256": "7650e714d3b45e5c2fba8410570f30fe84967c67e896c0c08365b136f412b65b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-REVIEW.md",
+      "bytes": 2361,
+      "sha256": "59edbe2b31b059b17e1462efc053cb6ad08493329a399ca2a0db892c2b099525"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND1-audit.json",
+      "bytes": 7618,
+      "sha256": "0c993d61798b38b828cb8599ee4f2ab48212e0306ef8cad162def29e6948ce78"
+    },
+    {
+      "path": "apps/packages/ui/vitest.config.ts",
+      "bytes": 1043,
+      "sha256": "678eb0b079091b7163170e578e0fc79abf6edf6c2b4d8254f39d428f67de57d2"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND2-audit.mjs",
+      "bytes": 6296,
+      "sha256": "b1a1e37168f1f09f3ab5bc8e3cc0a9251b2dfda3c36211c2a67eb49652a57349"
+    }
+  ]
+}

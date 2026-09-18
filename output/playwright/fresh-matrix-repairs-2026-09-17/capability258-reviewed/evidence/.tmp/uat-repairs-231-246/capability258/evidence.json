@@ -1,0 +1,37 @@
+{
+  "task": "UAT258 / TASK13260.200",
+  "red": [
+    {
+      "case": "fresh unconfigured discovery dispatched the protected entitlement request",
+      "command": "bunx vitest run src/services/__tests__/server-capabilities.test.ts -t 'defers protected source capability probing without configured credentials'",
+      "exitCode": 1
+    },
+    {
+      "case": "runtime key must override a stale multi-user config without a token",
+      "command": "bunx vitest run src/services/__tests__/server-capabilities.test.ts -t 'probes source capabilities with a runtime single-user key' --silent",
+      "exitCode": 1
+    }
+  ],
+  "green": {
+    "command": "bunx vitest run src/services/__tests__/server-capabilities.test.ts --silent",
+    "exitCode": 0,
+    "tests": 48
+  },
+  "static": {
+    "diffCheckExitCode": 0,
+    "lintExitCode": 0,
+    "lintErrors": 0,
+    "lintWarnings": 28,
+    "compilerBaselineDiagnostics": 90,
+    "compilerCurrentDiagnostics": 90,
+    "compilerAddedDiagnostics": 0,
+    "compilerRemovedDiagnostics": 0,
+    "banditExitCode": 0,
+    "banditFindings": 0,
+    "banditUnsupportedTypeScriptFiles": 2
+  },
+  "currentSha256": {
+    "apps/packages/ui/src/services/tldw/server-capabilities.ts": "f16a94b18ebfd97ad1b84f8cd476f35d0362d4d00f3cf48a145890cff3c819a7",
+    "apps/packages/ui/src/services/__tests__/server-capabilities.test.ts": "fccaa724b61cd301984003ff6437affd29ffbe2480bdf24e2d52f9f1e5ea2b68"
+  }
+}
