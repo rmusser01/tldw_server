@@ -1,0 +1,7 @@
+3ff6ea2ae18c572e6cba57626a230a9c156f38a3ac524b320a296b6fb1c3cc4e  .tmp/uat-repairs-231-246/model261-live-capture/uat261_capture.py
+ee63522f12619bd8750c0d6fc84e9cd82d04a1a97a48cd0b1c63f50e4f013bc1  .tmp/uat-repairs-231-246/model261-live-capture/test_live_capture.py
+091051d4317a8a4f59ae31837014bd757d89262a12fbb82f27830ee8cd4e5819  .tmp/uat-repairs-231-246/model261-live-capture/RUN.md
+d530be9264eb00a612a1d65ab37146f501e254be441bf84b2933691a28044a9d  .tmp/uat-repairs-231-246/model261-live-capture/REPORT.md
+68e581c478a7e47bece0d991df8f461d70a5c2fce6138f5b6f9880168c221d20  .tmp/uat-repairs-231-246/model261-live-capture/PRE_CORRECTION_FREEZE.md
+cf14edfc7ca68b860f5e396201edfe653d43e3636e0ed2a64a953a1d461c252a  .tmp/uat-repairs-231-246/model261-live-capture/bandit-source.json
+3908db72cd5be1d455f46ab95e830b5cdd269e1f6305d7bda171e7ae5523d2ba  .tmp/uat-repairs-231-246/model261-live-capture/bandit-all.json

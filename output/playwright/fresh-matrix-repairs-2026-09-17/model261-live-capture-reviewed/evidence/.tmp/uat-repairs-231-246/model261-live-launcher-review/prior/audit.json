@@ -1,0 +1,22 @@
+{
+  "verdict": "CLEAR_PREPARATION_ONLY",
+  "inputs": {
+    ".tmp/uat-next-matrix-20260916/matrix-upgrade.mjs": "5e0cc74c2c66a5c01eb7fc2f0d1680cffe018c072a892dd566041cdfac73567f",
+    ".tmp/uat-next-matrix-20260916/matrix-uat261-capture.mjs": "68affad22571e2cb9ce3e961a83328deab2e90fb0799d9665a954907d1445634"
+  },
+  "checks": {
+    "syntax": {
+      "path": ".tmp/uat-repairs-231-246/model261-live-launcher-review/syntax.log",
+      "exit": 0
+    },
+    "missing_args": {
+      "path": ".tmp/uat-repairs-231-246/model261-live-launcher-review/negative-missing-args.log",
+      "exit": 1
+    },
+    "invalid_action": {
+      "path": ".tmp/uat-repairs-231-246/model261-live-launcher-review/negative-invalid-action.log",
+      "exit": 1
+    }
+  },
+  "limits": "No launcher/capture wrapper/runtime/native/provider review or execution"
+}

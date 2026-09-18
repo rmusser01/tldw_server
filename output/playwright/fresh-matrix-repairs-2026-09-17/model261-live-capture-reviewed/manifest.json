@@ -1,0 +1,300 @@
+{
+  "at": "2026-09-18T04:57:51.110Z",
+  "reviewedDiagnosticPreparation": [
+    261
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    261
+  ],
+  "sourceBaseline": "2ff90d14ae2d8cc1686cb403b8c3a147cc53427c",
+  "fullMatrixAccepted": false,
+  "excludedLinks": [],
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-next-matrix-20260916/matrix-uat261-capture.mjs",
+      "path": "evidence/.tmp/uat-next-matrix-20260916/matrix-uat261-capture.mjs",
+      "sourceBytes": 14641,
+      "sourceSha256": "f2fcf115eafb77c43f2d330526d59eb21f18a2a72e008676503f04389ab65e1f",
+      "bytes": 14641,
+      "sha256": "f2fcf115eafb77c43f2d330526d59eb21f18a2a72e008676503f04389ab65e1f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/PROTOCOL.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/PROTOCOL.md",
+      "sourceBytes": 2752,
+      "sourceSha256": "cab8b3eafc5378b770f41e1749240f76b4123805df40b8b78db0365d8c2d61f7",
+      "bytes": 2752,
+      "sha256": "cab8b3eafc5378b770f41e1749240f76b4123805df40b8b78db0365d8c2d61f7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/backend-source-comparison.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/backend-source-comparison.json",
+      "sourceBytes": 748,
+      "sourceSha256": "9864416834b6f9ca449d18634c33e4548cc5d59590f1c1fd49bd2679dbddcc3a",
+      "bytes": 748,
+      "sha256": "9864416834b6f9ca449d18634c33e4548cc5d59590f1c1fd49bd2679dbddcc3a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/PRE_CORRECTION_FREEZE.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/PRE_CORRECTION_FREEZE.md",
+      "sourceBytes": 1392,
+      "sourceSha256": "68e581c478a7e47bece0d991df8f461d70a5c2fce6138f5b6f9880168c221d20",
+      "bytes": 1392,
+      "sha256": "68e581c478a7e47bece0d991df8f461d70a5c2fce6138f5b6f9880168c221d20",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/REPORT.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/REPORT.md",
+      "sourceBytes": 5479,
+      "sourceSha256": "d530be9264eb00a612a1d65ab37146f501e254be441bf84b2933691a28044a9d",
+      "bytes": 5479,
+      "sha256": "d530be9264eb00a612a1d65ab37146f501e254be441bf84b2933691a28044a9d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/RUN.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/RUN.md",
+      "sourceBytes": 3512,
+      "sourceSha256": "091051d4317a8a4f59ae31837014bd757d89262a12fbb82f27830ee8cd4e5819",
+      "bytes": 3512,
+      "sha256": "091051d4317a8a4f59ae31837014bd757d89262a12fbb82f27830ee8cd4e5819",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/bandit-all.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/bandit-all.json.gz",
+      "sourceBytes": 30449,
+      "sourceSha256": "3908db72cd5be1d455f46ab95e830b5cdd269e1f6305d7bda171e7ae5523d2ba",
+      "bytes": 2312,
+      "sha256": "1dca4c8c92322faabd1581aa69d012505a17fbabac3e85838937ec69da54b6e1",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/bandit-source.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/bandit-source.json",
+      "sourceBytes": 781,
+      "sourceSha256": "cf14edfc7ca68b860f5e396201edfe653d43e3636e0ed2a64a953a1d461c252a",
+      "bytes": 781,
+      "sha256": "cf14edfc7ca68b860f5e396201edfe653d43e3636e0ed2a64a953a1d461c252a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/release-gate.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/release-gate.json",
+      "sourceBytes": 583,
+      "sourceSha256": "f866d96ed2b6ecc9b13336bea3bfadef5392f360a55d2425c2578f310e1b441f",
+      "bytes": 583,
+      "sha256": "f866d96ed2b6ecc9b13336bea3bfadef5392f360a55d2425c2578f310e1b441f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/sha256.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/sha256.txt",
+      "sourceBytes": 907,
+      "sourceSha256": "c5a0a1e6f712f41f8f04c58e4e6407e8c42833251c242beb3451c46ea3cbffbf",
+      "bytes": 907,
+      "sha256": "c5a0a1e6f712f41f8f04c58e4e6407e8c42833251c242beb3451c46ea3cbffbf",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/test_live_capture.py",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/test_live_capture.py",
+      "sourceBytes": 15206,
+      "sourceSha256": "ee63522f12619bd8750c0d6fc84e9cd82d04a1a97a48cd0b1c63f50e4f013bc1",
+      "bytes": 15206,
+      "sha256": "ee63522f12619bd8750c0d6fc84e9cd82d04a1a97a48cd0b1c63f50e4f013bc1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture/uat261_capture.py",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture/uat261_capture.py.gz",
+      "sourceBytes": 17795,
+      "sourceSha256": "3ff6ea2ae18c572e6cba57626a230a9c156f38a3ac524b320a296b6fb1c3cc4e",
+      "bytes": 4431,
+      "sha256": "2b86651aee8bfcfc53fa6473f4396ba75cb46279f914138babeaa8739f6ddab5",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/RETENTION_LIMITS.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/RETENTION_LIMITS.md",
+      "sourceBytes": 1042,
+      "sourceSha256": "6dafc7569365bcfaf450fa3bec513d5bdfd1e1a49f59579089ef7d171091fc81",
+      "bytes": 1042,
+      "sha256": "6dafc7569365bcfaf450fa3bec513d5bdfd1e1a49f59579089ef7d171091fc81",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/REVIEW.md",
+      "sourceBytes": 2017,
+      "sourceSha256": "e2fd2abe981451f518cecf2275fe0c3896d4ed692988c00f70451d18b2a7e6a7",
+      "bytes": 2017,
+      "sha256": "e2fd2abe981451f518cecf2275fe0c3896d4ed692988c00f70451d18b2a7e6a7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/cleanup-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/cleanup-red.log.gz",
+      "sourceBytes": 1639,
+      "sourceSha256": "ffc7317b0321bbcd601f9b2a9e973ec98ca8f09d0ffd4a350394cfa51038794c",
+      "bytes": 737,
+      "sha256": "1584ebed6a724cf7a350d11e286b4b628e272b8f122eafed60a39dbb24780333",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/deferred-iteration-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/deferred-iteration-red.log.gz",
+      "sourceBytes": 1539,
+      "sourceSha256": "f52a337f5e31905b9be8bbb5594829123893e520d4e95eb7015196b87e7d8186",
+      "bytes": 695,
+      "sha256": "ad52f8c5a1bb360c6d98397596683f33ad5e856c8a0ab0f2a44ad93030691a88",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/final-controls.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/final-controls.log.gz",
+      "sourceBytes": 1206,
+      "sourceSha256": "8cf35c2aff350371698f2a422e510b42013c30b5ec795f8209f3c7b87e69e522",
+      "bytes": 603,
+      "sha256": "67d02313d8e9e3e3f58436826e4e2af7b459a24051bfe01dec2968af244363c6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/review.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/review.json",
+      "sourceBytes": 960,
+      "sourceSha256": "7a4d53696a1f403b008a1d68d31d28dcc73717c095af13df74867e01fcf9f4fa",
+      "bytes": 960,
+      "sha256": "7a4d53696a1f403b008a1d68d31d28dcc73717c095af13df74867e01fcf9f4fa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-capture-review/test_cleanup.py",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-capture-review/test_cleanup.py",
+      "sourceBytes": 2084,
+      "sourceSha256": "626a72b5617136ebb84cf6e684da354e831c34a35b8f531c100132033fcfa152",
+      "bytes": 2084,
+      "sha256": "626a72b5617136ebb84cf6e684da354e831c34a35b8f531c100132033fcfa152",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/REVIEW.md",
+      "sourceBytes": 2237,
+      "sourceSha256": "b67919c12cfffbed2d156bb17b703b16cf96e18bbc83a4e4d289a4a86b1953ac",
+      "bytes": 2237,
+      "sha256": "b67919c12cfffbed2d156bb17b703b16cf96e18bbc83a4e4d289a4a86b1953ac",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/audit-final.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/audit-final.json",
+      "sourceBytes": 442,
+      "sourceSha256": "6b2a472474b40496c6b8f45e65ee60ab832d1146b2031f835ecaaff84c92ac99",
+      "bytes": 442,
+      "sha256": "6b2a472474b40496c6b8f45e65ee60ab832d1146b2031f835ecaaff84c92ac99",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/audit.json",
+      "sourceBytes": 832,
+      "sourceSha256": "909bc169d6a62b05123cc59cdea0b720ffaf2cda2f0219f80cb95a0b35921a95",
+      "bytes": 832,
+      "sha256": "909bc169d6a62b05123cc59cdea0b720ffaf2cda2f0219f80cb95a0b35921a95",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/hashes-final.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/hashes-final.sha256",
+      "sourceBytes": 391,
+      "sourceSha256": "6735eb8f5aca90e1d57872338310e35902c84c62a24c04313f74872fcfe70954",
+      "bytes": 391,
+      "sha256": "6735eb8f5aca90e1d57872338310e35902c84c62a24c04313f74872fcfe70954",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/negative-invalid-action.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/negative-invalid-action.log.gz",
+      "sourceBytes": 78,
+      "sourceSha256": "f46bf3119612bab38e73bc952ff4cb6e35c1d1157f054c0127bf6cf49caaba8f",
+      "bytes": 95,
+      "sha256": "7809eacdbade793985cd9d93f9aa18b05861d1402477af80cd7ad55026bf0d3d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/negative-missing-args.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/negative-missing-args.log.gz",
+      "sourceBytes": 51,
+      "sourceSha256": "c0b2296ead01e065b413d71a78d82e3184fc3753e6878a5f2b0c8fc299d4e8d4",
+      "bytes": 68,
+      "sha256": "5fe6e555a2d8ea75537c466171487b718a3c17210c5e6c04989449c2cbaa8847",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/prior/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/prior/REVIEW.md",
+      "sourceBytes": 1727,
+      "sourceSha256": "4d8856ed7820cd2ad1f4c500155b3299714037b4ca30d016b5a78cdff1776a0c",
+      "bytes": 1727,
+      "sha256": "4d8856ed7820cd2ad1f4c500155b3299714037b4ca30d016b5a78cdff1776a0c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/prior/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/prior/audit.json",
+      "sourceBytes": 832,
+      "sourceSha256": "909bc169d6a62b05123cc59cdea0b720ffaf2cda2f0219f80cb95a0b35921a95",
+      "bytes": 832,
+      "sha256": "909bc169d6a62b05123cc59cdea0b720ffaf2cda2f0219f80cb95a0b35921a95",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/prior/negative-invalid-action.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/prior/negative-invalid-action.log.gz",
+      "sourceBytes": 78,
+      "sourceSha256": "f46bf3119612bab38e73bc952ff4cb6e35c1d1157f054c0127bf6cf49caaba8f",
+      "bytes": 95,
+      "sha256": "7809eacdbade793985cd9d93f9aa18b05861d1402477af80cd7ad55026bf0d3d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/prior/negative-missing-args.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/prior/negative-missing-args.log.gz",
+      "sourceBytes": 51,
+      "sourceSha256": "c0b2296ead01e065b413d71a78d82e3184fc3753e6878a5f2b0c8fc299d4e8d4",
+      "bytes": 68,
+      "sha256": "5fe6e555a2d8ea75537c466171487b718a3c17210c5e6c04989449c2cbaa8847",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/prior/syntax.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/prior/syntax.log.gz",
+      "sourceBytes": 12,
+      "sourceSha256": "b13e0760b6d7c287c9403ed78dc1f46d39b71ef35935619797d930dea2ea8ffd",
+      "bytes": 32,
+      "sha256": "74862f2272b56287c7e1ebf73d6034ea02db00885027234ce61212e3c93e3e70",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-launcher-review/syntax.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-launcher-review/syntax.log.gz",
+      "sourceBytes": 12,
+      "sourceSha256": "b13e0760b6d7c287c9403ed78dc1f46d39b71ef35935619797d930dea2ea8ffd",
+      "bytes": 32,
+      "sha256": "74862f2272b56287c7e1ebf73d6034ea02db00885027234ce61212e3c93e3e70",
+      "encoding": "gzip"
+    }
+  ]
+}
