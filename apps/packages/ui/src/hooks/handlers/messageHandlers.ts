@@ -1,3 +1,4 @@
+import i18n from "i18next"
 import type { UploadedFile } from "@/db"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
@@ -189,6 +190,7 @@ export const createBranchMessage =
         code: "owner_conversation_mismatch"
       }
     let observed: ForkResultV1 | undefined
+    let outcomeRecorded = false
     let claim: ForkDispatchClaim | null = null
     try {
       const operation = await prepareForkOperation(request, {
@@ -217,6 +219,7 @@ export const createBranchMessage =
           )
       observed = result
       await finishForkOperation(claim, result)
+      outcomeRecorded = true
       if (
         (result.state !== "committed" && result.state !== "legacy_completed") ||
         !current()
@@ -283,12 +286,30 @@ export const createBranchMessage =
       if (
         observed?.state === "committed" ||
         observed?.state === "legacy_completed"
-      )
+      ) {
+        if (
+          !outcomeRecorded &&
+          (!current() || (native && !native.validate_lease()))
+        )
+          return observed
         options.notification.warning({
-          message: "Copy saved; opening failed",
-          description: code
+          message: outcomeRecorded
+            ? i18n.t("playground:historySelection.copyOpenFailed", {
+                defaultValue: "Copy saved; opening failed"
+              })
+            : i18n.t("playground:historySelection.copyRecordFailed", {
+                defaultValue: "Copy saved; recovery record update failed"
+              }),
+          description: outcomeRecorded
+            ? code
+            : i18n.t("playground:historySelection.copyRecordFailedDetail", {
+                defaultValue:
+                  "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}",
+                childId: observed.child_id,
+                code
+              })
         })
-      else
+      } else
         options.notification.error({
           message: "Branch failed",
           description: code

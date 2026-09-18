@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import i18n from "i18next"
+import ICUWithInterpolation from "@/i18n/icu-format"
+import enPlayground from "@/assets/locale/en/playground.json"
+import { finishForkOperation } from "@/db/dexie/fork-operations"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 const forks = vi.hoisted(() => ({ prepare: vi.fn(), commit: vi.fn() }))
 const nativeForks = vi.hoisted(() => ({prepare: vi.fn(), commit: vi.fn()}))
 vi.mock("@/services/chat-history-selection", () => ({prepareNativeFork: nativeForks.prepare, commitNativeFork: nativeForks.commit}))
@@ -64,6 +68,9 @@ const setup = (extra = {}) => ({
   setContext: vi.fn(),
   setSystemPrompt: vi.fn(),
   ...extra
+})
+beforeAll(async () => {
+  await i18n.use(ICUWithInterpolation).init({lng: "en", fallbackLng: false, resources: {en: {playground: enPlayground}}, interpolation: {escapeValue: false}})
 })
 beforeEach(() => {
   vi.clearAllMocks()
@@ -247,4 +254,84 @@ it.each(["unknown", "partial"])("retains native %s after deferred response witho
   expect(forks.prepare).not.toHaveBeenCalled()
   expect(forks.commit).not.toHaveBeenCalled()
   expect(options.historySelection.loadConversation).not.toHaveBeenCalled()
+})
+
+it("reports outcome recording failure with the known child, without opening or copying again", async () => {
+  expect(i18n.exists("playground:historySelection.copyRecordFailed")).toBe(true)
+  expect(
+    i18n.exists("playground:historySelection.copyRecordFailedDetail")
+  ).toBe(true)
+  vi.mocked(finishForkOperation).mockRejectedValueOnce(
+    new Error("storage unavailable")
+  )
+  const options = setup()
+  expect(await createBranchMessage(options)(request)).toEqual(committed)
+  expect(options.historySelection.loadConversation).not.toHaveBeenCalled()
+  expect(forks.commit).toHaveBeenCalledTimes(1)
+  expect(finishForkOperation).toHaveBeenCalledTimes(1)
+  expect(options.notification.error).not.toHaveBeenCalled()
+  expect(options.notification.warning).toHaveBeenCalledWith({
+    message: "Copy saved; recovery record update failed",
+    description:
+      "Saved copy: child. Its recovery record could not be updated. Reason: storage unavailable"
+  })
+})
+
+it.each(["view", "lease"])(
+  "does not expose the native child when a held outcome write fails after %s invalidation",
+  async (invalidation) => {
+    let liveView = true
+    let liveLease = true
+    let rejectWrite!: (error: Error) => void
+    vi.mocked(finishForkOperation).mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectWrite = reject
+        })
+    )
+    const native = {
+      kind: "native",
+      owner_key: "local",
+      conversation_id: "source",
+      scope: { type: "global" },
+      validate_lease: () => liveLease
+    }
+    nativeForks.prepare.mockResolvedValue({ request })
+    nativeForks.commit.mockResolvedValue(committed)
+    const options = setup({
+      serverChatId: "source",
+      historyId: null,
+      captureViewFence: () => () => liveView,
+      historySelection: {
+        getCurrent: () => ({ owner: native }),
+        refreshForkOperations: vi.fn(),
+        loadConversation: vi.fn()
+      }
+    })
+    const pending = createBranchMessage(options)(request)
+    await vi.waitFor(() => expect(finishForkOperation).toHaveBeenCalledOnce())
+    if (invalidation === "view") liveView = false
+    else liveLease = false
+    rejectWrite(new Error("private old-owner write failure"))
+    expect(await pending).toEqual(committed)
+    expect(options.notification.warning).not.toHaveBeenCalled()
+    expect(options.notification.error).not.toHaveBeenCalled()
+    expect(options.historySelection.loadConversation).not.toHaveBeenCalled()
+    expect(nativeForks.commit).toHaveBeenCalledOnce()
+    expect(forks.commit).not.toHaveBeenCalled()
+  }
+)
+
+it("keeps same-owner loader failure feedback when the intended handoff retires the source fence", async () => {
+  let sourceCurrent = true
+  const options = setup({ captureViewFence: () => () => sourceCurrent })
+  options.historySelection.loadConversation.mockImplementation(async () => {
+    sourceCurrent = false
+    throw new Error("opening failed")
+  })
+  expect(await createBranchMessage(options)(request)).toEqual(committed)
+  expect(options.notification.warning).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "Copy saved; opening failed" })
+  )
+  expect(forks.commit).toHaveBeenCalledOnce()
 })

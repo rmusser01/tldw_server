@@ -171,6 +171,8 @@ export function useHistorySelection(
     if (mounted.current) {
       setForkOperations([])
       setForkOperationsError(null)
+      setRecoveries([])
+      setRecoveryError(null)
     }
     request.current?.abort()
     request.current = new AbortController()
@@ -1051,34 +1053,58 @@ export function useHistorySelection(
     Array<{ scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }>
   >([])
   const refreshRecovery = useCallback(async () => {
+    if (!mounted.current) return
     const current = live.current
+    const owner = current.owner
     if (
       !current.view ||
       !current.bookmarkScope ||
-      current.owner?.kind === "unavailable"
+      !owner ||
+      owner.kind === "unavailable" ||
+      (owner.kind === "native" &&
+        (!current.settingsQualified || !owner.validate_lease()))
     ) {
       setRecoveries([])
+      setRecoveryError(null)
       return
     }
     const view = current.view
+    const scope = current.bookmarkScope
+    const token = epoch.current
+    const stillCurrent = () =>
+      mounted.current &&
+      token === epoch.current &&
+      sameView(live.current.view, view) &&
+      live.current.owner === owner &&
+      live.current.bookmarkScope === scope &&
+      (owner.kind !== "native" ||
+        (live.current.settingsQualified && owner.validate_lease()))
     try {
-      const entries = await loadHistoryTurnRecoveries(
-        current.bookmarkScope,
-        view
-      )
-      if (sameView(live.current.view, view)) {
-        setRecoveries(entries)
+      const entries = await loadHistoryTurnRecoveries(scope, view)
+      if (stillCurrent()) {
+        setRecoveries(
+          entries.filter(
+            (entry) =>
+              entry.scope.profile_id === scope.profile_id &&
+              entry.turn.owner_key === view.owner_key &&
+              entry.turn.conversation_id === view.conversation_id
+          )
+        )
         setRecoveryError(null)
       }
     } catch (error) {
-      if (sameView(live.current.view, view)) setRecoveryError(errorCode(error))
+      if (stillCurrent()) setRecoveryError(errorCode(error))
     }
   }, [])
+  const recoveryEpoch = epoch.current
   useEffect(() => {
     setRecoveries([])
     setRecoveryError(null)
     void refreshRecovery()
   }, [
+    recoveryEpoch,
+    state.owner,
+    state.settingsQualified,
     state.view?.owner_key,
     state.view?.conversation_id,
     state.view?.view_session_id,
@@ -1091,8 +1117,16 @@ export function useHistorySelection(
       turn: HistoryTurnRecovery
     }) => {
       const current = live.current
+      const owner = current.owner
       if (
+        !mounted.current ||
         !current.view ||
+        !current.bookmarkScope ||
+        !owner ||
+        owner.kind === "unavailable" ||
+        (owner.kind === "native" &&
+          (!current.settingsQualified || !owner.validate_lease())) ||
+        current.bookmarkScope.profile_id !== entry.scope.profile_id ||
         current.view.owner_key !== entry.turn.owner_key ||
         current.view.conversation_id !== entry.turn.conversation_id
       )

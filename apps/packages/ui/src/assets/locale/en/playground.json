@@ -1285,6 +1285,9 @@
       "accepted_response_unknown": "User input accepted; response outcome unknown",
       "generated_unsaved": "Generated response needs review"
     },
+    "copyOpenFailed": "Copy saved; opening failed",
+    "copyRecordFailed": "Copy saved; recovery record update failed",
+    "copyRecordFailedDetail": "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}",
     "forkLoadError": "Could not load retained fork outcomes.",
     "forkInspect": "Inspect copy",
     "forkAllowNew": "Allow a new fork action",

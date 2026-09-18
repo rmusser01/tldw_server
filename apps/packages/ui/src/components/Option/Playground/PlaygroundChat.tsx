@@ -1395,7 +1395,6 @@ export const PlaygroundChat = ({
               resolvedMessageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE
             return (
               <PlaygroundMessage
-                key={`m-${blockIndex}`}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}

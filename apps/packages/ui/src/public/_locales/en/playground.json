@@ -3547,5 +3547,14 @@
   },
   "historySelection_forkDetails": {
     "message": "Operation details"
+  },
+  "historySelection_copyOpenFailed": {
+    "message": "Copy saved; opening failed"
+  },
+  "historySelection_copyRecordFailed": {
+    "message": "Copy saved; recovery record update failed"
+  },
+  "historySelection_copyRecordFailedDetail": {
+    "message": "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}"
   }
 }

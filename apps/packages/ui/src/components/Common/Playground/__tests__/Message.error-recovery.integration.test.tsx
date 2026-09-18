@@ -1,3 +1,4 @@
+import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 // @vitest-environment jsdom
 import React from "react"
 import { act, render, screen } from "@testing-library/react"
@@ -245,6 +246,7 @@ vi.mock("@/utils/character-mood", () => ({
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
+  generateID: () => crypto.randomUUID(),
   updateMessageDiscoSkillComment: vi.fn(async () => undefined)
 }))
 
@@ -595,3 +597,115 @@ for (const initialPortraits of [true, false]) {
     storedPreferences.clear()
   })
 }
+
+// Keep the real parent, timeline, message and edit form together for reconciliation.
+const parentChat = vi.hoisted(() => ({
+  messages: [] as Array<{
+    id: string
+    message: string
+    name: string
+    isBot: boolean
+    role: string
+  }>,
+  historyId: "identity-chat",
+  editMessage: vi.fn()
+}))
+vi.mock("@/hooks/useMessageOption", () => ({
+  useMessageOption: () => ({
+    ...parentChat,
+    compareMode: false,
+    compareFeatureEnabled: false,
+    streaming: false,
+    isProcessing: false,
+    setMessages: vi.fn(),
+    onSubmit: vi.fn()
+  })
+}))
+vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: [] }) }))
+vi.mock("@/hooks/useSelectedCharacter", () => ({
+  useSelectedCharacter: () => [null]
+}))
+vi.mock("@/hooks/useAntdNotification", () => ({
+  useAntdNotification: () => antdMessageApi
+}))
+vi.mock("@/hooks/chat/useDynamicUIActionBridge", () => ({
+  useDynamicUIActionBridge: () => vi.fn()
+}))
+
+it.each([false, true])(
+  "real parent preserves a moving editor through removal/reorder, bubble=%s",
+  async (bubble) => {
+    storedPreferences.set("chatShowCharacterPortraits", !bubble)
+    storedPreferences.set("userChatBubble", true)
+    parentChat.historyId = "identity-chat"
+    const row = (id: string) => ({
+      id,
+      message: `Original ${id}`,
+      name: "You",
+      isBot: false,
+      role: "user"
+    })
+    parentChat.messages = [row("before"), row("retained"), row("after")]
+    const submitted: Array<{ id: string; value: string; send: boolean }> = []
+    parentChat.editMessage
+      .mockReset()
+      .mockImplementation((index, value, _isUser, send) => {
+        submitted.push({ id: parentChat.messages[index].id, value, send })
+      })
+    const view = render(<PlaygroundChat />)
+    const user = userEvent.setup()
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    const editor = screen.getByRole("textbox")
+    const form = editor.closest("form")
+    await user.clear(editor)
+    await user.type(editor, "retained unsaved draft")
+    parentChat.messages = parentChat.messages.slice(1)
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(editor)
+    expect(editor.closest("form")).toBe(form)
+    expect(editor).toHaveValue("retained unsaved draft")
+    parentChat.messages = [...parentChat.messages].reverse()
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(editor)
+    await user.click(screen.getByRole("button", { name: "save", exact: true }))
+    expect(submitted).toEqual([
+      { id: "retained", value: "retained unsaved draft", send: false }
+    ])
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    const cancelEditor = screen.getByRole("textbox")
+    await user.clear(cancelEditor)
+    await user.type(cancelEditor, "cancel draft")
+    parentChat.messages = [...parentChat.messages].reverse()
+    view.rerender(<PlaygroundChat />)
+    expect(screen.getByRole("textbox")).toBe(cancelEditor)
+    await user.click(
+      screen.getByRole("button", { name: "cancel", exact: true })
+    )
+    expect(submitted).toHaveLength(1)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:edit-message", {
+          detail: { messageId: "retained" }
+        })
+      )
+    )
+    await user.type(screen.getByRole("textbox"), " private old owner")
+    parentChat.historyId = "replacement-owner"
+    view.rerender(<PlaygroundChat />)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    storedPreferences.clear()
+  }
+)

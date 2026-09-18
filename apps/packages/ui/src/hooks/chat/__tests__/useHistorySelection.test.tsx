@@ -160,6 +160,8 @@ beforeEach(() => {
   mocks.forkSettings.mockReset().mockResolvedValue(null)
   mocks.updateForkSettings.mockReset().mockResolvedValue(null)
   mocks.confirm.mockClear()
+  mocks.recoveries.mockReset().mockResolvedValue([])
+  mocks.dismissRecovery.mockReset().mockResolvedValue(undefined)
   mocks.configChanged = null
   controllers = {}
   mocks.bookmarks.clear()
@@ -809,4 +811,145 @@ it.each(["ordinary", "fork", "lookup-failed", "settings-failed"])("owner/setting
   expect(hook.result.current.settingsMode("chat")).toBe(kind.endsWith("failed") ? "pending" : kind)
   if (!kind.endsWith("failed")) expect(hook.result.current.status).toBe("legacy_review_required")
   expect(mocks.confirm).not.toHaveBeenCalled()
+})
+
+it.each(["published", "held-success", "held-error"])(
+  "native recovery authority rejects invalidated %s presentation and actions",
+  async (mode) => {
+    const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] =
+      {
+        scope: { profile_id: "profile", client_session_id: "original-view" },
+        turn: {
+          origin_view: {
+            view_session_id: "original",
+            owner_key: "owner",
+            conversation_id: "chat",
+            interpretation: { kind: "parent_graph_v1" },
+            cursor: { kind: "empty" },
+            selection_revision: 0
+          },
+          selection_digest: "selection",
+          request_context_digest: "request",
+          created_at: 1,
+          input_images: [],
+          persistence: "server",
+          operation_id: "retained-turn",
+          owner_key: "owner",
+          conversation_id: "chat",
+          state: "generated_unsaved",
+          input_text: "private input",
+          result_text: "private result"
+        }
+      }
+    const durable = [entry]
+    mocks.recoveries.mockResolvedValue(durable)
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.loadConversation({ serverChatId: "chat" })
+    })
+    await waitFor(() => expect(hook.result.current.recoveries).toEqual(durable))
+    let settle!: () => void
+    let reading: Promise<void> | undefined
+    if (mode !== "published") {
+      mocks.recoveries.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            settle = () =>
+              mode === "held-success"
+                ? resolve(durable)
+                : reject(new Error("private retained read error"))
+          })
+      )
+      act(() => {
+        reading = hook.result.current.refreshRecovery()
+      })
+    }
+    const oldDismiss = hook.result.current.dismissRecovery
+    act(() => mocks.configChanged!())
+    const invalidOwner = hook.result.current.owner
+    expect(invalidOwner?.kind).toBe("native")
+    if (invalidOwner?.kind !== "native")
+      throw new Error("expected native owner")
+    expect(invalidOwner.validate_lease()).toBe(false)
+    if (reading)
+      await act(async () => {
+        settle()
+        await reading
+      })
+    expect(hook.result.current.recoveries).toEqual([])
+    const reads = mocks.recoveries.mock.calls.length
+    await act(async () => {
+      await hook.result.current.refreshRecovery()
+      await oldDismiss(entry)
+    })
+    expect(mocks.recoveries).toHaveBeenCalledTimes(reads)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    expect(hook.result.current.recoveries).toEqual([])
+    expect(hook.result.current.recoveryError).toBeNull()
+    expect(durable).toEqual([entry])
+    await act(async () => {
+      await hook.result.current.loadConversation({ serverChatId: "chat" })
+    })
+    await waitFor(() => expect(hook.result.current.recoveries).toEqual(durable))
+    await act(async () => {
+      await hook.result.current.dismissRecovery(entry)
+    })
+    expect(mocks.dismissRecovery).toHaveBeenCalledExactlyOnceWith(
+      entry.scope,
+      expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+      "retained-turn"
+    )
+  }
+)
+
+it("local recovery remains available after remote account invalidation but refuses another profile's dismissal", async () => {
+  const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] = {
+    scope: { profile_id: "profile", client_session_id: "old-local-view" },
+    turn: {
+      origin_view: {
+        view_session_id: "original",
+        owner_key: "owner",
+        conversation_id: "chat",
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" },
+        selection_revision: 0
+      },
+      selection_digest: "selection",
+      request_context_digest: "request",
+      created_at: 1,
+      input_images: [],
+      persistence: "server",
+      operation_id: "local-turn",
+      owner_key: "owner",
+      conversation_id: "chat",
+      state: "unknown",
+      input_text: "local input",
+      result_text: ""
+    }
+  }
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.loadConversation({ serverChatId: "remote" })
+  })
+  const oldConfigChanged = mocks.configChanged!
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  mocks.recoveries.mockResolvedValue([entry])
+  act(() => oldConfigChanged())
+  await act(async () => {
+    await hook.result.current.refreshRecovery()
+  })
+  expect(hook.result.current.recoveries).toEqual([entry])
+  await act(async () => {
+    await hook.result.current.dismissRecovery({
+      ...entry,
+      scope: { ...entry.scope, profile_id: "foreign" }
+    })
+  })
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  await act(async () => {
+    await hook.result.current.dismissRecovery(entry)
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledOnce()
 })
