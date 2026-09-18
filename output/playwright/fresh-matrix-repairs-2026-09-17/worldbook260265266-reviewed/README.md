@@ -1,0 +1,9 @@
+# Reviewed World Book timestamp and transaction repairs (UAT260/265/266)
+
+Localresponse reads giveSQLite-generated naive timestamps UTC and projectPostgreSQL values using its sessiontimezone. Existingawarevalues retaininstants. Thispresumesstablewriter/reader sessionpolicy; historicalunknownwriterzonescannotberecoveredfromnaivebytes. No globalparser/schema/pooltimezonechange.
+
+WorldBookupdate andCharacterattachment nowuse establishedportabletransactions; optimisticconflicts, callerrollback, idempotency andinvalidrefs preserved. Independentreview45actualSQLite/officialPGtests0skips,9permissiontests,26formattertests pass. NonUTCwinter/summerLA andfractionalEucla offsets covered. ProductionBandit0findings;20testB101assertions. Ruffonly3preexistingdiagnostics, compilesuccess, TS90/90noaddeddiagnostics.
+
+Separateoriginal265update500 and266attachment500 failures arepreserved; native260chronology/edit265/attach266acceptance remains pendingexplicitfrozenupgrade. Otherunexecuted rawconnectioncontexts remainunchanged, notclaimedfixed. Fullmatrixnotaccepted.
+
+Safe reviewed evidence exactbytes/losslessgzip; knowncredentialvariants/JWTscanned. Matchinginputs areexplicitlocalhash-only. Privatefixturelogs/configs arenotcopied; standalone replay ofomittedinputs isnotclaimed.
