@@ -1,8 +1,6 @@
 import dynamic from "next/dynamic"
-import Head from "next/head"
+import { withPageTitle } from "@web/components/navigation/withPageTitle"
 
 const MediaAnalysis = dynamic(() => import("@/routes/option-media-multi"), { ssr: false })
 
-export default function MediaAnalysisPage() {
-  return <><Head><title>Media Analysis | tldw</title></Head><MediaAnalysis /></>
-}
+export default withPageTitle("Media Analysis", MediaAnalysis)

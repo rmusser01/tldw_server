@@ -1643,9 +1643,9 @@ export const PlaygroundForm = ({
           ? activeChat.serverChatAssistantKind === "persona" &&
             String(activeChat.serverChatAssistantId) === selection.id
           : activeChat.serverChatMetaLoaded &&
-            activeChat.serverChatAssistantKind == null &&
-            activeChat.serverChatAssistantId == null &&
-            activeChat.serverChatCharacterId == null;
+            (activeChat.serverChatAssistantKind === null || activeChat.serverChatAssistantKind === undefined) &&
+            (activeChat.serverChatAssistantId === null || activeChat.serverChatAssistantId === undefined) &&
+            (activeChat.serverChatCharacterId === null || activeChat.serverChatCharacterId === undefined);
       if (
         activeChat.serverChatId &&
         !matchesActiveChat &&

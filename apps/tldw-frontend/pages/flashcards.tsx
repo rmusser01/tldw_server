@@ -1,8 +1,6 @@
 import dynamic from "next/dynamic"
-import Head from "next/head"
+import { withPageTitle } from "@web/components/navigation/withPageTitle"
 
 const Flashcards = dynamic(() => import("@/routes/option-flashcards"), { ssr: false })
 
-export default function FlashcardsPage() {
-  return <><Head><title>Flashcards | tldw</title></Head><Flashcards /></>
-}
+export default withPageTitle("Flashcards", Flashcards)

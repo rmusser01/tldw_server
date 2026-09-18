@@ -1,5 +1,5 @@
 import dynamic from "next/dynamic"
-import Head from "next/head"
+import { withPageTitle } from "@web/components/navigation/withPageTitle"
 
 const ServerSettings = dynamic(async () => {
   const { SettingsRoute } = await import("@/routes/settings-route")
@@ -13,6 +13,4 @@ const ServerSettings = dynamic(async () => {
   return { default: Page }
 }, { ssr: false })
 
-export default function ServerSettingsPage() {
-  return <><Head><title>Server Settings | tldw</title></Head><ServerSettings /></>
-}
+export default withPageTitle("Server Settings", ServerSettings)

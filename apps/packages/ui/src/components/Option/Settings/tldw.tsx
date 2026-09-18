@@ -14,6 +14,7 @@ import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { SettingsSkeleton } from "@/components/Common/Settings/SettingsSkeleton"
 import { DEFAULT_TLDW_API_KEY } from "@/services/tldw-server"
 import { apiSend } from "@/services/api-send"
+import { bgRequest } from "@/services/background-proxy"
 import type { PathOrUrl } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useConnectionStore } from "@/store/connection"
@@ -105,24 +106,26 @@ export const TldwSettings = () => {
     setBillingServerUrl(null)
     if (authMode !== 'multi-user' || !isLoggedIn || !serverUrl || isQuickstartWebUiSameOriginServerUrl(serverUrl)) return
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
     let cancelled = false
     void (async () => {
       try {
-        const response = await fetch(`${serverUrl.replace(/\/$/, '')}/openapi.json`, { signal: controller.signal })
-        if (!response.ok) return
-        const spec = await response.json()
+        const spec = await bgRequest<{ paths?: Record<string, { get?: unknown }> }, PathOrUrl>({
+          path: `${serverUrl.replace(/\/$/, '')}/openapi.json` as PathOrUrl,
+          method: "GET",
+          noAuth: true,
+          timeoutMs: 5000,
+          abortSignal: controller.signal,
+          suppressBackendUnavailableEvent: true
+        })
         const supported = ['plans', 'subscription', 'usage', 'invoices'].every(
           (route) => spec?.paths?.[`/api/v1/billing/${route}`]?.get
         )
         if (!cancelled && supported) setBillingServerUrl(serverUrl)
       } catch {
         // Optional billing remains hidden until the server advertises it.
-      } finally {
-        clearTimeout(timeout)
       }
     })()
-    return () => { cancelled = true; clearTimeout(timeout); controller.abort() }
+    return () => { cancelled = true; controller.abort() }
   }, [authMode, isLoggedIn, serverUrl])
 
   // ── Config load ──────────────────────────────────────────────────

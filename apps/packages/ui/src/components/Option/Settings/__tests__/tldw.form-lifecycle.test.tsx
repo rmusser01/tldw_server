@@ -10,7 +10,8 @@ vi.mock("@plasmohq/storage", async () =>
   import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
 )
 
-const mocks = vi.hoisted(() => ({ getConfig: vi.fn(), logout: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getConfig: vi.fn(), logout: vi.fn(), bgRequest: vi.fn() }))
+vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.bgRequest }))
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/services/tldw/TldwApiClient")>(),
   tldwClient: {
@@ -42,6 +43,7 @@ beforeEach(async () => {
   storage = new Storage({ area: "local" })
   await storage.set("tldwConfig", signedIn)
   mocks.getConfig.mockReset().mockResolvedValue(signedIn)
+  mocks.bgRequest.mockReset().mockResolvedValue({ paths: {} })
   mocks.logout.mockReset().mockImplementation(async () => {
     await storage.set("tldwConfig", target)
     mocks.getConfig.mockResolvedValue(target)
@@ -52,6 +54,31 @@ beforeEach(async () => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const mount = () => render(<ConfigProvider theme={{ token: { motion: false } }}><App><TldwSettings /></App></ConfigProvider>)
 const formErrors = (errors: ReturnType<typeof vi.spyOn>) => errors.mock.calls.flat().map(String).filter(line => line.includes("not connected to any Form"))
+
+it("discovers optional billing through the shared transport at the server root", async () => {
+  mount()
+  await screen.findByText("Logged In", { exact: true })
+  await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+    path: `${target.serverUrl}/openapi.json`, method: "GET", noAuth: true, timeoutMs: 5000,
+    abortSignal: expect.any(AbortSignal)
+  })))
+  expect(fetch).not.toHaveBeenCalled()
+  expect(screen.queryByRole("tab", { name: "Billing" })).not.toBeInTheDocument()
+})
+
+it("ignores a delayed billing advertisement after disconnecting the server", async () => {
+  let release!: (value: unknown) => void
+  mocks.bgRequest.mockReturnValue(new Promise(resolve => { release = resolve }))
+  mount()
+  await screen.findByText("Logged In", { exact: true })
+  await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalled())
+  fireEvent.click(await screen.findByRole("button", { name: "Logout", exact: true }))
+  await screen.findByText("Login Required", { exact: true })
+  await act(async () => release({ paths: Object.fromEntries(
+    ["plans", "subscription", "usage", "invoices"].map(route => [`/api/v1/billing/${route}`, { get: {} }])
+  ) }))
+  expect(screen.queryByRole("tab", { name: "Billing" })).not.toBeInTheDocument()
+})
 
 it("loads the actual form before applying async configuration values", async () => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {})

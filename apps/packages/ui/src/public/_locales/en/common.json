@@ -1720,5 +1720,17 @@
   },
   "promptAssist_recipeForgetFailed": {
     "message": "Could not forget this operation. It remains locked; try again."
+  },
+  "help_loadFailed": {
+    "message": "Help could not be loaded. Reconnect, save any edits, then reload the page."
+  },
+  "help_loading": {
+    "message": "Loading help…"
+  },
+  "help_confirmReload": {
+    "message": "Reload this page? Unsaved edits may be lost."
+  },
+  "help_reload": {
+    "message": "Reload page"
   }
 }

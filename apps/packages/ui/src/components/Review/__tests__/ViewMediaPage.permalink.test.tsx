@@ -1,5 +1,5 @@
 import React from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import ViewMediaPage, { MEDIA_STALE_CHECK_INTERVAL_MS } from '../ViewMediaPage'
@@ -390,6 +390,7 @@ const renderMediaPage = (initialEntry: string) => {
 }
 
 describe('ViewMediaPage Stage 3 permalinks', () => {
+  afterEach(() => vi.useRealTimers())
   beforeEach(() => {
     mocks.ownerScope = 'alice-scope'
     mocks.canDelete = true
@@ -455,9 +456,10 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     await waitFor(() => expect(screen.getByTestId('reading-scroller').scrollTop).toBe(160))
     await waitFor(() => expect(mocks.getNavigationResume).toHaveBeenCalled())
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     await act(async () => {
       release(remembered ? { media_id: '1', node_id: 'chapter-1', title: 'Opening', level: 1 } : null)
-      await new Promise(resolve => setTimeout(resolve, 1100))
+      await vi.advanceTimersByTimeAsync(1100)
     })
 
     expect(screen.getByTestId('reading-scroller').scrollTop).toBe(160)
@@ -471,12 +473,14 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     renderMediaPage('/media?id=1')
     await screen.findByRole('button', { name: 'Jump to Opening' })
     const scroller = screen.getByTestId('reading-scroller')
-    await act(async () => { scroller.scrollTop = 90; await new Promise(resolve => setTimeout(resolve, 1100)) })
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    await act(async () => { scroller.scrollTop = 90; await vi.advanceTimersByTimeAsync(1100) })
     expect(mocks.updateReadingProgress).toHaveBeenCalledWith('1', expect.objectContaining({ percentage: 30.51, zoom_level: 100 }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Jump to Opening' }))
-    await waitFor(() => expect(scroller.scrollTop).toBe(0))
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1100)) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(scroller.scrollTop).toBe(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
     expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', expect.objectContaining({ percentage: 0, zoom_level: 100 }))
   })
 
