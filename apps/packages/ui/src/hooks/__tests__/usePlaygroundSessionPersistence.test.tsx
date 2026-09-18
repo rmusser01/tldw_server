@@ -575,7 +575,7 @@ it("restores tab A's selected conversation even after the shared record was repl
 it("preserves the selected native capture when restoring without a local mirror", async () => {
   useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, temporaryChat: false })
   usePlaygroundSessionStore.getState().clearSession()
-  usePlaygroundSessionStore.getState().saveSession({ serverChatId: "native-A", scopeKey: "global" })
+  usePlaygroundSessionStore.getState().saveSession({ serverChatId: "native-A", scopeKey: "global", compareMode: true, compareSelectedModels: ["native session model"] })
   mocks.selection = {
     beginLoad: () => {}, fence: () => () => true, getStoredReference: () => null, getReference: () => null,
     getCurrent: () => ({ capture: { status: "captured" } }),
@@ -585,4 +585,5 @@ it("preserves the selected native capture when restoring without a local mirror"
   await waitFor(() => expect(result.current.sessionScopeReady).toBe(true))
   await act(async () => { await result.current.restoreSession() })
   expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Selected native answer"])
+  expect(useStoreMessageOption.getState()).toMatchObject({ compareMode: true, compareSelectedModels: ["native session model"] })
 })

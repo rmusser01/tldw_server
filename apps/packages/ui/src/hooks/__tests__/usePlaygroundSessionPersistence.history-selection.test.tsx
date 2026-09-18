@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 import { resolveHistorySelection } from "@/utils/history-selection"
 
@@ -110,7 +110,8 @@ const reference = {
   owner_kind: "local"
 }
 function ColdSession() {
-  controller = useHistorySelectionContext()!
+  const selection = useHistorySelectionContext()!
+  React.useLayoutEffect(() => { controller = selection }, [selection])
   const session = usePlaygroundSessionPersistence()
   const started = React.useRef(false)
   const { historyId, serverChatId, messages } = useStoreMessageOption()
@@ -128,9 +129,9 @@ function ColdSession() {
         {messages.map((row) => row.message).join(" / ")}
       </output>
       <HistorySelectionReview
-        selection={controller}
+        selection={selection}
         onBind={() =>
-          void controller.loadConversation({
+          void selection.loadConversation({
             historyId,
             serverChatId,
             bindUnbound: true
@@ -368,4 +369,32 @@ it("does not turn a verified mirror owner mismatch into the unbound read-only fa
   ).toBeNull()
   expect(mocks.link).not.toHaveBeenCalled()
   expect(mocks.recent).not.toHaveBeenCalled()
+})
+
+it.each([true, false])("does not replay stale shared-session comparison over a selected local owner state %s", async ownerMode => {
+  seedBookmark()
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "local-A", historySelectionReference: reference, scopeKey: "current", compareMode: !ownerMode, compareSelectedModels: ["stale"] })
+  useStoreMessageOption.setState({ compareMode: ownerMode, compareSelectedModels: ownerMode ? ["A", "B"] : [] })
+  mount()
+  await waitFor(() => expect(outcome).toBe("restored"))
+  expect(useStoreMessageOption.getState().compareMode).toBe(ownerMode)
+  expect(useStoreMessageOption.getState().compareSelectedModels).toEqual(ownerMode ? ["A", "B"] : [])
+})
+
+it("cancels held selected-local session restore after live owner navigation", async () => {
+  seedBookmark()
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "local-A", historySelectionReference: reference, scopeKey: "current", compareMode: false, compareSelectedModels: ["stale"] })
+  let release!: (value: any) => void
+  mocks.chatData.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  mount()
+  await waitFor(() => expect(mocks.chatData).toHaveBeenCalled())
+  await act(async () => {
+    await controller.loadConversation({ historyId: "local-B" })
+    useStoreMessageOption.setState({ historyId: "local-B", compareMode: true, compareSelectedModels: ["B model"] })
+    release({ historyInfo: { id: "local-A", last_used_prompt: { prompt_content: "stale prompt" } }, messages: [] })
+  })
+  await waitFor(() => expect(outcome).toBe("cancelled"))
+  expect(controller.getCurrent().owner).toMatchObject({ kind: "local", conversation_id: "local-B" })
+  expect(useStoreMessageOption.getState()).toMatchObject({ historyId: "local-B", compareMode: true, compareSelectedModels: ["B model"] })
+  expect(mocks.setPrompt).not.toHaveBeenCalledWith("stale prompt")
 })

@@ -1,4 +1,5 @@
 import React from "react"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
@@ -53,6 +54,7 @@ export interface UsePlaygroundPersistenceDeps {
 // ---------------------------------------------------------------------------
 
 export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
+  const selection = useHistorySelectionContext()
   const {
     isFireFoxPrivateMode,
     isConnectionReady,
@@ -223,7 +225,13 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   )
 
   const handleSaveChatToServer = React.useCallback(async () => {
-    if (serverSaveInFlightRef.current) return
+    const isUnownedDraft = () => {
+      const current = selection?.getCurrent()
+      return !current || (current.status === "idle" && !current.owner && !current.view)
+    }
+    if (serverSaveInFlightRef.current || !isUnownedDraft()) return
+    const selectionCurrent = selection?.fence() || (() => true)
+    const canContinue = () => selectionCurrent() && isUnownedDraft()
     serverSaveInFlightRef.current = true
     try {
       const snapshot = [...historyRef.current]
@@ -248,6 +256,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         return
       }
       await tldwClient.initialize()
+      if (!canContinue()) return
       const firstUser = snapshot.find((m) => m.role === "user")
       const explicitSource =
         serverChatSourceRef.current &&
@@ -278,6 +287,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         source: explicitSource || WEBUI_CHAT_SOURCE
       }
       const created = await tldwClient.createChat(createPayload)
+      if (!canContinue()) return
       const rawId = (created as any)?.id ?? (created as any)?.chat_id ?? created
       const cid = rawId != null ? String(rawId) : ""
       if (!cid) {
@@ -297,6 +307,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       invalidateServerChatHistory()
 
       for (const msg of snapshot) {
+        if (!canContinue()) return
         const content = (msg.content || "").trim()
         if (!content) continue
         const role =
@@ -311,6 +322,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         })
       }
 
+      if (!canContinue()) return
       if (!serverPersistenceHintSeenRef.current) {
         serverPersistenceHintSeenRef.current = true
         setServerPersistenceHintSeen(true)
@@ -325,6 +337,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       serverSaveInFlightRef.current = false
     }
   }, [
+    selection,
     invalidateServerChatHistory,
     isConnectionReady,
     notificationApi,

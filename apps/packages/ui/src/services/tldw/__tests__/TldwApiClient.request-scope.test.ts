@@ -221,3 +221,22 @@ describe('H1 native owner scope', () => {
     }
   })
 })
+
+it.each([['composed', TldwApiClient], ['base', TldwApiClientBase]] as const)(
+  '%s streaming accepts frozen selected-history payload without mutating its request',
+  async (_name, Client) => {
+    mocks.bgStream.mockImplementation(async function* () {
+      yield '{"choices":[{"delta":{"content":"saved reply"}}]}'
+    })
+    const body = Object.freeze({
+      model: 'h1-model',
+      stream: false,
+      messages: [{ role: 'user' as const, content: 'selected input' }]
+    })
+    const chunks = []
+    for await (const chunk of new Client().streamChatCompletion(body, { requestScope })) chunks.push(chunk)
+    expect(chunks).toEqual([{ choices: [{ delta: { content: 'saved reply' } }] }])
+    expect(body.stream).toBe(false)
+    expect(mocks.bgStream.mock.calls.at(-1)?.[0].body).toEqual({ ...body, stream: true })
+  }
+)

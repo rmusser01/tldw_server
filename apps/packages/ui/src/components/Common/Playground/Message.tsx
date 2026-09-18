@@ -817,6 +817,7 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const resolvedRole = props.role ?? (props.isBot ? "assistant" : "user")
   const isSystemMessage = resolvedRole === "system"
+  const renderUserBubble = isUserChatBubble && !props.isBot && !isSystemMessage && !showCharacterPortraits
   const speakerMatchesCharacterIdentity =
     props.speakerCharacterId == null ||
     !props.characterIdentity?.id ||
@@ -947,7 +948,7 @@ export const PlaygroundMessage = (props: Props) => {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    if (!props.isBot && isUserChatBubble) return
+    if (renderUserBubble) return
 
     const handleEditMessage = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string }>).detail
@@ -965,7 +966,7 @@ export const PlaygroundMessage = (props: Props) => {
     return () => {
       window.removeEventListener(EDIT_MESSAGE_EVENT, handleEditMessage)
     }
-  }, [isUserChatBubble, props.isBot, props.messageId, props.serverMessageId])
+  }, [renderUserBubble, props.isBot, props.messageId, props.serverMessageId])
 
   const {
     thumb,
@@ -1897,12 +1898,7 @@ export const PlaygroundMessage = (props: Props) => {
     total: props.totalMessages
   }) as string
 
-  if (
-    isUserChatBubble &&
-    !props.isBot &&
-    !isSystemMessage &&
-    !showCharacterPortraits
-  ) {
+  if (renderUserBubble) {
     return (
       <PlaygroundUserMessageBubble
         {...props}

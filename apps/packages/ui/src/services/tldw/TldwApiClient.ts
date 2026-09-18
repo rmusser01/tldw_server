@@ -3288,7 +3288,7 @@ export class TldwApiClientBase {
   }
 
   async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
-    request.stream = true
+    request = { ...request, stream: true }
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",

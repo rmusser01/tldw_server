@@ -1,5 +1,6 @@
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
+import { VirtualChatTimeline, type ChatTimelineNavigation } from "./VirtualChatTimeline"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -92,6 +93,8 @@ const LazyChatGreetingPicker = React.lazy(() =>
 )
 
 type PlaygroundChatProps = {
+  scrollParentRef?: React.RefObject<HTMLDivElement>
+  navigationRef?: React.MutableRefObject<ChatTimelineNavigation | null>
   showStarterDeck?: boolean
   searchQuery?: string
   matchedMessageIndices?: Set<number>
@@ -146,6 +149,8 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
 }
 
 export const PlaygroundChat = ({
+  scrollParentRef,
+  navigationRef,
   showStarterDeck = true,
   searchQuery,
   matchedMessageIndices,
@@ -363,6 +368,17 @@ export const PlaygroundChat = ({
     }
   }, [linkedResearchRunsQuery.errorUpdatedAt, linkedResearchRunsQuery.isError])
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
+  const messageBlocks = React.useMemo(() => {
+    const indices = new Map<number, number>()
+    blocks.forEach((block, index) => {
+      for (const messageIndex of block.kind === "single" ? [block.index] : [block.userIndex, ...block.assistantIndices]) indices.set(messageIndex, index)
+    })
+    return indices
+  }, [blocks])
+  const blockKey = React.useCallback((index: number) => {
+    const block = blocks[index]
+    return block.kind === "compare" ? "compare:" + block.clusterId : "message:" + (messages[block.index].id ?? messages[block.index].serverMessageId ?? block.index)
+  }, [blocks, messages])
   const linkedResearchRuns = React.useMemo(() => {
     if (!linkedResearchRunsEnabled || !linkedResearchRunsQuery.isSuccess) {
       return []
@@ -1370,7 +1386,7 @@ export const PlaygroundChat = ({
             onFollowUp={onPrepareResearchFollowUp}
           />
         </React.Suspense>
-        {blocks.map((block, blockIndex) => {
+        <VirtualChatTimeline blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
             const previousUserMessage = getPreviousUserMessage(block.index)
@@ -1558,7 +1574,7 @@ export const PlaygroundChat = ({
               />
             </React.Suspense>
           )
-        })}
+        }} />
       </div>
     </>
   )

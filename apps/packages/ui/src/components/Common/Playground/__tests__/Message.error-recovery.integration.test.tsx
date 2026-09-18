@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
@@ -571,4 +571,11 @@ describe("PlaygroundMessage error recovery integration", () => {
       messageId: "image-assistant"
     })
   })
+})
+
+
+it('opens a user editor from timeline navigation when portrait cards own rendering', () => {
+  render(<PlaygroundMessage {...baseProps} isBot={false} role="user" messageId="timeline-user" message="Selected user row" />)
+  act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'timeline-user' } })))
+  expect(screen.getByTestId('edit-form')).toBeInTheDocument()
 })

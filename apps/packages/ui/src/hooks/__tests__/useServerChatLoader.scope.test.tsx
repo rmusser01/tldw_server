@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
     renderedMessages: [] as any[],
     getHistoriesWithMetadata: vi.fn(),
     initialize: vi.fn(),
+    getChat: vi.fn(),
     listChatMessages: vi.fn(),
     saveMessage: vi.fn(),
     setHistory: vi.fn(),
@@ -78,6 +79,7 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mocks.initialize,
+    getChat: mocks.getChat,
     listChatMessages: mocks.listChatMessages
   }
 }))
@@ -269,6 +271,42 @@ it("real qualified ordinary legacy controller lets the loader hydrate settings b
   expect(mounted.result.current.status).toBe("legacy_review_required")
   expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", scope: undefined, allowScratchFallback: false})
   expect(mocks.listChatMessages).toHaveBeenCalledOnce()
+  mounted.unmount()
+  vi.useRealTimers()
+})
+
+it.each(['scope', 'metadata missing', 'messages missing', 'late scope'] as const)('invalidates only the matching H1 owner after %s rejection', async scenario => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = 'rejected'
+  mocks.store.serverChatMetaLoaded = scenario === 'messages missing'
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.temporaryChat = false
+  mocks.renderedMessages = []
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.syncChatSettingsForServerChat.mockResolvedValue(null)
+  const response = deferred<any>()
+  mocks.getChat.mockImplementation(() => scenario === 'late scope' ? response.promise : scenario === 'metadata missing' ? Promise.reject(Object.assign(new Error('not found'), {status: 404})) : Promise.resolve({id: 'rejected', scope_type: 'workspace', workspace_id: 'foreign'}))
+  mocks.listChatMessages.mockImplementation(() => scenario === 'messages missing' ? Promise.reject(Object.assign(new Error('not found'), {status: 404})) : Promise.resolve([]))
+  const notification = {error: vi.fn()}
+  const mounted = renderHook(() => {
+    const control = useHistorySelection()
+    mocks.selection = control
+    useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification, t: ((key: string) => key) as any})
+    return control
+  })
+  await act(async () => { await mounted.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'rejected', validate_lease: () => true} as any) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  if (scenario === 'late scope') {
+    await act(async () => { await mounted.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'later', validate_lease: () => true} as any); response.resolve({id: 'rejected', scope_type: 'workspace', workspace_id: 'foreign'}) })
+    expect(mounted.result.current.getCurrent().owner).toMatchObject({kind: 'native', conversation_id: 'later'})
+    expect(mocks.store.setServerChatLoadState).not.toHaveBeenCalledWith('failed')
+  } else {
+    expect(mounted.result.current.getCurrent().owner).toEqual({kind: 'unavailable', code: scenario === 'scope' ? 'server_chat_scope_mismatch' : 'server_chat_not_found'})
+    expect(mocks.store.setServerChatLoadState).toHaveBeenCalledWith('failed')
+  }
+  expect(mocks.store.setServerChatId).not.toHaveBeenCalledWith(null)
   mounted.unmount()
   vi.useRealTimers()
 })

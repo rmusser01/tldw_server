@@ -1,3 +1,4 @@
+import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
@@ -831,7 +832,7 @@ const SidepanelChatContent = () => {
   const applySnapshot = React.useCallback(
     (snapshot: SidepanelChatSnapshot) => {
       historySelection.activate(useSidepanelChatTabsStore.getState().activeTabId || "initial")
-      void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference)
+      void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference).then(loaded => { if (loaded) return restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages) }) }).catch(error => console.warn("Failed to restore readable comparison", error))
       setHistory(snapshot.history || [])
       setMessages(snapshot.messages || [])
       setHistoryId(snapshot.historyId ?? null)
@@ -2492,7 +2493,9 @@ const SidepanelChatContent = () => {
               </div>
             ) : (
               <>
-              <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+              <div className={historySelection.status === "idle" ? undefined : "pt-12"}>
+                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+              </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
                 searchQuery={sidebarSearchQuery}

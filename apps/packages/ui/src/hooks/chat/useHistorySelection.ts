@@ -859,9 +859,9 @@ export function useHistorySelection(
       chatId: string | null,
       scope?: ChatScope
     ): "ordinary" | "pending" | "fork" => {
-      if (!chatId) return "ordinary"
       const current = live.current
       const owner = current.owner
+      if (!chatId) return owner?.kind === "native" || (owner?.kind === "unavailable" && ["server_chat_scope_mismatch", "server_chat_not_found"].includes(owner.code)) ? "pending" : "ordinary"
       if (
         !current.settingsQualified ||
         owner?.kind !== "native" ||

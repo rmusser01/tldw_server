@@ -4,6 +4,7 @@ import { formatSelectedHistory } from "@/db/dexie/helpers";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
+import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
@@ -97,7 +98,7 @@ import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useDarkMode } from "@/hooks/useDarkmode";
-import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
+import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
 import {
@@ -698,9 +699,6 @@ const PlaygroundContent = () => {
   const feedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const timelineActionRetryTimeoutRef = React.useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
   const initializePlaygroundCallbackRef = React.useRef<
     () => Promise<void>
@@ -1353,9 +1351,6 @@ const PlaygroundContent = () => {
       if (feedbackTimerRef.current) {
         clearTimeout(feedbackTimerRef.current);
       }
-      if (timelineActionRetryTimeoutRef.current) {
-        clearTimeout(timelineActionRetryTimeoutRef.current);
-      }
       pendingTimelineActionRef.current = null;
     };
   }, []);
@@ -1716,6 +1711,9 @@ const PlaygroundContent = () => {
       if (loaded && historySelection.getCurrent().capture) {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
+        const handoffCurrent = historySelection.fence();
+        await restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages); });
+        if (!handoffCurrent()) return;
         // The frozen address initializes this writer once. Reload then uses its
         // own saved address, including the original pending-confirmation pointer.
         const url = new URL(window.location.href);
@@ -2230,31 +2228,37 @@ const PlaygroundContent = () => {
     [messages],
   );
 
+  const chatTimelineRef = React.useRef<ChatTimelineNavigation | null>(null);
   const scrollToMessage = React.useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
+      const current = historySelection.fence();
+      const index = findMessageIndex(messageId);
+      if (index < 0 || (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index))) return false;
       const container = containerRef.current;
-      if (!container) return false;
+      if (!current() || !container) return false;
       const target = container.querySelector<HTMLElement>(
         `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
       return true;
     },
-    [containerRef],
+    [containerRef, findMessageIndex, historySelection, messages.length],
   );
   const scrollToMessageIndex = React.useCallback(
-    (index: number) => {
+    async (index: number) => {
+      const current = historySelection.fence();
+      if (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index)) return false;
       const container = containerRef.current;
-      if (!container) return false;
+      if (!current() || !container) return false;
       const target = container.querySelector<HTMLElement>(
-        `[data-index="${index}"]`,
+        `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
       target.scrollIntoView({ block: "center", behavior: "smooth" });
       return true;
     },
-    [containerRef],
+    [containerRef, historySelection],
   );
 
   const dispatchEditMessage = React.useCallback((messageId: string) => {
@@ -2280,36 +2284,20 @@ const PlaygroundContent = () => {
 
       if (!detail.messageId) return true;
 
-      const scrolled = scrollToMessage(detail.messageId);
-      if (!scrolled) {
-        if (!containerRef.current) return false;
-        if (timelineActionRetryTimeoutRef.current) {
-          clearTimeout(timelineActionRetryTimeoutRef.current);
-        }
-        timelineActionRetryTimeoutRef.current = setTimeout(() => {
-          timelineActionRetryTimeoutRef.current = null;
-          const retry = scrollToMessage(detail.messageId);
-          if (retry && detail.action === "edit") {
-            dispatchEditMessage(detail.messageId);
-          }
-        }, 80);
-        return true;
-      }
-
-      if (detail.action === "edit") {
-        dispatchEditMessage(detail.messageId);
-      }
+      const current = historySelection.fence();
+      void scrollToMessage(detail.messageId).then(scrolled => {
+        if (current() && scrolled && detail.action === "edit") dispatchEditMessage(detail.messageId!);
+      });
       return true;
     },
     [
-      containerRef,
       createChatBranch,
       dispatchEditMessage,
       findMessageIndex,
       historyId,
+      historySelection,
       messages.length,
       scrollToMessage,
-      timelineActionRetryTimeoutRef,
     ],
   );
 
@@ -4261,6 +4249,8 @@ const PlaygroundContent = () => {
                 <ChatErrorBoundary>
                   <HistorySelectionReview selection={historySelection} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
                   <PlaygroundChat
+                    scrollParentRef={containerRef}
+                    navigationRef={chatTimelineRef}
                     showStarterDeck={showStarterDeck}
                     searchQuery={threadSearchQuery.trim()}
                     matchedMessageIndices={threadSearchMatchSet}

@@ -749,15 +749,30 @@ export const useServerChatLoader = ({
         loaded: false
       }
 
+      const rejectCurrentOwner = async (code: string) => {
+        if (!canCommitCurrentLoad()) return
+        const control = selectionRef.current
+        if (!control) {
+          setServerChatId(null)
+          return
+        }
+        const owner = control.getCurrent().owner
+        if (owner?.kind !== "native" || owner.conversation_id !== serverChatId) return
+        setServerChatLoadState("failed")
+        setServerChatLoadError(code)
+        await control.open({ kind: "unavailable", code })
+      }
+
       const loadServerChat = async () => {
         let didLoadSuccessfully = false
         try {
           setIsLoading(true)
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
-          if (selectionRef.current?.getCurrent().error === "unbound_server_mirror") {
+          const selectionState = selectionRef.current?.getCurrent()
+          if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
             setServerChatLoadState("failed")
-            setServerChatLoadError("unbound_server_mirror")
+            setServerChatLoadError(selectionState.error || "history_owner_unavailable")
             return
           }
           const control = selectionRef.current
@@ -799,7 +814,7 @@ export const useServerChatLoader = ({
                 expectedScope: scope || { type: "global" }
               })
               if (!validatedServerChatId) {
-                setServerChatId(null)
+                await rejectCurrentOwner("server_chat_scope_mismatch")
                 return
               }
               const meta = chat as unknown as Record<string, unknown>
@@ -843,7 +858,7 @@ export const useServerChatLoader = ({
               setServerChatMetaLoaded(true)
             } catch (error) {
               if (isMissingServerChatReferenceError(error) && canCommitCurrentLoad()) {
-                setServerChatId(null)
+                await rejectCurrentOwner("server_chat_not_found")
                 return
               }
               // ignore metadata failures; still try to load messages
@@ -1158,7 +1173,7 @@ export const useServerChatLoader = ({
               ? true
               : message.toLowerCase().includes("abort")
           if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
-            setServerChatId(null)
+            await rejectCurrentOwner("server_chat_not_found")
             return
           }
           if (!isAbort && canCommitCurrentLoad()) {

@@ -139,3 +139,28 @@ export function useLoadLocalConversation(
     ]
   )
 }
+
+/** Read-only comparison presentation; this never upgrades an unsupported send capture. */
+export async function restoreReadableLocalComparison(
+  controller: import('@/hooks/chat/useHistorySelection').HistorySelectionController,
+  display: (value: { history: ReturnType<typeof formatToChatHistory>; messages: ReturnType<typeof formatToMessage> }) => void,
+  supplied?: Awaited<ReturnType<typeof import('@/db/dexie/helpers').getFullChatData>>
+): Promise<boolean> {
+  const initial = controller.getCurrent()
+  const owner = initial.owner
+  const view = initial.view
+  if (owner?.kind !== 'local' || !view || initial.error !== 'unsupported_comparison_history' || initial.capture?.snapshot.owner_key !== owner.owner_key) return false
+  const current = controller.fence()
+  const { getFullChatData } = await import('@/db/dexie/helpers')
+  const data = supplied === undefined ? await getFullChatData(owner.conversation_id) : supplied
+  if (!current() || !data || data.historyInfo.id !== owner.conversation_id) return false
+  const { getLocalHistoryOwner } = await import('@/db/dexie/history-selection')
+  let verified
+  try { verified = await getLocalHistoryOwner(owner.conversation_id) } catch (error) {
+    console.warn("Failed to verify readable comparison owner", error)
+    return false
+  }
+  if (!current() || controller.getCurrent().owner !== owner || controller.getCurrent().view !== view || verified.owner_key !== owner.owner_key || verified.profile_id !== owner.profile_id) return false
+  display({ history: formatToChatHistory(data.messages), messages: formatToMessage(data.messages) })
+  return true
+}

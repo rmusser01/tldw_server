@@ -1,4 +1,3 @@
-import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
@@ -60,7 +59,7 @@ export const SidePanelBody = ({
   )
   const uiMode = useUiModeStore((state) => state.mode)
   const scrollAnchorRef = React.useRef<number | null>(null)
-  const topPaddingClass = "pt-12"
+  const topPaddingClass = historySelection && historySelection.status !== "idle" ? "pt-4" : "pt-12"
   const stableHistoryId =
     temporaryChat || historyId === "temp" ? null : historyId
   const [conversationInstanceId, setConversationInstanceId] = React.useState(
@@ -258,7 +257,6 @@ export const SidePanelBody = ({
 
   return (
     <>
-      {historySelection && <HistorySelectionReview selection={historySelection} />}
       <div
         role="log"
         aria-live="polite"

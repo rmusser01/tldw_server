@@ -1,3 +1,4 @@
+import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -590,8 +591,13 @@ export function usePlaygroundSessionPersistence() {
             useStoreMessageOption.getState().setContextFiles(files)
             if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
             if (selected.getCurrent().capture?.status !== "captured") {
-              setHistory(formatToChatHistory(chatData.messages))
-              setMessages(formatToMessage(chatData.messages))
+              if (selected.getCurrent().error === "unsupported_comparison_history") {
+                await restoreReadableLocalComparison(selected, display => { setHistory(display.history); setMessages(display.messages) }, chatData)
+                if (!isCurrentRestore()) return "cancelled"
+              } else {
+                setHistory(formatToChatHistory(chatData.messages))
+                setMessages(formatToMessage(chatData.messages))
+              }
             }
           }
         }
@@ -735,9 +741,14 @@ export function usePlaygroundSessionPersistence() {
       }
       setChatMode(sessionStore.chatMode)
       setWebSearch(sessionStore.webSearch)
-      setCompareMode(sessionStore.compareMode)
-      if (sessionStore.compareSelectedModels.length > 0) {
-        setCompareSelectedModels(sessionStore.compareSelectedModels)
+      const restoredOwner = selectionRef.current?.getCurrent().owner
+      // Local H1 comparison is restored from its per-conversation compareStates.
+      // A shared session snapshot can predate that asynchronous owner hydration.
+      if (restoredOwner?.kind !== "local" || restoredOwner.conversation_id !== savedHistoryId) {
+        setCompareMode(sessionStore.compareMode)
+        if (sessionStore.compareSelectedModels.length > 0) {
+          setCompareSelectedModels(sessionStore.compareSelectedModels)
+        }
       }
 
       // Restore RAG settings

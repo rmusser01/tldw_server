@@ -146,3 +146,31 @@ it.each(["ordinary", "fork"])(
     expect(controller.result.current.status).toBe("legacy_review_required")
   }
 )
+
+it('keeps null display IDs pending for a native owner and permits ordinary settings only after reset', async () => {
+  const controller = renderHook(() => useHistorySelection())
+  await act(async () => { await controller.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'child', validate_lease: () => true} as any) })
+  mocks.controller = controller.result.current
+  const settings = renderHook(() => useChatSettingsRecord({historyId: 'mirror', serverChatId: null}))
+  await expect(settings.result.current.updateSettings({authorNote: 'must not copy'})).rejects.toThrow('fork_settings_owner_unavailable')
+  expect(mocks.write).not.toHaveBeenCalled()
+  expect(mocks.read).not.toHaveBeenCalled()
+  await act(async () => { await controller.result.current.open({kind: 'unavailable', code: 'server_chat_scope_mismatch'}) })
+  mocks.controller = controller.result.current
+  settings.rerender()
+  await expect(settings.result.current.updateSettings({authorNote: 'still blocked'})).rejects.toThrow('fork_settings_owner_unavailable')
+  act(() => controller.result.current.reset())
+  mocks.controller = controller.result.current
+  settings.rerender()
+  await act(async () => { await settings.result.current.updateSettings({authorNote: 'fresh draft'}) })
+  expect(mocks.write).toHaveBeenCalledWith({historyId: 'mirror', serverChatId: null, patch: {authorNote: 'fresh draft'}})
+})
+
+it('preserves ordinary settings for temporary history capability rejection', async () => {
+  const controller = renderHook(() => useHistorySelection())
+  await act(async () => { await controller.result.current.open({kind: 'unavailable', code: 'temporary_history_unavailable'}) })
+  mocks.controller = controller.result.current
+  const settings = renderHook(() => useChatSettingsRecord({historyId: null, serverChatId: null}))
+  await act(async () => { await settings.result.current.updateSettings({authorNote: 'temporary settings'}) })
+  expect(mocks.write).toHaveBeenCalledWith({historyId: null, serverChatId: null, patch: {authorNote: 'temporary settings'}})
+})

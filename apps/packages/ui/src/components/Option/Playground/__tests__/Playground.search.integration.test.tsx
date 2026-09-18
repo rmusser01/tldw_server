@@ -16,6 +16,7 @@ import {
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
 const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
+const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
 const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
@@ -178,12 +179,14 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: React.forwardRef(function MockPlaygroundChat(
     props: {
+      navigationRef?: React.MutableRefObject<any>
       searchQuery?: string
       matchedMessageIndices?: Set<number>
       activeSearchMessageIndex?: number | null
     },
     _ref
   ) {
+    React.useEffect(() => { if (props.navigationRef && timelineReveal.current) props.navigationRef.current = { reveal: timelineReveal.current } }, [props.navigationRef])
     const selection = useHistorySelectionContext()
     if (h1.enabled) h1.controller = selection
     return (
@@ -205,7 +208,10 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => h1.enabled ? { ...messageOptionState.value, ...useStoreMessageOption() } : messageOptionState.value
+  useMessageOption: () => {
+    const store = useStoreMessageOption()
+    return h1.enabled ? { ...messageOptionState.value, ...store } : messageOptionState.value
+  }
 }))
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", async (importOriginal) => {
@@ -308,7 +314,8 @@ vi.mock("@/services/chat-settings", () => ({
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
-  useLoadLocalConversation: () => loadLocalConversationMock
+  useLoadLocalConversation: () => loadLocalConversationMock,
+  restoreReadableLocalComparison: vi.fn(async () => false)
 }))
 
 vi.mock("../playground-shortcuts", () => ({
@@ -342,6 +349,7 @@ describe("Playground thread search integration", () => {
     h1.confirm.mockClear()
     h1.enabled = false
     forkPresentation.controller = null
+    timelineReveal.current = null
     h1.legacyNative = false
     forkPresentation.mode = null
     forkPresentation.settings = null
@@ -407,6 +415,54 @@ describe("Playground thread search integration", () => {
     await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: "history-1", serverChatId: "chat-1"}))
     expect(actual.result.current.status).toBe("legacy_review_required")
     expect(h1.confirm).not.toHaveBeenCalled()
+  })
+
+  it("does not scroll or edit after a held reveal outlives the initiating owner", async () => {
+    const actual = renderHook(() => useHistorySelection())
+    forkPresentation.controller = actual.result.current
+    let release!: (value: boolean) => void
+    const reveal = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+    timelineReveal.current = reveal
+    const edit = vi.fn()
+    window.addEventListener("tldw:edit-message", edit)
+    const target = document.createElement("div")
+    target.dataset.messageId = "m-2"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    smartScrollState.value.containerRef.current!.append(target)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:timeline-action", { detail: {
+      action: "edit", historyId: "history-1", messageId: "m-2"
+    } })))
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    act(() => actual.result.current.reset())
+    await act(async () => { release(true); await Promise.resolve() })
+    expect(scroll).not.toHaveBeenCalled()
+    expect(edit).not.toHaveBeenCalled()
+    window.removeEventListener("tldw:edit-message", edit)
+    page.unmount()
+  })
+
+  it("does not scroll an indexed search result after a held reveal outlives its owner", async () => {
+    const actual = renderHook(() => useHistorySelection())
+    forkPresentation.controller = actual.result.current
+    let release!: (value: boolean) => void
+    const reveal = vi.fn(() => new Promise<boolean>(resolve => { release = resolve }))
+    timelineReveal.current = reveal
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    smartScrollState.value.containerRef.current!.append(target)
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+    fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), { target: { value: "beta" } })
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    act(() => actual.result.current.reset())
+    await act(async () => { release(true); await Promise.resolve() })
+    expect(scroll).not.toHaveBeenCalled()
+    page.unmount()
   })
 
   it("forks timeline messages using stable IDs rather than rendered positions", async () => {
