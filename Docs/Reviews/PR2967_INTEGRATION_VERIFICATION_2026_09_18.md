@@ -123,3 +123,13 @@ Publication checkpoint: all reviewed source fixes are pushed at 38b686f0b2. All 
 On 4752bbe5aa, frontend shard 4 reports three failures in the existing cookie/logout Billing discovery tests; 445 other shard cases pass. The same three failures reproduce locally (30 passing controls). The fixtures supply JSON bodies but their synthetic Response objects default to text/plain. The real shared request transport correctly uses Content-Type to choose JSON parsing; the actual retained API returns /openapi.json as application/json.
 
 Seven fixture responses now supply that real Content-Type. No production code, assertion, timeout, cancellation or transport mock changes. All 33 cookie/logout cases and nine form lifecycle cases pass on Node 20.20.2. Independent source review confirms the correction preserves the positive/negative, same-origin, timeout and stale-response controls. Earlier failures remain retained. Final hosted CI must rerun on the updated commit. This is a test-fixture correction, not an additional native UAT product finding.
+
+
+## Verified merge
+
+Merged PR2967 normally into dev at `3cff7962721a60b768464221c1f7fe2a8b25e4d5` on 2026-09-18T21:06:54Z. All seven required gates pass; all eight frontend shards pass. Final hosted authentication lifecycles report 3 WebUI passes, 3 extension passes and 1 cookie pass. All 14 Qodo threads are resolved. The merge tree exactly equals tested head 35e46b7a14. Generated Playwright artifacts remain excluded. UAT261 and the next full fresh-install matrix are not certified by this merge.
+
+
+## First post-merge UAT result
+
+The original PostgreSQL single-user TestBot was checked first on the ordinary merged runtime, preserving its profile, configuration, official fixture holder, card and selected model. One browser completion submission returned and saved `BEEP BOOP` without the required final period. Normal reload preserved exactly one user and one assistant row. Independent evidence review confirms this bounded result, no Retry and no settings change. UAT261 remains open; no application cause or provider reliability claim is established. The requester explicitly authorized continuing the full fresh matrix with261 open. See the [current matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md). No additional production code changed in this checkpoint; Bandit is not applicable to these documentation and JavaScript-only UAT artifacts.

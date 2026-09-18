@@ -12,7 +12,7 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 
 ## Mandatory entry gate for another full UAT
 
-**Current sequence (2026-09-18 UTC): merge PR2967, then resume from261.** The user explicitly requested this order. The [running tracker](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md) remains authoritative:277 findings,276 verified and UAT261 open. Its exact-output criterion is unchanged. Complete CI, review and repository merge requirements under [TASK13260.219's integration plan](IMPLEMENTATION_PLAN_pr2967_merge_and_uat_resume.md), then begin the resumed UAT with261 before continuing the full fresh SQLite/PostgreSQL single-user/multi-user48-outcome scope. Historical preparation releases below do not constitute current test acceptance. The next full matrix has not started.
+**Current gate (2026-09-18 UTC): full matrix RELEASED with UAT261 explicitly open.** PR2967 is verified merged at `3cff7962721a60b768464221c1f7fe2a8b25e4d5`. The first resumed original PostgreSQL single-user TestBot call completed/persisted/reloaded but omitted the exact criterion final period. The requester explicitly answered “Continue the matrix; keep UAT261 open.” The running tracker has282 findings,281verified and261open. Execute the unchanged12 named journeys across fresh SQLite/PostgreSQL × single/multi-user profiles, including actual image attachment, at that frozen merged revision. Keep every failure; no criterion relaxation or full acceptance is implied. Current outcomes: [post-merge matrix](Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 The checkpoints below are historical and do not override that current gate.
 

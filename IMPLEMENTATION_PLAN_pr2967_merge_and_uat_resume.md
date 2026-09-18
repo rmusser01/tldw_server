@@ -16,7 +16,7 @@ User requested removing excessive generated Playwright evidence from the PR. The
 **Goal:** Fix confirmed failures with causal evidence and minimal changes.
 **Success Criteria:** Required CI passes on the reviewed candidate; substantive review findings resolved; associated tasks and running tracker current; no bypass of hooks, tests or branch protection.
 **Tests:** Reproduce failing tests, retain baseline comparisons where needed, run relevant package/backend suites and actual official-fixture PostgreSQL controls for database changes. Run scoped lint/security checks and final candidate CI.
-**Status:** In Progress.
+**Status:** Complete.
 
 Generated evidence removal is committed and pushed at `6bc0b1c13368d241461c35257a2a322b67f89b12`. Confirmed integration defects are World Book PostgreSQL ownership (278), rejected Chat Retry connection cleanup (279), and World Book secondary operations/LIKE placeholder conversion (280). Retry has independent review and 110 passing focused tests; World Book verification is expanding to RAG and conversation consumers found during review. CI repairs include realistic frontend fixtures, stable OpenAPI dependency/schema generation, ingestion opt-out, backend shard assignment, onboarding and extension persistence fixtures. Final candidate CI and the human-authored Change summary remain required.
 
@@ -28,7 +28,7 @@ At fa50b25ca4, final hosted extension acceptance passes36 scenarios with zero sk
 **Goal:** Integrate the verified repair branch into dev.
 **Success Criteria:** PR description represents final scope and261 limitation; human-requester Change summary required by repository policy is present; PR ready and required checks/review clear; normal merge succeeds and remote merge commit verified.
 **Tests:** Fresh PR status/head/base/check review immediately before merge; inspect remote merged state afterward.
-**Status:** In Progress.
+**Status:** Complete.
 
 Requester checkpoint2026-09-18: the user supplied their own Change summary and explicitly requested latest-dev rebase, remediation of all Qodo findings/comments, then merge. The exact summary is published in PR2967. Fresh origin/dev remains59049e094e0845a4611ea725ae19b7c1754ea709. Rebase replayed327 non-merge commits, preserving the previous8eca6 head in codex/pr2967-before-rebase-20260918. Historical tracker/task conflicts retain their accepted records; the original cycle3 plan detail is restored. Application/test files match the pre-rebase candidate. Generated output/playwright files remain excluded and their local archive is preserved. Before pushing, integrate and verify the final CI fixture correction below; then mark ready for Qodo review and address every finding before normal merge.
 
@@ -38,7 +38,7 @@ At8eca6, all eight frontend unit shards pass; shard2 has31 frontend and563 UI te
 **Goal:** Continue the original UAT → review → fix loop on the integrated code.
 **Success Criteria:** First resumed scenario is original TestBot character flow, all outcomes retained; subsequent fresh four-configuration workflow matrix proceeds with261 still open until genuinely resolved. No green-only retries or acceptance weakening.
 **Tests:** Characters → TestBot → Chat, exact public question and instruction, real completion/canonical reload; then the retained twelve-row protocol across SQLite/PostgreSQL and single/multi-user setups, including actual image attachment.
-**Status:** Not Started.
+**Status:** In Progress.
 
 The first corrected local browser run passes device and legacy persistence but fails session readiness after the unchanged15-second wait, with retries0. Thus the original weak readiness check does not explain the full failure. Retain that failed attempt and trace actual save/storage behavior before another candidate. Local evidence: .tmp/pr2967-merge-20260918/manual-api-key-e2e/. The rebased branch may be reviewed by Qodo while this known gate is diagnosed; it is not merge-ready.
 
@@ -63,3 +63,11 @@ Source repair is complete locally. Publication, individual Qodo replies and fina
 
 
 Publication checkpoint: all reviewed source fixes are pushed at 38b686f0b2. All 14 Qodo threads are resolved, and the updated review reports zero open bugs, rule violations or cross-repo conflicts. Individual replies include fix commits and verification evidence. Final required hosted CI remains pending.
+
+
+## Verified merge and UAT resumption
+
+PR2967 merged normally at 2026-09-18T21:06:54Z as `3cff7962721a60b768464221c1f7fe2a8b25e4d5`, with exact tree parity to tested head 35e46b7a14. All required checks and eight frontend shards pass; actual WebUI, extension and cookie lifecycle results are 3, 3 and 1 passes respectively. All 14 Qodo threads are resolved. The new `codex/postmerge-uat-20260918` branch starts at this merged dev revision. Targeted preparation preserves the original PostgreSQL single-user TestBot profile and controls. One exact original question followed by canonical reload is first; the full fresh matrix remains pending.
+
+
+Post-merge resumption checkpoint: one original PG single-user TestBot submission completed, persisted200 and reloaded as exactly two canonical rows. Its final `BEEP BOOP` lacks the required period, so261 remains open. Independent review confirms the request count, unchanged card/model/profile and visible/canonical agreement; it makes no inference about uncaptured internal provider inputs. The requester explicitly authorized continuing the full matrix with261 open. TASK13260.219 merge/resumption acceptance is complete; parent TASK13260 continues Stage4 through the [fresh post-merge matrix](Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
