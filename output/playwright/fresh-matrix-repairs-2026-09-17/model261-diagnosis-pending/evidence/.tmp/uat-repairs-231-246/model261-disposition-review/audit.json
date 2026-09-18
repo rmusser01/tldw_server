@@ -1,0 +1,154 @@
+{
+  "task": "TASK13260.203 UAT261 read-only disposition review",
+  "verdict": "DISPOSITION: no application defect established; task remains open pending a causal boundary",
+  "checks": [
+    {
+      "name": "Maintained journey creates a timestamp-named character",
+      "pass": true
+    },
+    {
+      "name": "Maintained journey sends a distinct description field",
+      "pass": true
+    },
+    {
+      "name": "Maintained journey exercises library selection and complete-v2 streaming",
+      "pass": true
+    },
+    {
+      "name": "Maintained journey only requires successful completion status, not exact canonical answer",
+      "pass": true
+    },
+    {
+      "name": "Tagged UAT261 helper opens existing decorated card and requires a fresh conversation",
+      "pass": true
+    },
+    {
+      "name": "Default prompt builder makes character name a prompt input before character fields",
+      "pass": true
+    },
+    {
+      "name": "Complete-v2 builds character context then appends the generic emote instruction",
+      "pass": true
+    },
+    {
+      "name": "Retained source record explicitly withholds outbound provider prompt/messages",
+      "pass": true
+    },
+    {
+      "name": "UAT261 record retains both original deviation and later no-final-answer outcome",
+      "pass": true
+    },
+    {
+      "name": "Same tagged-card sequence contains an exact retry child final without exposing reasoning",
+      "pass": true
+    },
+    {
+      "name": "Original stale parent projection is distinct and records no final answer",
+      "pass": true
+    },
+    {
+      "name": "Independent UAT246 review records exact fresh turns using the existing TestBot card in both PostgreSQL modes",
+      "pass": true
+    },
+    {
+      "name": "Fresh UAT236 review explicitly scopes its static E2E-TestBot as distinct from tagged UAT261",
+      "pass": true
+    }
+  ],
+  "counts": {
+    "checks": 13,
+    "inputs": 11
+  },
+  "inputHashes": [
+    {
+      "path": "apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts",
+      "bytes": 4767,
+      "sha256": "93455de74c1a4f2c6dbfc8297d872dca47f8e3092b1ec0b0530432ec10d9824e",
+      "privateHashOnly": false
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "bytes": 359125,
+      "sha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b",
+      "privateHashOnly": false
+    },
+    {
+      "path": "tldw_Server_API/app/core/Character_Chat/modules/character_prompt_presets.py",
+      "bytes": 7593,
+      "sha256": "6c79b9efc4fb7a6fa0a1a5035761e27c0e8f5ce90b47b440eda05afb3ba0740a",
+      "privateHashOnly": false
+    },
+    {
+      "path": "tldw_Server_API/app/core/Character_Chat/emote_directives.py",
+      "bytes": 8423,
+      "sha256": "dc33c540694b5f87262f8183c0e63060c7e2079d903ad0c1c3a44c201627c729",
+      "privateHashOnly": false
+    },
+    {
+      "path": "backlog/tasks/task-13260.203 - Diagnose-TestBot-exact-response-deviation-after-valid-model-selection-UAT-261.md",
+      "bytes": 4501,
+      "sha256": "42acdcb3d14b7bddadf6284b68a6e6150b118b530881ce0d60eb60717f2cf88e",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-stream246-review/REVIEW.md",
+      "bytes": 7136,
+      "sha256": "c5f98298cf811c023242ed59bda77bedc4f5b6af0c58618e8010a0b79f197cc4",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native236-fresh-review/REVIEW.md",
+      "bytes": 4661,
+      "sha256": "f00924a19617b429b0a8881ecfb96fe4cc7da4528af4efc680b96226c02c2cf2",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native236-fresh-review/audit.json",
+      "bytes": 22135,
+      "sha256": "49659a2ba28fc91d82a4356caf51f1245ecc73e9b4999fdc4275b99373d30929",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot261-repeat-send.js",
+      "bytes": 740,
+      "sha256": "011d1247a50331bd171ce8a695b9f24374506d9b80d1fd376c503e65279d33b2",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot261-retry-branch-projection.json",
+      "bytes": 697,
+      "sha256": "0a90f467756aed2435b3ff8a014f24e947ca1ad4af19a66dec2441bad411e3d9",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/testbot261-retry-reloaded-projection.json",
+      "bytes": 806,
+      "sha256": "c5527449379988b81520adc82978b54512db9f6080cc69d2dc16f72f6a35f395",
+      "privateHashOnly": false
+    }
+  ],
+  "findings": {
+    "workflowAndTaggedFixtureDifferMaterially": true,
+    "materialDifferences": [
+      "workflow creates a timestamp-named character; tagged helper opens a pre-existing decorated-name card",
+      "workflow supplies a description field; retained tagged-card fields are not a byte-identical workflow creation receipt",
+      "workflow has status/recovery assertions but no exact canonical-final assertion"
+    ],
+    "decoratedNamePromptRelevant": true,
+    "decoratedNameCausalityEstablished": false,
+    "reason": "The default builder incorporates the name, but retained UAT246 exact fresh turns used the existing TestBot card and UAT261 retry child on the tagged card reached the exact final.",
+    "applicationPromptDefectEstablished": false,
+    "reasonPrompt": "The retained artifacts do not contain the outbound provider messages or a prompt fingerprint for the failed turn; source augmentation is therefore not comparable at the required request boundary."
+  },
+  "justifiedNextEvidence": [
+    "Do not perform blind provider retries or tune the model.",
+    "If UAT261 is advanced, collect one paired, same-tagged-card/same-provider request-boundary record that hashes the assembled message sequence and normalized request settings before provider dispatch, then pair it with canonical final-only metadata. Retain no raw prompt, provider reasoning, or credentials.",
+    "Use the current UAT261 exact-final requirement in the acceptance harness: canonical final after think-block removal, not the maintained workflow’s present status-only completion assertion.",
+    "A product edit is unjustified unless the paired records show an application-controlled prompt/request difference or a deterministic source-level invariant that conflicts with the character instruction."
+  ],
+  "limitations": [
+    "No browser, provider, database, runtime, source, test, Git, Backlog, or tracker action was performed.",
+    "The audit reads only source, safe projections, and metadata; it does not emit raw provider output, reasoning, prompt bodies, or credentials.",
+    "Fresh UAT236 establishes a separate static-card success and cannot erase UAT261 failures."
+  ]
+}

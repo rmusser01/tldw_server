@@ -68,7 +68,6 @@ export interface UseCharacterCrudDeps {
   editId: string | null
   setEditId: (id: string | null) => void
   editVersion: number | null
-  setEditVersion: (version: number | null) => void
   editCharacterNumericId: number | null
   setOpen: (open: boolean) => void
   setOpenEdit: (open: boolean) => void
@@ -108,7 +107,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     editId,
     setEditId,
     editVersion,
-    setEditVersion,
     editCharacterNumericId,
     setOpen,
     setOpenEdit,
@@ -617,14 +615,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       lastEditTriggerRef.current = triggerRef
     }
     setEditId(record.id || record.slug || record.name)
-    const recordVersion = record?.version
-    setEditVersion(
-      typeof recordVersion === "number" &&
-        Number.isInteger(recordVersion) &&
-        recordVersion >= 0
-        ? recordVersion
-        : null
-    )
     const ex = record.extensions
     const extensionsValue =
       ex && typeof ex === "object" && !Array.isArray(ex)
@@ -672,7 +662,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     })
     setShowEditAdvanced(hasAdvancedData(record, extensionsValue))
     setOpenEdit(true)
-  }, [editForm, editWorldBooksInitializedRef, lastEditTriggerRef, setEditId, setEditVersion, setOpenEdit, setShowEditAdvanced])
+  }, [editForm, editWorldBooksInitializedRef, lastEditTriggerRef, setEditId, setOpenEdit, setShowEditAdvanced])
 
   // --- Duplicate handler ---
   const handleDuplicate = React.useCallback((record: any) => {

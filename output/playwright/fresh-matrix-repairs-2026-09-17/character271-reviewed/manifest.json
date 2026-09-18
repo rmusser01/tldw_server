@@ -1,0 +1,272 @@
+{
+  "at": "2026-09-18T02:56:51.308Z",
+  "reviewedImplementation": [
+    271
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    271
+  ],
+  "sourceBaseline": "8764bf5b6c686e362d21a52d4cc6fc0627241827",
+  "fullMatrixAccepted": false,
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": "apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "sourceBytes": 48487,
+      "sourceSha256": "7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9",
+      "bytes": 48487,
+      "sha256": "7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx",
+      "sourceBytes": 48928,
+      "sourceSha256": "0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c",
+      "bytes": 48928,
+      "sha256": "0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx",
+      "sourceBytes": 192151,
+      "sourceSha256": "51dd43d68f386b21a19c88eb50bbc4d78b2b11bbb4685f9b8a2ce4d3721a3b5c",
+      "bytes": 192151,
+      "sha256": "51dd43d68f386b21a19c88eb50bbc4d78b2b11bbb4685f9b8a2ce4d3721a3b5c",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/services/__tests__/tldw-api-client.characters-delete.test.ts",
+      "path": "evidence/apps/packages/ui/src/services/__tests__/tldw-api-client.characters-delete.test.ts",
+      "sourceBytes": 3944,
+      "sourceSha256": "31eacb13865faf0fd6496bdbb954aa30a923ccb0df09aa666f95db4290fa9030",
+      "bytes": 3944,
+      "sha256": "31eacb13865faf0fd6496bdbb954aa30a923ccb0df09aa666f95db4290fa9030",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-report.md",
+      "sourceBytes": 2548,
+      "sourceSha256": "67bab1ad591baacf41d915494c3448739b199fa5801b48c935500e567b2b57c3",
+      "bytes": 2548,
+      "sha256": "67bab1ad591baacf41d915494c3448739b199fa5801b48c935500e567b2b57c3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-review.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-review.md",
+      "sourceBytes": 5055,
+      "sourceSha256": "7261f51ad3fcd56321c70460ade8f39be52ff90882747b0d18052d28e6d72be5",
+      "bytes": 5055,
+      "sha256": "7261f51ad3fcd56321c70460ade8f39be52ff90882747b0d18052d28e6d72be5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271/bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271/bandit.json",
+      "sourceBytes": 1040,
+      "sourceSha256": "f8d7600c0cc17b8097ff517b14635c7d6c688818da46674ece2e0521fb889c9b",
+      "bytes": 1040,
+      "sha256": "f8d7600c0cc17b8097ff517b14635c7d6c688818da46674ece2e0521fb889c9b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271/client-focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271/client-focused-final.log.gz",
+      "sourceBytes": 1634,
+      "sourceSha256": "695a400f63944e4db86489c999c70524307ead8aa5aca42eb0bf672bb7706666",
+      "bytes": 476,
+      "sha256": "c3f4111641bd0743c24e8b3ef67caad33ba0318aaf08281d7d1c32baeeb4d7b7",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271/hashes.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271/hashes.sha256",
+      "sourceBytes": 1248,
+      "sourceSha256": "4ccb0b4d5d362932e17c2645e73dcac83d249e9dedcc38823f87376c3c70d36f",
+      "bytes": 1248,
+      "sha256": "4ccb0b4d5d362932e17c2645e73dcac83d249e9dedcc38823f87376c3c70d36f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271/manager-focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271/manager-focused-final.log.gz",
+      "sourceBytes": 368,
+      "sourceSha256": "50bafdb6b7367c019c10d377144925b1eaa4820ca61e546c0366643f7e0bab08",
+      "bytes": 233,
+      "sha256": "fc380c932fa6587f5cc81563dee26c88397d273e1c94f06d365372068e73baea",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271/verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271/verification.json",
+      "sourceBytes": 3889,
+      "sourceSha256": "c4ffd4b2a0ae2830215c71f85c6ac62cdd92fccfab1191c6fd3b1fa3278cad97",
+      "bytes": 3889,
+      "sha256": "c4ffd4b2a0ae2830215c71f85c6ac62cdd92fccfab1191c6fd3b1fa3278cad97",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/REVIEW.md",
+      "sourceBytes": 5055,
+      "sourceSha256": "7261f51ad3fcd56321c70460ade8f39be52ff90882747b0d18052d28e6d72be5",
+      "bytes": 5055,
+      "sha256": "7261f51ad3fcd56321c70460ade8f39be52ff90882747b0d18052d28e6d72be5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/audit.json",
+      "sourceBytes": 14074,
+      "sourceSha256": "64f1abb91329dc58943901231520f7f60c748829edc10afaacfbdf82b84c863c",
+      "bytes": 14074,
+      "sha256": "64f1abb91329dc58943901231520f7f60c748829edc10afaacfbdf82b84c863c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/audit.mjs",
+      "sourceBytes": 10450,
+      "sourceSha256": "411be129a946c8c744d96031fd7d6944a39d0ea9b78391803da2023439eab8e5",
+      "bytes": 10450,
+      "sha256": "411be129a946c8c744d96031fd7d6944a39d0ea9b78391803da2023439eab8e5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/baseline-useCharacterCrud.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/baseline-useCharacterCrud.tsx",
+      "sourceBytes": 48621,
+      "sourceSha256": "fcf0c9e164620df8391fa051faedff1e5b6b8f152887322d1dac27924a2e12ad",
+      "bytes": 48621,
+      "sha256": "fcf0c9e164620df8391fa051faedff1e5b6b8f152887322d1dac27924a2e12ad",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/causal-red.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/causal-red.config.ts",
+      "sourceBytes": 514,
+      "sourceSha256": "7b0e05d11836e156a863638342bbb36dc2f20bf831fd73374df60e26276ced66",
+      "bytes": 514,
+      "sha256": "7b0e05d11836e156a863638342bbb36dc2f20bf831fd73374df60e26276ced66",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/causal-red.log.gz",
+      "sourceBytes": 34095,
+      "sourceSha256": "7f5fa55dbcac74cad435d3f1fc5c131a4bb5fdc6ed8310b3934e4eab33485b79",
+      "bytes": 4859,
+      "sha256": "3910d17ae578301cf427c105b23e147d64152f18fadb091d89d200cfea6a6dd3",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/client-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/client-focused.log.gz",
+      "sourceBytes": 1816,
+      "sourceSha256": "75b3fd4260229fc08076ba118fd1c1bfab97692f8f832e4e15c3144dc4a4dab3",
+      "bytes": 578,
+      "sha256": "f8e05f6f64855ef9a950c508cd9dab640a22464b43127eb2c8eb7ec0b019babd",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/eslint-baseline-summary.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/eslint-baseline-summary.txt",
+      "sourceBytes": 299,
+      "sourceSha256": "974d216bd40c8873ee50409076339682cd7b63f5eb1f780b28ee3fb6075205b3",
+      "bytes": 299,
+      "sha256": "974d216bd40c8873ee50409076339682cd7b63f5eb1f780b28ee3fb6075205b3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/eslint-baseline.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/eslint-baseline.json.gz",
+      "sourceBytes": 531267,
+      "sourceSha256": "5a46906674ab6a0b4355a7b0d464fe80d275d32e2503df89ab3493bd5df2e355",
+      "bytes": 54351,
+      "sha256": "d685993d25e31c0d799af94c5deaa30600665f96bc440d10a5dcf59bcabb3bdd",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/eslint-comparison.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/eslint-comparison.json",
+      "sourceBytes": 1103,
+      "sourceSha256": "e9c40484a2200a697053d5a39d8f5e083eaff4b80d88eb539a2513a3d0e1969c",
+      "bytes": 1103,
+      "sha256": "e9c40484a2200a697053d5a39d8f5e083eaff4b80d88eb539a2513a3d0e1969c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/eslint-current-stderr.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/eslint-current-stderr.txt",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/eslint-current.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/eslint-current.json.gz",
+      "sourceBytes": 439513,
+      "sourceSha256": "77de6064386e909f6b1327278f02230fbdfa06a676b2749502228362b3f087c6",
+      "bytes": 53784,
+      "sha256": "02d90eb211235cd131e6b2453bb4c6f6c0356785cc0c57a7b20f6e0bd477b839",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/lint-baseline-sources.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/lint-baseline-sources.json.gz",
+      "sourceBytes": 305899,
+      "sourceSha256": "ed966bb07fe9d2438c3f297f07562e621a685e1369685052af63243cedeafbbe",
+      "bytes": 44548,
+      "sha256": "2d9254737d40c72cb8ea5e905ba599d2634f4ff6d9e6d02ab218fabad4f11ae6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/lint-baseline.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/lint-baseline.mjs",
+      "sourceBytes": 886,
+      "sourceSha256": "cb780692fc9faf6d89e80584688f1f3dc94223787e046619a90ee914b3960170",
+      "bytes": 886,
+      "sha256": "cb780692fc9faf6d89e80584688f1f3dc94223787e046619a90ee914b3960170",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/manager-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/manager-focused.log.gz",
+      "sourceBytes": 18798,
+      "sourceSha256": "5e8513ffe2641654848368c732d194e99b01569cfd806ad025b4b078d6ad4153",
+      "bytes": 3075,
+      "sha256": "73ed0e7c1ac8c80519b7e4b3f11e76469ed6d043b9f406f26855cfa33c92a6c2",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/manager-green-after-overlay.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/manager-green-after-overlay.log.gz",
+      "sourceBytes": 18798,
+      "sourceSha256": "03408ce1e39dc5771cc8da0377c8e919e36f93410860063be0896ddf279549ec",
+      "bytes": 3075,
+      "sha256": "73d6eebfdeee89a7a5e615569f283f253207193fcb7e16392a1894121e524551",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character271-review/reviewed.diff",
+      "path": "evidence/.tmp/uat-repairs-231-246/character271-review/reviewed.diff.gz",
+      "sourceBytes": 4933,
+      "sourceSha256": "9b7cb11a91527aa4c1c071e63df7ba09898431fe077e78330255032b9b5162ca",
+      "bytes": 1471,
+      "sha256": "3d64addfaf0ac6845cc6e30ec36e0b884006ca940103447e8cf20e5fe6d5da91",
+      "encoding": "gzip"
+    }
+  ]
+}

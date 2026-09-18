@@ -1,0 +1,11 @@
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import config from '../../../apps/tldw-frontend/eslint.config.mjs';
+const require=createRequire(path.resolve('apps/tldw-frontend/package.json'));
+const {ESLint}=require('eslint');
+const lint=new ESLint({cwd:process.cwd(),overrideConfigFile:true,overrideConfig:config});
+const sources=JSON.parse(fs.readFileSync('.tmp/uat-repairs-231-246/character271-review/lint-baseline-sources.json'));
+const results=[];for(const [filePath,code] of Object.entries(sources))results.push(...await lint.lintText(code,{filePath}));
+fs.writeFileSync('.tmp/uat-repairs-231-246/character271-review/eslint-baseline.json',JSON.stringify(results,null,2)+'\n');
+console.log(JSON.stringify({files:results.length,errors:results.reduce((a,r)=>a+r.errorCount,0),warnings:results.reduce((a,r)=>a+r.warningCount,0)}));
