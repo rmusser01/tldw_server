@@ -1,0 +1,1140 @@
+{
+  "verdict": "CLEAR bounded UAT264/267/271/272/273; UAT268/269 partial and blocked by UAT274; UAT275 remains open",
+  "at": "2026-09-18T03:56:57.221Z",
+  "checks": [
+    {
+      "name": "Identity remains original Alice2 through normal application auth",
+      "pass": true
+    },
+    {
+      "name": "Original Character4 Save supplies loaded expected_version1 and returns version2",
+      "pass": true
+    },
+    {
+      "name": "Original Character4 name and behavior unchanged",
+      "pass": true
+    },
+    {
+      "name": "Original Character4 original book1 attachment actualPOST200",
+      "pass": true
+    },
+    {
+      "name": "Normal reload confirms original Character4 selected book1 and canonical association",
+      "pass": true
+    },
+    {
+      "name": "Original reciprocal book1 lists Characters4 and6",
+      "pass": true
+    },
+    {
+      "name": "Character6 disable then reenable only, both actual200",
+      "pass": true
+    },
+    {
+      "name": "Disabled link persists after normal reload and remains reciprocal",
+      "pass": true
+    },
+    {
+      "name": "Reenabled link persists after second reload",
+      "pass": true
+    },
+    {
+      "name": "WorldBook character catalogue uses same-origin slash route200 without429",
+      "pass": true
+    },
+    {
+      "name": "WorldBook association hydration explicitly includes disabled links",
+      "pass": true
+    },
+    {
+      "name": "Metadata false capability produces plain guidance and disabled authoring",
+      "pass": true
+    },
+    {
+      "name": "Metadata skips pack dispatch501 while slots/resolver remain200",
+      "pass": true
+    },
+    {
+      "name": "Alice Sources list and normal reload same-origin authorized200",
+      "pass": true
+    },
+    {
+      "name": "Sources renders correct empty state without persistent sign-in gate",
+      "pass": true
+    },
+    {
+      "name": "No Sources redirect401/500 in entire observed lease",
+      "pass": true
+    },
+    {
+      "name": "Disposable book3 and entry1 created through normalUI actual201",
+      "pass": true
+    },
+    {
+      "name": "New undefined entryID failure preserved with exact422 validation",
+      "pass": true
+    },
+    {
+      "name": "After failed edit normal reload retains blue canonical entry1",
+      "pass": true
+    },
+    {
+      "name": "Stale parent count recorded against settled Entries1 then corrected after reload",
+      "pass": true
+    },
+    {
+      "name": "Dedicated Character7 created without inference",
+      "pass": true
+    },
+    {
+      "name": "Dedicated attachment200 and reciprocal persists reload",
+      "pass": true
+    },
+    {
+      "name": "Dedicated detach200 and normal reload persists empty association",
+      "pass": true
+    },
+    {
+      "name": "Original books1/2 canonical unchanged and original Character6 unchanged",
+      "pass": true
+    },
+    {
+      "name": "Book3/entry1 preserved and no destructive entry/book cleanup",
+      "pass": true
+    },
+    {
+      "name": "Passive full API observer sees zero inference endpoint dispatch",
+      "pass": true
+    },
+    {
+      "name": "Background auth episode automatically recovers to Alice2 and endpoint200",
+      "pass": true
+    },
+    {
+      "name": "Source binding and startup same exact reviewed270682 original profile/ports",
+      "pass": true
+    },
+    {
+      "name": "Original profile initialization official holder unchanged",
+      "pass": true
+    },
+    {
+      "name": "Official PostgreSQL restricted runtime role retained",
+      "pass": true
+    },
+    {
+      "name": "Observed process receipts cover native interval and immutable source binding",
+      "pass": true
+    },
+    {
+      "name": "Prepared source completion/gate/manifests bound cryptographically",
+      "pass": true
+    },
+    {
+      "name": "Runtime product sources match immutable prepared manifest",
+      "pass": true
+    },
+    {
+      "name": "Sources267 runtime service matches independently frozen reviewed source",
+      "pass": true
+    },
+    {
+      "name": "Character271 and Metadata273 runtime source matches frozen independent reviews",
+      "pass": true
+    },
+    {
+      "name": "All unsuccessful helper captures retained",
+      "pass": true
+    },
+    {
+      "name": "Additive root auth classification and four local controls retain exact supporting hashes",
+      "pass": true
+    },
+    {
+      "name": "Root auth recovery interpretation refers to same runtime refresh source",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "run": "repairs231-250-targeted-20260917",
+    "cell": "pg-multi",
+    "source": "270682e98f2dd35c753fdf18cfb440ee80cb0ff1",
+    "identity": {
+      "id": 2,
+      "matchesPrivateAlice": true
+    },
+    "accepted": [
+      264,
+      267,
+      271,
+      272,
+      273
+    ],
+    "partialBlocked": [
+      268,
+      269
+    ],
+    "newFindings": [
+      274,
+      275
+    ],
+    "startAt": "2026-09-18T03:26:51.913Z",
+    "handbackAt": "2026-09-18T03:50:22.831Z",
+    "character4": {
+      "requestAt": "2026-09-18T03:33:27.939Z",
+      "responseAt": "2026-09-18T03:33:27.973Z",
+      "expectedVersion": 1,
+      "returnedVersion": 2,
+      "attachResponseAt": "2026-09-18T03:33:28.037Z",
+      "reloadAt": "2026-09-18T03:33:57.107Z"
+    },
+    "character6": {
+      "disabledReloadAt": "2026-09-18T03:36:42.824Z",
+      "reenabledReloadAt": "2026-09-18T03:37:27.043Z",
+      "finalEnabled": true
+    },
+    "sources": {
+      "requests": [
+        {
+          "event": "request",
+          "at": "2026-09-18T03:38:02.076Z",
+          "path": "/api/v1/ingestion-sources/",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:38:29.837Z",
+          "path": "/api/v1/ingestion-sources/",
+          "method": "GET",
+          "authorizationPresent": true
+        }
+      ],
+      "responses": [
+        {
+          "event": "response",
+          "at": "2026-09-18T03:38:02.122Z",
+          "path": "/api/v1/ingestion-sources/",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:38:29.875Z",
+          "path": "/api/v1/ingestion-sources/",
+          "status": 200
+        }
+      ],
+      "emptyState": true
+    },
+    "metadata": {
+      "at": "2026-09-18T03:32:49.176Z",
+      "metadataSupported": false,
+      "packRequests": 0,
+      "slotsAndResolver200": true
+    },
+    "disposable": {
+      "bookId": 3,
+      "entryId": 1,
+      "characterId": 7,
+      "createBookAt": "2026-09-18T03:39:18.086Z",
+      "createEntryAt": "2026-09-18T03:39:54.435Z",
+      "entryContentSha256": "57273df9017c6977698ce81e0be1366f151938054dc4be5607416d24bddf8fc6",
+      "entryLastModified": "2026-09-18T03:39:54.428625",
+      "attachmentAt": "2026-09-18T03:47:35.222Z",
+      "detachmentAt": "2026-09-18T03:48:49.825Z",
+      "finalAssociationCount": 0,
+      "preserved": true
+    },
+    "entryFailure": {
+      "request": {
+        "event": "request",
+        "at": "2026-09-18T03:41:10.973Z",
+        "path": "/api/v1/characters/world-books/entries/undefined",
+        "method": "PUT",
+        "authorizationPresent": true
+      },
+      "response": {
+        "event": "response",
+        "at": "2026-09-18T03:41:11.001Z",
+        "path": "/api/v1/characters/world-books/entries/undefined",
+        "status": 422
+      },
+      "validation": {
+        "type": "int_parsing",
+        "loc": [
+          "path",
+          "entry_id"
+        ],
+        "msg": "Input should be a valid integer, unable to parse string as an integer",
+        "input": "undefined"
+      },
+      "canonicalId": 1,
+      "canonicalHasEntryId": false,
+      "reloadUnchanged": true
+    },
+    "staleCount": {
+      "beforeReloadParentCount": 0,
+      "entriesPanelCount": 1,
+      "afterReloadCanonicalCount": 1,
+      "afterReloadVisibleCount": 1,
+      "cause": "not independently diagnosed"
+    },
+    "authEpisode": {
+      "events": [
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.114Z",
+          "path": "/api/v1/auth/sessions",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.119Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.119Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.126Z",
+          "path": "/api/v1/auth/sessions",
+          "status": 401
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.127Z",
+          "path": "/api/v1/auth/refresh",
+          "method": "POST",
+          "authorizationPresent": false
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.142Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "status": 401
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.143Z",
+          "path": "/api/v1/auth/refresh",
+          "method": "POST",
+          "authorizationPresent": false
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.143Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "status": 401
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.173Z",
+          "path": "/api/v1/auth/refresh",
+          "status": 200
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.176Z",
+          "path": "/api/v1/auth/sessions",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.176Z",
+          "path": "/api/v1/auth/me",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.185Z",
+          "path": "/api/v1/auth/refresh",
+          "status": 401
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.192Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.192Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.192Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.193Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.193Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T03:45:29.193Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "method": "GET",
+          "authorizationPresent": true
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.226Z",
+          "path": "/api/v1/auth/sessions",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.220Z",
+          "path": "/api/v1/auth/me",
+          "status": 200,
+          "identity": {
+            "id": 2,
+            "matchesAlice": true
+          }
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.246Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.258Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.286Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.295Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.314Z",
+          "path": "/api/v1/buddies/attachment?client_slot=default",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T03:45:29.321Z",
+          "path": "/api/v1/buddies?limit=100&offset=0",
+          "status": 200
+        }
+      ],
+      "refreshPostCount": 2,
+      "manualAuthActions": 0,
+      "authMeAutomatic": true,
+      "errorBodyCaptured": false,
+      "immediateUIAt401Captured": false,
+      "subsequentUIHealthy": true,
+      "cause": "unestablished; recovered background observation, no defect classification"
+    },
+    "errorResponses": [
+      {
+        "event": "response",
+        "at": "2026-09-18T03:41:11.001Z",
+        "path": "/api/v1/characters/world-books/entries/undefined",
+        "status": 422
+      },
+      {
+        "event": "response",
+        "at": "2026-09-18T03:45:29.126Z",
+        "path": "/api/v1/auth/sessions",
+        "status": 401
+      },
+      {
+        "event": "response",
+        "at": "2026-09-18T03:45:29.142Z",
+        "path": "/api/v1/buddies?limit=100&offset=0",
+        "status": 401
+      },
+      {
+        "event": "response",
+        "at": "2026-09-18T03:45:29.143Z",
+        "path": "/api/v1/buddies/attachment?client_slot=default",
+        "status": 401
+      },
+      {
+        "event": "response",
+        "at": "2026-09-18T03:45:29.185Z",
+        "path": "/api/v1/auth/refresh",
+        "status": 401
+      }
+    ],
+    "requestCount": 906,
+    "responseCount": 906,
+    "inferenceRequests": 0,
+    "runtime": [
+      {
+        "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/frontend271272273-upgrade-20260918/pg-multi/backend-1789701861507-fff00f4b-dbe5-4948-9016-bd1ea4d69edd.process.private.json",
+        "observedAt": "2026-09-18T03:56:57.197Z",
+        "startupSha256": "16bc5dd6a001ac6b977ef8481abc2ff59650de2b3670903e4466a571185723fb",
+        "observedSha256": "16bc5dd6a001ac6b977ef8481abc2ff59650de2b3670903e4466a571185723fb",
+        "pid": 67160,
+        "status": "started",
+        "startedAt": "2026-09-18T03:24:21.507Z",
+        "endedAt": null,
+        "bindingMatches": true,
+        "coversAcceptance": true
+      },
+      {
+        "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/frontend271272273-upgrade-20260918/pg-multi/frontend-1789701894042-ddeac859-5b24-4f19-b6bb-3413c62935ac.process.private.json",
+        "observedAt": "2026-09-18T03:56:57.198Z",
+        "startupSha256": "a120f2e0e11c75a32831679e84fa8eab9319838e8b4b16d9acb91185c40da66d",
+        "observedSha256": "a120f2e0e11c75a32831679e84fa8eab9319838e8b4b16d9acb91185c40da66d",
+        "pid": 67372,
+        "status": "started",
+        "startedAt": "2026-09-18T03:24:54.042Z",
+        "endedAt": null,
+        "bindingMatches": true,
+        "coversAcceptance": true
+      }
+    ],
+    "sourceHashes": [
+      {
+        "path": "apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+        "sha256": "7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9",
+        "manifestSha256": "7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx",
+        "sha256": "0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c",
+        "manifestSha256": "0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx",
+        "sha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c",
+        "manifestSha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx",
+        "sha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+        "manifestSha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401"
+      },
+      {
+        "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+        "sha256": "2b40a3d2520ad42242a121a7da0fcd6e3378f6596b5a16125fcadc8d1c84b192",
+        "manifestSha256": "2b40a3d2520ad42242a121a7da0fcd6e3378f6596b5a16125fcadc8d1c84b192"
+      },
+      {
+        "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+        "sha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186",
+        "manifestSha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186"
+      },
+      {
+        "path": "apps/packages/ui/src/services/tldw/domains/collections.ts",
+        "sha256": "99d63fccf990319e5f5293db0d5c04fca5a6f837ebfae9ab5e750f3e58708ea0",
+        "manifestSha256": "99d63fccf990319e5f5293db0d5c04fca5a6f837ebfae9ab5e750f3e58708ea0"
+      },
+      {
+        "path": "tldw_Server_API/app/core/Ingestion_Sources/service.py",
+        "sha256": "ccdb74c7ec45e0bba7a76b08cb9c832b55ce337c0ba67599b364067a709b5a82",
+        "manifestSha256": "ccdb74c7ec45e0bba7a76b08cb9c832b55ce337c0ba67599b364067a709b5a82"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookDetailPanel.tsx",
+        "sha256": "a38f6fdfc2ffe7d2e5040c918249d1ce3e50fd86789292b253ba98511ef5c47b",
+        "manifestSha256": "a38f6fdfc2ffe7d2e5040c918249d1ce3e50fd86789292b253ba98511ef5c47b"
+      },
+      {
+        "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+        "sha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4",
+        "manifestSha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4"
+      },
+      {
+        "path": "apps/packages/ui/src/services/tldw/domains/characters.ts",
+        "sha256": "74310dfd16c99139baec1762968b713e5620d750123353935c7072ea427879e8",
+        "manifestSha256": "74310dfd16c99139baec1762968b713e5620d750123353935c7072ea427879e8"
+      }
+    ],
+    "failedHelperFiles": [
+      "12-link-disabled.txt",
+      "24-entry-edited.txt",
+      "26-entry-canonical-after-failure.txt",
+      "31-disposable-attach-ready.txt",
+      "34-disposable-selected-correct.txt",
+      "36-disposable-attached.txt",
+      "41-final-handback.txt"
+    ]
+  },
+  "limits": [
+    "Existing original PostgreSQL multi-user Alice profile, source270682. No clean install, SQLite/single-user native matrix, full48 acceptance, inference, or provider reliability claim.",
+    "UAT264/267 acceptance is authenticated empty Sources listing and normal reload. It does not cover source creation or queued worker execution.",
+    "UAT268/269 remain partial: create/list and dedicated attach/detach persistence succeeded; entry edit failed before reaching repaired backend lifecycle. Entry deletion and book deletion were not attempted after root ordered preservation of book3/entry1 for UAT274.",
+    "UAT275 stale parent count is retained as an open UX observation. Reload correction is not closure. Entry timestamps have no zone in observed response; no native entry-chronology display claim is made.",
+    "Two automatic refresh POSTs returned200 and401 alongside background endpoint401, then automatic auth/meAlice2 and endpoint200 recovery. Observer intentionally omitted auth response bodies; exact error code/message and instantaneous UI state at401 are unavailable. No cause or token-expiry assertion.",
+    "Harness failures retained: wrong response predicates for disable and entry edit; reload content wait on Settings instead of Entries; read-only selector fill; End/Enter chose wrong option without submission; selected-label overlay blocked dropdown click; checkbox check asserted before async successful response; initial listener-cleanup used wrong array shape. No failed helper is counted as product pass or hidden. A few attempted local reads before tool completion yielded no payload; completed files alone feed audit.",
+    "Native actions used normal existing browser UI; passive observers only, no interception, auth/header/storage injection, direct API mutation, runtime/DB/fixture/product/test/Git/Backlog edit. Original browser observer untouched. Own listener cleanup corrected and successful in42.",
+    "Only original Character4 Save/book1 attachment and original Character6 disable/reenable modify original fixtures. Original books1/2 remain canonical byte-equivalent in captured catalogue objects; Character6 version1 remains. Dedicated book3/entry1 and Character7 are retained;7 is detached.",
+    "Process receipt hashes are observed after handback while processes remained started; receipts may later change on root-owned shutdown. Binding/source/acceptance interval is explicit. Private files are hash-only; no raw log or credential contents emitted.",
+    "Raw captures remain local. Audit is a safe projection with input hashes; no standalone replay claim for a later packet containing only this report/audit."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/42-final-handback-observed.txt",
+      "sha256": "f0e16bd82c9b50c5883245007105e90569076291e97bb4c7a472241ca9ac9e7e",
+      "bytes": 364128,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/06-character4-saved.txt",
+      "sha256": "d8df144cf8b36ade6dcb53f24b0393198fb2131eff8a64634be55ce9c20cf54a",
+      "bytes": 96625,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/07-character4-reloaded.txt",
+      "sha256": "6a9cb1f7028b19574414247d6cde859d2f6a0ea683329ea07469a7398549afa9",
+      "bytes": 103242,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/05-character4-metadata.txt",
+      "sha256": "7ac71ebf35cebd9c4b7cebcd0c1f2c9ddb48aea1824ccb2de823b108eef57b33",
+      "bytes": 75751,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/08-book1-attachments.txt",
+      "sha256": "c1b7dff12993ae1f6eed77ce8c3d277e08d99d4fe7adc2763430803594342f77",
+      "bytes": 113021,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/14-disabled-reloaded.txt",
+      "sha256": "e571248d7f3f5226d62a2f55ed8312b8d150fb68019c1ecef7e394b3e1bb262e",
+      "bytes": 152471,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/16-reenabled-reloaded.txt",
+      "sha256": "e959ebfd8f7ebeacdaf3fe1d3933c6d5f5155d498940696bc361b0e60f01f39c",
+      "bytes": 170296,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/17-sources-opened.txt",
+      "sha256": "16cf8deb06db57c67d5e7b3c0897a31f8444ff72bce680f2dd80f2d442567c50",
+      "bytes": 169649,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/18-sources-reloaded.txt",
+      "sha256": "dff2e3f11422f09048affd5eec9b69d8f9ba880c20d37c24a32b9955d8fe5e78",
+      "bytes": 177600,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/22-entry-settled.txt",
+      "sha256": "98959961e9b7b3220df192018b666d3a796c67574281c039a6a1c36b8ed02d10",
+      "bytes": 206958,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/25-entry-edit-observed.txt",
+      "sha256": "3ea87b6c1fafd4f028eb8d4bde543af41f9f785c1d03292016223d8ab425f294",
+      "bytes": 225891,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/28-entry-canonical-blue.txt",
+      "sha256": "631bd5f199c8cf36b64311a6ad30a8ce432af56bb17dbe56d60a0b393da25ef7",
+      "bytes": 247006,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/38-disposable-attached-reloaded.txt",
+      "sha256": "475d62fabdd8a2bdfde3cd769d34d3f6b1a49f2074ffad85972522227e97dfaa",
+      "bytes": 330955,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/40-disposable-detached-reloaded.txt",
+      "sha256": "864084624d3f68d611c6b1002dae62bee6f4b42b3e74e81b6e6c92f51c97bfb1",
+      "bytes": 351163,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f",
+      "bytes": 11348,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/credentials.private.json",
+      "sha256": "ce6ad6074ccd07fdaf5fe4ff9d0e831266aac6b26bf52320ea569e61232788fa",
+      "bytes": 784,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/frontend271272273-startup-safe.json",
+      "sha256": "a4e0a74e02ed0d902f62c95be54ef742200a0028bdf05d99f684b2f376a842f9",
+      "bytes": 1902,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/frontend271272273-upgrade-20260918/pg-multi/binding.private.json",
+      "sha256": "c15ee5f02c42fb4e64c06ac4024ea968eb318d3ac10fa34a9178a9b609e4c84c",
+      "bytes": 1659,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db",
+      "bytes": 1593,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9",
+      "bytes": 217,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/frontend271272273-upgrade-20260918/pg-multi/backend-1789701861507-fff00f4b-dbe5-4948-9016-bd1ea4d69edd.process.private.json",
+      "sha256": "16bc5dd6a001ac6b977ef8481abc2ff59650de2b3670903e4466a571185723fb",
+      "bytes": 1241,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/frontend271272273-upgrade-20260918/pg-multi/frontend-1789701894042-ddeac859-5b24-4f19-b6bb-3413c62935ac.process.private.json",
+      "sha256": "a120f2e0e11c75a32831679e84fa8eab9319838e8b4b16d9acb91185c40da66d",
+      "bytes": 1373,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/preparation/pg-multi-source-manifest.json",
+      "sha256": "d7cdff1a660184b72ebf06986b2ac795404328529a18ecec13829773805b33a6",
+      "bytes": 8708484,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/preparation/complete.json",
+      "sha256": "a48806cda10e03c4cc3c5c1cf4990a9a04c49a38c104728b3776506ffd1fa083",
+      "bytes": 572,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/preparation/gate.json",
+      "sha256": "9e4e82b6acd030de9e02913784ec7ba02147b3c17f0baf13be4b5201cc2215ae",
+      "bytes": 1924,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/preparation/python-reuse.json",
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "bytes": 1417,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "sha256": "7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9",
+      "bytes": 48487,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx",
+      "sha256": "0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c",
+      "bytes": 48928,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx",
+      "sha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c",
+      "bytes": 100062,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx",
+      "sha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+      "bytes": 15642,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "2b40a3d2520ad42242a121a7da0fcd6e3378f6596b5a16125fcadc8d1c84b192",
+      "bytes": 266709,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "sha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186",
+      "bytes": 107252,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/domains/collections.ts",
+      "sha256": "99d63fccf990319e5f5293db0d5c04fca5a6f837ebfae9ab5e750f3e58708ea0",
+      "bytes": 38839,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/tldw_Server_API/app/core/Ingestion_Sources/service.py",
+      "sha256": "ccdb74c7ec45e0bba7a76b08cb9c832b55ce337c0ba67599b364067a709b5a82",
+      "bytes": 47091,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/WorldBookDetailPanel.tsx",
+      "sha256": "a38f6fdfc2ffe7d2e5040c918249d1ce3e50fd86789292b253ba98511ef5c47b",
+      "bytes": 17362,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4",
+      "bytes": 75013,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/domains/characters.ts",
+      "sha256": "74310dfd16c99139baec1762968b713e5620d750123353935c7072ea427879e8",
+      "bytes": 36874,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/12-link-disabled.txt",
+      "sha256": "fa6e76f442413f399661524aedaf3ea3ec725d7b533587cae2f5d48cb8511304",
+      "bytes": 107,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/24-entry-edited.txt",
+      "sha256": "fa6e76f442413f399661524aedaf3ea3ec725d7b533587cae2f5d48cb8511304",
+      "bytes": 107,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/26-entry-canonical-after-failure.txt",
+      "sha256": "dfcc8f73c725c3805b9a12566ab438ca8e78fec86b4d25c83869d8a49d14aca0",
+      "bytes": 209,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/31-disposable-attach-ready.txt",
+      "sha256": "0f4d711e00c70a0584d93009dae9c63f8e6d9509736c2a62986d85dcab1941af",
+      "bytes": 1482,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/34-disposable-selected-correct.txt",
+      "sha256": "7d97e26c2c3aa84b829ef224ce3d0074112b6e09159bb433cef8c6880cf67604",
+      "bytes": 1613,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/36-disposable-attached.txt",
+      "sha256": "ed77ead9cc1d8e1a6e7947c10e3a49a63067473dcffff90cf5dc453d754985fe",
+      "bytes": 902,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/41-final-handback.txt",
+      "sha256": "a33d723fac61b2d3f53f001245ed16b5a209a5445415cc812dbeba64027271af",
+      "bytes": 93,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/01-reload-observe.js",
+      "sha256": "2e86ff31b4321334b098d57ed7135c271f35d8617aa5adab9f20a200df5d7204",
+      "bytes": 1624,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/01-reloaded.txt",
+      "sha256": "244a9a4fbe2bcb014bbd1c4b63f1b0317ca396f1a051ced738563dbf98f08d3a",
+      "bytes": 4682,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/02-worldbooks-ready.txt",
+      "sha256": "cb3e09c1833e8faa58cfb85588f0e933dcd112670f365e71f0b81d2ec4f39929",
+      "bytes": 13121,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/03-characters-opened.txt",
+      "sha256": "e8aca44019c3a27928865734f8d79c03f20f2060624fb1baa506d298a4ab5435",
+      "bytes": 13010,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/04-character4-edit.txt",
+      "sha256": "64592704de6bd5a48d854a7a8d4972c5845c900b614cbbf79e81e113fb705dbd",
+      "bytes": 73293,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/09-worldbook-tools.txt",
+      "sha256": "d805665143ef557c19e714dc3d0a4b1c98579d62f06d67c7cc887ec714a630c9",
+      "bytes": 5206,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/10-matrix-open.txt",
+      "sha256": "155b7b539f0ee235dab4db8d6f266ec057c0895c5f00c166049a3ee167e6bfca",
+      "bytes": 123337,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/11-link-settings.txt",
+      "sha256": "87549e91b85e3a2e6e4ad25f8b8993e8b9703a806e8e15b198b339b055477211",
+      "bytes": 10337,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/13-disabled-observed.txt",
+      "sha256": "6a0dbaf8b3e91238891022e3fe5df08dfbfd5b0a6fde02b88af57185e1455122",
+      "bytes": 136630,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/15-link-reenabled.txt",
+      "sha256": "34e5ec644cc8665d8a786057a13fc95e42a236d83d8cdd432c67a44559921891",
+      "bytes": 143891,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/19-new-book-form.txt",
+      "sha256": "90d38f86ad16cac93245bd338680d0eebbbc6ad75d15b69e518d87b2593925cd",
+      "bytes": 879,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/20-disposable-book-created.txt",
+      "sha256": "8e7c016c4b53178adb28444382d27cb5378b7532493d2e1dcdcc295329404850",
+      "bytes": 198032,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/21-entry-created.txt",
+      "sha256": "503689a7a924b28788bbb1e0981c308695da4ca61892f7c14ad57347e2e67697",
+      "bytes": 205990,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/23-entry-edit-form.txt",
+      "sha256": "6fb7d37ebeaf766229e37342a81dfa45174d895ea1a3de43d1645d81b33dc2cd",
+      "bytes": 8383,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/27-entry-reload-observed.txt",
+      "sha256": "6d9dfdc223e94011fca0a070d6e61027c178973077f9a178529c2cf6eceec81c",
+      "bytes": 244435,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/29-disposable-character-form.txt",
+      "sha256": "8a43dba1e28455610d5ab175221d36848670b1d6477a07d5434be44e8805b8fb",
+      "bytes": 3177,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/30-disposable-character-created.txt",
+      "sha256": "97c6717a82dd8e777cc988e112a1014a2335768092c1cc511a8f7af94817f488",
+      "bytes": 259207,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/32-disposable-attach-options.txt",
+      "sha256": "2101d2f6c8e2329f349f54277c50b144b9f2dfca1bf4b841dc02ec6d4d4338b6",
+      "bytes": 292762,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/33-disposable-selected.txt",
+      "sha256": "b184e023336ab5653655ec2b0e8ab386b3401c6a52cc1b2bf85a007d69e7cc75",
+      "bytes": 724,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/35-disposable-matrix.txt",
+      "sha256": "a67479c0c62a1a04c3d2be84dbd6ced92bd170ba1540dd5635db185176139373",
+      "bytes": 308992,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/37-disposable-attached-observed.txt",
+      "sha256": "c9a4f71506efeecc072b50ccd72675b2c5818bf7ce254daeda8b57c3436f404e",
+      "bytes": 319558,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/39-disposable-detach-clicked.txt",
+      "sha256": "a619a96ad5543c995ca2396aae5bc32660837783675df0c886a62a095d30f868",
+      "bytes": 337410,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/character271-review/audit.json",
+      "sha256": "64f1abb91329dc58943901231520f7f60c748829edc10afaacfbdf82b84c863c",
+      "bytes": 14074,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/visualidentity273-review/audit.json",
+      "sha256": "10f6c2e7a53cdfe647d31f76a126cd54bed36c28544afe30e75e4d66d0d0bb78",
+      "bytes": 17058,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.json",
+      "sha256": "13ee8b8993da5f12fc0f9ed1bb164a8b153ca63f6f25355bb06abb7eb61707ab",
+      "bytes": 33042,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/root-auth-refresh-classification.json",
+      "sha256": "d47fe61cbe2dfd7dfae88789089d58ead1012926d59f077aea854d4830cc2f38",
+      "bytes": 2565,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "bytes": 80256,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts",
+      "sha256": "fcb3471761167a07c12f3c385eb0aeb50bd3c2a6640293691247b74a2c61775f",
+      "bytes": 57986,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/root-auth-refresh-controls-local.log",
+      "sha256": "6ac5a62faae85b7920a8c776d7f19cc0e166c7ed7e7c873ae96547238f85bb72",
+      "bytes": 878,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/root-auth-refresh-controls.log",
+      "sha256": "f3885ad9199b06ce7d01d6c0478caeb0232b8447cea63ecfbcc1b4ddd5f0ecd7",
+      "bytes": 19991,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/frontend271272273-upgrade-20260918/pg-multi/apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "bytes": 80256,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/audit.mjs",
+      "sha256": "1ab2b302923ce5c626ace24f56e3acdcb3bb1d855818d83b7dd493750475d201",
+      "bytes": 21037,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    }
+  ]
+}

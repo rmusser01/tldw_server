@@ -1,0 +1,43 @@
+{
+  "at": "2026-09-18T03:53:09.710Z",
+  "observation": "Recovered background authentication refresh during original PostgreSQL multi-user native UAT",
+  "classification": "No additional product defect established",
+  "evidence": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/42-final-handback-observed.txt",
+      "sha256": "f0e16bd82c9b50c5883245007105e90569076291e97bb4c7a472241ca9ac9e7e"
+    },
+    {
+      "path": "apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/background-proxy.web-refresh.test.ts",
+      "sha256": "fcb3471761167a07c12f3c385eb0aeb50bd3c2a6640293691247b74a2c61775f"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/root-auth-refresh-controls-local.log",
+      "sha256": "6ac5a62faae85b7920a8c776d7f19cc0e166c7ed7e7c873ae96547238f85bb72"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/root-auth-refresh-controls.log",
+      "sha256": "f3885ad9199b06ce7d01d6c0478caeb0232b8447cea63ecfbcc1b4ddd5f0ecd7"
+    }
+  ],
+  "facts": [
+    "At03:45:29 three background protected reads returned401; two refresh POSTs were observed, one200 and one401.",
+    "Subsequent automatic auth/me and sessions returned200 with Alice2; buddies and attachment reads also returned200.",
+    "No manual login, observed identity loss or failed user action; subsequent dedicated link create and delete persisted.",
+    "Existing scoped and ordinary refresh paths can recover by adopting a current successful rotation after a losing401."
+  ],
+  "validation": {
+    "passed": 4,
+    "deselected": 56,
+    "command": "node node_modules/vitest/vitest.mjs run src/services/__tests__/background-proxy.web-refresh.test.ts -t 'recovers when another context wins|reuses an ordinary raw-config refresh|single-flights concurrent|signals refresh failure when /auth/refresh itself' --maxWorkers=1 --no-file-parallelism",
+    "runnerAttempt": "First pnpm command attempted registry resolution; interrupted exit130 before tests. Existing installed local Vitest completed0. No dependency changes intended or observed in tracked diff."
+  },
+  "limits": [
+    "No token bodies were retained or compared; exact refresh cause remains an inference from safe timing/status and implemented recovery.",
+    "This is not a fresh full-matrix expiry qualification. No repeated expiry test or runtime mutation."
+  ]
+}
