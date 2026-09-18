@@ -1,0 +1,36 @@
+[
+  {
+    "cell": null,
+    "code": "SIM110",
+    "end_location": {
+      "column": 17,
+      "row": 177
+    },
+    "filename": "/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+    "fix": {
+      "applicability": "unsafe",
+      "edits": [
+        {
+          "content": "return any(env_flag_enabled(flag) for flag in (\"TEST_MODE\", \"TLDW_TEST_MODE\", \"TESTING\"))",
+          "end_location": {
+            "column": 17,
+            "row": 177
+          },
+          "location": {
+            "column": 5,
+            "row": 174
+          }
+        }
+      ],
+      "message": "Replace with `return any(env_flag_enabled(flag) for flag in (\"TEST_MODE\", \"TLDW_TEST_MODE\", \"TESTING\"))`"
+    },
+    "location": {
+      "column": 5,
+      "row": 174
+    },
+    "message": "Use `return any(env_flag_enabled(flag) for flag in (\"TEST_MODE\", \"TLDW_TEST_MODE\", \"TESTING\"))` instead of `for` loop",
+    "noqa_row": 174,
+    "severity": "error",
+    "url": "https://docs.astral.sh/ruff/rules/reimplemented-builtin"
+  }
+]

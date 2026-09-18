@@ -1,0 +1,51 @@
+{
+  "source": "tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py",
+  "sourceSha256": "1b72acff7d544f9fe9e4c7f2896a1e94b59480699f1bfc51db8288110340aab6",
+  "rows": [
+    {
+      "line": 769,
+      "querySha256": "42be74c7fc0ce5f89e9b44834777c0c7fde979d6da2bd05808ba047b31eddd3a",
+      "kind": "SELECT",
+      "result": {
+        "protected": false,
+        "operation": "read_or_unprotected_write"
+      }
+    },
+    {
+      "line": 786,
+      "querySha256": "2856aed8e347dda0f044eb3c2f6020c23fa3e6615e4dbcccbe86a06020b5bb7d",
+      "kind": "INSERT",
+      "error": "ProfileUserWriteRejected",
+      "frames": [
+        {
+          "file": "<stdin>",
+          "line": 14,
+          "function": "<module>"
+        },
+        {
+          "file": "profile_user_write_guard.py",
+          "line": 490,
+          "function": "_classify_sql"
+        }
+      ]
+    },
+    {
+      "line": 823,
+      "querySha256": "262554f033301ddaf9d431c00a28362d26912b30e93e618988502b8c304c73dc",
+      "kind": "INSERT",
+      "error": "ProfileUserWriteRejected",
+      "frames": [
+        {
+          "file": "<stdin>",
+          "line": 14,
+          "function": "<module>"
+        },
+        {
+          "file": "profile_user_write_guard.py",
+          "line": 490,
+          "function": "_classify_sql"
+        }
+      ]
+    }
+  ]
+}

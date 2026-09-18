@@ -1,0 +1,2637 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-18T00:26:15Z",
+  "metrics": {
+    "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 3,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1401,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 5,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 5,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 555,
+      "nosec": 0,
+      "skipped_tests": 1
+    },
+    "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py": {
+      "CONFIDENCE.HIGH": 86,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 86,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 419,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py": {
+      "CONFIDENCE.HIGH": 6,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 6,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 75,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py": {
+      "CONFIDENCE.HIGH": 22,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 22,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 297,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 114,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 8,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 122,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2747,
+      "nosec": 0,
+      "skipped_tests": 1
+    }
+  },
+  "results": [
+    {
+      "code": "915     try:\n916         principal = AuthPrincipal(\n917             kind=\"user\",\n918             user_id=user.id_int,\n919             api_key_id=None,\n920             username=getattr(user, \"username\", None),\n921             email=getattr(user, \"email\", None),\n922             subject=None,\n923             token_type=\"access\",\n924             jti=None,\n925             impersonation=user.impersonation,\n926             impersonated_by=user.impersonated_by,\n927             roles=list(user.roles or []),\n928             permissions=list(user.permissions or []),\n929             is_admin=bool(user.is_admin),\n930             org_ids=org_ids,\n931             team_ids=team_ids,\n932             active_org_id=active_org_id,\n933             active_team_id=active_team_id,\n934         )\n935         ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 20,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'access'",
+      "line_number": 916,
+      "line_range": [
+        916,
+        917,
+        918,
+        919,
+        920,
+        921,
+        922,
+        923,
+        924,
+        925,
+        926,
+        927,
+        928,
+        929,
+        930,
+        931,
+        932,
+        933,
+        934
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "1023                 try:\n1024                     principal = AuthPrincipal(\n1025                         kind=\"user\",\n1026                         user_id=user.id_int,\n1027                         api_key_id=None,\n1028                         username=getattr(user, \"username\", None),\n1029                         email=getattr(user, \"email\", None),\n1030                         subject=\"single_user\",\n1031                         token_type=\"api_key\",\n1032                         jti=None,\n1033                         roles=list(user.roles or []),\n1034                         permissions=list(user.permissions or []),\n1035                         is_admin=True,\n1036                         org_ids=[],\n1037                         team_ids=[],\n1038                     )\n1039                     ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 32,
+      "end_col_offset": 21,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 1024,
+      "line_range": [
+        1024,
+        1025,
+        1026,
+        1027,
+        1028,
+        1029,
+        1030,
+        1031,
+        1032,
+        1033,
+        1034,
+        1035,
+        1036,
+        1037,
+        1038
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "1355 \n1356             principal = AuthPrincipal(\n1357                 kind=\"api_key\",\n1358                 user_id=user_obj.id_int,\n1359                 api_key_id=api_key_id_val,\n1360                 username=getattr(user_obj, \"username\", None),\n1361                 email=getattr(user_obj, \"email\", None),\n1362                 subject=subject_val,\n1363                 token_type=\"api_key\",\n1364                 jti=None,\n1365                 roles=list(user_obj.roles or []),\n1366                 permissions=list(user_obj.permissions or []),\n1367                 is_admin=bool(user_obj.is_admin),\n1368                 org_ids=org_ids,\n1369                 team_ids=team_ids,\n1370                 active_org_id=active_org_id,\n1371                 active_team_id=active_team_id,\n1372             )\n1373             ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 24,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 1356,
+      "line_range": [
+        1356,
+        1357,
+        1358,
+        1359,
+        1360,
+        1361,
+        1362,
+        1363,
+        1364,
+        1365,
+        1366,
+        1367,
+        1368,
+        1369,
+        1370,
+        1371,
+        1372
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "389             token_type = _peek_jwt_token_type(token)\n390             if token_type == \"service\":\n391                 try:\n",
+      "col_offset": 29,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'service'",
+      "line_number": 390,
+      "line_range": [
+        390
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "442                 service_name, permissions, roles = _resolve_service_identity(payload)\n443                 principal = AuthPrincipal(\n444                     kind=\"service\",\n445                     user_id=None,\n446                     api_key_id=None,\n447                     username=None,\n448                     email=None,\n449                     subject=f\"service:{service_name}\",\n450                     token_type=\"service\",\n451                     jti=payload.get(\"jti\"),\n452                     roles=roles,\n453                     permissions=permissions,\n454                     is_admin=_claims_mark_admin(roles=roles, permissions=permissions),\n455                     org_ids=[],\n456                     team_ids=[],\n457                     active_org_id=None,\n458                     active_team_id=None,\n459                 )\n460                 ctx = _build_context(principal, request)\n",
+      "col_offset": 28,
+      "end_col_offset": 17,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'service'",
+      "line_number": 443,
+      "line_range": [
+        443,
+        444,
+        445,
+        446,
+        447,
+        448,
+        449,
+        450,
+        451,
+        452,
+        453,
+        454,
+        455,
+        456,
+        457,
+        458,
+        459
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "506 \n507             principal = _build_principal_from_user(\n508                 user=user,\n509                 kind=\"user\",\n510                 request=request,\n511                 token_type=\"access\",\n512                 jti=None,\n513                 api_key_id=None,\n514             )\n515             ctx = _build_context(principal, request)\n",
+      "col_offset": 24,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'access'",
+      "line_number": 507,
+      "line_range": [
+        507,
+        508,
+        509,
+        510,
+        511,
+        512,
+        513,
+        514
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "549                     user = User_DB_Handling.get_single_user_instance()\n550                     principal = _build_principal_from_user(\n551                         user=user,\n552                         kind=\"user\",\n553                         request=request,\n554                         token_type=\"api_key\",\n555                         jti=None,\n556                         subject=\"single_user\",\n557                         api_key_id=None,\n558                     )\n559                     ctx = _build_context(principal, request)\n",
+      "col_offset": 32,
+      "end_col_offset": 21,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 550,
+      "line_range": [
+        550,
+        551,
+        552,
+        553,
+        554,
+        555,
+        556,
+        557,
+        558
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "606 \n607         principal = _build_principal_from_user(\n608             user=user,\n609             kind=\"api_key\",\n610             request=request,\n611             token_type=\"api_key\",\n612             jti=None,\n613             api_key_id=api_key_id,\n614         )\n615         ctx = _build_context(principal, request)\n",
+      "col_offset": 20,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 607,
+      "line_range": [
+        607,
+        608,
+        609,
+        610,
+        611,
+        612,
+        613,
+        614
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "82 \n83     assert any(dependency.dependency is check_auth_rate_limit for dependency in route.dependencies)\n84 \n",
+      "col_offset": 4,
+      "end_col_offset": 99,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 83,
+      "line_range": [
+        83
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "94     expected = SingleUserSessionResponse if method == \"POST\" else SingleUserSessionLogoutResponse\n95     assert route.response_model is expected\n96 \n",
+      "col_offset": 4,
+      "end_col_offset": 43,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 95,
+      "line_range": [
+        95
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "102 \n103     assert response.status_code == 200\n104     assert \"no-store\" in response.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 103,
+      "line_range": [
+        103
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "103     assert response.status_code == 200\n104     assert \"no-store\" in response.headers[\"cache-control\"]\n105     assert set(response.json()) == {\"authenticated\", \"expires_at\"}\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 104,
+      "line_range": [
+        104
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "104     assert \"no-store\" in response.headers[\"cache-control\"]\n105     assert set(response.json()) == {\"authenticated\", \"expires_at\"}\n106     cookie = response.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 105,
+      "line_range": [
+        105
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "106     cookie = response.headers[\"set-cookie\"]\n107     assert \"tldw_single_user_session=\" in cookie\n108     assert \"HttpOnly\" in cookie\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 107,
+      "line_range": [
+        107
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "107     assert \"tldw_single_user_session=\" in cookie\n108     assert \"HttpOnly\" in cookie\n109     assert \"SameSite=lax\" in cookie\n",
+      "col_offset": 4,
+      "end_col_offset": 31,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 108,
+      "line_range": [
+        108
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "108     assert \"HttpOnly\" in cookie\n109     assert \"SameSite=lax\" in cookie\n110     assert \"Path=/api\" in cookie\n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 109,
+      "line_range": [
+        109
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "109     assert \"SameSite=lax\" in cookie\n110     assert \"Path=/api\" in cookie\n111     assert api_key not in response.text + cookie\n",
+      "col_offset": 4,
+      "end_col_offset": 32,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 110,
+      "line_range": [
+        110
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "110     assert \"Path=/api\" in cookie\n111     assert api_key not in response.text + cookie\n112 \n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 111,
+      "line_range": [
+        111
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "115     client, api_key = single_user_cookie_client\n116     assert _mint(client, api_key).status_code == 200\n117 \n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 116,
+      "line_range": [
+        116
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "119 \n120     assert response.status_code == 200\n121 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 120,
+      "line_range": [
+        120
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "125     mint = _mint(client, api_key)\n126     assert mint.status_code == 200\n127 \n",
+      "col_offset": 4,
+      "end_col_offset": 34,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 126,
+      "line_range": [
+        126
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "127 \n128     assert client.delete(\"/api/v1/auth/single-user/session\").status_code == 403\n129     assert _mint(client, api_key).status_code == 200\n",
+      "col_offset": 4,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 128,
+      "line_range": [
+        128
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "128     assert client.delete(\"/api/v1/auth/single-user/session\").status_code == 403\n129     assert _mint(client, api_key).status_code == 200\n130 \n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 129,
+      "line_range": [
+        129
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "133     client, api_key = single_user_cookie_client\n134     assert _mint(client, api_key).status_code == 200\n135     csrf_token = client.cookies[\"csrf_token\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 134,
+      "line_range": [
+        134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "141 \n142     assert response.status_code == 401\n143 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 142,
+      "line_range": [
+        142
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "147     first = _mint(client, api_key)\n148     assert first.status_code == 200\n149     cookie_before = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 148,
+      "line_range": [
+        148
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "152 \n153     assert second.status_code == 200\n154     assert \"no-store\" in second.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 36,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 153,
+      "line_range": [
+        153
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "153     assert second.status_code == 200\n154     assert \"no-store\" in second.headers[\"cache-control\"]\n155     assert second.json()[\"expires_at\"] == first.json()[\"expires_at\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 154,
+      "line_range": [
+        154
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "154     assert \"no-store\" in second.headers[\"cache-control\"]\n155     assert second.json()[\"expires_at\"] == first.json()[\"expires_at\"]\n156     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n",
+      "col_offset": 4,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 155,
+      "line_range": [
+        155
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "155     assert second.json()[\"expires_at\"] == first.json()[\"expires_at\"]\n156     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n157 \n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 156,
+      "line_range": [
+        156
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "164     first = _mint(client, api_key)\n165     assert first.status_code == 200\n166     revoked_cookie = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 165,
+      "line_range": [
+        165
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "177 \n178     assert replacement.status_code == 200\n179     assert revoked_cookie not in replacement.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 41,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 178,
+      "line_range": [
+        178
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "178     assert replacement.status_code == 200\n179     assert revoked_cookie not in replacement.headers[\"set-cookie\"]\n180 \n",
+      "col_offset": 4,
+      "end_col_offset": 66,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 179,
+      "line_range": [
+        179
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "186     client, api_key = single_user_cookie_client\n187     assert _mint(client, api_key).status_code == 200\n188     cookie_before = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 187,
+      "line_range": [
+        187
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "202 \n203     assert response.status_code == 503\n204     assert \"no-store\" in response.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 203,
+      "line_range": [
+        203
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "203     assert response.status_code == 503\n204     assert \"no-store\" in response.headers[\"cache-control\"]\n205     assert \"set-cookie\" not in response.headers\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 204,
+      "line_range": [
+        204
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "204     assert \"no-store\" in response.headers[\"cache-control\"]\n205     assert \"set-cookie\" not in response.headers\n206     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 205,
+      "line_range": [
+        205
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "205     assert \"set-cookie\" not in response.headers\n206     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n207 \n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 206,
+      "line_range": [
+        206
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "214 \n215     assert response.status_code == 503\n216 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 215,
+      "line_range": [
+        215
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "231     first = _mint(client, api_key)\n232     assert first.status_code == 200\n233     first_cookie = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 232,
+      "line_range": [
+        232
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "237     second = _mint(client, api_key)\n238     assert second.status_code == 200\n239     second_cookie = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 36,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 238,
+      "line_range": [
+        238
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "239     second_cookie = client.cookies[\"tldw_single_user_session\"]\n240     assert second_cookie != first_cookie\n241 \n",
+      "col_offset": 4,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 240,
+      "line_range": [
+        240
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "248     )\n249     assert logout.status_code == 200\n250     assert logout.json() == {\"authenticated\": False}\n",
+      "col_offset": 4,
+      "end_col_offset": 36,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 249,
+      "line_range": [
+        249
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "249     assert logout.status_code == 200\n250     assert logout.json() == {\"authenticated\": False}\n251     assert \"no-store\" in logout.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 250,
+      "line_range": [
+        250
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "250     assert logout.json() == {\"authenticated\": False}\n251     assert \"no-store\" in logout.headers[\"cache-control\"]\n252     assert \"tldw_single_user_session=\" in logout.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 251,
+      "line_range": [
+        251
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "251     assert \"no-store\" in logout.headers[\"cache-control\"]\n252     assert \"tldw_single_user_session=\" in logout.headers[\"set-cookie\"]\n253     assert \"Max-Age=0\" in logout.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 252,
+      "line_range": [
+        252
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "252     assert \"tldw_single_user_session=\" in logout.headers[\"set-cookie\"]\n253     assert \"Max-Age=0\" in logout.headers[\"set-cookie\"]\n254     assert len(revoke_calls) == 1\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 253,
+      "line_range": [
+        253
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "253     assert \"Max-Age=0\" in logout.headers[\"set-cookie\"]\n254     assert len(revoke_calls) == 1\n255 \n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 254,
+      "line_range": [
+        254
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "257     client.cookies.set(\"tldw_single_user_session\", first_cookie, path=\"/api\")\n258     assert client.get(\"/api/v1/auth/sessions\").status_code == 401\n259 \n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 258,
+      "line_range": [
+        258
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "261     client.cookies.set(\"tldw_single_user_session\", second_cookie, path=\"/api\")\n262     assert client.get(\"/api/v1/auth/sessions\").status_code == 200\n263 \n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 262,
+      "line_range": [
+        262
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "272 \n273     assert stale_logout.status_code == 200\n274     assert stale_logout.json() == {\"authenticated\": False}\n",
+      "col_offset": 4,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 273,
+      "line_range": [
+        273
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "273     assert stale_logout.status_code == 200\n274     assert stale_logout.json() == {\"authenticated\": False}\n275     assert \"no-store\" in stale_logout.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 274,
+      "line_range": [
+        274
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "274     assert stale_logout.json() == {\"authenticated\": False}\n275     assert \"no-store\" in stale_logout.headers[\"cache-control\"]\n276     assert \"Max-Age=0\" in stale_logout.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 275,
+      "line_range": [
+        275
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "275     assert \"no-store\" in stale_logout.headers[\"cache-control\"]\n276     assert \"Max-Age=0\" in stale_logout.headers[\"set-cookie\"]\n277     assert len(revoke_calls) == 1\n",
+      "col_offset": 4,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 276,
+      "line_range": [
+        276
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "276     assert \"Max-Age=0\" in stale_logout.headers[\"set-cookie\"]\n277     assert len(revoke_calls) == 1\n278 \n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 277,
+      "line_range": [
+        277
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "280     client.cookies.set(\"tldw_single_user_session\", second_cookie, path=\"/api\")\n281     assert client.get(\"/api/v1/auth/sessions\").status_code == 200\n282 \n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 281,
+      "line_range": [
+        281
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "289 \n290     assert response.status_code == 200\n291     assert response.json() == {\"authenticated\": False}\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 290,
+      "line_range": [
+        290
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "290     assert response.status_code == 200\n291     assert response.json() == {\"authenticated\": False}\n292     assert \"no-store\" in response.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 291,
+      "line_range": [
+        291
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "291     assert response.json() == {\"authenticated\": False}\n292     assert \"no-store\" in response.headers[\"cache-control\"]\n293     assert \"tldw_single_user_session=\" in response.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 292,
+      "line_range": [
+        292
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "292     assert \"no-store\" in response.headers[\"cache-control\"]\n293     assert \"tldw_single_user_session=\" in response.headers[\"set-cookie\"]\n294     assert \"Max-Age=0\" in response.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 72,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 293,
+      "line_range": [
+        293
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "293     assert \"tldw_single_user_session=\" in response.headers[\"set-cookie\"]\n294     assert \"Max-Age=0\" in response.headers[\"set-cookie\"]\n295 \n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 294,
+      "line_range": [
+        294
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "319 \n320     assert response.status_code == 200\n321     assert response.json() == {\"authenticated\": False}\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 320,
+      "line_range": [
+        320
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "320     assert response.status_code == 200\n321     assert response.json() == {\"authenticated\": False}\n322     assert \"no-store\" in response.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 321,
+      "line_range": [
+        321
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "321     assert response.json() == {\"authenticated\": False}\n322     assert \"no-store\" in response.headers[\"cache-control\"]\n323     assert \"Max-Age=0\" in response.headers[\"set-cookie\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 322,
+      "line_range": [
+        322
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "322     assert \"no-store\" in response.headers[\"cache-control\"]\n323     assert \"Max-Age=0\" in response.headers[\"set-cookie\"]\n324     assert revoke_calls == []\n",
+      "col_offset": 4,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 323,
+      "line_range": [
+        323
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "323     assert \"Max-Age=0\" in response.headers[\"set-cookie\"]\n324     assert revoke_calls == []\n325 \n",
+      "col_offset": 4,
+      "end_col_offset": 29,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 324,
+      "line_range": [
+        324
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "332     mint = _mint(client, api_key)\n333     assert mint.status_code == 200\n334     cookie_before = client.cookies[\"tldw_single_user_session\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 34,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 333,
+      "line_range": [
+        333
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "352 \n353     assert response.status_code == 503\n354     assert \"no-store\" in response.headers[\"cache-control\"]\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 353,
+      "line_range": [
+        353
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "353     assert response.status_code == 503\n354     assert \"no-store\" in response.headers[\"cache-control\"]\n355     assert \"set-cookie\" not in response.headers\n",
+      "col_offset": 4,
+      "end_col_offset": 58,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 354,
+      "line_range": [
+        354
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "354     assert \"no-store\" in response.headers[\"cache-control\"]\n355     assert \"set-cookie\" not in response.headers\n356     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 355,
+      "line_range": [
+        355
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "355     assert \"set-cookie\" not in response.headers\n356     assert client.cookies[\"tldw_single_user_session\"] == cookie_before\n357 \n",
+      "col_offset": 4,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 356,
+      "line_range": [
+        356
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "371     # single-user-only route can conceal itself with a 404.\n372     assert response.status_code == 403\n373 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 372,
+      "line_range": [
+        372
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "391     monkeypatch.setenv(\"USER_DB_BASE_DIR\", str(tmp_path / \"users\"))\n392     assert _mint(client, api_key).status_code == 200\n393 \n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 392,
+      "line_range": [
+        392
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "395 \n396     assert response.status_code == 200, response.text\n397 \n",
+      "col_offset": 4,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 396,
+      "line_range": [
+        396
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "418     if session_state in {\"expired\", \"revoked\", \"wrong_type\"}:\n419         assert _mint(client, api_key).status_code == 200\n420     if session_state == \"revoked\":\n",
+      "col_offset": 8,
+      "end_col_offset": 56,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 419,
+      "line_range": [
+        419
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "422         csrf = client.cookies[\"csrf_token\"]\n423         assert (\n424             client.delete(\n425                 \"/api/v1/auth/single-user/session\",\n426                 headers={\"X-CSRF-Token\": csrf},\n427             ).status_code\n428             == 200\n429         )\n430         client.cookies.set(\"tldw_single_user_session\", cookie, path=\"/api\")\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 423,
+      "line_range": [
+        423,
+        424,
+        425,
+        426,
+        427,
+        428,
+        429
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "435         response = client.get(path)\n436         assert response.status_code == 401, (path, response.text)\n437 \n",
+      "col_offset": 8,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 436,
+      "line_range": [
+        436
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "453     client, api_key = single_user_cookie_client\n454     assert _mint(client, api_key).status_code == 200\n455 \n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 454,
+      "line_range": [
+        454
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "457         response = client.get(path, headers=headers)\n458         assert response.status_code == 401, (path, response.text)\n459 \n",
+      "col_offset": 8,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 458,
+      "line_range": [
+        458
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "468     monkeypatch.setenv(\"USER_DB_BASE_DIR\", str(tmp_path / \"users\"))\n469     assert _mint(client, api_key).status_code == 200\n470     payload = {\"name\": \"Cookie-owned persona\"}\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 469,
+      "line_range": [
+        469
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "470     payload = {\"name\": \"Cookie-owned persona\"}\n471     assert client.post(\"/api/v1/persona/profiles\", json=payload).status_code == 403\n472     response = client.post(\n",
+      "col_offset": 4,
+      "end_col_offset": 83,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 471,
+      "line_range": [
+        471
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "476     )\n477     assert response.status_code == 201, response.text\n478     profile = response.json()\n",
+      "col_offset": 4,
+      "end_col_offset": 53,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 477,
+      "line_range": [
+        477
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "483     stored = db.get_persona_profile(profile[\"id\"], user_id=str(user_id))\n484     assert stored[\"user_id\"] == str(user_id)\n485     other_profile_id = db.create_persona_profile({\"name\": \"Other owner\", \"user_id\": \"other-user\"})\n",
+      "col_offset": 4,
+      "end_col_offset": 44,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 484,
+      "line_range": [
+        484
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "485     other_profile_id = db.create_persona_profile({\"name\": \"Other owner\", \"user_id\": \"other-user\"})\n486     assert client.get(f\"/api/v1/persona/profiles/{other_profile_id}\").status_code == 404\n487     listing = client.get(\"/api/v1/persona/profiles\")\n",
+      "col_offset": 4,
+      "end_col_offset": 88,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 486,
+      "line_range": [
+        486
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "487     listing = client.get(\"/api/v1/persona/profiles\")\n488     assert listing.status_code == 200\n489     assert profile[\"id\"] in {row[\"id\"] for row in listing.json()}\n",
+      "col_offset": 4,
+      "end_col_offset": 37,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 488,
+      "line_range": [
+        488
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "488     assert listing.status_code == 200\n489     assert profile[\"id\"] in {row[\"id\"] for row in listing.json()}\n490 \n",
+      "col_offset": 4,
+      "end_col_offset": 65,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 489,
+      "line_range": [
+        489
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "496     client, api_key = single_user_cookie_client\n497     assert _mint(client, api_key).status_code == 200\n498     monkeypatch.setenv(\"AUTH_MODE\", \"multi_user\")\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 497,
+      "line_range": [
+        497
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "501     for path in LEGACY_USER_PATHS:\n502         assert client.get(path).status_code == 401\n503 \n",
+      "col_offset": 8,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 502,
+      "line_range": [
+        502
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "523 \n524     assert get_scope() is None\n525     assert _mint(client, api_key).status_code == 200\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 524,
+      "line_range": [
+        524
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "524     assert get_scope() is None\n525     assert _mint(client, api_key).status_code == 200\n526     response = client.get(\"/api/v1/authnz/cookie-content-scope\")\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 525,
+      "line_range": [
+        525
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "526     response = client.get(\"/api/v1/authnz/cookie-content-scope\")\n527     assert response.status_code == 200\n528     assert response.json() == {\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 527,
+      "line_range": [
+        527
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "527     assert response.status_code == 200\n528     assert response.json() == {\n529         \"user_id\": get_settings().SINGLE_USER_FIXED_ID,\n530         \"org_ids\": [], \"team_ids\": [], \"active_org_id\": None,\n531         \"active_team_id\": None, \"is_admin\": True, \"session_role\": None,\n532     }\n533     # A cookie cannot rescue an explicitly invalid header on this path.\n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 528,
+      "line_range": [
+        528,
+        529,
+        530,
+        531,
+        532
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "533     # A cookie cannot rescue an explicitly invalid header on this path.\n534     assert client.get(\"/api/v1/authnz/cookie-content-scope\", headers={\"X-API-KEY\": \"\"}).status_code == 401\n535     assert get_scope() is None\n",
+      "col_offset": 4,
+      "end_col_offset": 106,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 534,
+      "line_range": [
+        534
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "534     assert client.get(\"/api/v1/authnz/cookie-content-scope\", headers={\"X-API-KEY\": \"\"}).status_code == 401\n535     assert get_scope() is None\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 535,
+      "line_range": [
+        535
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "43             scope = get_scope()\n44             assert asdict(scope) == {\n45                 \"user_id\": 42, \"org_ids\": [3, 4], \"team_ids\": [5, 6],\n46                 \"active_org_id\": 4, \"active_team_id\": 6, \"is_admin\": admin,\n47                 \"session_role\": \"matching-role\" if prior == 42 else None,\n48             }\n49             # Child tasks used by streaming must inherit exactly this authenticated scope.\n",
+      "col_offset": 12,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 44,
+      "line_range": [
+        44,
+        45,
+        46,
+        47,
+        48
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "51                 return get_scope()\n52             assert await asyncio.create_task(stream_scope()) == scope\n53 \n",
+      "col_offset": 12,
+      "end_col_offset": 69,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 52,
+      "line_range": [
+        52
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "54     await asyncio.create_task(resolve())\n55     assert get_scope() is initial\n56 \n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 55,
+      "line_range": [
+        55
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "76             if stale is None:\n77                 assert get_scope() is None\n78             if boundary == \"principal\":\n",
+      "col_offset": 16,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 77,
+      "line_range": [
+        77
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "81                 await users.get_request_user(request, api_key=None, token=None)\n82             assert asdict(get_scope()) == {\n83                 \"user_id\": 42, \"org_ids\": [], \"team_ids\": [],\n84                 \"active_org_id\": None, \"active_team_id\": None,\n85                 \"is_admin\": False, \"session_role\": None,\n86             }\n87 \n",
+      "col_offset": 12,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 82,
+      "line_range": [
+        82,
+        83,
+        84,
+        85,
+        86
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "88     await asyncio.create_task(resolve())\n89     assert get_scope() is initial\n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 89,
+      "line_range": [
+        89
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "60             ).fetchone()\n61             assert not flags[\"rolsuper\"] and not flags[\"rolbypassrls\"]\n62     else:\n",
+      "col_offset": 12,
+      "end_col_offset": 70,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 61,
+      "line_range": [
+        61
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "96         )\n97         assert media_id is not None\n98 \n",
+      "col_offset": 8,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 97,
+      "line_range": [
+        97
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "104         )\n105         assert [row[\"id\"] for row in media_rows] == [media_id]\n106 \n",
+      "col_offset": 8,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 105,
+      "line_range": [
+        105
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "118         direct_documents = await retriever.retrieve(\"Rowan\")\n119         assert [document.metadata.get(\"media_id\") for document in direct_documents] == [str(media_id)]\n120 \n",
+      "col_offset": 8,
+      "end_col_offset": 102,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 119,
+      "line_range": [
+        119
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "134 \n135     assert result.documents\n136     assert any(\n",
+      "col_offset": 4,
+      "end_col_offset": 27,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 135,
+      "line_range": [
+        135
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "135     assert result.documents\n136     assert any(\n137         str(document.get(\"content\", \"\")).startswith(\"Rowan\")\n138         for document in result.documents\n139         if isinstance(document, dict)\n140     )\n141 \n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 136,
+      "line_range": [
+        136,
+        137,
+        138,
+        139,
+        140
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "165         )\n166         assert media_id is not None\n167 \n",
+      "col_offset": 8,
+      "end_col_offset": 35,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 166,
+      "line_range": [
+        166
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "205                 ) as response:\n206                     assert response.status_code == 200\n207                     events = [json.loads(raw) for raw in response.iter_lines() if raw]\n",
+      "col_offset": 20,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 206,
+      "line_range": [
+        206
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "211     context_events = [event for event in events if event.get(\"type\") == \"contexts\"]\n212     assert context_events\n213     assert any(\n",
+      "col_offset": 4,
+      "end_col_offset": 25,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 212,
+      "line_range": [
+        212
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "212     assert context_events\n213     assert any(\n214         context.get(\"source_id\") == str(media_id)\n215         for context in context_events[0][\"contexts\"]\n216     )\n217 \n",
+      "col_offset": 4,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 213,
+      "line_range": [
+        213,
+        214,
+        215,
+        216
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "243         )\n244     assert get_scope() is None\n245     app = FastAPI()\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 244,
+      "line_range": [
+        244
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "275             yield client, db, media_id\n276         assert get_scope() is None\n277     finally:\n",
+      "col_offset": 8,
+      "end_col_offset": 34,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 276,
+      "line_range": [
+        276
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "286     headers = {header: f\"Bearer {key}\" if header == \"Authorization\" else key}\n287     assert client.get(f\"/media/{media_id}\", headers=headers).status_code == 200\n288     assert client.delete(f\"/media/{media_id}\", headers=headers).status_code == 204\n",
+      "col_offset": 4,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 287,
+      "line_range": [
+        287
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "287     assert client.get(f\"/media/{media_id}\", headers=headers).status_code == 200\n288     assert client.delete(f\"/media/{media_id}\", headers=headers).status_code == 204\n289     with scoped_context(user_id=1, is_admin=False):\n",
+      "col_offset": 4,
+      "end_col_offset": 82,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 288,
+      "line_range": [
+        288
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "289     with scoped_context(user_id=1, is_admin=False):\n290         assert db.get_media_by_id(media_id, include_trash=True)[\"is_trash\"]\n291     response = client.post(f\"/media/{media_id}/restore\", headers=headers)\n",
+      "col_offset": 8,
+      "end_col_offset": 75,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 290,
+      "line_range": [
+        290
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "291     response = client.post(f\"/media/{media_id}/restore\", headers=headers)\n292     assert response.status_code == 200\n293     with scoped_context(user_id=1, is_admin=False):\n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 292,
+      "line_range": [
+        292
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "293     with scoped_context(user_id=1, is_admin=False):\n294         assert not db.get_media_by_id(media_id, include_trash=True)[\"is_trash\"]\n295 \n",
+      "col_offset": 8,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 294,
+      "line_range": [
+        294
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "304                              \"top_k\": 8, \"enable_generation\": True, \"enable_cache\": False}) as response:\n305         assert response.status_code == 200\n306         events = [json.loads(raw) for raw in response.iter_lines() if raw]\n",
+      "col_offset": 8,
+      "end_col_offset": 42,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 305,
+      "line_range": [
+        305
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "308                 for context in event[\"contexts\"]]\n309     assert any(context.get(\"source_id\") == str(media_id) for context in contexts) is expected\n310 \n",
+      "col_offset": 4,
+      "end_col_offset": 93,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 309,
+      "line_range": [
+        309
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "327         )\n328     assert get_scope() is None\n329     request = Request({\"type\": \"http\", \"headers\": [], \"path\": \"/\", \"method\": \"GET\"})\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 328,
+      "line_range": [
+        328
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "336             await get_request_user(request, api_key=None, token=None)\n337         assert db.get_media_by_id(media_id, include_trash=True) is None\n338     assert get_scope() is None\n",
+      "col_offset": 8,
+      "end_col_offset": 71,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 337,
+      "line_range": [
+        337
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "337         assert db.get_media_by_id(media_id, include_trash=True) is None\n338     assert get_scope() is None\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 338,
+      "line_range": [
+        338
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

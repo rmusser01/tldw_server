@@ -1,0 +1,23 @@
+# UAT257/259 authenticated content-scope repair
+
+## Tasks 257/259: restore authenticated content scope before permission-first database work
+
+**Backlog:** TASK13260.199 and TASK13260.201. **Status:** Prepared; implementation waits for258 review correction. **Baseline:**2787043410.
+
+**Proven boundary:** `.tmp/uat-repairs-231-246/trash259-diagnosis/REVIEW.md` proves that the configured single-user key branch of `core/AuthNZ/auth_principal_resolver.py` caches an authenticated principal/user without activating content scope. The cached `get_request_user` return in `core/AuthNZ/User_DB_Handling.py` likewise leaves scope unset. User-first authentication activates owner1; principal-first leaves PostgreSQL app.user_id empty and hides the same original owned row. Both Media DELETE and RAG stream declare permission-first dependencies. Initial257 direct-context probes bypass this defect and are controls only, not causal regression coverage.
+
+**Design:** Activate the existing content authorization context from the already authenticated identity at the canonical resolver/cached-user boundary. Reuse existing claim/user normalization and admin semantics; preserve org/team memberships, active selectors, session-role behavior and request isolation. Prefer the smallest shared correction over endpoint-specific scope patches or changing SQL/RLS. No schema, role, permission, retrieval threshold, provider, timeout or native data changes. Do not add a broad auth redesign. If evidence points to a different necessary boundary, report it before expanding production scope.
+
+**Owned source:** `tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py`, `User_DB_Handling.py`, and a narrowly necessary existing auth helper if justified; focused tests under AuthNZ/AuthNZ_Unit and the existing untracked RAG probe file. Root alone owns Git, Backlog, docs, runtime/model/browser, frozen archives, profiles, and native data. No subagents or commits by author. One implementation author at a time.
+
+**Steps:**
+1. Reproduce causal RED through actual FastAPI dependency resolution using official restricted PostgreSQL fixtures (NOSUPERUSER/NOBYPASSRLS) and SQLite controls. Exercise actual Media DELETE/restore and RAG stream database/retrieval path, without overriding authentication or pre-seeding request content scope. Test fixture data can be created in explicit temporary setup scope that is reset before request. Controlled external generation/embeddings are allowed; mocking the broken auth or owned lookup is not.
+2. Make the narrow authenticated-scope repair. Cover principal-first/user-first, cached authenticated user/principal with absent and prior unrelated scope, configured key/bearer compatibility and actual cookie paths, explicit invalid-header precedence, claim-derived membership/admin state, ordinary multi-user JWT/API-key isolation, and stream/task propagation/cleanup where affected. Use existing tests/fixtures rather than inventing a new framework. Preserve other-owner denial and legitimate no-match behavior. Verify same-owner retrieval, deletion and restoration against actual database behavior.
+3. Run focused plus relevant adjacent actual SQLite/PostgreSQL tests with zero skips using the mandatory official runner and escalated fixture-network access. Run scoped .venv Ruff/compile/Bandit, compare pre-existing findings and distinguish test B101. Retain causal RED, final GREEN, commands, exit codes, source hashes and limits. Maximum3 failed attempts per issue, then reassess and record.
+4. Independent spec/code review follows before commit. Root explicitly upgrades immutable native copies and repeats original Rowan QA and Delete/Trash/Restore, preserving all original failures and data. Neither finding closes merely because direct helper tests pass.
+
+**Runner:** `source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=authscope257259-UNIQUE node .tmp/fresh-uat-recovery-20260916/run-pg-tests-explicit-jobs.mjs TESTS -q --tb=short`. Use require_escalated for local fixture network. Do not skip PostgreSQL, substitute a DB or roll a new cluster. Never print private credentials/configs/raw runtime logs or provider reasoning. Store safe results in `.tmp/uat-repairs-231-246/authscope257259/` and full report in this plan's SDD workspace.
+
+**Success:** Actual permission-first endpoint regressions fail before and pass after the narrow repair; owned source retrieval and Trash lifecycle work with restricted PostgreSQL and SQLite controls; unrelated identities remain denied; no new static/security findings; independent review and original native acceptance both clear.
+
+Return status plus full report path. Preserve the prior task257 report as historical probe evidence; write task-257-259-report.md separately.

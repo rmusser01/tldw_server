@@ -1,0 +1,293 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-18T00:18:39Z",
+  "metrics": {
+    "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 3,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 3,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1378,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 5,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 5,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 552,
+      "nosec": 0,
+      "skipped_tests": 1
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 8,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 8,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1930,
+      "nosec": 0,
+      "skipped_tests": 1
+    }
+  },
+  "results": [
+    {
+      "code": "915     try:\n916         principal = AuthPrincipal(\n917             kind=\"user\",\n918             user_id=user.id_int,\n919             api_key_id=None,\n920             username=getattr(user, \"username\", None),\n921             email=getattr(user, \"email\", None),\n922             subject=None,\n923             token_type=\"access\",\n924             jti=None,\n925             impersonation=user.impersonation,\n926             impersonated_by=user.impersonated_by,\n927             roles=list(user.roles or []),\n928             permissions=list(user.permissions or []),\n929             is_admin=bool(user.is_admin),\n930             org_ids=org_ids,\n931             team_ids=team_ids,\n932             active_org_id=active_org_id,\n933             active_team_id=active_team_id,\n934         )\n935         ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 20,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'access'",
+      "line_number": 916,
+      "line_range": [
+        916,
+        917,
+        918,
+        919,
+        920,
+        921,
+        922,
+        923,
+        924,
+        925,
+        926,
+        927,
+        928,
+        929,
+        930,
+        931,
+        932,
+        933,
+        934
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "1023                 try:\n1024                     principal = AuthPrincipal(\n1025                         kind=\"user\",\n1026                         user_id=user.id_int,\n1027                         api_key_id=None,\n1028                         username=getattr(user, \"username\", None),\n1029                         email=getattr(user, \"email\", None),\n1030                         subject=\"single_user\",\n1031                         token_type=\"api_key\",\n1032                         jti=None,\n1033                         roles=list(user.roles or []),\n1034                         permissions=list(user.permissions or []),\n1035                         is_admin=True,\n1036                         org_ids=[],\n1037                         team_ids=[],\n1038                     )\n1039                     ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 32,
+      "end_col_offset": 21,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 1024,
+      "line_range": [
+        1024,
+        1025,
+        1026,
+        1027,
+        1028,
+        1029,
+        1030,
+        1031,
+        1032,
+        1033,
+        1034,
+        1035,
+        1036,
+        1037,
+        1038
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "1355 \n1356             principal = AuthPrincipal(\n1357                 kind=\"api_key\",\n1358                 user_id=user_obj.id_int,\n1359                 api_key_id=api_key_id_val,\n1360                 username=getattr(user_obj, \"username\", None),\n1361                 email=getattr(user_obj, \"email\", None),\n1362                 subject=subject_val,\n1363                 token_type=\"api_key\",\n1364                 jti=None,\n1365                 roles=list(user_obj.roles or []),\n1366                 permissions=list(user_obj.permissions or []),\n1367                 is_admin=bool(user_obj.is_admin),\n1368                 org_ids=org_ids,\n1369                 team_ids=team_ids,\n1370                 active_org_id=active_org_id,\n1371                 active_team_id=active_team_id,\n1372             )\n1373             ip = request.client.host if getattr(request, \"client\", None) else None\n",
+      "col_offset": 24,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 1356,
+      "line_range": [
+        1356,
+        1357,
+        1358,
+        1359,
+        1360,
+        1361,
+        1362,
+        1363,
+        1364,
+        1365,
+        1366,
+        1367,
+        1368,
+        1369,
+        1370,
+        1371,
+        1372
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "387             token_type = _peek_jwt_token_type(token)\n388             if token_type == \"service\":\n389                 try:\n",
+      "col_offset": 29,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'service'",
+      "line_number": 388,
+      "line_range": [
+        388
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b105_hardcoded_password_string.html",
+      "test_id": "B105",
+      "test_name": "hardcoded_password_string"
+    },
+    {
+      "code": "440                 service_name, permissions, roles = _resolve_service_identity(payload)\n441                 principal = AuthPrincipal(\n442                     kind=\"service\",\n443                     user_id=None,\n444                     api_key_id=None,\n445                     username=None,\n446                     email=None,\n447                     subject=f\"service:{service_name}\",\n448                     token_type=\"service\",\n449                     jti=payload.get(\"jti\"),\n450                     roles=roles,\n451                     permissions=permissions,\n452                     is_admin=_claims_mark_admin(roles=roles, permissions=permissions),\n453                     org_ids=[],\n454                     team_ids=[],\n455                     active_org_id=None,\n456                     active_team_id=None,\n457                 )\n458                 ctx = _build_context(principal, request)\n",
+      "col_offset": 28,
+      "end_col_offset": 17,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'service'",
+      "line_number": 441,
+      "line_range": [
+        441,
+        442,
+        443,
+        444,
+        445,
+        446,
+        447,
+        448,
+        449,
+        450,
+        451,
+        452,
+        453,
+        454,
+        455,
+        456,
+        457
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "504 \n505             principal = _build_principal_from_user(\n506                 user=user,\n507                 kind=\"user\",\n508                 request=request,\n509                 token_type=\"access\",\n510                 jti=None,\n511                 api_key_id=None,\n512             )\n513             ctx = _build_context(principal, request)\n",
+      "col_offset": 24,
+      "end_col_offset": 13,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'access'",
+      "line_number": 505,
+      "line_range": [
+        505,
+        506,
+        507,
+        508,
+        509,
+        510,
+        511,
+        512
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "547                     user = User_DB_Handling.get_single_user_instance()\n548                     principal = _build_principal_from_user(\n549                         user=user,\n550                         kind=\"user\",\n551                         request=request,\n552                         token_type=\"api_key\",\n553                         jti=None,\n554                         subject=\"single_user\",\n555                         api_key_id=None,\n556                     )\n557                     ctx = _build_context(principal, request)\n",
+      "col_offset": 32,
+      "end_col_offset": 21,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 548,
+      "line_range": [
+        548,
+        549,
+        550,
+        551,
+        552,
+        553,
+        554,
+        555,
+        556
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "603 \n604         principal = _build_principal_from_user(\n605             user=user,\n606             kind=\"api_key\",\n607             request=request,\n608             token_type=\"api_key\",\n609             jti=None,\n610             api_key_id=api_key_id,\n611         )\n612         ctx = _build_context(principal, request)\n",
+      "col_offset": 20,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'api_key'",
+      "line_number": 604,
+      "line_range": [
+        604,
+        605,
+        606,
+        607,
+        608,
+        609,
+        610,
+        611
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    }
+  ]
+}
