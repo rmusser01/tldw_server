@@ -1,0 +1,28 @@
+{
+  "at": "2026-09-18T05:07:10.299Z",
+  "cell": "pg-multi",
+  "sourceCommit": "c13701938e86ed8e9c83cacebdcd5d7fb3abe7e9",
+  "bindingSha256": "9855ae14666889e16e4a4d16566f76ac919b8a4692e808c8e9967aff23bf2921",
+  "profileUnchanged": true,
+  "initializationUnchanged": true,
+  "holderUnchanged": true,
+  "configSha256": "c5da2dcc22aae4125c80eeb0b15a92f05adbc56f9b477b99041e7cd46ad5308e",
+  "apiHealth": 200,
+  "webStatus": 200,
+  "processes": [
+    {
+      "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/backend-1789707959327-385d19fd-256a-4555-9cf3-655710c5b863.process.private.json",
+      "receiptSha256": "650ee8fcc0ffc3f054b33bc5fa59dda97c32eb987affa9f89ad675bb6e62484f",
+      "action": "backend",
+      "pid": 97657,
+      "identity": "97657 97639 /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 18703"
+    },
+    {
+      "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/frontend-1789707968498-c296278b-4127-44be-8be0-2ef8c7dc2ea7.process.private.json",
+      "receiptSha256": "f499e1e075f0e744e55d131f7a0069fc62ffb0be24a945cbbe28a9a5da275cdd",
+      "action": "frontend",
+      "pid": 97812,
+      "identity": "97812 97781 /Users/macbook-dev/.nvm/versions/node/v24.6.0/bin/node /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/node_modules/.bun/next@16.1.4+d9efe0b44b7e6f19/node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port 18783"
+    }
+  ]
+}

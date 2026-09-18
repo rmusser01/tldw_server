@@ -310,11 +310,11 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task217: contain catalogue table beside World Book detail
 
-**Status:** In Progress. TASK13260.217/UAT276 retains native pointer interception and screenshot/geometry at1200×953: table extends outside its35% list column underneath detail. Keyboard menu is a workaround only. Implementer diagnoses minimal existing layout overflow correction and meaningful layout/pointer regression; independent review and original committed PostgreSQL pointer/reload acceptance required. Gate276:270verified,4native-pending268269274275,2active261276.
+**Status:** Complete. TASK13260.217/UAT276 retains native pointer interception and screenshot/geometry at1200×953: table extends outside its35% list column underneath detail. Keyboard menu was a workaround only. Minimal existing layout overflow correction passed independent source review and original committed PostgreSQL pointer/reload acceptance at1200×953 and900×953. Historical gate276:270verified,4native-pending268269274275,2active261276.
 
 ## Task218: truthful World Book deletion wording
 
-**Status:** In Progress. TASK13260.218/UAT277 retains native permanent-removal text versus default soft-delete response. Root owns a two-string single/bulk dialog correction describing library removal; no endpoint/timer/undo change. Existing selection/keyboard3controls pass; independent review and committed native single/bulk Cancel checks remain required.
+**Status:** Complete. TASK13260.218/UAT277 retains native permanent-removal text versus default soft-delete response. Root's two-string single/bulk dialog correction describes library removal; no endpoint/timer/undo change. Existing selection/keyboard3controls, independent source review and committed native single/bulk2 Cancel checks pass; no deletion was sent.
 
 - Tasks210/215/216 Complete after native33checks62inputs and root85retention comparisons; packet43a483292f336032a9fda08ecf89efe51b57965e1ccf34ae05b6020c9882ae35. Current277 findings:274verified,3active261276277. Root owns returned PGmulti browser; runtimeac713a4/API84240/Next84458 unchanged.276 containment and277 copy source review pending;261 capture correction is under root review, no live calls yet.
 
@@ -323,3 +323,5 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 - 05:07UTC: bounded261 native diagnosis completed exactly2fresh calls with equal captured current message/settings fingerprints and terminalstop: first nonexact55characters, second exact10characters, both saved/reloaded. No thirdcall/Retry/tuning/criterionchange; historical attribution remains unproven and261 stays open. OrdinaryPGsingle restored healthy using unchanged2ff source/profile/init/holder/config/frontend. OriginalPGmulti upgraded healthy to committedc137 for276277 native pointer/responsive/dialog-Cancel acceptance; exclusive reviewer lease released. Fullmatrix remains held.
 
 - Bounded261 evidence independently audited25checks56inputs, root identical replay; separate disposition finds no actionable application defect. Live packet26357d80844fdc6385823b51a2b62044c00f0a9775526abb2375a91ca3518a26 passes85rootretention comparisons,261 remains open. Owner run-gate question pending; no criterion relaxation or dependent full-matrix start. Native276277 continues independently.
+
+- Tasks217/218 Complete after native26checks54inputs, root replay/visual inspection and89retention comparisons. Packet14b1ccd4f63717037542fb83839bd7f327dd47ca72cf74ff8c752d5dd325088d. Gate277:276verified,1open261, no reviewed fixes awaiting native acceptance. PGmulti browser returned, original data preserved; ordinaryPGsingle restored. Owner run-gate decision remains pending, fullfreshmatrix unstarted.

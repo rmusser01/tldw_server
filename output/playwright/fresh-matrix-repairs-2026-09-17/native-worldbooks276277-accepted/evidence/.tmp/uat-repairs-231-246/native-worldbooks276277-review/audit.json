@@ -1,0 +1,892 @@
+{
+  "verdict": "CLEAR bounded native UAT276/277",
+  "checks": [
+    {
+      "name": "Actual desktop CSS viewport1200x953 and adjacent900x953 retained with DPR1 qualification",
+      "pass": true
+    },
+    {
+      "name": "Desktop ordinary wheel reveals contained action whose center receives normal click",
+      "pass": true
+    },
+    {
+      "name": "Tablet normal expansion retains contained action above detail and normal pointer menu",
+      "pass": true
+    },
+    {
+      "name": "Tablet missing-region wait was collapsed catalogue, not broken pointer action",
+      "pass": true
+    },
+    {
+      "name": "Pointer helpers use actual wheel/click with no force or assigned fake geometry",
+      "pass": true
+    },
+    {
+      "name": "Single native dialog correct neutral copy/context/undo; both inspections Cancel",
+      "pass": true
+    },
+    {
+      "name": "Bulk native dialog correct count2/library copy, Cancel and clear selection",
+      "pass": true
+    },
+    {
+      "name": "Final viewport restored1200x953 and originalbook1 attachments visible",
+      "pass": true
+    },
+    {
+      "name": "No DELETE, model generation or scheduled-deletion notification",
+      "pass": true
+    },
+    {
+      "name": "Only automatic auth refresh writes; no fixture mutations",
+      "pass": true
+    },
+    {
+      "name": "Only originalbooks1/2 remain and whole canonical objects are unchanged",
+      "pass": true
+    },
+    {
+      "name": "Originalcharacter4/6 and dedicated7 metadata preserved",
+      "pass": true
+    },
+    {
+      "name": "Full association objects unchanged;4/6book1enabled,7detached",
+      "pass": true
+    },
+    {
+      "name": "Original books also equal prior lease canonical objects",
+      "pass": true
+    },
+    {
+      "name": "Recovered background401s retained, one refresh200, automaticAlice2 and retries200",
+      "pass": true
+    },
+    {
+      "name": "Own passive listeners removed after all readbacks",
+      "pass": true
+    },
+    {
+      "name": "Healthy originalPGmulti startup on exact source c137 binding",
+      "pass": true
+    },
+    {
+      "name": "Original profile/init/holder/config hashes unchanged",
+      "pass": true
+    },
+    {
+      "name": "Official restricted PostgreSQL role retained",
+      "pass": true
+    },
+    {
+      "name": "Post-handback source-bound process observation matches healthy startup",
+      "pass": true
+    },
+    {
+      "name": "Current receipts preserve source identity and native interval",
+      "pass": true
+    },
+    {
+      "name": "Prepared immutable source/dependency proofs match binding",
+      "pass": true
+    },
+    {
+      "name": "Actual serving sources match frozen reviews and prepared manifest",
+      "pass": true
+    },
+    {
+      "name": "worldbooks276-review independent source review remains CLEAR",
+      "pass": true
+    },
+    {
+      "name": "worldbook277-review independent source review remains CLEAR",
+      "pass": true
+    },
+    {
+      "name": "Run-label setup failure retained; later correct profile used",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "run": "repairs231-250-targeted-20260917",
+    "cell": "pg-multi",
+    "source": "c13701938e86ed8e9c83cacebdcd5d7fb3abe7e9",
+    "identityId": 2,
+    "accepted": [
+      276,
+      277
+    ],
+    "startAt": "2026-09-18T05:11:03.771Z",
+    "handbackAt": "2026-09-18T05:18:44.240Z",
+    "pointer": [
+      {
+        "at": "2026-09-18T05:11:52.376Z",
+        "viewport": {
+          "width": 1200,
+          "height": 953,
+          "dpr": 1
+        },
+        "before": {
+          "x": 80,
+          "y": 203,
+          "width": 380.796875,
+          "height": 399,
+          "clientWidth": 381,
+          "scrollWidth": 517,
+          "scrollLeft": 0,
+          "overflowX": "auto"
+        },
+        "geometry": {
+          "button": {
+            "x": 421.0234375,
+            "y": 347,
+            "width": 24,
+            "height": 24
+          },
+          "region": {
+            "x": 80,
+            "y": 203,
+            "width": 380.796875,
+            "height": 399,
+            "clientWidth": 381,
+            "scrollWidth": 517,
+            "scrollLeft": 136
+          },
+          "detail": {
+            "x": 476.796875,
+            "y": 203,
+            "width": 691.203125,
+            "height": 1120
+          },
+          "hit": {
+            "tag": "circle",
+            "ownButton": true
+          },
+          "insideRegion": true
+        },
+        "normalPointerMenuOpened": true
+      },
+      {
+        "at": "2026-09-18T05:15:49.824Z",
+        "viewport": {
+          "width": 900,
+          "height": 953,
+          "dpr": 1
+        },
+        "before": {
+          "x": 73,
+          "y": 281,
+          "width": 802,
+          "height": 235,
+          "clientWidth": 802,
+          "scrollWidth": 802,
+          "scrollLeft": 0,
+          "overflowX": "auto"
+        },
+        "geometry": {
+          "button": {
+            "x": 834.9921875,
+            "y": 384,
+            "width": 24,
+            "height": 24
+          },
+          "region": {
+            "x": 73,
+            "y": 281,
+            "width": 802,
+            "height": 235,
+            "clientWidth": 802,
+            "scrollWidth": 802,
+            "scrollLeft": 0
+          },
+          "detail": {
+            "x": 72,
+            "y": 533,
+            "width": 804,
+            "height": 1092
+          },
+          "hit": {
+            "tag": "circle",
+            "ownButton": true
+          },
+          "insideRegion": true
+        },
+        "normalPointerMenuOpened": true
+      }
+    ],
+    "singleDialog": {
+      "at": "2026-09-18T05:16:23.765Z",
+      "cancelled": true,
+      "context": {
+        "entries": 0,
+        "attached": 2
+      },
+      "neutralLibraryCopy": true,
+      "tenSecondUndoUnchanged": true,
+      "settledScreenshot": "08-single-settled.png"
+    },
+    "bulkDialog": {
+      "at": "2026-09-18T05:17:52.786Z",
+      "count": 2,
+      "cancelled": true,
+      "selectionCleared": true,
+      "settledScreenshot": "10-bulk-settled.png"
+    },
+    "finalReload": {
+      "at": "2026-09-18T05:18:15.830Z",
+      "viewport": {
+        "width": 1200,
+        "height": 953,
+        "dpr": 1
+      },
+      "books": [
+        1,
+        2
+      ],
+      "originalObjectsUnchanged": true,
+      "attachments": {
+        "4": {
+          "bookId": 1,
+          "enabled": true
+        },
+        "6": {
+          "bookId": 1,
+          "enabled": true
+        },
+        "7": []
+      }
+    },
+    "requestCount": 270,
+    "responseCount": 270,
+    "deleteRequests": 0,
+    "modelRequests": 0,
+    "automaticAuthRefresh": {
+      "events": [
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.226Z",
+          "path": "/api/v1/buddies",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.227Z",
+          "path": "/api/v1/buddies/attachment",
+          "method": "GET"
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.237Z",
+          "path": "/api/v1/buddies",
+          "status": 401
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.238Z",
+          "path": "/api/v1/auth/refresh",
+          "method": "POST"
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.238Z",
+          "path": "/api/v1/buddies/attachment",
+          "status": 401
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.260Z",
+          "path": "/api/v1/auth/refresh",
+          "status": 200
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.263Z",
+          "path": "/api/v1/notifications/unread-count",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.263Z",
+          "path": "/api/v1/buddies",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.263Z",
+          "path": "/api/v1/buddies/attachment",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.263Z",
+          "path": "/api/v1/auth/me",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.278Z",
+          "path": "/api/v1/buddies",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.278Z",
+          "path": "/api/v1/buddies/attachment",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.278Z",
+          "path": "/api/v1/buddies",
+          "method": "GET"
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.278Z",
+          "path": "/api/v1/buddies/attachment",
+          "method": "GET"
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.291Z",
+          "path": "/api/v1/auth/me",
+          "status": 200,
+          "identityId": 2
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.293Z",
+          "path": "/api/v1/notifications/unread-count",
+          "status": 200
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.293Z",
+          "path": "/api/v1/notifications",
+          "method": "GET"
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.305Z",
+          "path": "/api/v1/buddies",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.305Z",
+          "path": "/api/v1/buddies/attachment",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.317Z",
+          "path": "/api/v1/notifications",
+          "status": 200
+        },
+        {
+          "event": "request",
+          "at": "2026-09-18T05:15:39.318Z",
+          "path": "/api/v1/notifications/stream",
+          "method": "GET"
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.337Z",
+          "path": "/api/v1/notifications/stream",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.343Z",
+          "path": "/api/v1/buddies",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.343Z",
+          "path": "/api/v1/buddies/attachment",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.365Z",
+          "path": "/api/v1/buddies",
+          "status": 200
+        },
+        {
+          "event": "response",
+          "at": "2026-09-18T05:15:39.367Z",
+          "path": "/api/v1/buddies/attachment",
+          "status": 200
+        }
+      ],
+      "postCount": 1,
+      "manualAuthActions": 0,
+      "errorBodyCaptured": false,
+      "exactCause": "unestablished",
+      "recoveredAlice2": true
+    },
+    "errors": [
+      {
+        "event": "response",
+        "at": "2026-09-18T05:15:39.237Z",
+        "path": "/api/v1/buddies",
+        "status": 401
+      },
+      {
+        "event": "response",
+        "at": "2026-09-18T05:15:39.238Z",
+        "path": "/api/v1/buddies/attachment",
+        "status": 401
+      }
+    ],
+    "runtime": [
+      {
+        "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/backend-1789707959327-385d19fd-256a-4555-9cf3-655710c5b863.process.private.json",
+        "observedAt": "2026-09-18T05:19:18.278Z",
+        "observedSha256": "650ee8fcc0ffc3f054b33bc5fa59dda97c32eb987affa9f89ad675bb6e62484f",
+        "currentSha256": "650ee8fcc0ffc3f054b33bc5fa59dda97c32eb987affa9f89ad675bb6e62484f",
+        "currentStatus": "started",
+        "endedAt": null,
+        "coversAcceptance": true
+      },
+      {
+        "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/frontend-1789707968498-c296278b-4127-44be-8be0-2ef8c7dc2ea7.process.private.json",
+        "observedAt": "2026-09-18T05:19:18.278Z",
+        "observedSha256": "f499e1e075f0e744e55d131f7a0069fc62ffb0be24a945cbbe28a9a5da275cdd",
+        "currentSha256": "f499e1e075f0e744e55d131f7a0069fc62ffb0be24a945cbbe28a9a5da275cdd",
+        "currentStatus": "started",
+        "endedAt": null,
+        "coversAcceptance": true
+      }
+    ],
+    "sourceHashes": [
+      {
+        "path": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookListPanel.tsx",
+        "sha256": "082514ca18f5f38a413c12b1c04f63971ef8e0d715317d5806637b6115ca434f",
+        "manifestSha256": "082514ca18f5f38a413c12b1c04f63971ef8e0d715317d5806637b6115ca434f"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/WorldBooks/hooks/useWorldBookBulkActions.tsx",
+        "sha256": "2522236f2596586aee7b6ed8ca358f53e2c8b00736fdad1347b5526ca0e1252b",
+        "manifestSha256": "2522236f2596586aee7b6ed8ca358f53e2c8b00736fdad1347b5526ca0e1252b"
+      },
+      {
+        "path": "apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx",
+        "sha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c",
+        "manifestSha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c"
+      },
+      {
+        "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+        "sha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4",
+        "manifestSha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4"
+      },
+      {
+        "path": "tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+        "sha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186",
+        "manifestSha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186"
+      },
+      {
+        "path": "apps/packages/ui/src/services/background-proxy.ts",
+        "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+        "manifestSha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638"
+      }
+    ]
+  },
+  "limits": [
+    "Original preserved PostgreSQL multi-user Alice configuration; no clean install/full48/all-mode acceptance.",
+    "Current real browser CSS1200x953 and900x953 use DPR1 after Playwright viewport sizing; pre-fix screenshot was DPR2. CSS containment/hit-target checks are direct measurements, not a device-pixel-identical image comparison.",
+    "Desktop Actions need ordinary horizontal scrolling. At900 the selected catalogue is intentionally collapsed until its visible summary is clicked. Neither behavior is represented as a new defect.",
+    "04-single-dialog.png captured the preceding menu frame, so it is not dialog-copy image proof. Its text capture retains the real dialog and Cancel.08 settled element screenshot is authoritative.07 tablet screenshot caught menu animation; containment geometry, normal-click success and subsequent settled dialog support usability.",
+    "One mistyped run label failed setup without browser action. Relative screenshot path resolved under the original browser profile sourceRoot/.tmp; that generated image is preserved, with an additional absolute-path capture in the intended directory. No product file was altered.",
+    "05 tablet helper waited for a hidden table region before recognizing the intentional collapsed catalogue. It is a harness-only failure; no force click or arbitrary geometry assignment was used. A premature read/image lookup while05 was pending yielded no usable artifact; only completed captures feed this audit.",
+    "Two background buddies401 responses recovered through one automatic refresh200, auth/meAlice2 and successful automatic retries. No failed user action or identity loss observed; error bodies and exact cause are unavailable. No expiry or new-auth-defect assertion.",
+    "All confirmation interactions Cancel only; zero DELETE/model requests. No direct API writes, auth/header/storage injection, model/settings changes, fixture mutations, product/test/Git/Backlog changes or forced clicks.",
+    "Native acceptance covers single-book and bulk2 confirmation. Bulk1 copy has source review only; no new deletion or undo timer execution was required for copy acceptance.",
+    "Process hashes were observed while started after handback; later root-owned stop may change mutable receipt status/hash. Original binding and interval are explicit.",
+    "Private records are hash-only and known credentials checked in memory. Raw local native captures and screenshots remain hash-addressed; a safe-only retained packet does not independently replay omitted browser artifacts."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/01-reloaded.txt",
+      "sha256": "b86c02f32ca11014f424a29ee0fc07b6f1c5ff3d6baba958af0382134d483d24",
+      "bytes": 12241,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/02-desktop-pointer-corrected.txt",
+      "sha256": "8335d6056e6a76d3d324640cc03c6b26d35079af419f70e4e0fe2e53fc441c64",
+      "bytes": 21903,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/04-single-cancelled.txt",
+      "sha256": "16ef24dc014b4d59a469c1b2b9aa5469b27de2ab87bb59bb4abd3aeb70d55341",
+      "bytes": 33178,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/06-tablet-current.txt",
+      "sha256": "a4ace056aa3b6f1b2b31577a3940fac5d061590fa489e1399027042092c80869",
+      "bytes": 42733,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/07-tablet-pointer-expanded.txt",
+      "sha256": "f371280a515346da74fef036b4e82e145707b12ba8378b671d5bbb87af467537",
+      "bytes": 56153,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/08-single-settled-cancelled.txt",
+      "sha256": "014c2e7710ec5ac37e3e964b45a00b86281026b9744597d8ead89f2136107a63",
+      "bytes": 53185,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/09-bulk-selected.txt",
+      "sha256": "8e262fca1e14e3affd117fa058822f21b2a29d93694b3be8e79ec96826d99d7d",
+      "bytes": 61690,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/10-bulk-cancelled.txt",
+      "sha256": "76814df407231af0548367b9875016498d30d000f5ab4fb2bc6dc1b36fd72ac4",
+      "bytes": 70047,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/11-final-reloaded.txt",
+      "sha256": "92ddfb72dcd3c8294c7730281206223c9262fac3d99843a0682b561248ea9436",
+      "bytes": 81080,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/12-handback.txt",
+      "sha256": "1ec234bd3eeb42b748068240604033c6d4bc7373ee976683d8378ba22807077e",
+      "bytes": 83353,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/05-tablet-pointer.txt",
+      "sha256": "22b90a9fad6305e67e31aa3b822196e2363427e66dbe6c0023da58cc4f79e028",
+      "bytes": 160,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/02-pointer-desktop.js",
+      "sha256": "744de7527ccfa64db4a0d973bc43b30b178c826742d156fbae2b8f31d6ed8766",
+      "bytes": 1945,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/07-pointer-tablet-expanded.js",
+      "sha256": "20ba5f88621a2da172a36e43e290ebba7a4ff991033be2cf595c41d11f33abf6",
+      "bytes": 2173,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-entry274275-review/17-final-handback.txt",
+      "sha256": "21c3fc03ba98fd4c6d2ecf104da511d2cd066e93e08d7f173f74913e55f7acec",
+      "bytes": 187071,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/worldbooks276277-startup-safe.json",
+      "sha256": "62357b5070aeca3efcc665b1d725168eb40d29066a3e775bcae9f37a2f5f10df",
+      "bytes": 1696,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/binding.private.json",
+      "sha256": "9855ae14666889e16e4a4d16566f76ac919b8a4692e808c8e9967aff23bf2921",
+      "bytes": 1657,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f",
+      "bytes": 11348,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db",
+      "bytes": 1593,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9",
+      "bytes": 217,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/Config_Files/config.txt",
+      "sha256": "c5da2dcc22aae4125c80eeb0b15a92f05adbc56f9b477b99041e7cd46ad5308e",
+      "bytes": 61599,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/13-process-observed-safe.json",
+      "sha256": "637f53d41f1b8bccb771f315da3c1b35fb7078cb7e7e0e854b3768e16cbe2eee",
+      "bytes": 1355,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/backend-1789707959327-385d19fd-256a-4555-9cf3-655710c5b863.process.private.json",
+      "sha256": "650ee8fcc0ffc3f054b33bc5fa59dda97c32eb987affa9f89ad675bb6e62484f",
+      "bytes": 1238,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbooks276277-upgrade-20260918/pg-multi/frontend-1789707968498-c296278b-4127-44be-8be0-2ef8c7dc2ea7.process.private.json",
+      "sha256": "f499e1e075f0e744e55d131f7a0069fc62ffb0be24a945cbbe28a9a5da275cdd",
+      "bytes": 1368,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/preparation/pg-multi-source-manifest.json",
+      "sha256": "80b1f133c7e8199caceee83131e202b2a18f4a8f349acca900366d71669903fb",
+      "bytes": 8769205,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/preparation/complete.json",
+      "sha256": "8a58007b62858fb35c188def814ff0d40781f4a0b360cc2466138e5b7f6d07ea",
+      "bytes": 570,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/preparation/gate.json",
+      "sha256": "4c2f4e008ceecb44bca9efa2177c91d0d8d6ecea684af87c764ea7c0e6d70da4",
+      "bytes": 1277,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/preparation/python-reuse.json",
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "bytes": 1417,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/WorldBookListPanel.tsx",
+      "sha256": "082514ca18f5f38a413c12b1c04f63971ef8e0d715317d5806637b6115ca434f",
+      "bytes": 5906,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/hooks/useWorldBookBulkActions.tsx",
+      "sha256": "2522236f2596586aee7b6ed8ca358f53e2c8b00736fdad1347b5526ca0e1252b",
+      "bytes": 7631,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx",
+      "sha256": "68ebdabf0c2839787c8e277fa8ab66289309013980f35fe77f71a90979b53e8c",
+      "bytes": 100062,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4",
+      "bytes": 75013,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "sha256": "c6ae32d056d79c4fb5a529fae5e99d749ca855c0a975fc4d485fe4d72abca186",
+      "bytes": 107252,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbooks276277-upgrade-20260918/pg-multi/apps/packages/ui/src/services/background-proxy.ts",
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "bytes": 80256,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbooks276-review/audit.json",
+      "sha256": "d7b583ad6911a84cd338c92a58925cbce7e8c2eeb45c282e813fba3dd472624c",
+      "bytes": 8010,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbooks276-review/REVIEW.md",
+      "sha256": "971c4e4e4e67fc67d22c684d901f7d7be0feea22af08e6b1153dfce54224803f",
+      "bytes": 2877,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook277-review/audit.json",
+      "sha256": "01f35f90cfd2b0828e23193141bce189bbc32b234f7643748248d7f609aa9e15",
+      "bytes": 6940,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook277-review/REVIEW.md",
+      "sha256": "18f5959c6b103762a9334fe47b04628f7a61c0ab7c0de3d1eda686e0ae046e98",
+      "bytes": 2044,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/repairs231-250-targeted-20260917/pg-multi/.tmp/uat-repairs-231-246/native-worldbooks276277-review/02-desktop-pointer.png",
+      "sha256": "9abdd164d10d374f1304fda2b379a6b66630e1fdc24b1550315a3ff9d0e3a5a5",
+      "bytes": 121118,
+      "privateHashOnly": false,
+      "classification": "misplaced-generated-screenshot"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/02-desktop-pointer.txt",
+      "sha256": "080449ee283c413770a3972cccb886d5451d2e4274c1eb1796a6526a9673fb54",
+      "bytes": 81,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/01-reload.js",
+      "sha256": "83f79b4e6c569a23fdfd075523edc89b04cd7699bfbe604b6a99fcb7db1fe2f1",
+      "bytes": 1647,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/02-desktop-pointer-absolute.png",
+      "sha256": "e8050bf09effe0a13041f0927611990ddbc5e4602175261cf5727b8d7f76ffdf",
+      "bytes": 119591,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/03-desktop-screenshot.txt",
+      "sha256": "087befc91ac446aa4b0d7d69c984b3486ef22179dd2b76c1669ab254495c6abf",
+      "bytes": 482,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/04-single-dialog.png",
+      "sha256": "b1efb978ffc01765b8887dbb4747496dc53e9255a533889fcd4e1ac598b924c3",
+      "bytes": 163835,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/05-pointer-tablet.js",
+      "sha256": "677e003e7b219655d1d98d35b294121ef8731012b96f41ebaa8738b182941efd",
+      "bytes": 2047,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/07-tablet-pointer-expanded.png",
+      "sha256": "f219a589258e6c372e39fa836f91ef29d922d33a3fad0e93e2dda4804aafd120",
+      "bytes": 120481,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/08-single-settled.js",
+      "sha256": "753dea4ecf6617d43633e643530f92e1f3da63b769a39240b16ccb6a84e0205a",
+      "bytes": 841,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/08-single-settled.png",
+      "sha256": "1cacf70752138f7f836fdfbe13550080185c1f815e3edfbfbb9a4b8d8b908e33",
+      "bytes": 36422,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/10-bulk-cancel.js",
+      "sha256": "b84db652ac9795d8f18315ea0808554974b2b69808b6e5cd3a5ef7fc61fc74f9",
+      "bytes": 1035,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/10-bulk-settled.png",
+      "sha256": "4d4ce62168c9d2f3ec9da8255a946d9fa03521d68302562a1a33ebd4bb2e20da",
+      "bytes": 11617,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/11-final-reload.js",
+      "sha256": "c354cf74444c2222b7ecd636e39b386563bc51e07dd430413c715062158f5ee5",
+      "bytes": 639,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/PROTOCOL.md",
+      "sha256": "e2a32f520078cc6b99255b931f2152e97f5816ee7747db3c99dc091d17fef41b",
+      "bytes": 2334,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbooks276277-review/audit.mjs",
+      "sha256": "a3cc54ff9bb4c10b668bdba4f403e745728b0f8120fbbe9081413a4a8760af9c",
+      "bytes": 16054,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/worldbooks276277-root-visual-review.md",
+      "sha256": "580b92ffae0eb1f28611123a61d265039e04a040cd422a87cd9bcc4c75160fed",
+      "bytes": 1274,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/credentials.private.json",
+      "sha256": "ce6ad6074ccd07fdaf5fe4ff9d0e831266aac6b26bf52320ea569e61232788fa",
+      "bytes": 784,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence"
+    }
+  ],
+  "secretScan": {
+    "knownValues": 6,
+    "hits": 0
+  }
+}
