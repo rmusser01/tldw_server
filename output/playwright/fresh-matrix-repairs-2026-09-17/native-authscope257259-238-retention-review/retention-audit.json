@@ -1,0 +1,1000 @@
+{
+  "task": "UAT238/257/259 safe native packet retention",
+  "at": "2026-09-18T01:50:12.661Z",
+  "verdict": "CLEAR bounded retention",
+  "checks": [
+    {
+      "name": "Requested final manifest hash",
+      "pass": true
+    },
+    {
+      "name": "Acceptance limited to238/257/259 and reviewed edfd revision",
+      "pass": true
+    },
+    {
+      "name": "Original38-check native audit unchanged and clear",
+      "pass": true
+    },
+    {
+      "name": "Only three intended safe identity payloads",
+      "pass": true
+    },
+    {
+      "name": "Exact six-file inventory with contained paths and no symlinks",
+      "pass": true
+    },
+    {
+      "name": "Exact retained/source/manifest parity: REVIEW.md",
+      "pass": true
+    },
+    {
+      "name": "Exact retained/source/manifest parity: audit.mjs",
+      "pass": true
+    },
+    {
+      "name": "Exact retained/source/manifest parity: audit.json",
+      "pass": true
+    },
+    {
+      "name": "Checksum file covers every other file exactly once",
+      "pass": true
+    },
+    {
+      "name": "All stored checksums correct",
+      "pass": true
+    },
+    {
+      "name": "All85 original input hashes/sizes/private flags mapped once",
+      "pass": true
+    },
+    {
+      "name": "Only explicitly disclosed tracker mismatch, preserving original/retention-time/latest hashes",
+      "pass": true
+    },
+    {
+      "name": "Ten private inputs and all raw captures remain omitted",
+      "pass": true
+    },
+    {
+      "name": "README retains provider/failure caveats and targeted-only scope",
+      "pass": true
+    },
+    {
+      "name": "Retainer mismatch exception is exact tracker path; other changes fail",
+      "pass": true
+    },
+    {
+      "name": "Independent credential/JWT scan across all six files is zero",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "payloads": 3,
+    "files": 6,
+    "inputReferences": 85,
+    "privateOmitted": 10,
+    "exactCurrentInputMatches": 84,
+    "disclosedMutableTracker": 1,
+    "logPrefixExceptions": 0,
+    "manifestSha256": "7ecc624ecfbf57158b4858ee3ffc2b374b81885dbe58c1dec9d912b2302b67f2",
+    "credentialScan": {
+      "profiles": 7,
+      "variants": 122,
+      "files": 6,
+      "matches": 0,
+      "jwtMatches": 0
+    }
+  },
+  "limits": [
+    "The changed tracker is metadata only: original hash retained, retention-time hash independently matched at initial inspection, then root updated the tracker during this review. Latest hash is recorded separately; no current byte-parity claim. All84 other source/evidence inputs still match exactly.",
+    "No private log prefix exception is actually needed in this packet. API/Next receipt exits were already included in the original review and remain byte-identical.",
+    "Raw captures/private values/source archives remain local with hash-only provenance; packet is not standalone replay. Native acceptance and provider limits are unchanged.",
+    "Known-credential scan covers local known values and selected encodings; no general claim about every possible secret.",
+    "Retainer leading comment contains stale administrative task IDs; actual manifest and reviewed packet correctly identify238/257/259. No original packet, product/runtime/DB/browser/model/Git/task files modified."
+  ],
+  "observations": [
+    {
+      "kind": "payload",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-authscope257259-238-review/REVIEW.md",
+      "source": ".tmp/uat-repairs-231-246/native-authscope257259-238-review/REVIEW.md",
+      "bytes": 7436,
+      "sha256": "33509306fe49cb64f1fc4ba10247b33ce837354bbd3e380117e628abfa6f9d15"
+    },
+    {
+      "kind": "payload",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-authscope257259-238-review/audit.mjs",
+      "source": ".tmp/uat-repairs-231-246/native-authscope257259-238-review/audit.mjs",
+      "bytes": 21785,
+      "sha256": "9977adcbff16892d92bfa1651546e3022e45b8bc171c18072aa0800e48310213"
+    },
+    {
+      "kind": "payload",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-authscope257259-238-review/audit.json",
+      "source": ".tmp/uat-repairs-231-246/native-authscope257259-238-review/audit.json",
+      "bytes": 40704,
+      "sha256": "e360fe1270584ad3a02b0b98231c696613ea8c9986c50077383efc83d068c4ba"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/fixtures/rowan-observatory-public-20260917.txt",
+      "observedBytes": 1917,
+      "observedSha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "currentBytes": 1917,
+      "currentSha256": "e29cc5935162ed5c22618a3104c565f26755d22cc7e90d57cacacd5329aff89b",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-observed-3.txt",
+      "observedBytes": 35087,
+      "observedSha256": "d558e655cdf92045d33f01be5889e31b526173f6e21cc38f409307b9f27eb00c",
+      "currentBytes": 35087,
+      "currentSha256": "d558e655cdf92045d33f01be5889e31b526173f6e21cc38f409307b9f27eb00c",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-qa-observed-2.txt",
+      "observedBytes": 10583,
+      "observedSha256": "8cda8ae50149b164cdd9b1b89f09f6d787eb7c2cee649bc478f5956248dcbe90",
+      "currentBytes": 10583,
+      "currentSha256": "8cda8ae50149b164cdd9b1b89f09f6d787eb7c2cee649bc478f5956248dcbe90",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-opened.txt",
+      "observedBytes": 10376,
+      "observedSha256": "18d12368878acff8579f3f0ffc7eb905cd660a56491f7c96a0bfe21c26167204",
+      "currentBytes": 10376,
+      "currentSha256": "18d12368878acff8579f3f0ffc7eb905cd660a56491f7c96a0bfe21c26167204",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-tabs.txt",
+      "observedBytes": 232,
+      "observedSha256": "44a18d470801535ce48415c97184787f99797494728477b8eb6b0d125b4fbfa7",
+      "currentBytes": 232,
+      "currentSha256": "44a18d470801535ce48415c97184787f99797494728477b8eb6b0d125b4fbfa7",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-tab-selected.txt",
+      "observedBytes": 228,
+      "observedSha256": "ef2c68dc1c73af0c2c2dfa1d196c178b9aa8ed6bd4bbe3c2b28f26bd205037dc",
+      "currentBytes": 228,
+      "currentSha256": "ef2c68dc1c73af0c2c2dfa1d196c178b9aa8ed6bd4bbe3c2b28f26bd205037dc",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-open.js",
+      "observedBytes": 308,
+      "observedSha256": "af9ccae7e3e56e0bf724864b0edeb1f402899f99f7ccd199a01fc487e7df9632",
+      "currentBytes": 308,
+      "currentSha256": "af9ccae7e3e56e0bf724864b0edeb1f402899f99f7ccd199a01fc487e7df9632",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-media.js",
+      "observedBytes": 387,
+      "observedSha256": "ae79baf30e5d01dafa98b93ff57848ed4fbf0eef64a0f03d5f96533158b6f2df",
+      "currentBytes": 387,
+      "currentSha256": "ae79baf30e5d01dafa98b93ff57848ed4fbf0eef64a0f03d5f96533158b6f2df",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-media.txt",
+      "observedBytes": 1555,
+      "observedSha256": "20135e223f11930544ed2bdf8f0c424039981ce6ef5b82787b6443a3274f7213",
+      "currentBytes": 1555,
+      "currentSha256": "20135e223f11930544ed2bdf8f0c424039981ce6ef5b82787b6443a3274f7213",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-canonical.txt",
+      "observedBytes": 18789,
+      "observedSha256": "203f3a6a9e6ac5a6514ed0c0a9b03a75524b7998b45bebe33c8772c8345b9a47",
+      "currentBytes": 18789,
+      "currentSha256": "203f3a6a9e6ac5a6514ed0c0a9b03a75524b7998b45bebe33c8772c8345b9a47",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restored-canonical.txt",
+      "observedBytes": 25855,
+      "observedSha256": "6e8120318bd3c387fb732224d9764594fd9980d41d1e5e1ea54932dc148cbb52",
+      "currentBytes": 25855,
+      "currentSha256": "6e8120318bd3c387fb732224d9764594fd9980d41d1e5e1ea54932dc148cbb52",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-canonical.js",
+      "observedBytes": 955,
+      "observedSha256": "799e0499e6ae150a1f7745426a6ad87f602d6b7400e23d1d0406b6345766ef9b",
+      "currentBytes": 955,
+      "currentSha256": "799e0499e6ae150a1f7745426a6ad87f602d6b7400e23d1d0406b6345766ef9b",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-citation-canonical-projection.json",
+      "observedBytes": 2312,
+      "observedSha256": "b55e307b0184b40ba42a9722dfdef34afe2b298822fa31cfa3492da3a340cdec",
+      "currentBytes": 2312,
+      "currentSha256": "b55e307b0184b40ba42a9722dfdef34afe2b298822fa31cfa3492da3a340cdec",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restored-canonical-projection.json",
+      "observedBytes": 957,
+      "observedSha256": "2ee635b86b24f12445d772edf4a39f5c71b2b71f1be8ee510d70df5015d9c524",
+      "currentBytes": 957,
+      "currentSha256": "2ee635b86b24f12445d772edf4a39f5c71b2b71f1be8ee510d70df5015d9c524",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-settled.txt",
+      "observedBytes": 3276,
+      "observedSha256": "bdeecd129b2af2e96838dcb3a850b05e447c411b760882cd29429b6ca14c4e50",
+      "currentBytes": 3276,
+      "currentSha256": "bdeecd129b2af2e96838dcb3a850b05e447c411b760882cd29429b6ca14c4e50",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restore-settled.txt",
+      "observedBytes": 7635,
+      "observedSha256": "b08a8513a37c5c7d01cf24f28b2241ed2554d67dc231df6c6e8afffd8fc825fd",
+      "currentBytes": 7635,
+      "currentSha256": "b08a8513a37c5c7d01cf24f28b2241ed2554d67dc231df6c6e8afffd8fc825fd",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-viewed.txt",
+      "observedBytes": 2200,
+      "observedSha256": "637b051092eae2a7a4d16e2c0e81ef25842c0b9ed1689f543274a5c984a8048f",
+      "currentBytes": 2200,
+      "currentSha256": "637b051092eae2a7a4d16e2c0e81ef25842c0b9ed1689f543274a5c984a8048f",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restored-selected.txt",
+      "observedBytes": 4683,
+      "observedSha256": "dd7593631db308401e5f9aa256b38a80bcf6f73dbcd34a6f48147d8c1260b6d0",
+      "currentBytes": 4683,
+      "currentSha256": "dd7593631db308401e5f9aa256b38a80bcf6f73dbcd34a6f48147d8c1260b6d0",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-confirm.js",
+      "observedBytes": 398,
+      "observedSha256": "52a84b20ff9fd9a3ebea64f4a4a03860420b2bb2b70fd3d920904e3863cf188a",
+      "currentBytes": 398,
+      "currentSha256": "52a84b20ff9fd9a3ebea64f4a4a03860420b2bb2b70fd3d920904e3863cf188a",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restore.js",
+      "observedBytes": 372,
+      "observedSha256": "aa2d02adebd52d11a885061e7f029515b4e7781d26a1755f586e615b7bb7493d",
+      "currentBytes": 372,
+      "currentSha256": "aa2d02adebd52d11a885061e7f029515b4e7781d26a1755f586e615b7bb7493d",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restored-select.js",
+      "observedBytes": 396,
+      "observedSha256": "d8a5b4e72cd856fb3346ffe3ee657c10a36fdad2b71d5d9bc83b12adbdcb6bbf",
+      "currentBytes": 396,
+      "currentSha256": "d8a5b4e72cd856fb3346ffe3ee657c10a36fdad2b71d5d9bc83b12adbdcb6bbf",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-trash-failed-observed.txt",
+      "observedBytes": 71196,
+      "observedSha256": "23185da61ffaa0da755b7706cecf3b247e2f4429a3dcdcc8d42ecc96daf49406",
+      "currentBytes": 71196,
+      "currentSha256": "23185da61ffaa0da755b7706cecf3b247e2f4429a3dcdcc8d42ecc96daf49406",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-one-observed.txt",
+      "observedBytes": 65108,
+      "observedSha256": "79bb939470c4c79767be2a0d8d96858325b527f7fa5b02fe72ac615aaa080f5a",
+      "currentBytes": 65108,
+      "currentSha256": "79bb939470c4c79767be2a0d8d96858325b527f7fa5b02fe72ac615aaa080f5a",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-two-observed.txt",
+      "observedBytes": 153294,
+      "observedSha256": "b112177438cbf2c276c6c823b6431b689566d04480c3adcee564d06ccaaa2e07",
+      "currentBytes": 153294,
+      "currentSha256": "b112177438cbf2c276c6c823b6431b689566d04480c3adcee564d06ccaaa2e07",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-multi-review-one.txt",
+      "observedBytes": 21887,
+      "observedSha256": "c400298b538d4cd8199be1ffe62a0f7c6b69753d1d1924976927e25fa9fa8000",
+      "currentBytes": 21887,
+      "currentSha256": "c400298b538d4cd8199be1ffe62a0f7c6b69753d1d1924976927e25fa9fa8000",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-failure-observed.txt",
+      "observedBytes": 44666,
+      "observedSha256": "44058031c0008972f842741df8063e56aa5197c6a6f0ecc7f587e672e74652ba",
+      "currentBytes": 44666,
+      "currentSha256": "44058031c0008972f842741df8063e56aa5197c6a6f0ecc7f587e672e74652ba",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-failure-reloaded.txt",
+      "observedBytes": 23568,
+      "observedSha256": "214b17651b1cd0b6b5a472076b1b24be3ead6866874ea1cda68d3d698d8833fc",
+      "currentBytes": 23568,
+      "currentSha256": "214b17651b1cd0b6b5a472076b1b24be3ead6866874ea1cda68d3d698d8833fc",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-one.js",
+      "observedBytes": 484,
+      "observedSha256": "316349d1d560f5bea3745911a3a1003cc97b287a166574e2996deba60add4f30",
+      "currentBytes": 484,
+      "currentSha256": "316349d1d560f5bea3745911a3a1003cc97b287a166574e2996deba60add4f30",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-two.js",
+      "observedBytes": 484,
+      "observedSha256": "7a23d54eebc76b626353bd51508f51e2b5dd407a347aee0ff5d4b0c20d4b4f5e",
+      "currentBytes": 484,
+      "currentSha256": "7a23d54eebc76b626353bd51508f51e2b5dd407a347aee0ff5d4b0c20d4b4f5e",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-failure.js",
+      "observedBytes": 1244,
+      "observedSha256": "fef0a0f0ef21e608725c5b49ee9d99bd7d0aa4498e06d30ce93294390b9c3196",
+      "currentBytes": 1244,
+      "currentSha256": "fef0a0f0ef21e608725c5b49ee9d99bd7d0aa4498e06d30ce93294390b9c3196",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/binding.private.json",
+      "observedBytes": 1644,
+      "observedSha256": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "currentBytes": 1644,
+      "currentSha256": "c4b19137f72f8ca34493a42468e55bed4fde0d282659557320e3089efe35a74e",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "observedBytes": 11397,
+      "observedSha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "currentBytes": 11397,
+      "currentSha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "observedBytes": 217,
+      "observedSha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "currentBytes": 217,
+      "currentSha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "observedBytes": 1594,
+      "observedSha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "currentBytes": 1594,
+      "currentSha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/pg-single-source-manifest.json",
+      "observedBytes": 8498043,
+      "observedSha256": "d27c1ed455cbc8da979bffd711720258df024f7d88b237fdefab798d9e694e04",
+      "currentBytes": 8498043,
+      "currentSha256": "d27c1ed455cbc8da979bffd711720258df024f7d88b237fdefab798d9e694e04",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/gate.json",
+      "observedBytes": 1118,
+      "observedSha256": "80f85a0325b356ae3512ce863682d340fe3580133af594fa6a67469627fff3f8",
+      "currentBytes": 1118,
+      "currentSha256": "80f85a0325b356ae3512ce863682d340fe3580133af594fa6a67469627fff3f8",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/complete.json",
+      "observedBytes": 554,
+      "observedSha256": "d2c1a8acc76ce16f24a34bd054ed3dd311646ffbb7f7b0f4a47d096ff73df5a9",
+      "currentBytes": 554,
+      "currentSha256": "d2c1a8acc76ce16f24a34bd054ed3dd311646ffbb7f7b0f4a47d096ff73df5a9",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/model232-upgrade-20260917/preparation/python-reuse.json",
+      "observedBytes": 1417,
+      "observedSha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "currentBytes": 1417,
+      "currentSha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789685136710-2f4c1257-863c-45ea-ba7d-ab69c111e7c9.process.private.json",
+      "observedBytes": 1316,
+      "observedSha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "currentBytes": 1316,
+      "currentSha256": "6801874336c7525296f27103c023aaa41f02ff5248560e4fbdc126d6e6229d47",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/backend-1789686261464-ef9f65a7-bfc0-44f6-a9df-4b9bb5eec125.process.private.json",
+      "observedBytes": 1316,
+      "observedSha256": "c7aa21db258375646aab15341f1ea89dd3474ebe803c3385c36a1ff5251ff636",
+      "currentBytes": 1316,
+      "currentSha256": "c7aa21db258375646aab15341f1ea89dd3474ebe803c3385c36a1ff5251ff636",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/model232-upgrade-20260917/pg-single/frontend-1789685141496-e82c76cd-d4ff-463e-b13e-feae5684e44f.process.private.json",
+      "observedBytes": 1423,
+      "observedSha256": "11b3df5a0cab46d2f53e02f15aff5995b8b30ca3fabae90c3cbbe6559927ca82",
+      "currentBytes": 1423,
+      "currentSha256": "11b3df5a0cab46d2f53e02f15aff5995b8b30ca3fabae90c3cbbe6559927ca82",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/binding.private.json",
+      "observedBytes": 1672,
+      "observedSha256": "9c1706060b1cf2a987b17b2610f489c8446181dbab829dc7f59de33516a5a6a4",
+      "currentBytes": 1672,
+      "currentSha256": "9c1706060b1cf2a987b17b2610f489c8446181dbab829dc7f59de33516a5a6a4",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/pg-single-source-manifest.json",
+      "observedBytes": 8575432,
+      "observedSha256": "6b4b2d3e5bc5ffb6a98cf0eff460475961bcdaf9189ac84be67655a36c94fdbe",
+      "currentBytes": 8575432,
+      "currentSha256": "6b4b2d3e5bc5ffb6a98cf0eff460475961bcdaf9189ac84be67655a36c94fdbe",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/gate.json",
+      "observedBytes": 1639,
+      "observedSha256": "bcffda1d32d2ed5b004b38772ff4beea9f124da7d78db64943735942c9585d35",
+      "currentBytes": 1639,
+      "currentSha256": "bcffda1d32d2ed5b004b38772ff4beea9f124da7d78db64943735942c9585d35",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/complete.json",
+      "observedBytes": 582,
+      "observedSha256": "e27aad77d7b128d926d856a53d9a84d1f729bfdfaf5015444d99b1cb41dbb8d4",
+      "currentBytes": 582,
+      "currentSha256": "e27aad77d7b128d926d856a53d9a84d1f729bfdfaf5015444d99b1cb41dbb8d4",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/python-reuse.json",
+      "observedBytes": 1417,
+      "observedSha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "currentBytes": 1417,
+      "currentSha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/backend-1789693120302-9be6d56a-dc55-40fe-a815-e61a3910550f.process.private.json",
+      "observedBytes": 1358,
+      "observedSha256": "b0bf6854b9baa4ad30a834eccd308ae96df892074ce1e628483eb563f1e2a477",
+      "currentBytes": 1358,
+      "currentSha256": "b0bf6854b9baa4ad30a834eccd308ae96df892074ce1e628483eb563f1e2a477",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/frontend-1789693164801-019802f2-a46d-45ee-8fcb-12b793451826.process.private.json",
+      "observedBytes": 1493,
+      "observedSha256": "79c9eeab99a7f0ed3239e7368adda66fa089611ce3a4752d1f39a13aa0108d17",
+      "currentBytes": 1493,
+      "currentSha256": "79c9eeab99a7f0ed3239e7368adda66fa089611ce3a4752d1f39a13aa0108d17",
+      "privateHashOnly": true,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py",
+      "observedBytes": 24291,
+      "observedSha256": "3eee904c6d103f0cfa6931f3167a8028b40e2eed90a2eb70cfb79c937732cfe0",
+      "currentBytes": 24291,
+      "currentSha256": "3eee904c6d103f0cfa6931f3167a8028b40e2eed90a2eb70cfb79c937732cfe0",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py",
+      "observedBytes": 65599,
+      "observedSha256": "efb8497693942be43a61fefbeb0ece1b38d9f57059e3c9f5c3a90009a502aacb",
+      "currentBytes": 65599,
+      "currentSha256": "efb8497693942be43a61fefbeb0ece1b38d9f57059e3c9f5c3a90009a502aacb",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+      "observedBytes": 4364,
+      "observedSha256": "817a9a2559d5afa861cb5afd582b9cdf5a374ed21de1eb1f3c4cf085af30f53e",
+      "currentBytes": 4364,
+      "currentSha256": "817a9a2559d5afa861cb5afd582b9cdf5a374ed21de1eb1f3c4cf085af30f53e",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/tldw_Server_API/tests/RAG/test_restricted_postgres_media_retrieval.py",
+      "observedBytes": 14450,
+      "observedSha256": "004e14ba8ecc1a09c40edaa87b3f0f8d5ed93362df285e23cc141782fee72bd7",
+      "currentBytes": 14450,
+      "currentSha256": "004e14ba8ecc1a09c40edaa87b3f0f8d5ed93362df285e23cc141782fee72bd7",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py",
+      "observedBytes": 19560,
+      "observedSha256": "e731880d63031672483f8c637362cc12a88ecb28651538b1f95755a73a510415",
+      "currentBytes": 19560,
+      "currentSha256": "e731880d63031672483f8c637362cc12a88ecb28651538b1f95755a73a510415",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/authscope257259-startup-safe.json",
+      "observedBytes": 1548,
+      "observedSha256": "03f58a19ce34eae1caa017a394898aea50b2a7807907e8c59b3eec32840749ad",
+      "currentBytes": 1548,
+      "currentSha256": "03f58a19ce34eae1caa017a394898aea50b2a7807907e8c59b3eec32840749ad",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/routes263264-pre-stop-safe.json",
+      "observedBytes": 2558,
+      "observedSha256": "a394fde6458190cd53a5cd6bf0210474afe249c672177356adb25ac10c1c2381",
+      "currentBytes": 2558,
+      "currentSha256": "a394fde6458190cd53a5cd6bf0210474afe249c672177356adb25ac10c1c2381",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-ingest-review/audit.json",
+      "observedBytes": 17327,
+      "observedSha256": "4dd68f60a13902f62b5c9b87e7d0f8c3549d5f3d7e8c426bc599f1724aa8aab6",
+      "currentBytes": 17327,
+      "currentSha256": "4dd68f60a13902f62b5c9b87e7d0f8c3549d5f3d7e8c426bc599f1724aa8aab6",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/authscope257259-review/REVIEW.md",
+      "observedBytes": 4655,
+      "observedSha256": "2d0cbecceba95d1b84add5d810170d1630bd6555b8711b7e6ea10cc0158b980e",
+      "currentBytes": 4655,
+      "currentSha256": "2d0cbecceba95d1b84add5d810170d1630bd6555b8711b7e6ea10cc0158b980e",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/authscope257259-review/BASELINE-ATTRIBUTION.md",
+      "observedBytes": 1888,
+      "observedSha256": "a61ec66e3f2a88215af2ca0130d7ac54439b092df46fe3b57c355ccaf4a8368c",
+      "currentBytes": 1888,
+      "currentSha256": "a61ec66e3f2a88215af2ca0130d7ac54439b092df46fe3b57c355ccaf4a8368c",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-ingest-review/REVIEW.md",
+      "observedBytes": 9593,
+      "observedSha256": "5087e4c38f749f0fb9302d6dcdb772f0936b21b0e5b77e292123131e902867f5",
+      "currentBytes": 9593,
+      "currentSha256": "5087e4c38f749f0fb9302d6dcdb772f0936b21b0e5b77e292123131e902867f5",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-media-review/REVIEW.md",
+      "observedBytes": 5265,
+      "observedSha256": "979d0fc1666ea17bdd07cdc49b1b48789e6744b97e99f511ccc4e56ac512574a",
+      "currentBytes": 5265,
+      "currentSha256": "979d0fc1666ea17bdd07cdc49b1b48789e6744b97e99f511ccc4e56ac512574a",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/review233-238-247/REVIEW.md",
+      "observedBytes": 2638,
+      "observedSha256": "d85d861f2d74daf837272cf3e7bd56f5ccac91b34e5ebf35333423cafe017a17",
+      "currentBytes": 2638,
+      "currentSha256": "d85d861f2d74daf837272cf3e7bd56f5ccac91b34e5ebf35333423cafe017a17",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "output/playwright/fresh-matrix-repairs-2026-09-17/authscope257259-reviewed/manifest.json",
+      "observedBytes": 11008,
+      "observedSha256": "c1a7c92198e580186d24de67dba0e5c2b94c53ae4a149886e0ba52d22ec23a43",
+      "currentBytes": 11008,
+      "currentSha256": "c1a7c92198e580186d24de67dba0e5c2b94c53ae4a149886e0ba52d22ec23a43",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_17.md",
+      "observedBytes": 40915,
+      "observedSha256": "e655ea28f11ad8c64565d15b9a3a6172a6b93ae1ab65f149e2068a35bb28dd55",
+      "currentBytes": 40915,
+      "currentSha256": "e655ea28f11ad8c64565d15b9a3a6172a6b93ae1ab65f149e2068a35bb28dd55",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md",
+      "observedBytes": 578967,
+      "observedSha256": "e360fd0be080bb81f55cdf4b9b5c74cc73b85dde80f5c7fca0a559549c56d397",
+      "currentBytes": 580765,
+      "currentSha256": "e1dc6e48b10fb9816cde7c64ae019fa44a7b42610e4dc516e1f3600a0afeb957",
+      "privateHashOnly": false,
+      "retentionTimeAndInitialReviewSha256": "4f7383e597b458fb3c81693791d2cc2bc3f72d9b0cc7bb6191b4f0b5e3b31529",
+      "currentStillMatchesRetentionHash": false,
+      "verification": "explicit-mutable-tracker"
+    },
+    {
+      "kind": "original-input",
+      "path": "backlog/tasks/task-13260.180 - Repair-fresh-PostgreSQL-media-ingestion-database-write-failure.md",
+      "observedBytes": 3527,
+      "observedSha256": "220c48cfab82f975115546c72351cef97f3f5fffb9056819610b4aa2be90bdb6",
+      "currentBytes": 3527,
+      "currentSha256": "220c48cfab82f975115546c72351cef97f3f5fffb9056819610b4aa2be90bdb6",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "backlog/tasks/task-13260.199 - Repair-PostgreSQL-Knowledge-QA-returning-no-evidence-for-an-owned-ready-source-UAT-257.md",
+      "observedBytes": 3874,
+      "observedSha256": "9a8929e3cc54d85ab4084e4e24c33f5bd53127753d7fbb2578ba9c0e5f890afd",
+      "currentBytes": 3874,
+      "currentSha256": "9a8929e3cc54d85ab4084e4e24c33f5bd53127753d7fbb2578ba9c0e5f890afd",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": "backlog/tasks/task-13260.201 - Repair-PostgreSQL-Trash-lookup-returning-404-for-readable-owned-Media-UAT-259.md",
+      "observedBytes": 3282,
+      "observedSha256": "4e8081a34295e6e233794c10775a840deb1e007ffb4604344032aceecda07efb",
+      "currentBytes": 3282,
+      "currentSha256": "4e8081a34295e6e233794c10775a840deb1e007ffb4604344032aceecda07efb",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-open.js",
+      "observedBytes": 343,
+      "observedSha256": "fd72d1ba841492ef287af7ba15ad9bf1e0afce47c6da8f78e3ad11780306de35",
+      "currentBytes": 343,
+      "currentSha256": "fd72d1ba841492ef287af7ba15ad9bf1e0afce47c6da8f78e3ad11780306de35",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-controls.js",
+      "observedBytes": 213,
+      "observedSha256": "eb9ca99ec3b18a590e52e8ac49abd4340af0d76b2f98247b6fe95463342c1f46",
+      "currentBytes": 213,
+      "currentSha256": "eb9ca99ec3b18a590e52e8ac49abd4340af0d76b2f98247b6fe95463342c1f46",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-observe.js",
+      "observedBytes": 170,
+      "observedSha256": "0e33a9b21207e7b9699230ef5f48d9dfcf8e85af554e587b6455548aa31974c5",
+      "currentBytes": 170,
+      "currentSha256": "0e33a9b21207e7b9699230ef5f48d9dfcf8e85af554e587b6455548aa31974c5",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-media-return.js",
+      "observedBytes": 375,
+      "observedSha256": "cfd6d3c220381b6b0ce3a5d170a6c697a239333a2fcb73ef8c9a17ed43dcda14",
+      "currentBytes": 375,
+      "currentSha256": "cfd6d3c220381b6b0ce3a5d170a6c697a239333a2fcb73ef8c9a17ed43dcda14",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-view.js",
+      "observedBytes": 303,
+      "observedSha256": "3f4e6268f3c5b4e4549d6cd44693c2fffafa83af93feae5daa5fcb4ede7e7a57",
+      "currentBytes": 303,
+      "currentSha256": "3f4e6268f3c5b4e4549d6cd44693c2fffafa83af93feae5daa5fcb4ede7e7a57",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-failure-reload.js",
+      "observedBytes": 416,
+      "observedSha256": "8b93d80897e633e390cb41689ef5414a229677224dc9e930c47860f2544bfd4a",
+      "currentBytes": 416,
+      "currentSha256": "8b93d80897e633e390cb41689ef5414a229677224dc9e930c47860f2544bfd4a",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-multi-review-one.js",
+      "observedBytes": 564,
+      "observedSha256": "88d0f3a86513ad3f77b5d3f7b6e774d43b9ec5734a14b9f652c7d7e5a44f1e93",
+      "currentBytes": 564,
+      "currentSha256": "88d0f3a86513ad3f77b5d3f7b6e774d43b9ec5734a14b9f652c7d7e5a44f1e93",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257259-reloaded.txt",
+      "observedBytes": 16482,
+      "observedSha256": "30175481b7fc8887068d56a6f0b6113cd25ef29647345298fd83a07db137b967",
+      "currentBytes": 16482,
+      "currentSha256": "30175481b7fc8887068d56a6f0b6113cd25ef29647345298fd83a07db137b967",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-asked.txt",
+      "observedBytes": 4157,
+      "observedSha256": "b139e572dc31a98cf9577ea2fcb41511291224d8d77ffcab5e60719b8c5154ff",
+      "currentBytes": 4157,
+      "currentSha256": "b139e572dc31a98cf9577ea2fcb41511291224d8d77ffcab5e60719b8c5154ff",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-observed.txt",
+      "observedBytes": 17736,
+      "observedSha256": "78bf6f212b345750ba184eabe7bafcb359ca0c29c52a618a3d8b04ea7ed93df8",
+      "currentBytes": 17736,
+      "currentSha256": "78bf6f212b345750ba184eabe7bafcb359ca0c29c52a618a3d8b04ea7ed93df8",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope257-qa-observed-2.txt",
+      "observedBytes": 17737,
+      "observedSha256": "43629fcc7daa67c3faa9b6fde910fe5c0bcb874dbc57fd14ef81cbc24b8c1048",
+      "currentBytes": 17737,
+      "currentSha256": "43629fcc7daa67c3faa9b6fde910fe5c0bcb874dbc57fd14ef81cbc24b8c1048",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-open.txt",
+      "observedBytes": 14168,
+      "observedSha256": "189d85ad68138b1376f20d9aabcf80ef3a2dfa32f7099451ab02603f5deae5ff",
+      "currentBytes": 14168,
+      "currentSha256": "189d85ad68138b1376f20d9aabcf80ef3a2dfa32f7099451ab02603f5deae5ff",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-trash-confirmed.txt",
+      "observedBytes": 3067,
+      "observedSha256": "00de11311cadbfdb4ceb6a17e016ee64c71106825729ad5184a644f6166918b5",
+      "currentBytes": 3067,
+      "currentSha256": "00de11311cadbfdb4ceb6a17e016ee64c71106825729ad5184a644f6166918b5",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-restored.txt",
+      "observedBytes": 2405,
+      "observedSha256": "9a273e272a5e737776cbc4f22376c9633a43959a2ccc4a3b155cb0ddd2c8c5c9",
+      "currentBytes": 2405,
+      "currentSha256": "9a273e272a5e737776cbc4f22376c9633a43959a2ccc4a3b155cb0ddd2c8c5c9",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/authscope259-media-returned.txt",
+      "observedBytes": 5763,
+      "observedSha256": "61cd992154ca3d8da24e24f2117048d91cc9b32e3e1a088b40e992d41a3ad7b0",
+      "currentBytes": 5763,
+      "currentSha256": "61cd992154ca3d8da24e24f2117048d91cc9b32e3e1a088b40e992d41a3ad7b0",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-two-reload.txt",
+      "observedBytes": 485,
+      "observedSha256": "f492e43fc807ae8e379936862b8a3d7fa94ba359822dece523f9683498bd1222",
+      "currentBytes": 485,
+      "currentSha256": "f492e43fc807ae8e379936862b8a3d7fa94ba359822dece523f9683498bd1222",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/media238-analysis-failure-started.txt",
+      "observedBytes": 16096,
+      "observedSha256": "8b205b35dd26cb61ad6e7ba08b9139fa25010e7ec976f8b627454202edef190d",
+      "currentBytes": 16096,
+      "currentSha256": "8b205b35dd26cb61ad6e7ba08b9139fa25010e7ec976f8b627454202edef190d",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "original-input",
+      "path": ".tmp/uat-repairs-231-246/native-authscope257259-238-review/audit.mjs",
+      "observedBytes": 21785,
+      "observedSha256": "9977adcbff16892d92bfa1651546e3022e45b8bc171c18072aa0800e48310213",
+      "currentBytes": 21785,
+      "currentSha256": "9977adcbff16892d92bfa1651546e3022e45b8bc171c18072aa0800e48310213",
+      "privateHashOnly": false,
+      "verification": "exact"
+    },
+    {
+      "kind": "review-input",
+      "path": "output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-accepted/README.md",
+      "bytes": 954,
+      "sha256": "77e62c1bad8259bf77611b9dfd28e96cbece652091b5dabda85a8feb55d56a08"
+    },
+    {
+      "kind": "review-input",
+      "path": "output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-accepted/manifest.json",
+      "bytes": 33104,
+      "sha256": "7ecc624ecfbf57158b4858ee3ffc2b374b81885dbe58c1dec9d912b2302b67f2"
+    },
+    {
+      "kind": "review-input",
+      "path": "output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-accepted/CHECKPOINT_SHA256SUMS",
+      "bytes": 589,
+      "sha256": "9bcdeee2f1180eb40bbe81ab03d78958e700739adcf24a6e20214bfc736663e6"
+    },
+    {
+      "kind": "review-input",
+      "path": ".tmp/uat-repairs-231-246/retain-native-authscope257259-238.mjs",
+      "bytes": 5293,
+      "sha256": "ec25651ae2acd0d63cd9783544ceaf59efa4cd7d61363a7cc50556dfda0e9c95"
+    },
+    {
+      "kind": "review-input",
+      "path": ".tmp/uat-repairs-231-246/native-authscope257259-238-review/retention-audit.mjs",
+      "bytes": 9159,
+      "sha256": "3b61f82cf6f588b68fe1b09371971d1e4383f123b35a2a18f4bf55923a509fc0"
+    }
+  ]
+}

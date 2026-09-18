@@ -241,3 +241,17 @@ Root owns Git/Backlog/docs/runtime/nativebrowser/model/profiles/archives. Author
 - 01:35UTC:262verified/Done committed4a5d61b383;263reviewed committedc3d5cce7aa;264reviewed committed2ff90d14ae. Original257citedQA and259Delete/Trash/Restore/canonicalreload now observed passing with full source+versionsunchanged; independent native review pending.260 sole implementation author active under contract-BRIEF.md; no global timezone/schema change. Fullmatrixheld.
 
 - UAT258 native+retention accepted, TASK13260.200Done.256verified/6awaiting236238257259263264/2active260261. Fullmatrixheld.
+
+## Task265: portable PostgreSQL World Book update lifecycle
+
+TASK13260.207. OfficialPG260suite reveals unchanged rawconnectioncontext inupdate_world_book (4passed1failed). Same soleauthor owns narrow supportedtransactionrepair plus conflict/callerrollback/SQLitecontrols. Preserve260pre265diff; independentreview andnativeedit/reload required. No globalwrapper/schema/authchanges.
+
+## Task266: portable PostgreSQL World Book attachment lifecycle
+
+TASK13260.208. OfficialPGsuite6passed1failed exposes rawconnectioncontext inattach_to_character after265corrected. Sameauthor owns boundedtransactionfix and validation/idempotency/rollback controls. Retain failedrun and260attachedtimestampcoverage. Independentreview/nativeattachment required.
+
+## Task267: authenticated Sources backend catalogue failure
+
+TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d14ae. Root retainedoriginalAliceUI/requestevidence; read-onlydiagnosis assigned. No productioneditwhileWorldBookauthoractive. Require actualPG+SQLitecausalcontrols, preserveentitlements/ownership andoriginalAlicecatalogue200acceptance.
+
+- UAT238/257/259native38+retention16checks CLEAR; tasks180199201Done.259verified/3awaiting236263264/5active260261265266267. Fullmatrixheld.265nativeSave500 retained.

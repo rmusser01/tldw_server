@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 264 findings total: 256 verified, 6 reviewed implementations awaiting native acceptance (236/238/257/259/263/264), and 2 active repairs (260/261). UAT262 is verified and committed. Original PostgreSQL Rowan QA, citation handoff and Trash/Restore now pass observed native checks; independent acceptance review is underway. UAT258 is verified after native and retention reviews. Character retry route263 and Sources route264 are reviewed and committed, awaiting an explicit runtime upgrade. World Book timestamp260 is being repaired; provider outcomes261 remain unresolved. Full UAT has not restarted.
+- **Current repair gate:** 267 findings total: 259 verified, 3 reviewed implementations awaiting native acceptance (236/263/264), and 5 active repairs (260/261/265/266/267). UAT262 is verified and committed. Original PostgreSQL ingestion, cited QA and Trash/Restore are verified after independent native and retention reviews. UAT258 is verified after native and retention reviews. Character retry route263 and Sources route264 are reviewed and committed, awaiting an explicit runtime upgrade. World Book timestamp260 is being repaired; provider outcomes261 remain unresolved. Full UAT has not restarted.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2892,3 +2892,25 @@ UAT257 original source-only Rowan question returns200 with five excerpts and cit
 - UAT264: committed2ff90d14ae after independent67route/auth cases. Collection list/create now use canonical slash path without cross-origin credential forwarding. Reviewed packetmanifest2afb9391caae708e30c45064c61afc9b73cae5a2f909d3f676d14ec284a8bdf4. Native originalAliceSourcesreload pending.
 
 - UAT258 verified/Done: native18checks53inputs and retention18checks pass. Fresh bothPGmodes issue no protectedprobe beforecredentials; authenticatedAliceprobe200. Safe packetmanifest5f6335979143612103e6cd0c5445fb3decf62edd18e9a91ff1e9721df2bb9702;52fullinputmatches+1disclosed unchangedoriginalprivate-logprefix. Sources264 remains separate. [Native acceptance](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-capability258-accepted/README.md) and [retention review](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-capability258-retention-review/retention-REVIEW.md).
+
+## UAT265 — P1: PostgreSQL World Book update returns500
+
+TASK13260.207. Actual officialPG260timestamp endpoint test reaches WorldBookService.update_world_book and raises TypeError: BackendConnectionWrapper does not support contextmanagerprotocol. Existing raw connection context usage is unchanged inHEAD; create/read and3nonUTCprojection cases pass, updatefails. Original worldbook260-unique receipt retained (4passed/1failed); no updatecoverage removed. Minimal portable transaction repair is assigned to the same soleWorldBookauthor, preserving optimisticconflicts, callerrollback, permissions andSQLite. Distinct from closed255create/readback and239catalogue. Native edit/reload will be required after independentreview.
+
+## UAT266 — P1: PostgreSQL World Book attachment returns500
+
+TASK13260.208. After265update repair, actual officialPGsuite reaches attach_to_character, which also uses the unsupported raw connection context. worldbook260-265 result6passed1failed; attachment endpoint returns500.260timestampattachmentcoverage preserved. Same soleauthor assigned narrow supportedtransaction repair with validation/idempotency/callerrollback and adjacentdetach controls. No globalwrapperchange.
+
+- 01:42UTC explicit targeted upgrade: reviewed2ff90d14ae now runs bothPGmodes on originalports/profiles/holders; sourcecopy and startupreceipts retained. All originalprofile/init/holderhashes unchanged, APIhealth200both. Only four verified oldappPIDs stoppedgracefully aftermodelslotidle. This includes263264 and262, excludesworking260265266; fullmatrixnotstarted.
+
+## UAT267 — P1: authenticated PostgreSQL Sources catalogue returns500
+
+TASK13260.209. OriginalAliceSources reload on2ff90d14ae01:43:19/20 sends Authorization directly to WebUI/api/v1/ingestion-sources/;264crossoriginredirect/401 is gone. Actualbackend500 now produces Unable to load sources. SpecificrequestIDs7749bc08-0387-4c0a-82dc-84d21c9c4a99 and a9a09dd3-2cb0-44af-aa2e-fd12288f24bc retained. Duplicateobserverentries arose from two installedlisteners, notproven duplicateactualrequests. Read-onlybackenddiagnosis assigned. Sources264 finalcatalogue200acceptance waits267.
+
+- UAT263native01:44:32 originalRetry createschild0742e5b4-0ae7-4004-8691-1d0bc41c5f65 and changesURLtochild. Complete/persist200; normalreload01:46:14GET200 preserveschild, copieduser+originalfailedassistant andnewassistantpa_9a9f-515c-dd9-8ecc with finalexactBEEPBOOP. Earlier261 failures remain, no providerreliabilityclosure. Independentnative review underway.
+
+## UAT238/257/259 verified — 2026-09-18
+
+Tasks180/199/201Done after38nativechecks85hashedinputs and16retentionchecks. SameoriginalQArequest yieldsfiveownedcontexts/citedfacts; citationopensMedia1; Delete204/Trash1/Restore200/Trashempty andnormalreloadpreserve1914characters andallversions. Safe packetmanifest7ecc624ecfbf57158b4858ee3ffc2b374b81885dbe58c1dec9d912b2302b67f2;84inputsfullmatch, solemutabletracker discrepancy explicitlyretained. Private/provider-bearingcaptures hash-only. [Acceptance](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-accepted/README.md) and [retention review](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-retention-review/retention-REVIEW.md). Prior defaultanalysis502, quotedTWO, controlled400/no-newversion andharnesserrors remainrecorded; nofullmatrix/providerreliabilityclaim.
+
+-265 nativebaseline confirmed01:50:26.804 on2ff90d14ae: Alice originalWorldBook1 normalDescriptionedit/Save PUTexpected_version1 returns500; visibleerrortoast. Editedsyntheticdescription remainsunsavedinform, persistedcatalogue retainsoriginaldescription. Evidence worldbook265-save-failed.txt.
