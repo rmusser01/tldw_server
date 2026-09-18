@@ -851,8 +851,7 @@ export const readNativeForkSettings = async (
   signal?: AbortSignal
 ) => {
   assertOwnerLease(owner, { signal })
-  if (!nativeCapabilities.get(owner)?.captured)
-    fail("unsupported_history_capability")
+  if (!nativeCapabilities.has(owner)) fail("unsupported_history_capability")
   const response = await tldwClient.getChatSettings(
     owner.conversation_id,
     nativeOptions(owner, signal)
@@ -871,8 +870,7 @@ export const updateNativeForkSettings = async (
   signal?: AbortSignal
 ) => {
   assertOwnerLease(owner, { signal })
-  if (!nativeCapabilities.get(owner)?.captured)
-    fail("unsupported_history_capability")
+  if (!nativeCapabilities.has(owner)) fail("unsupported_history_capability")
   const detached = structuredClone(patch)
   const response = await tldwClient.updateChatSettings(
     owner.conversation_id,

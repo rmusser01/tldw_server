@@ -731,3 +731,18 @@ it.each(["image", "wrong-parent", "wrong-conversation", "wrong-role"])("validate
   expect(calls.append).toHaveBeenCalledWith("child", expect.objectContaining({content: "", image_base64: image, parent_message_id: null}), expect.anything())
   expect(calls.create).toHaveBeenCalledTimes(1)
 })
+
+it("verified legacy ownership permits scoped settings without granting captured-selection authority", async () => {
+  const native = owner()
+  const original = capture()
+  calls.capture.mockResolvedValue({status: "legacy_review_required", code: "legacy_review_required", snapshot: {...original.snapshot, interpretation_status: {kind: "legacy_review_required"}}, view: original.view})
+  expect((await service.captureHistorySnapshot(native, view, "send")).status).toBe("legacy_review_required")
+  calls.getSettings.mockResolvedValue({conversation_id: "chat", settings: {authorNote: "legacy settings"}})
+  calls.updateSettings.mockResolvedValue({conversation_id: "chat", settings: {authorNote: "edited"}})
+  expect(await service.readNativeForkSettings(native)).toMatchObject({authorNote: "legacy settings"})
+  expect(await service.updateNativeForkSettings(native, {authorNote: "edited"})).toMatchObject({authorNote: "edited"})
+  expect(calls.updateSettings).toHaveBeenCalledWith("chat", {authorNote: "edited"}, expect.objectContaining({requestScope: native.request_scope}))
+  await expect(service.captureNativeForkSelection(native, view)).rejects.toThrow("legacy_review_required")
+  expect(calls.create).not.toHaveBeenCalled()
+  await expect(service.readNativeForkSettings(owner())).rejects.toThrow("unsupported_history_capability")
+})

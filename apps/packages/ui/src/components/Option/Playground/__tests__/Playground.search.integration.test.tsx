@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { resolveHistorySelection } from "@/utils/history-selection"
@@ -15,15 +15,15 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
-const h1 = vi.hoisted(() => ({ enabled: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
+const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
-const forkPresentation = vi.hoisted(() => ({mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
+const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
 vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
   return {...actual, useHistorySelectionContext: () => {
     const controller = actual.useHistorySelectionContext()
-    return forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller
+    return forkPresentation.controller ?? (forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller)
   }}
 })
 
@@ -339,7 +339,10 @@ vi.mock("react-router-dom", async () => {
 describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    h1.confirm.mockClear()
     h1.enabled = false
+    forkPresentation.controller = null
+    h1.legacyNative = false
     forkPresentation.mode = null
     forkPresentation.settings = null
     routerState.hashRouter = false
@@ -393,6 +396,17 @@ describe("Playground thread search integration", () => {
     forkPresentation.settings = null
     mounted.rerender(<Playground />)
     await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalled())
+  })
+
+  it("restores ordinary attachments through a real owner-qualified legacy controller without accepting ancestry", async () => {
+    h1.legacyNative = true
+    const actual = renderHook(() => useHistorySelection())
+    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "local-owner", conversation_id: "chat-1", validate_lease: () => true} as any)})
+    forkPresentation.controller = actual.result.current
+    render(<Playground />)
+    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: "history-1", serverChatId: "chat-1"}))
+    expect(actual.result.current.status).toBe("legacy_review_required")
+    expect(h1.confirm).not.toHaveBeenCalled()
   })
 
   it("forks timeline messages using stable IDs rather than rendered positions", async () => {
@@ -709,6 +723,7 @@ vi.mock("@/db/dexie/history-selection", () => ({
   saveHistoryBookmark: async (scope: any, view: any) =>
     h1.bookmarks.set(h1Key(scope, view), { ...scope, view })
 }))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
     getHistoryInfo = async () => null
@@ -735,6 +750,7 @@ vi.mock("@/services/chat-history-selection", () => ({
         preview: owner.conversation_id + " answer " + id
       }))
     }
+    if (h1.legacyNative) return {status: "legacy_review_required", code: "legacy_review_required", snapshot, view: bound}
     const result = resolveHistorySelection(snapshot, bound, "send", "")
     if (result.status !== "ready") return { ...result, snapshot, view: bound }
     return {
@@ -758,6 +774,8 @@ describe("Playground H1 URL initialization with the mounted session/controller",
   beforeEach(() => {
     routerState.hashRouter = false
     h1.enabled = true
+    forkPresentation.controller = null
+    h1.legacyNative = false
     forkPresentation.mode = null
     forkPresentation.settings = null
     h1.controller = null

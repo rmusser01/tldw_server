@@ -48,7 +48,11 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => mocks.selection }))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({...(await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()), useHistorySelectionContext: () => mocks.selection }))
+vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: async () => "profile", loadHistoryBookmark: async () => null, saveHistoryBookmark: async () => {}, loadHistoryTurnRecoveries: async () => []}))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
+vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}})}))
+import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
 
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
@@ -239,5 +243,32 @@ it("holds native fork owner qualification before any ambient settings import and
   expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
   expect(mocks.initialize).not.toHaveBeenCalled()
   expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  vi.useRealTimers()
+})
+
+it("real qualified ordinary legacy controller lets the loader hydrate settings before ancestry review", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = "legacy"
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.serverChatMetaLoaded = true
+  mocks.store.temporaryChat = false
+  mocks.renderedMessages = []
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.listChatMessages.mockResolvedValue([])
+  mocks.syncChatSettingsForServerChat.mockResolvedValue(null)
+  const mounted = renderHook(() => {
+    const controller = useHistorySelection()
+    mocks.selection = controller
+    useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification: {error: vi.fn()}, t: ((key: string) => key) as any})
+    return controller
+  })
+  await act(async () => {await mounted.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)})
+  await act(async () => {await vi.advanceTimersByTimeAsync(300)})
+  expect(mounted.result.current.status).toBe("legacy_review_required")
+  expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", scope: undefined, allowScratchFallback: false})
+  expect(mocks.listChatMessages).toHaveBeenCalledOnce()
+  mounted.unmount()
   vi.useRealTimers()
 })

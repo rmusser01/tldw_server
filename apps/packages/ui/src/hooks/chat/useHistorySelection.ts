@@ -59,6 +59,7 @@ type PendingConfirmation = {
   intent: LegacyHistoryProjectionConfirmV1
 }
 type SelectionState = {
+  settingsQualified: boolean
   forkCandidate: ForkOperation | null
   forkSettings: ChatSettingsRecord | null
   owner: HistoryOwnerV1 | null
@@ -80,6 +81,7 @@ type SelectionState = {
   pending: PendingConfirmation | null
 }
 const initialState = (): SelectionState => ({
+  settingsQualified: false,
   forkCandidate: null,
   forkSettings: null,
   owner: null,
@@ -132,6 +134,10 @@ export function useHistorySelection(
   const onCapture = useRef(options.onCapture)
   onCapture.current = options.onCapture
   const [state, setState] = useState<SelectionState>(initialState)
+  const [forkOperations, setForkOperations] = useState<ForkOperation[]>([])
+  const [forkOperationsError, setForkOperationsError] = useState<string | null>(
+    null
+  )
   const live = useRef(state)
   const identity = useRef<{ client: string; view: string; revision: number }>()
   if (!identity.current)
@@ -162,6 +168,10 @@ export function useHistorySelection(
   }, [])
   const invalidate = useCallback(() => {
     epoch.current += 1
+    if (mounted.current) {
+      setForkOperations([])
+      setForkOperationsError(null)
+    }
     request.current?.abort()
     request.current = new AbortController()
     return { epoch: epoch.current, signal: request.current.signal }
@@ -208,7 +218,11 @@ export function useHistorySelection(
       token: number,
       pending: PendingConfirmation | null = null
     ) => {
-      if (!mounted.current || token !== epoch.current) return false
+      const current = () =>
+        mounted.current &&
+        token === epoch.current &&
+        (owner.kind !== "native" || owner.validate_lease())
+      if (!current()) return false
       const forkCandidate =
         owner.kind === "native"
           ? await findForkCandidate({
@@ -218,13 +232,14 @@ export function useHistorySelection(
               scope: owner.scope ?? { type: "global" }
             })
           : null
-      if (!mounted.current || token !== epoch.current) return false
+      if (!current()) return false
       const forkSettings =
         forkCandidate && owner.kind === "native"
           ? await readNativeForkSettings(owner, request.current?.signal)
           : null
-      if (!mounted.current || token !== epoch.current) return false
+      if (!current()) return false
       publish({
+        settingsQualified: true,
         forkCandidate,
         forkSettings,
         owner,
@@ -434,7 +449,13 @@ export function useHistorySelection(
         cursor,
         selection_revision: ++identity.current!.revision
       }
-      publish({ ...current, view, status: "loading", error: null })
+      publish({
+        ...current,
+        settingsQualified: false,
+        view,
+        status: "loading",
+        error: null
+      })
       try {
         const result = await captureHistorySnapshot(
           current.owner,
@@ -461,7 +482,12 @@ export function useHistorySelection(
     const current = live.current
     if (!current.owner || !current.view || !current.bookmarkScope) return false
     const operation = invalidate()
-    publish({ ...current, status: "loading", error: null })
+    publish({
+      ...current,
+      settingsQualified: false,
+      status: "loading",
+      error: null
+    })
     try {
       const result = await captureHistorySnapshot(
         current.owner,
@@ -696,6 +722,9 @@ export function useHistorySelection(
           invalidate()
           publish({
             ...live.current,
+            settingsQualified: false,
+            forkCandidate: null,
+            forkSettings: null,
             status: "unsupported_history_capability",
             error: "request_config_scope_changed"
           })
@@ -834,7 +863,7 @@ export function useHistorySelection(
       const current = live.current
       const owner = current.owner
       if (
-        current.status !== "ready" ||
+        !current.settingsQualified ||
         owner?.kind !== "native" ||
         owner.conversation_id !== chatId ||
         current.view?.conversation_id !== chatId ||
@@ -860,7 +889,8 @@ export function useHistorySelection(
       if (
         !current.forkCandidate ||
         current.owner?.kind !== "native" ||
-        current.status !== "ready"
+        settingsMode(current.owner.conversation_id, current.owner.scope) !==
+          "fork"
       )
         throw new Error("fork_settings_owner_unavailable")
       const owner = current.owner
@@ -875,24 +905,30 @@ export function useHistorySelection(
       publish({ ...live.current, forkSettings: next })
       return next
     },
-    [publish]
-  )
-  const [forkOperations, setForkOperations] = useState<ForkOperation[]>([])
-  const [forkOperationsError, setForkOperationsError] = useState<string | null>(
-    null
+    [publish, settingsMode]
   )
   const refreshForkOperations = useCallback(async () => {
     const current = live.current
     if (
       !current.view ||
       !current.owner ||
-      current.owner.kind === "unavailable"
+      current.owner.kind === "unavailable" ||
+      (current.owner.kind === "native" &&
+        (!current.settingsQualified || !current.owner.validate_lease()))
     ) {
       setForkOperations([])
+      setForkOperationsError(null)
       return
     }
     const view = current.view
     const owner = current.owner
+    const token = epoch.current
+    const stillCurrent = () =>
+      mounted.current &&
+      token === epoch.current &&
+      sameView(live.current.view, view) &&
+      live.current.owner === owner &&
+      (owner.kind !== "native" || owner.validate_lease())
     try {
       const entries = await loadForkOperations({
         owner_key: view.owner_key,
@@ -903,21 +939,24 @@ export function useHistorySelection(
             ? (owner.scope ?? { type: "global" })
             : { type: "global" }
       })
-      if (sameView(live.current.view, view) && live.current.owner === owner) {
+      if (stillCurrent()) {
         setForkOperations(entries)
         setForkOperationsError(null)
       }
     } catch (error) {
-      if (sameView(live.current.view, view))
-        setForkOperationsError(errorCode(error))
+      if (stillCurrent()) setForkOperationsError(errorCode(error))
     }
   }, [])
+  // A same-view refresh can finish within one React batch; qualification alone may not change.
+  const forkOperationsEpoch = epoch.current
   useEffect(() => {
     setForkOperations([])
     setForkOperationsError(null)
     void refreshForkOperations()
   }, [
+    forkOperationsEpoch,
     state.owner,
+    state.settingsQualified,
     state.view?.view_session_id,
     state.view?.selection_revision,
     refreshForkOperations

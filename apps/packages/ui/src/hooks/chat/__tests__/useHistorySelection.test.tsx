@@ -16,6 +16,7 @@ import { resolveHistorySelection } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
   bookmarks: new Map<string, any>(),
+  configChanged: null as null | (() => void),
   forkCandidate: vi.fn(async (..._args: any[]) => null as any),
   forkRecords: vi.fn(async (..._args: any[]) => [] as any[]),
   forkSettings: vi.fn(async (..._args: any[]) => null as any),
@@ -72,7 +73,7 @@ vi.mock("@/db/dexie/chat", () => ({
 }))
 vi.mock("@/services/service-prompts", () => ({
   resolveServicePromptScope: async () => ({ scopeKey: "scope" }),
-  subscribeToServicePromptConfigChanges: () => () => {}
+  subscribeToServicePromptConfigChanges: (changed: () => void) => { mocks.configChanged = changed; return () => {} }
 }))
 vi.mock("@/db/dexie/server-chat-mirror", () => ({
   serverChatMirrorOwnerKey: () => "verified-scope",
@@ -158,6 +159,8 @@ beforeEach(() => {
   mocks.forkRecords.mockReset().mockResolvedValue([])
   mocks.forkSettings.mockReset().mockResolvedValue(null)
   mocks.updateForkSettings.mockReset().mockResolvedValue(null)
+  mocks.confirm.mockClear()
+  mocks.configChanged = null
   controllers = {}
   mocks.bookmarks.clear()
   mocks.profile.mockReset().mockResolvedValue("profile")
@@ -751,4 +754,59 @@ it("an old workspace fork control cannot release another namespace's active inte
   vi.mocked(store.allowNewForkOperation).mockClear()
   await act(async () => {await result.current.allowNewFork({owner_key: "owner", conversation_id: "chat", context: {kind: "native", scope: {type: "workspace", workspaceId: "old"}}} as any)})
   expect(store.allowNewForkOperation).not.toHaveBeenCalled()
+})
+
+it.each(["published", "held-success", "held-error"])("config invalidation hides fork outcomes and fences %s reads without changing durable records", async mode => {
+  const retained = [{owner_key: "owner", conversation_id: "chat", operation_id: "private-operation", state: "partial", candidate_child_id: "private-child", result: {state: "partial", code: "private-error"}, context: {kind: "native", scope: {type: "global"}}}]
+  mocks.forkRecords.mockResolvedValue(retained)
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {await hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(hook.result.current.forkOperations).toHaveLength(1))
+  await act(async () => {await hook.result.current.refresh()})
+  await waitFor(() => expect(hook.result.current.forkOperations).toHaveLength(1))
+  let finish!: () => void
+  let reading: Promise<void> | undefined
+  if (mode !== "published") {
+    mocks.forkRecords.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finish = () => mode === "held-success" ? resolve(retained) : reject(new Error("stale-record-error"))
+    }))
+    act(() => {reading = hook.result.current.refreshForkOperations()})
+  }
+  act(() => mocks.configChanged!())
+  expect(hook.result.current.status).toBe("unsupported_history_capability")
+  expect(hook.result.current.forkOperations).toEqual([])
+  expect(hook.result.current.forkOperationsError).toBeNull()
+  if (reading) await act(async () => {finish(); await reading})
+  const reads = mocks.forkRecords.mock.calls.length
+  await act(async () => {await hook.result.current.refreshForkOperations()})
+  expect(mocks.forkRecords).toHaveBeenCalledTimes(reads)
+  expect(hook.result.current.forkOperations).toEqual([])
+  expect(hook.result.current.forkOperationsError).toBeNull()
+  expect(hook.result.current.error).toBe("request_config_scope_changed")
+  expect(await hook.result.current.inspectForkOperation(retained[0] as any)).toBe(false)
+  expect(retained[0]).toMatchObject({operation_id: "private-operation", candidate_child_id: "private-child", state: "partial"})
+  await act(async () => {await hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(hook.result.current.forkOperations).toEqual(retained))
+  expect(mocks.forkRecords.mock.calls.at(-1)?.[0]).toMatchObject({owner_key: "owner", conversation_id: "chat", scope: {type: "global"}})
+})
+
+it.each(["ordinary", "fork", "lookup-failed", "settings-failed"])("owner/settings qualification is independent of legacy ancestry readiness: %s", async kind => {
+  mocks.capture.mockImplementation(async (_owner, view) => ({status: "legacy_review_required", code: "legacy_review_required", snapshot, view: {...view, owner_key: "owner"}}))
+  let finish!: (value: any) => void
+  mocks.forkCandidate.mockImplementationOnce(() => new Promise(resolve => {finish = resolve}))
+  if (kind === "settings-failed") mocks.forkSettings.mockRejectedValueOnce(new Error("settings unavailable"))
+  const hook = renderHook(() => useHistorySelection())
+  let opening!: Promise<boolean>
+  act(() => {opening = hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(mocks.forkCandidate).toHaveBeenCalled())
+  expect(hook.result.current.settingsMode("chat")).toBe("pending")
+  if (kind === "lookup-failed") {
+    // A failed fresh lookup after a prior ordinary qualification must close the old path too.
+    await act(async () => {finish(null); await opening})
+    mocks.forkCandidate.mockRejectedValueOnce(new Error("lookup unavailable"))
+    await act(async () => {await hook.result.current.refresh()})
+  } else await act(async () => {finish(kind === "ordinary" ? null : {candidate_child_id: "chat"}); await opening})
+  expect(hook.result.current.settingsMode("chat")).toBe(kind.endsWith("failed") ? "pending" : kind)
+  if (!kind.endsWith("failed")) expect(hook.result.current.status).toBe("legacy_review_required")
+  expect(mocks.confirm).not.toHaveBeenCalled()
 })
