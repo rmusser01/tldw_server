@@ -1,0 +1,6 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import base from '../../../apps/packages/ui/vitest.config'
+const entries=[{"source":"apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx","baseline":"baseline-Manager.tsx","sha256":"8ab50685e72a05df41662e525d383fffb7609058da817bdfa8b89f13bb3397ad"},{"source":"apps/packages/ui/src/components/Option/WorldBooks/WorldBookDetailPanel.tsx","baseline":"baseline-WorldBookDetailPanel.tsx","sha256":"bb861791f27f795dfe8eabbac94d3117305efd00b9a83d2b52dfd248e9bd24d3"},{"source":"apps/packages/ui/src/services/tldw/TldwApiClient.ts","baseline":"baseline-TldwApiClient.ts","sha256":"01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca"},{"source":"apps/packages/ui/src/services/tldw/domains/characters.ts","baseline":"baseline-characters.ts","sha256":"178b30cbb0cd77a4a25aae51b4a37544e5193e32ba8ea572673807c455594f94"},{"source":"apps/packages/ui/src/services/tldw/domains/chat-rag.ts","baseline":"baseline-chat-rag.ts","sha256":"327013a1060d51187ce199e9211d7628d479cd5f2cbff41b5f3c04598f3aebff"}]
+const sources = new Map(entries.map(e => [path.resolve(__dirname, '../../../', e.source), fs.readFileSync(path.resolve(__dirname,e.baseline),'utf8')]))
+export default {...base,plugins:[{name:'review-uat272-disabled-baseline-only',enforce:'pre' as const,load(id:string){return sources.get(id.split('?')[0])}}]}

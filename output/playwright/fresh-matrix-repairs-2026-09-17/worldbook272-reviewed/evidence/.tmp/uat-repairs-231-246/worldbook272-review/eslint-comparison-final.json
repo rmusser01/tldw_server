@@ -1,0 +1,70 @@
+{
+  "at": "2026-09-18T03:18:04.498Z",
+  "normalization": "Ignore source positions and normalize embedded hook line numbers only",
+  "files": [
+    {
+      "file": "apps/packages/ui/src/components/Option/WorldBooks/Manager.tsx",
+      "errors": 1,
+      "warnings": 104,
+      "baselineErrors": 1,
+      "baselineWarnings": 104,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookDetailPanel.tsx",
+      "errors": 0,
+      "warnings": 22,
+      "baselineErrors": 0,
+      "baselineWarnings": 22,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookDetailPanel.test.tsx",
+      "errors": 0,
+      "warnings": 7,
+      "baselineErrors": 0,
+      "baselineWarnings": 7,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBooksManager.attachmentStage1.test.tsx",
+      "errors": 0,
+      "warnings": 6,
+      "baselineErrors": 0,
+      "baselineWarnings": 6,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "errors": 0,
+      "warnings": 532,
+      "baselineErrors": 0,
+      "baselineWarnings": 532,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/services/tldw/__tests__/TldwApiClient.request-scope.test.ts",
+      "errors": 0,
+      "warnings": 0,
+      "baselineErrors": 0,
+      "baselineWarnings": 0,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/services/tldw/domains/characters.ts",
+      "errors": 0,
+      "warnings": 57,
+      "baselineErrors": 0,
+      "baselineWarnings": 57,
+      "added": []
+    },
+    {
+      "file": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "errors": 0,
+      "warnings": 235,
+      "baselineErrors": 0,
+      "baselineWarnings": 235,
+      "added": []
+    }
+  ]
+}

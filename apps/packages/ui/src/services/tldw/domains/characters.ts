@@ -56,7 +56,7 @@ export const characterMethods = {
   async listCharacters(this: TldwApiClientCore, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const query = buildQuery(params)
-    const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
+    const listPathCandidates = ["/api/v1/characters/", "/api/v1/characters"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(

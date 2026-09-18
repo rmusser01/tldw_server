@@ -4512,7 +4512,7 @@ export class TldwApiClientBase {
   async listCharacters(params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery(params)
-    const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
+    const listPathCandidates = ["/api/v1/characters/", "/api/v1/characters"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(
@@ -6369,9 +6369,10 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books/${wid}`, method: 'DELETE' })
   }
 
-  async listCharacterWorldBooks(character_id: number | string): Promise<any> {
+  async listCharacterWorldBooks(character_id: number | string, includeDisabled = false): Promise<any> {
     const cid = String(character_id)
-    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books`, method: 'GET' })
+    const query = includeDisabled ? '?enabled_only=false' : ''
+    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books${query}`, method: 'GET' })
   }
 
   async processWorldBookContext(payload: {

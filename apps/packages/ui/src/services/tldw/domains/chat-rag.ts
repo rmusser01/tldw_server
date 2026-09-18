@@ -1610,9 +1610,10 @@ export const chatRagMethods = {
     return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books/${wid}`, method: 'DELETE' })
   },
 
-  async listCharacterWorldBooks(this: TldwApiClientCore, character_id: number | string): Promise<any> {
+  async listCharacterWorldBooks(this: TldwApiClientCore, character_id: number | string, includeDisabled = false): Promise<any> {
     const cid = String(character_id)
-    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books`, method: 'GET' })
+    const query = includeDisabled ? '?enabled_only=false' : ''
+    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books${query}`, method: 'GET' })
   },
 
   async processWorldBookContext(this: TldwApiClientCore, payload: {

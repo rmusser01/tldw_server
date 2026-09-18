@@ -1,0 +1,1 @@
+{"errorCount":1,"warningCount":104,"fatalErrorCount":0,"errors":[{"line":1986,"column":24,"ruleId":"@typescript-eslint/no-non-null-asserted-optional-chain","message":"Optional chain expressions can return undefined by design - using a non-null assertion is unsafe and wrong."}]}
