@@ -122,6 +122,7 @@ describe("ServerAdminPage design-system states", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    apiMock.getConfig.mockReset()
     mockMatchMedia()
     resolveBaseAdminCalls()
     vi.spyOn(window, "open").mockImplementation(() => null)
@@ -151,10 +152,17 @@ describe("ServerAdminPage design-system states", () => {
   })
 
   it("creates an ordinary user from the admin modal and refreshes the list", async () => {
-    apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    let resolveConfig!: (value: { serverUrl: string; authMode: "multi-user" }) => void
+    apiMock.getConfig.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveConfig = resolve })
+    )
     apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
     const staticSuccess = vi.spyOn(message, "success")
     render(<App><ServerAdminPage /></App>)
+    await waitFor(() => expect(apiMock.getConfig).toHaveBeenCalledOnce())
+    await act(async () => {
+      resolveConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    })
     fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
     // Test setup supplies identical useId values; find the sole open dialog.
     const dialog = await screen.findByRole("dialog")

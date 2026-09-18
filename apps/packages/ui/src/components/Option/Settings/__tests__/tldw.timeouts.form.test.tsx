@@ -96,7 +96,9 @@ it("Extended and explicit Reset persist their generation budgets across reload",
   cleanup()
   await load(extended)
   advanced()
-  expect(screen.getByRole("radio", { name: "settings:tldw.timeoutPresetExtended" })).toBeChecked()
+  await waitFor(() =>
+    expect(screen.getByRole("radio", { name: "settings:tldw.timeoutPresetExtended" })).toBeChecked()
+  )
   fireEvent.click(screen.getByRole("button", { name: "settings:tldw.reset" }))
   expect(generation(await save())).toEqual([120000, 120000, 120000])
 })

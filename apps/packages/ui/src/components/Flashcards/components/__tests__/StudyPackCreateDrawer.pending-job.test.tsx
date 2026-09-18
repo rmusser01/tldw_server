@@ -120,10 +120,17 @@ const mount = (
   );
   return { ...view, client, onClose, onCreated };
 };
-const submit = async (client: QueryClient) => {
+const submit = async (client: QueryClient, jobId = 91) => {
+  await waitFor(() => {
+    const createButton = button();
+    expect(createButton).toBeEnabled();
+    expect(createButton).not.toHaveClass("ant-btn-loading");
+  });
   fireEvent.click(button());
   await waitFor(() =>
-    expect(client.getQueryState(jobKey)?.status).toBe("success"),
+    expect(
+      client.getQueryState(["flashcards:study-packs:job", jobId])?.status,
+    ).toBe("success"),
   );
 };
 
@@ -276,7 +283,7 @@ describe("StudyPackCreateDrawer accepted job lifecycle", () => {
         job: response("queued", 92).job,
       });
       vi.mocked(getStudyPackJob).mockResolvedValue(response("queued", 92));
-      fireEvent.click(button());
+      await submit(client, 92);
       await waitFor(() => expect(getStudyPackJob).toHaveBeenCalledWith(92));
       expect(createStudyPackJob).toHaveBeenLastCalledWith({
         title: "Citrine study pack",

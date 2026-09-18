@@ -430,7 +430,9 @@ describe("CompanionHomePage", () => {
       expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options")
     })
 
-    expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("heading", { name: "Inbox Preview" })
+    ).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Needs Attention" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Resume Work" })).toBeInTheDocument()
