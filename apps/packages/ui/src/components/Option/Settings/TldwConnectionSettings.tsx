@@ -159,6 +159,7 @@ export const TldwConnectionSettings = ({
         rules={[{ required: true }]}
       >
         <Segmented
+          name="tldw-auth-mode"
           options={[
             { label: t('settings:tldw.authMode.single', 'Single User (API Key)'), value: 'single-user' },
             { label: t('settings:tldw.authMode.multi', 'Multi User (Login)'), value: 'multi-user' }
@@ -282,6 +283,7 @@ export const TldwConnectionSettings = ({
             label={t('settings:tldw.loginMethod.label', 'Login Method')}
           >
             <Segmented
+              name="tldw-login-method"
               options={[
                 { label: t('settings:tldw.loginMethod.magic', 'Magic link'), value: 'magic-link' },
                 { label: t('settings:tldw.loginMethod.password', 'Password'), value: 'password' }

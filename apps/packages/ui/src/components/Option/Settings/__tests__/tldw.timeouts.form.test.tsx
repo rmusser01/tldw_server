@@ -134,6 +134,27 @@ it("clicking Balanced from a preserved Custom configuration applies the selected
   expect(screen.getByRole("radio", { name: "settings:tldw.timeoutPresetBalanced" })).toBeChecked()
 })
 
+it("keeps auth, login, and timeout segmented radios independently selected", async () => {
+  await load({ ...target, accessToken: undefined, refreshToken: undefined })
+  advanced()
+
+  const multiUser = screen.getByRole("radio", { name: "Multi User (Login)" })
+  const magicLink = screen.getByRole("radio", { name: "Magic link" })
+  const balanced = screen.getByRole("radio", { name: "settings:tldw.timeoutPresetBalanced" })
+
+  fireEvent.click(multiUser)
+  fireEvent.click(magicLink)
+  fireEvent.click(balanced)
+  expect(multiUser).toBeChecked()
+  expect(magicLink).toBeChecked()
+  expect(balanced).toBeChecked()
+  expect(new Set([
+    multiUser.getAttribute("name"),
+    magicLink.getAttribute("name"),
+    balanced.getAttribute("name")
+  ]).size).toBe(3)
+})
+
 const runDelayedGeneration = async (config: TldwConfig) => {
   cleanup()
   vi.useFakeTimers()

@@ -162,6 +162,7 @@ export const TldwTimeoutSettings = ({
                 </span>
                 <div className="flex flex-wrap items-center gap-3">
                   <Segmented
+                    name="tldw-timeout-preset"
                     value={timeoutPreset}
                     onChange={(value) => applyTimeoutPreset(value as TimeoutPresetKey)}
                     options={[
