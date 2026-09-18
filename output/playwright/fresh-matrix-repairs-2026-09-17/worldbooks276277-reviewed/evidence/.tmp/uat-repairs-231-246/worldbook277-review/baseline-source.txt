@@ -83,7 +83,7 @@ export function useWorldBookBulkActions(deps: UseWorldBookBulkActionsDeps) {
       title: `Delete "${record.name}"?`,
       content: (
         <div className="space-y-2">
-          <p>This world book will be removed from your library. It contains:</p>
+          <p>This will permanently remove:</p>
           <ul className="list-disc list-inside text-sm">
             <li>{entryCount} {entryCount === 1 ? "entry" : "entries"}</li>
             <li>{attachedSummary}</li>
@@ -133,7 +133,7 @@ export function useWorldBookBulkActions(deps: UseWorldBookBulkActionsDeps) {
     if (operation === "delete") {
       const ok = await confirmDanger({
         title: "Delete selected world books?",
-        content: `This will remove ${selectedIds.length} ${selectedIds.length === 1 ? "world book" : "world books"} from your library.`,
+        content: `This will permanently remove ${selectedIds.length} world books and their entries.`,
         okText: "Delete",
         cancelText: "Cancel"
       })

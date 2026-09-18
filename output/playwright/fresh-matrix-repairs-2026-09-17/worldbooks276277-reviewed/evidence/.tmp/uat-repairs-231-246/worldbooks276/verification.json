@@ -1,0 +1,51 @@
+{
+  "task": "TASK13260.217 / UAT276",
+  "source": {
+    "apps/packages/ui/src/components/Option/WorldBooks/WorldBookListPanel.tsx": "082514ca18f5f38a413c12b1c04f63971ef8e0d715317d5806637b6115ca434f"
+  },
+  "baseline": {
+    "geometryProjection": "8340c03aef146e00df6e75b34ff272f6b116566c5af4f9456904b73938cf599b",
+    "causalRedReceipt": "3e935f6cd0475642665a4bf464f2bbfc51cdf6b3509c1cf0e3bec4099e75f82e"
+  },
+  "checks": [
+    {
+      "command": "bunx vitest run src/components/Option/WorldBooks/__tests__/WorldBookListPanel.test.tsx src/components/Option/WorldBooks/__tests__/WorldBooksManager.responsive.layout.test.tsx --maxWorkers=1",
+      "cwd": "apps/packages/ui",
+      "exit": 0,
+      "result": "2 files, 12 existing controls passed",
+      "receipt": "focused-existing-controls.log",
+      "sha256": "3daa1b176ec3131f33f1caf51fd0f3edfd6f460eddc15eff8921c09994487f0d"
+    },
+    {
+      "command": "./apps/tldw-frontend/node_modules/.bin/eslint --config ./apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/components/Option/WorldBooks/WorldBookListPanel.tsx",
+      "cwd": ".",
+      "exit": 0,
+      "result": "0 errors; 22 existing warnings in the legacy panel, none in the added hunk",
+      "receipt": "eslint-final.log",
+      "sha256": "d596e2f7ca69d08bda8a5d9ed21aa6dd033c2700071e50b04b0c761f3f7a2a9d"
+    },
+    {
+      "command": "source .venv/bin/activate && python -m bandit -r apps/packages/ui/src/components/Option/WorldBooks/WorldBookListPanel.tsx -f json -o bandit-final.json",
+      "cwd": ".",
+      "exit": 0,
+      "result": "0 findings",
+      "receipt": "bandit-final.json",
+      "sha256": "397f494013641c618ee93803e1582f852e2366666da32a2c0a7d0b6003ceb7dd",
+      "limitation": "Bandit is Python-oriented; its zero TypeScript findings are not a TypeScript security assurance."
+    },
+    {
+      "command": "git diff --check -- <two touched paths>",
+      "cwd": ".",
+      "exit": 0,
+      "result": "no whitespace errors"
+    }
+  ],
+  "historicalHarnessEvidence": {
+    "status": "not acceptance evidence",
+    "reason": "JSDOM synthetic dimensions and assigned scrollLeft cannot establish browser layout or pointer hit testing.",
+    "roundOneManifest": "verification-round1-superseded.json",
+    "causalRedReceipt": "focused-red.log",
+    "roundOneReport": "task-217-report-round1-superseded.md"
+  },
+  "requiredAcceptance": "Run the committed product in the native browser at CSS 1200×953 and an adjacent responsive size; verify the actual More actions button receives a normal pointer click."
+}
