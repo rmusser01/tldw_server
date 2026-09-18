@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: 2026-09-15 01:27
-updated_date: 2026-09-18 21:27
+updated_date: 2026-09-18 23:24
 labels:
 - uat
 - testing
@@ -217,6 +217,8 @@ Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads
 
 2026-09-18 continuation reconciliation: previous turn completed276/277 acceptance and commits. Current tracked worktree clean at8f3b861a82;203 remains InProgress, native/review agents terminal. The original cycle5 plan still displayed the older230-finding preparation release, so its current gate is now explicitly HELD and the release labelled historical/superseded, pointing to the authoritative277-finding tracker/follow-up plan. Full48-outcome scope unchanged; owner261 run-gate decision remains pending. No new inference or full-matrix execution.
 PR2967 is verified merged into dev as3cff7962721a60b768464221c1f7fe2a8b25e4d5 after requested latest-dev rebase, all required checks and14resolvedQodo threads. First resumed original PG single-user TestBot check completed one submission and canonical reload; answer BEEP BOOP lacks the exact criterion final period, so261 remains open. Requester explicitly authorized continuing the full matrix with261open. Release fresh four-cell preparation/execution at frozen merged3cff;12namedjourneys xSQLite/PostgreSQL xsingle/multi, actualimage included. Reused dependencies/models disclosed; all new failures retained. TASK13260.219 covers merge/resumption checkpoint; this parent owns the full matrix.
+Post-merge frozen matrix on 3cff796: PostgreSQL single rows6/7/9 pass (five-card Study, actual Pirate apply/request/ARRR/reload, Note/backlink/card/practice/re-rate/session controls). Fresh TestBot3 returns exactly BEEP BOOP. and reloads in 4a2b69f7-4477-427d-a448-c0164335d07f; UAT261 remains open per requester. Image Retry blocked286 despite mmproj relaunch; row5 exact Wikipedia denied/no storage. Analysis versions2/3 persist; second contains provider-added quotes. Controlled isolated-provider failure test in progress. Other three fresh cells remain pending.
+PostgreSQL single-user native journey execution checkpoint23:19UTC: exact TestBot first turn and real failed-character Retry both return BEEP BOOP. and canonical reload preserves correct identities/counts;261 stays open. Ordinary same-user Retry, source analysis/reanalysis/error preservation, dated Trash restore, Disconnect/reconnect and background ingest minimize/resume pass. Image blocked286; exact Wikipedia denied; actual hidden-tab control unavailable because both tabs report visible. Independent restored UUID lookup unavailable outside HTTP scope; native ID/content/analysis pass. New shutdown observation287 under13260.224. Other three cells pending; no full acceptance. Evidence records1–207 local/ignored. Frozen application3cff unchanged. Next PostgreSQL multi-user.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
