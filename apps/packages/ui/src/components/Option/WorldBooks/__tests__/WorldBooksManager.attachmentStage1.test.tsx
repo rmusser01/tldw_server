@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
@@ -419,19 +419,29 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
   })
 
   it("retries failed attachment hydration through the existing query client", async () => {
-    const user = userEvent.setup()
     attachmentQueryError = new Error("service unavailable")
 
     render(<WorldBooksManager />)
-    await user.click(screen.getByText("Arcana"))
-    await user.click(await screen.findByRole("tab", { name: "Attachments" }))
-    await user.click(await screen.findByRole("button", { name: "Try again" }))
+    fireEvent.click(screen.getByText("Arcana"))
+    fireEvent.click(await screen.findByRole("tab", { name: "Attachments" }))
+    const attachmentsPanel = within(
+      await screen.findByRole("tabpanel", { name: "Attachments" })
+    )
+    expect(await attachmentsPanel.findByRole("alert")).toHaveTextContent(
+      "Unable to load character attachments. Try again."
+    )
+    const retryButton = await attachmentsPanel.findByRole("button", { name: "Try again" })
+    expect(retryButton).toBeVisible()
+    expect(retryButton).toBeEnabled()
+    fireEvent.click(retryButton)
 
-    await waitFor(() => expect(invalidateQueriesMock).toHaveBeenCalledWith({
-      queryKey: ["tldw:listCharactersForWB"]
-    }))
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({
-      queryKey: ["tldw:worldBookAttachments"]
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: ["tldw:listCharactersForWB"]
+      })
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: ["tldw:worldBookAttachments"]
+      })
     })
   })
 })
