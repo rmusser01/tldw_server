@@ -383,14 +383,25 @@ const seedPromptTemplate = async (page: Page) => {
   )
 }
 
-const seedExcludedContext = async (page: Page, selectedModel = MODEL_KEY) => {
+const seedExcludedContext = async (
+  page: Page,
+  selectedModel = MODEL_KEY,
+  options: { temporaryChat?: boolean } = {}
+) => {
   await page.evaluate(
-    ({ model, history, pageContext, rag, tool }) => {
+    ({ model, history, pageContext, rag, tool, temporaryChat }) => {
       const store = (window as any).__tldw_useStoreMessageOption
       if (!store?.setState)
         throw new Error("Message option store is unavailable")
       store.setState({
         selectedModel: model,
+        ...(temporaryChat
+          ? {
+              temporaryChat: true,
+              historyId: "temp",
+              serverChatId: null
+            }
+          : {}),
         history: [{ role: "user", content: history }],
         messages: [
           {
@@ -431,7 +442,8 @@ const seedExcludedContext = async (page: Page, selectedModel = MODEL_KEY) => {
       history: HISTORY_SENTINEL,
       pageContext: PAGE_CONTEXT_SENTINEL,
       rag: RAG_SENTINEL,
-      tool: TOOL_SENTINEL
+      tool: TOOL_SENTINEL,
+      temporaryChat: options.temporaryChat ?? false
     }
   )
 }
@@ -453,6 +465,7 @@ const launchChatSurface = async (
     variant?: "v1" | "v3" | "v5"
     viewport?: { width: number; height: number }
     seedTemplate?: boolean
+    temporaryChat?: boolean
   } = {}
 ): Promise<SurfaceLaunch> => {
   const {
@@ -461,7 +474,8 @@ const launchChatSurface = async (
     nextgen = false,
     variant = "v1",
     viewport,
-    seedTemplate = false
+    seedTemplate = false,
+    temporaryChat = false
   } = options
   const launched = await launchWithExtension(EXT_PATH, {
     seedConfig: buildSeedConfig(mock.baseUrl),
@@ -500,7 +514,9 @@ const launchChatSurface = async (
       `prompt-improvement:${surface}:connected`
     )
     await ensureChatInput(chatPage)
-    if (withModel) await seedExcludedContext(chatPage)
+    if (withModel) {
+      await seedExcludedContext(chatPage, MODEL_KEY, { temporaryChat })
+    }
     return { context, bootstrapPage: page, chatPage, extensionId }
   } catch (setupError) {
     try {
@@ -1050,11 +1066,11 @@ test.describe("Packaged extension prompt improvement parity", () => {
     try {
       const launched = await launchChatSurface(mock, "options", {
         viewport: { width: 390, height: 780 },
-        seedTemplate: true
+        seedTemplate: true,
+        temporaryChat: true
       })
       context = launched.context
       const page = launched.chatPage
-      await seedExcludedContext(page)
       const storeTemplateSelected = await page.evaluate((templateId) => {
         const store = (window as any).__tldw_useStoreMessageOption
         store.setState({ selectedSystemPrompt: templateId })
@@ -1106,6 +1122,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await expect(firstMenu.trigger).toBeFocused()
 
       const secondMenu = await openPromptActions(page)
+      await expect(
+        page.getByText("Chat saving is incomplete", { exact: true })
+      ).toHaveCount(0)
       await secondMenu.actions
         .getByRole("button", { name: /Review changes/ })
         .click()
@@ -1208,6 +1227,12 @@ test.describe("Packaged extension prompt improvement parity", () => {
           text: originalDraft
         })
       }
+      expect(
+        mock.requests.filter(
+          (request) =>
+            request.method === "POST" && request.url.startsWith("/api/v1/chats")
+        )
+      ).toEqual([])
     } finally {
       await context?.close()
       await stopPromptMockServer(mock)
