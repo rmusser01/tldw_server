@@ -262,7 +262,7 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task210: full World Book lifecycle compatibility
 
-**Status:** In Progress. User-approved concurrent ownership is disjoint from Sources267. Official fixture RED identifies268 PostgreSQL entry connection misuse and269 SQLite entry writes escaping caller rollback. Add independent seeded operation cases for remaining supported mutations; preserve all causal failures and narrow fixes to proven boundaries. Independent review/native acceptance required. Existing260/265/266 fixes committed0d7f2a23c9 and remain the frozen native candidate.
+**Status:** Complete. User-approved concurrent ownership is disjoint from Sources267. Official fixture RED identifies268 PostgreSQL entry connection misuse and269 SQLite entry writes escaping caller rollback. Add independent seeded operation cases for remaining supported mutations; preserve all causal failures and narrow fixes to proven boundaries. Independent review/native acceptance required. Existing260/265/266 fixes committed0d7f2a23c9 and remain the frozen native candidate.
 
 ## Task211: legacy World Book regression harness
 
@@ -296,14 +296,24 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task215: preserve canonical World Book entry identifiers
 
-**Status:** In Progress. TASK13260.215/UAT274 records native `PUT .../entries/undefined` →422 after successful book3/entry1 creation on committed270682. The canonical entry carries `id`; the editor reads `entry_id`. Trace the boundary, preserve a causal failing test using the actual wire shape, repair the narrow mapping, and cover adjacent edit/delete/selection behavior. Root owns bookkeeping and immutable runtime; the entry author owns bounded source/tests, and the native reviewer continues independent attachment checks on its exclusive browser. Preserve original books1/2 and Characters4/6. Review, commit and repeat entry lifecycle UI acceptance before closing268/269 or274. Current gate274:265verified,7native-pending,2active.
+**Status:** Complete. TASK13260.215/UAT274 records native `PUT .../entries/undefined` →422 after successful book3/entry1 creation on committed270682. The canonical entry carries `id`; the editor reads `entry_id`. Trace the boundary, preserve a causal failing test using the actual wire shape, repair the narrow mapping, and cover adjacent edit/delete/selection behavior. Root owns bookkeeping and immutable runtime; the entry author owns bounded source/tests, and the native reviewer continues independent attachment checks on its exclusive browser. Preserve original books1/2 and Characters4/6. Review, commit and repeat entry lifecycle UI acceptance before closing268/269 or274. Current gate274:265verified,7native-pending,2active.
 
 ## Task216: refresh parent World Book counts after entry mutations
 
-**Status:** In Progress. TASK13260.216/UAT275 records stale parent0entries after successful create while the entry panel shows1; normal reload corrects it. After274 freezes, the same entry-file author owns a causal query-refresh regression and minimal invalidation correction. Require create/delete native summaries to update without reload and agree with canonical reload. Separate task and evidence preserve this UX defect; no concurrent edits to the shared entry manager. Gate275:265verified,7native-pending,3active.
+**Status:** Complete. TASK13260.216/UAT275 records stale parent0entries after successful create while the entry panel shows1; normal reload corrects it. After274 freezes, the same entry-file author owns a causal query-refresh regression and minimal invalidation correction. Require create/delete native summaries to update without reload and agree with canonical reload. Separate task and evidence preserve this UX defect; no concurrent edits to the shared entry manager. Gate275:265verified,7native-pending,3active.
 
 - Tasks206/209/212/213/214 are Complete after original Alice native38checks76inputs and root98retention comparisons. Accepted packet `native-worldbook-sources264267271272273-accepted`, manifestf8d42ec77678ea579c5e67c88deb3d504d52b5a0fdb74b74f007130b0944a5a7. Gate275:270verified,2native-pending268269,3active261274275. Source remains270682 in the running original PGmulti instance; browser returned to root with preserved book3/blueentry1 and detachedCharacter7. No full matrix or inference. Continue274 then275, independently review/commit, upgrade and complete entry/book lifecycle acceptance.
 
 - Task215/UAT274 source review is Complete; native acceptance remains pending. Final guarded identifier mapping passes independent13checks44inputs, author17focused and independent12focused tests; reviewed packet2e28dc41a94261ad60353cd18aa469a6a3ea9faa6726eff2ab0a4c21d8ee838f retained with281rootcomparisons. Task216/UAT275 is In Progress with a separate real-QueryClient summary regression before source edits. Gate275:270verified,3native-pending268269274,2active261275. Model261 isolated diagnostic capture independently replays1test; no live inference or disposition change.
 
 - Task216/UAT275 source review is clear: independent13checks30inputs, three real-QueryClient controls pass and the exact baseline overlay reproduces two failures with its negative control passing. Author adjacent suite17passed/one unchanged retired-drawer skip; partial bulk-add is source-reviewed only. Reviewed packet manifest21b55c880f4e46b6438ec688fc89d2e957e2f5334236f1ca28e5d6b92e2e3be7 retained with74rootcomparisons. Current275 findings:270verified,4reviewed/native-pending268269274275,1active261. Original PostgreSQL combined entry/count acceptance is next; no full fresh matrix or model criterion change.
+
+## Task217: contain catalogue table beside World Book detail
+
+**Status:** In Progress. TASK13260.217/UAT276 retains native pointer interception and screenshot/geometry at1200×953: table extends outside its35% list column underneath detail. Keyboard menu is a workaround only. Implementer diagnoses minimal existing layout overflow correction and meaningful layout/pointer regression; independent review and original committed PostgreSQL pointer/reload acceptance required. Gate276:270verified,4native-pending268269274275,2active261276.
+
+## Task218: truthful World Book deletion wording
+
+**Status:** In Progress. TASK13260.218/UAT277 retains native permanent-removal text versus default soft-delete response. Root owns a two-string single/bulk dialog correction describing library removal; no endpoint/timer/undo change. Existing selection/keyboard3controls pass; independent review and committed native single/bulk Cancel checks remain required.
+
+- Tasks210/215/216 Complete after native33checks62inputs and root85retention comparisons; packet43a483292f336032a9fda08ecf89efe51b57965e1ccf34ae05b6020c9882ae35. Current277 findings:274verified,3active261276277. Root owns returned PGmulti browser; runtimeac713a4/API84240/Next84458 unchanged.276 containment and277 copy source review pending;261 capture correction is under root review, no live calls yet.

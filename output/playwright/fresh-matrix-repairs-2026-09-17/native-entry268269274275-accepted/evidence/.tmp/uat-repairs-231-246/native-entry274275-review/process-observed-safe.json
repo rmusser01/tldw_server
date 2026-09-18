@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-18T04:42:16.967Z",
+  "startupPath": ".tmp/uat-repairs-231-246/native-upgrade-preparation/worldbook274275-startup-safe.json",
+  "startupSha256": "dd1de05a60e9d96919f62e5549da0833dedc047f5e7a3b6033a2aac2df82b9bb",
+  "processes": [
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook274275-upgrade-20260918/pg-multi/backend-1789705638211-7880f209-beef-4dc8-8b23-aea4fb2a0f58.process.private.json",
+      "sha256": "dc0bfe4c01f72dc9b7c3ba7e19cfdb2ca594923fe63cb3b42173089932df9d14",
+      "startupSha256": "dc0bfe4c01f72dc9b7c3ba7e19cfdb2ca594923fe63cb3b42173089932df9d14",
+      "pid": 84240,
+      "status": "started",
+      "startedAt": "2026-09-18T04:27:18.211Z",
+      "endedAt": null,
+      "bindingHash": "80f50a60288b4df7d1d5ff94befcad37f07535cb9046f885f72282f005a94d55",
+      "sourceCommit": "ac713a4e238a51d548f12722126854e88c79b1c9"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook274275-upgrade-20260918/pg-multi/frontend-1789705661804-2826fa4c-93f9-40b7-839f-bd34b2cd377d.process.private.json",
+      "sha256": "29a75636b32dd7fd8f0d125b5420f791be68c0277ddd9b1e5f2cc420cfb618ea",
+      "startupSha256": "29a75636b32dd7fd8f0d125b5420f791be68c0277ddd9b1e5f2cc420cfb618ea",
+      "pid": 84458,
+      "status": "started",
+      "startedAt": "2026-09-18T04:27:41.804Z",
+      "endedAt": null,
+      "bindingHash": "80f50a60288b4df7d1d5ff94befcad37f07535cb9046f885f72282f005a94d55",
+      "sourceCommit": "ac713a4e238a51d548f12722126854e88c79b1c9"
+    }
+  ]
+}

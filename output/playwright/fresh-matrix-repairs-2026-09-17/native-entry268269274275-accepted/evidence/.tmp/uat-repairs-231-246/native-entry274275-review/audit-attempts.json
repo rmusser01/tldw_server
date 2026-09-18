@@ -1,0 +1,18 @@
+{
+  "kind": "Reviewer audit-tool correction history; native evidence unchanged",
+  "attempts": [
+    {
+      "result": "exception",
+      "cause": "Credential accounts is an object, not an array; .some was corrected to Object.values(...).some. No private values emitted."
+    },
+    {
+      "result": "GAPS 1 of 33 checks",
+      "cause": "Count matcher expected plural entries for 1. Canonical responses and UI already showed one; matcher changed to singular entry for 1."
+    },
+    {
+      "result": "CLEAR 33 of 33",
+      "cause": "Corrected offline audit only."
+    }
+  ],
+  "receiptLimit": "Safe synopsis of actual tool outcomes; no claim that this file is the original command stdout."
+}
