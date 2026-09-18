@@ -52,7 +52,8 @@ const load = async (config = target) => {
   await storage.set("tldwConfig", config)
   await tldwClient.initialize()
   mount()
-  await waitFor(() => expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(target.serverUrl))
+  const server = await screen.findByRole("textbox", { name: "Server URL" })
+  await waitFor(() => expect(server).toHaveValue(target.serverUrl))
 }
 const save = async () => {
   const update = vi.spyOn(tldwClient, "updateConfig")

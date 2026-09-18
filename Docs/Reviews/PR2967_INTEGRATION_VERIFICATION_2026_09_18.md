@@ -25,7 +25,7 @@ local archive. This summary and the running tracker retain reviewable outcomes.
 | Onboarding | Both desktop and mobile tests passed, zero skipped | Fixture preserves the verified session owner while changing lifecycle state. |
 | Approved extension replay | One passed, zero skipped/retried/flaky outcomes | Fresh build 29.1 seconds, scenario 6.927 seconds; privacy, edit/apply, focus and narrow layout assertions pass. Tested fixture cd8ed1452a50cb518be9fcdeb7126ca7e21711fc577f849aa252cd9797f92b27. Subsequent first-seed ordering refinement needs hosted CI. Axe has zero violations but one incomplete observation, now UAT281. |
 | Settings radio repair | 24 tests passed on CI Node20.20.2, zero skipped | A causal regression reproduces AntD's test-mode native radio-name collision. Three explicit group names preserve independent selections. Auth-mode and timeout accessibility controls pass. Final test-only typing cleanup is source-reviewed; the separate Server URL assertion passes unchanged locally, with no claimed hydration cause. |
-| Prompt-review semantics (UAT281) | All 10 component tests passed, zero skipped; independent source review clear | Removing the new group role causes the named-content regression to fail. The existing control relationships and pressed-button behavior remain intact. Final hosted extension validation remains required. |
+| Prompt-review semantics (UAT281) | All 10 component tests and final hosted extension gate pass; independent source review clear | Removing the new group role causes the named-content regression to fail. Hosted fa50b25ca4 passes14 Watchlists and22 Prompt Improvement scenarios, zero skipped/unexpected/flaky outcomes. Final Axe report has zero violations/incomplete observations; screenshot independently inspected. |
 | OpenAPI | Canonical fingerprint check passed | Isolated Python 3.12.11, FastAPI 0.136.3, Pydantic 2.13.5; 2097 paths/3207 schemas. |
 | Published docs | All 52 docs tests passed in a clean checkout; three macOS controls passed locally | Canonical mirrors have real Git revision dates; fixtures preserve `Site` and exclude `_site`. CI dependency versions remain unchanged; strict warnings are not suppressed. |
 | Backend shard coverage | No newly uncovered tests | 805 shards, 4729 test files, 130 pre-existing baseline exclusions. |
@@ -48,9 +48,14 @@ certification.
 
 ## Remaining merge gates
 
-- Confirm Settings and UAT281 prompt-review repairs in hosted CI. Causal local
-  regressions and independent source review pass; the separate transient
-  Server URL assertion still has no established cause.
+- Confirm the Settings readiness helper in hosted CI. At fa50b25ca4, shard2
+  passes562 tests and fails only the first ordinary save/reload case's blank
+  Server URL; the radio repair passes. The candidate now discovers the real
+  textbox once, then waits for its unchanged exact value. It separates two
+  readiness deadlines without changing product source or persistence checks.
+  All10 focused tests pass on CI Node20.20.2. Instrumentation observes one
+  field-arrival/value transition in an incomplete broader experiment; the
+  earlier hosted timing cause remains unproven.
 - Run final candidate CI after pushing the reviewed repairs, including the
   extension fixture's final first-seed ordering and named-content assertion.
   The one explicitly approved local extension replay is complete.
