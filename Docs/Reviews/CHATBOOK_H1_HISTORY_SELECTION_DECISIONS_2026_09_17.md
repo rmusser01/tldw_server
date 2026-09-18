@@ -1,0 +1,283 @@
+# H1 implementation decision history
+
+Status: interim history through Task4.2 review closure, 2026-09-17. This is a chronological record of controller decisions, including superseded decisions and their stated tradeoffs; it is not a new specification or release verdict. The [H1 specification](../Design/2026-09-16-chatbook-h1-history-selection-design.md) defines the current contract, and the [verification record](CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md) records what has actually passed review and qualification.
+
+These entries preserve every line containing `Ruling:` from the plan-owned execution ledger, in order and without paraphrasing. Later refinements supersede earlier conflicting choices. In particular, the pending-confirmation ruling is refined by the following entry, adjacent regeneration was subsequently capability-gated, and Task4.1's native-copy gate is temporary pending Task4.2. Implementation authorizations are not evidence that their requirements have passed tests or review. The original ledger remains available while execution is active; this tracked record prevents decisions from disappearing when that scratch workspace is eventually cleaned up.
+
+Snapshot: 69 entries; source ledger SHA-256 `86f808df3fa1b02da43853445da547b873219d62466302ea6efe8beec7aa479e`. Refresh this record after later rulings and before workflow cleanup.
+
+## Decision 1 (execution ledger line 80)
+
+- Ruling: comparison digest uses `[1,"comparison",owner_key,conversation_id,model_id,cluster_id_or_null,[cursor.kind,message_id_or_null],[[id,revision],...],storage_context_digest,request_context_digest]`, compact literal-Unicode JSON UTF-8 — the normal tuple is specified but the comparison tuple needed a stable disjoint encoding — changing it later requires coordinated fixtures and both owner/client consumers, with no deployed contract yet.
+
+## Decision 2 (execution ledger line 81)
+
+- Ruling: snapshot interpretation is one discriminated state (known parent graph, accepted legacy with projection ID, or legacy-review-required), rather than independent readiness flags — prevents contradictory states while preserving all raw legacy rows — later owner adapters may need additional evidence fields but must retain the discriminator.
+
+## Decision 3 (execution ledger line 84)
+
+- Ruling: Task 2.3 must create/integrate the scoped `server-chat-mirror.ts` helper and its relevant UAT acknowledgement/rollback tests if still absent from dev, rather than treating the plan's Modify label as evidence it exists — the file is new on the active UAT branch and shared-owner integration depends on those invariants — targeted integration may need reconciliation against newer UAT edits; do not merge unrelated branch changes.
+
+## Decision 4 (execution ledger line 89)
+
+- Ruling: retain `nodes` as the single manifest field and mapping-style native node access; update Task 2.1's illustrative `.manifest`/attribute access to this completed contract — all three shared shapes already agree on `nodes`, so an alias would duplicate state — downstream adapters must use the documented field consistently.
+
+## Decision 5 (execution ledger line 100)
+
+- Ruling: Task 2.1 may add nullable protected `messages.history_admission_json` alongside the legacy projection table in migration 68 — ordinary/imported metadata must never be evidence of owner-issued acceptance, including on legacy rows — later Task 2.2 must close all ordinary/sync write paths and implement the specialized write/settlement; this is a narrow message-storage field, not a new turn platform.
+
+## Decision 6 (execution ledger line 101)
+
+- Ruling: allow Task 2.1 public refinements for adapter-supplied owner_key, requested projection_id, lock_for_update, and a fenced selected-content reader, but keep owner_client_id required and derive confirmation conversation_id from its existing payload — explicit authorization prevents accidental default-principal use and avoids duplicate positional scope inputs — plan signatures must be updated from the verified final report before the API consumer is dispatched.
+
+## Decision 7 (execution ledger line 103)
+
+- Ruling: include protected legacy descendant support in Task 2.1's shared node/pure resolver changes — an immutable base-only ordered path cannot resolve newly admitted descendants, and selecting a latest child in the owner would violate per-view selection — add optional legacy_projection_id from protected storage and require matching identity while walking explicit new edges to a base prefix or null. Both-language tests cover shared legacy rows with separate bases, wrong-base rejection and null-parent new branches. This extends the reviewed Stage 1 foundation within Stage 2; native admission writes remain Task 2.2. Cost if wrong is a coordinated pure API refinement before mounted consumers ship; report exact signatures.
+
+## Decision 8 (execution ledger line 104)
+
+- Ruling: Task 2.3 includes `services/tldw/domains/chat-rag.ts` — TldwApiClient's base addChatMessage is overridden by Object.assign domain methods at runtime, so a base-class-only change would be dead code — update live domain, types and response normalization together. Plan and preliminary Task 2.3 brief now name the real runtime seam.
+
+## Decision 9 (execution ledger line 121)
+
+- Ruling: register the fixed snapshot SHA-256 SQL function once in SQLiteConnectionPool._create_connection after configure_sqlite_connection; narrow sqlite_backend.py scope approved — repeated registration fails with active statements, and a one-handle per-store cache misses A→B→A/shared-store reuse — initialization affects all backend handles, so require actual active-cursor/reuse regressions plus directly relevant pool checks and touched-scope static/security validation.
+
+## Decision 10 (execution ledger line 122)
+
+- Ruling: server multi-input completion is one atomic append_selected_history_inputs operation against the original finalized selection; final admission retains the original manifest/digest and protected metadata binds every input row/version/state — repeated per-row selections would change request authority and permit partial input acceptance — cover midpoint rollback, duplicate concurrent consumption including tool-only chains, earlier-input drift and unrelated branch/settings changes. Consumption lookup is scoped to owner/conversation and protected server-completion provenance; client-managed stable-ID matching retry remains distinct.
+
+## Decision 11 (execution ledger line 124)
+
+- Ruling: versioned server completion uses documented optional scope_type/workspace_id query parameters, with omitted scope global and explicit matching workspace required — existing ChatCompletionRequest has no workspace fields, and owner identity must remain separate from route scope — cover wrong/omitted workspace rejection before settings/admission mutations; unversioned behavior unchanged.
+
+## Decision 12 (execution ledger line 128)
+
+- Ruling: reject an effective assistant override inconsistent with captured conversation identity before mutation, including resolved compatibility aliases — history/storage behavior must not silently compose a different assistant — require positive neutral/matching-character and zero-write mismatch tests. Additional concrete risk sent to worker: pre-admission get-or-create/live character/persona reads must not write on stale requests or bypass captured required behavior.
+
+## Decision 13 (execution ledger line 129)
+
+- Ruling: after confirming the Sync failure at the task base, update its partial-message expectation to atomic rollback followed by a successful exactly-once complete retry — the transactional rollback is intentional H1 owner behavior — require RED/GREEN provenance and retain all meaningful assertions. No production sync weakening or scope expansion.
+
+## Decision 14 (execution ledger line 131)
+
+- Ruling: add a bounded already-saved behavior adapter (optional focused core/Chat/history_context.py with unit coverage), read/freeze supported effective state inside owner admission transaction — this preserves usable self-contained saved character prompts without trusting mutable ambient sources — precisely gate unsupported materialized overrides/worldbooks/memory/assets/persona states before writes, list those limitations, and retain separate client-managed/stateless paths. Require live-source edit/delete fidelity and no pre-admission get-or-create or post-admission live reload. Cost if incomplete is explicit capability restriction and later adapter work, never silent fidelity loss or parity credit.
+
+## Decision 15 (execution ledger line 136)
+
+- Ruling: skills absence gating must mirror actual immediate non-dot/non-symlink discovery and model-visible flags, using read-only parsing/registry evidence; a recursive any-SKILL.md check is rejected because deleted, nested-resource, and disabled-only skills would incorrectly disable supported chat. Do not construct the mutating SkillsService or run subsequent live injection for accepted versioned requests. Unresolved potentially active registry/recovery state can be explicitly unsupported before writes; the cost is a documented narrow capability restriction until context can be captured faithfully.
+
+## Decision 16 (execution ledger line 137)
+
+- Ruling: versioned character stream settlement must not derive result identity from the current active turn or mutable live card/visual state. Use stable explicit client-composed speaker provenance or protected captured values and test same-request retry after current speaker/branch/source changes, plus conflicting speaker metadata rejection. Unversioned resolution and existing guardrails remain intact; the cost of unsupported missing provenance must be explicit rather than ambient rebinding.
+
+## Decision 17 (execution ledger line 138)
+
+- Ruling: Task3.2 needs a narrow shared chatModePipeline.ts/types/chat-modes.ts integration scope because the actual provider payload is assembled there after asynchronous preparePrompt, dynamic UI and steering injection. Finalizing in normalChatMode before those steps would bind different inputs than stream receives. Preserve non-H1 modes and propagate acceptance through success/error/abort persistence; focused actual-pipeline and error-save tests must prove no duplicate user or accepted-input rollback. The cost is a shared seam requiring its existing lifecycle regressions, not a replacement composer.
+
+## Decision 18 (execution ledger line 139)
+
+- Ruling: Task4.1 must include adjacent H1 edit/delete/regenerate stable-ID boundaries. Selected rendering makes existing removeMessageByIndex/createEditMessage timestamp positions target wrong persisted rows; even deleteChatAfterMessageId deletes unrelated later alternatives. Existing ID helpers also swallow failures and PageAssistDatabase.updateMessage ignores history_id. Reuse scoped ID mutations, reject missing authority, preserve unrelated alternatives and use explicit regeneration boundaries. Add narrow chat.ts/helper and mounted/DB test scope. The cost is necessary mutation integration for selected rendering, not a general editor redesign.
+
+## Decision 19 (execution ledger line 142)
+
+- Ruling: Task2.3 must narrowly extend isServicePromptRequestPath and its tests for the actual new history/legacy-confirmation and character-settlement POSTs — otherwise captured requestScope/servicePromptConfig is rejected by the real transport, tempting an unsafe scope bypass — retain exact route/method validation and principal/API-key/refresh-lineage checks. Add captured-scope options to the real persistCharacterCompletion domain method. The cost is one existing guard/test seam, not broad transport authorization.
+
+## Decision 20 (execution ledger line 148)
+
+- Ruling: Task3.2 must reach models/index.ts/ChatTldw/TldwChat's existing request seam. pageAssistModel currently rereads ambient model/tools settings and defaults saveToDb=true from serverChatId; finalizing before that read can bind different inputs and double-persist after H1 user admission. Resolve/freeze real model/tool/provider inputs before finalization, reuse existing message normalization, explicitly dispatch stateless client-managed inference, and prevent returned stream metadata from acquiring owner authority. Add narrow model/transport scope with actual-wire tests; cost is shared-model regression coverage, not a new composer/provider framework.
+
+## Decision 21 (execution ledger line 155)
+
+- Ruling: Task2.3 service functions take an explicit HistoryOwnerV1 (local profile/owner/conversation, verified native request scope plus separate workspace/mirror binding, or unavailable code), rather than resolve authority from ambient state. Keep finalizeHistorySelection synchronous over an explicit immutable prepared payload and current view/lease; owner source/storage revalidation belongs the append transaction, not an unfenced extra local read in finalization. Keep cancellation per operation, so stopping one request does not permanently poison a reusable owner descriptor or late settlement. Retain PreparedHistoryContextV1 with a small explicit freeze/digest constructor if needed, ensuring later dispatch uses that same frozen payload. Cost if wrong is updating the narrow service/consumer signatures before Task3; no new owner registry or runtime host is authorized.
+
+## Decision 22 (execution ledger line 160)
+
+- Ruling: Task3.1 explicitly includes db/dexie/helpers.ts selected formatting because actual hydration imports formatToMessage/formatToChatHistory there. They currently collapse by timestamps and normalize tool/function roles for display; selected provider authority must remain in the raw owner capture. Task3.2 already owns generateHistory/ChatTldw/TldwChat and now has actual-wire tests for ordered images and tool-call-only assistant plus result sequences, since the current adapter drops assistant additional_kwargs. Unsupported legacy function shapes must gate before mutation rather than lose fields or invent call IDs. Cost is narrow formatter/type/model regression coverage, not a global display-role rewrite or new provider framework.
+
+## Decision 23 (execution ledger line 162)
+
+- Ruling: correct the native handoff's image_mime_type request-field claim, found by Task2.3 and verified in MessageCreate/character_messages. Generic wire accepts one image_base64 only; MIME is magic-byte-derived internally, and metadata_extra/tool_calls/images are not request fields. Keep native schema unchanged in Task2.3; preserve supported bytes/MIME and gate unrepresentable shapes instead of sending ignored fields. Rich character settlement stays an explicit separate route with the same admission, never an automatic fallback. Cost is explicit generic-persistence capability limits until a separately tested native schema extension; historical selected tool/images remain supported. Corrected the downstream brief and appended the evidence to Task2.2 report.
+
+## Decision 24 (execution ledger line 163)
+
+- Ruling: Task2.3 need not create a new temporary memory owner. Its approved local/native adapter scope may return explicit unsupported for temporary/other owners before any IndexedDB/profile/bookmark/native write. Preserve read access and expose the capability to mounted callers; never coerce a temporary request into local durability. Task4.2 still owns memory-only temporary pending state, and H3 owns full temporary fork/Save semantics. Cost is no H1 parity credit for unsupported temporary selected-history actions. Add a zero-write adapter test so this boundary is observable.
+
+## Decision 25 (execution ledger line 166)
+
+- Ruling: local late settlement does not revalidate the current conversation-wide SessionFiles/retrieval/settings digest after admission. Those are frozen composer/source context; another view changing them must not reject an unchanged accepted input. Revalidate substantive accepted input and its directly owned embedded assets. A required mutable external/file reference needs a specific accepted revision check or an admission capability gate, never a whole-current-settings fence. This matches the accepted-parent rule and preserves unrelated-view independence. Cost if wrong is a narrower accepted-asset binding extension, with no permission to silently drop required content. Task2.3 adds a post-admission SessionFiles-change regression while preserving accepted-input/image drift rejection.
+
+## Decision 26 (execution ledger line 172)
+
+- Ruling: preserve the scoped UAT mirror helper's verified owner, acknowledgement and rollback behavior, but remove its adjacency-only inference from newly trusted canonical mapping. The port-preservation instruction cannot override the spec's prohibition on order/text as mutation identity. Require explicit authoritative remote parent or verified client correlation; unresolved legacy rows stay readable and unbound. Cost if wrong is reduced legacy automatic reconciliation, not selecting the wrong branch; tests must retain genuine acknowledgement recovery and exercise same-text reordered input through cursor translation.
+
+## Decision 27 (execution ledger line 174)
+
+- Ruling: savePendingHistoryConfirmation returns the stored originating pending_view_session_id to its caller, retaining that identity for matching replay after reopen. Exact-intent non-commit cleanup uses the returned origin; it does not adopt the reopened live view or overwrite its cursor. Otherwise a definitively rejected replay would remain permanently blocked solely because its view remounted. Cost if wrong is pending-confirmation API adjustment; guards must still prevent a late cleanup from clearing a different/newer intent. No new operation registry is needed.
+
+## Decision 28 (execution ledger line 176)
+
+- Ruling: refine the preceding pending-origin return-value decision. A replay that fails locally before dispatch cannot prove an earlier attempt did not commit; moreover, a newly created pending record may already have been attached to and dispatched by another matching attempt before its creator tries cleanup. Permit a small structured write result and the smallest transactionally checked dispatch/attempt marker needed for this proof. Local cleanup must retain any intent that another attempt may have dispatched; definitive owner non-commit remains narrowly classified. Add a deferred A-create/B-replay-dispatch/A-lease-failure regression. Cost if wrong is unsafe loss of confirmation identity or unnecessary retained pending state; no generic registry is authorized. Final helper signatures supersede the earlier proposed string-only return.
+
+## Decision 29 (execution ledger line 180)
+
+- Ruling: Task3.1 additionally owns the narrow useLoadLocalConversation and useServerChatHistoryId hydration seams and covering tests. Actual Playground calls the former from settings, handoff and local navigation; it independently installs timestamp-formatted rows after asynchronous reads. The latter currently resolves a bare server ID and can relink the current local history. Omitting them would allow selection overwrite and owner reassignment despite a correct new hook. Preserve existing non-H1 behavior where appropriate, but all H1 restore/load paths must use current view fences and verified mirror binding. Cost is two necessary existing-hook integrations, not a new loader or owner service.
+
+## Decision 30 (execution ledger line 183)
+
+- Ruling: use one history-selection controller per mounted shell/logical view. Fresh document/view instances allocate fresh client/view identities, stable for their lifetime; owner-validated previous bookmark/handoff references initialize state but do not reuse another view's mutable bookmark writer. SessionStorage retains that view's last reference for reload, so copied storage initializes independent writers without a cross-tab registry. Preserve empty/before-first/projection identity, distinct sidepanel tab views and origin-view/revision result fencing; unsupported temporary owners create no durable profile/bookmark. Cost if wrong is initialization/reference-lifecycle adjustment and possible orphaned historical bookmark rows, not shared mutable cursors. Task3.1 worker will report the exact interfaces for Task3.2.
+
+## Decision 31 (execution ledger line 184)
+
+- Ruling: Task3.1 may narrow serverChatMirrorOwnerKey's parameter to Pick<ServicePromptSnapshot, "requestScope">. Root verified the helper reads only that property. Preserve its exact verified identity tuple and runtime behavior; this reuses the existing owner identity without a display-only prompt-definition fetch. Include the signature-only file change in focused typing/report. Cost if wrong is a parameter-type correction, with no intended identity or runtime change.
+
+## Decision 32 (execution ledger line 185)
+
+- Ruling: the planned history hook may export a React provider/consumer to share its single controller across actual shell descendants, because useMessageOption embeds the server loaders and is mounted in several descendants. Place the provider above every participating hook, including Playground's own useMessageOption call; a small outer/inner shell boundary is permitted. Keep distinct live identities for sidepanel logical tabs. Cost if wrong is provider placement/lifecycle correction, not a second cursor store or send-pipeline redesign.
+
+## Decision 33 (execution ledger line 187)
+
+- Ruling: the fresh source delta adds C07/C08 acceptance requirements for settings retention, endpoint/credential-scoped discovery, context-capacity provenance and responsive subscription readiness, but does not change identified H1 selected-ancestry/admission/fork contracts. Keep H1 implementation moving; Task3.2 freezes all resolved values actually consumed by its existing composer, and follow-on model/context work ports the new source behavior. Cost if wrong is a missed source dependency requiring another explicit H1 scope review; full parity remains open. The refresh will be included in the final independent branch review.
+
+## Decision 34 (execution ledger line 189)
+
+- Ruling: Task3.1 actual session restore must prefer the tab-local H1 address for its conversation, using the global origin-wide record only when the address is absent. Owner kind is a locator; actual authority requires validated owner namespace and conversation, not bare ID equality. Never apply a different global conversation's queue/assistant/persona/files/settings. Restore supported authoritative settings for the selected conversation; native owner mismatch stays explicit, while local ownership survives remote account changes. Add mounted A/B different-conversation reload coverage. Cost if wrong is restore compatibility/initialization adjustment; keeping the old global-first selection would violate the approved independent-view contract.
+
+## Decision 35 (execution ledger line 192)
+
+- Ruling: expansion must freeze the clicked selection in a fresh write-once bookmark address before opening, since a reference to the source's live bookmark can resolve a later swipe. Destination still allocates its own live writer. Root inspected the current open/install/persist seam and found a related pending-loss issue: opening a source pending confirmation creates a new live bookmark without its pending data and makes sessionStorage point there, so a second reload loses it. Carry an optional scoped reference to the original pending bookmark plus exact projection_id through expansion/session initialization, validated against the same profile/owner/conversation. Keep original scope/view/intent/dispatch marker; no moving/copying pending authority or automatic replay. Test click-versus-later-swipe and unknown-confirmation expansion/reload. Cost if wrong is reference-parser/lifecycle correction and additional inert bookmark rows, with no new schema/registry. Open until Task3.1 implementation and review prove both cases.
+
+## Decision 36 (execution ledger line 194)
+
+- Ruling: make shared-hook hydration explicitly owned by chat surfaces. The worker proposed default-true hydrateServerChat with Layout/Header disabled; root identified additional passive consumers (useOmniSearchDeps, LocalChatList, NewChat, CurrentChatModelSettings) outside the Playground provider, so that proposal alone would leave unfenced writers. Prefer opt-in and explicitly retain the existing non-H1 scoped surface owners; authorize only necessary callsite flags/tests. Disabled loaders cancel outstanding work and perform no fetch/metadata/display/mirror writes. Cost if wrong is a missed domain-surface opt-in or duplicated owner, to be checked in the callsite inventory/regression; no editor redesign or new H1 parity claim for those surfaces.
+
+## Decision 37 (execution ledger line 197)
+
+- Ruling: Task3.1 lifts the one full-page controller above actual sidebar loaders in both shared Layout and the separate WebUI WebLayout root, gated to the real H1 chat route with route aliases checked. Root verified shared Layout bypasses its root under __NEXT_DATA__, while pages/_app.tsx mounts WebLayout; changing only shared Layout would leave WebUI uncovered. Playground reuses context and only creates a standalone fallback if absent. Cover both mounted layout boundaries, route exit/reentry identity and no duplicate controllers; preserve passive hydration opt-in and scoped non-H1 consumers. Cost if wrong is route/provider lifetime correction, not another selection store. Worker reproduced the shared Layout defect (Header descendant has no controller) in /tmp/h1-3.1-provider-red.log,1failed/6passed, before the production placement change. Narrow WebLayout edits/tests are added to Task3.1 scope.
+
+## Decision 38 (execution ledger line 200)
+
+- Ruling: Task3.2 owns an operation-lived native adapter under the originating verified owner/workspace and the existing request-scope/composer lease, establishing capability by fresh capture on that exact adapter. Root read useHistorySelection: its native validate_lease is tied to a display subscription released by load/reset/logical-tab activation/unmount, so borrowing it would reject late accepted settlement after navigation. Do not change Task3.1's read lifecycle or introduce a second cursor; retain the operation adapter through capture/finalize/append/settle, compare its captured owner namespace to the originating view and follow UI conditionally. Actual auth/config changes still invalidate the operation; view changes alone do not. Cost if wrong is missed late persistence or leaked subscriptions, covered by held-admission/settlement plus navigation regressions. This remains an open Task3.2 dependency, not a Task3.1 send-completion claim.
+
+## Decision 39 (execution ledger line 202)
+
+- Ruling: accept review M2's test-location substitution. New loader ownership/scope tests belong in useServerChatLoader.scope.test.tsx, while the unchanged existing29-test useServerChatLoader.test.ts suite remains executed. Corrected plan/brief to match this coverage; no requirement demands a redundant hunk in the older suite. Cost if wrong is missing behavior coverage, which the real regression requirements and final browser gate address, not nominal file modification.
+
+## Decision 40 (execution ledger line 211)
+
+- Ruling: split server-managed tracked-character integration into required Task3.3 after Task3.2, before Stage3 completion. Root verified ordinary detail reads expose saved snapshot status/digest only, old character streaming rebuilds timestamp/live context, while reviewed versioned /chat/completions already freezes supported saved single-character behavior in the owner transaction. Task3.2 retains normal/overlay client composition and explicitly blocks selected-history legacy tracked sends before effects. Task3.3 will use new current inputs+finalized selection on that existing server-owned endpoint, with no duplicate browser append/settlement or saved-prompt preview service. Cost if wrong is a narrow transport/character integration correction; no removed H1 requirement or character parity claim. Plan/spec/brief/review request updated; worker informed.
+
+## Decision 41 (execution ledger line 212)
+
+- Ruling: retain uncertain/accepted-unsent/generated-unsaved turns in narrow typed per-operation recovery fields on existing HistoryBookmark/historySelections, outside transcript rows. Existing generationInfo interruption rows would be included in local authoritative capture; native mirror hydration could erase them. Persist intent before dispatch, preserve original profile/owner/conversation and immutable operation ID, discover it under the same verified owner after view/client changes, and expose inspect/copy/dismiss without replay. All bookmark/confirmation/recovery writes must preserve unrelated state atomically. No native mirror creation, new table/runtime platform or persisted owner capability. Minimal DB/controller/review UI/tests scope authorized to Task3.2. Cost if wrong is lost/mis-scoped recovery or polluted ancestry; required race/reopen/exclusion tests and Stage5 real-IDB checks cover it. No implementation result yet.
+
+## Decision 42 (execution ledger line 224)
+
+- Ruling: the missing before-first wire regression on a nonempty source is a real Task3.2 requirement gap (R4), so both mounted interfaces are included in this fix wave. Review cannot-verify real browser/IndexedDB claims remain explicit Task5.1 work, tracked-character remains required3.3, actions/forks remain Task4; no completion claim for them. Cost if the test distinction is wrong is two redundant narrow cases; leaving it untested risks hidden raw-history fallback.
+
+## Decision 43 (execution ledger line 227)
+
+- Ruling: R1 must preserve historyId-only bound native mirrors, so a narrow operation-bound load receipt/result refinement is authorized in useHistorySelection while retaining existing hydration boolean semantics. Never assume a historyId implies local ownership. Worker will report the precise interface and cover that case plus superseded/mismatched load; cost if wrong is a loader compatibility regression, addressed by controller/mounted tests and scoped review.
+
+## Decision 44 (execution ledger line 229)
+
+- Ruling: Task3.3 includes the smallest per-request native acknowledgement correction so admitted versioned completion reports canonical saved ID after successful settlement regardless of optional legacy metadata; preserve unversioned suppression and no ACK after failed save/cancellation. Endpoint/service/streaming pipeline/handler scope and focused tests/static/Bandit are authorized; no receipt store or new context service. Cost if wrong is streaming compatibility regression, covered by legacy-disabled and versioned endpoint wiring tests. Plan/spec/review/preflight updated; Task3.3 still waits for3.2 clean review.
+
+## Decision 45 (execution ledger line 231)
+
+- Task3.3 related source finding: streaming_utils.process_line forwards parsed provider dicts, and legacy _attach_stream_metadata uses setdefault, allowing provider-supplied result/admission-shaped fields to survive. Ruling: the same versioned ACK correction must make consumed admission/result identity owner-authoritative (strip/overwrite untrusted provider-reserved fields before delivery), with spoofed-ID + failed-save and actual-save-ID regressions. Cost if wrong is stripping legitimate provider extension metadata; scope is limited to owner authority fields consumed by H1 and preserves ordinary text/tool output. No runtime exploit/test claimed by root.
+
+## Decision 46 (execution ledger line 244)
+
+- Ruling: fix2 revalidates the original load after native async imports before new open or shared lease/subscription installation. The mirror-import gap is proven by corrected probe and production beginLoad source; the adjacent service-prompts import must likewise not replace a newer destination lease. This stays within the amended loader/receipt lifetime boundary. Cost if wrong is rejecting an otherwise valid load, covered by successful bound-mirror and mounted destination regressions.
+
+## Decision 47 (execution ledger line 247)
+
+- Task3.2 fix2 worker checkpoint: mounted actual controller+useLoadLocalConversation RED confirms pending-B and ready-local-B native import races with signal/native lease checks. Adjacent service-import test hit3 fixture-only attempts because replacing an in-flight module mock exposed unrelated real dependencies; no production/interface blocker. Ruling: use one coherent deferred module, actual beginLoad supersession and zero stale subscription/scope-resolution/receipt assertions, combined with the two mounted destination cases. This tests the guard without impossible competing module versions; cost if wrong is insufficient lease-lifetime coverage, assessed by scoped review. Worker instructed to proceed with minimal guards and final evidence.
+
+## Decision 48 (execution ledger line 268)
+
+- Ruling: Task4.1 may narrowly modify db/dexie/history-selection.ts to reuse owner/profile/transaction checks for coherent normal/comparison fork capture and retained-policy digests. Current readSnapshot hashes full SessionFiles for both purposes and the normal adapter deliberately gates comparisons; a parallel permissive owner service or weakening send gates is not acceptable. Keep source-only ingestion controls excluded from fork digests while required retained file/content drift rejects inside commit. Cost if wrong is weakened owner/context fencing, covered by normal-send, mirror rejection and retained/excluded-file tests plus independent review. This is preparation only; no Task4 production implementation started.
+
+## Decision 49 (execution ledger line 293)
+
+- Ruling: Task4.1 preserves the regenerate capability rejection before any copy, write or UI truncation because the current selected-history admission appends a new user input and cannot represent Chatbook's same-parent assistant sibling. Stable-boundary/source-preservation is required now; broader regeneration parity remains open. Cost if wrong is unnecessarily gated support, preferable to duplicating user input or corrupting a branch and revisitable with a proven admission seam.
+
+## Decision 50 (execution ledger line 294)
+
+- Ruling: Task4.1 removes the unsafe native index replay/fallback and returns typed blocked pending the immediately following Task4.2 owner-scoped immutable legacy adapter. Task4.2 still must restore the supported limited native projection with request-scope/workspace checks and explicit legacy_completed/partial/unknown outcomes before H1 qualification. This sequencing prevents keeping an unsafe API solely for intermediate feature continuity; cost if wrong is a temporary task-boundary native-fork gate, not permission for a final H1 gap. Worker notified and exact seam will be reviewed/reported.
+
+## Decision 51 (execution ledger line 300)
+
+- Ruling: edit-and-send retains explicit capability rejection before choose(), copy/write or display mutation in Task4.1. Existing onSubmit gates already prevent successful H1 edit-and-send, while controller.choose eagerly changes the view before preparation; there is no read-only boundary override. Duplicating capability gates in two hooks would drift from admission, and adding an action protocol expands this safety task. Plain scoped edit/delete remains required, stable rejected target/boundary and both mounted no-mutation regressions are mandatory. Cost if wrong is unnecessarily gated edited-input continuation until its broader parity task, rather than hidden source/view corruption; do not claim parity delivered. Worker informed and plan/verification limitations updated.
+
+## Decision 52 (execution ledger line 308)
+
+- Ruling: comparison fork ordering is derived from the coherent owner records, not timestamp/id presentation or the UI list. Verified current source persists one compare:user common root per cluster with prior-tail parent, model responses to the common root, and per-model replies along that cluster/model thread; CompareState has maps but no ordered manifest. Derive common-round order across verified links (other-model links may establish round order only), then selected-model paths to the explicit boundary. Materialize common+selected rows as a child chain; never copy omitted other-model parents. Reject cycles/dangling IDs, missing/duplicate required common roots, ambiguous model branches and unsupported mixed/legacy shapes. Cost if wrong is gating a valid comparison shape or imposing incorrect semantic order, so require shuffled storage/timestamps, U2->B1 to childU2->A1 and own-follow-up cases and independent review; no imported-comparison parity assumed. Worker approved and source facts carried to brief.
+
+## Decision 53 (execution ledger line 310)
+
+- Ruling: local H1 deletion is leaf-only unless a separately reviewed graph-delete policy exists. In the existing message rw transaction, validate target history and reject any persisted direct child (including hidden alternatives) before deleting. No suffix delete/cascade/reparent. Only the still-matching initiating parent_graph view can deliberately step back from its deleted boundary to the captured parent/empty; another view's deleted bookmark stays stale, and an invalidated legacy interpretation stays review-required. Cost if wrong is a conservative non-leaf delete gate or unwanted cursor advance, covered by hidden-child/transaction-boundary, leaf-parent and late-navigation cases.
+
+## Decision 54 (execution ledger line 311)
+
+- Ruling: native selected-message edit/delete remain explicitly gated in this bounded H1 control repair. Source inspection found current hooks use ambient unscoped getMessage/version and swallowed initialize failures; actual native DELETE has no atomic child guard. Existing selected-history capture exposes revision hashes, not a reviewed native mutation action contract. Do not enter these unsafe paths or invent a native reparent/action API inside Task4.1. Local plain scoped edits/deletes remain required. Cost if wrong is gating otherwise representable native mutation until its owner-safe adapter is delivered; report as an open broader-parity capability, never as completed native edit/delete. Worker notified before implementation completion.
+
+## Decision 55 (execution ledger line 322)
+
+- Ruling: fix1 may narrowly extend the existing settings reader/writer and local owner guard to prove required-context absence/eligibility; a null-on-error read or best-effort async check cannot certify it. Require positive plain copies, strict unavailable/malformed handling, preparation drift rejection and excluded-summary invariance; no second settings authority/H3 expansion. Any persistence/schema change is to be proposed to root first. Cost if wrong is additional gating or a settings-write regression, addressed by focused existing-settings regressions and independent scoped review.
+
+## Decision 56 (execution ledger line 324)
+
+- Ruling: F3 may persist one optional external-settings write guard on existing HistoryInfo, maintained by the current local settings writer before external storage effects and settled afterward; strict fork reads capture it before reading raw settings and owner commit validates it in the history transaction. This is a fence, not a second settings payload/authority or table. Concurrent writers must retain every in-flight token or prove serialization: latest-nonce-only CAS settlement can hide an earlier writer that writes late. Failed/crashed writes may keep forks explicitly unavailable but must not block future ordinary settings edits or clear another live guard. Excluded-only summary/content changes require relevant-policy reread rather than rejection solely from a new counter. Cost if wrong is a settings-write regression or persistent fork gating after interruption; cover reversed writer completions, failed reads, required drift, positive plain forks and excluded invariance, then independent review/real IndexedDB qualification. Worker authorized and notified while F1/F2 proceed.
+
+## Decision 57 (execution ledger line 325)
+
+- Ruling: F1 may add a narrow optional onOpened UI callback on the existing comparison action payload. Invoke it synchronously only within exact validated child-load receipt application after child identity installation, so deliberate adoption's new epoch does not suppress required child-view cleanup. It may not mutate source comparison records. open:false retains the source fence with no adoption/callback; callback failure retains the actual committed result. Cost if wrong is comparison-mode leakage or stale UI application, covered by open-success, delayed-load navigation and open:false regressions. No owner/admission/result contract changes authorized by this callback.
+
+## Decision 58 (execution ledger line 327)
+
+- Ruling: route only chatSettings:local:<historyId> through the existing browser-local area, with strict non-destructive one-time migration from legacy browser-sync values through the existing settings seam. Keep server/scratch/global preferences unchanged; retain old sync data, and after a local baseline exists never fall back to subsequent sync updates. Preserve exact legacy required state, represent initialized empty separately from missing/unreadable, and coordinate migration with the owner guard so stale async reads cannot overwrite local edits. Update actual local-key readers/writers, including the hook and sidepanel resume; remove redundant raw hook writes that bypass the guard. This relocates one existing authority instead of adding a second settings store/table. Cost if wrong: local per-conversation settings stop implicitly following browser-sync after migration or migration could hide context; this follows independent local ownership and needs positive extension-local, legacy required-state, read-failure and migration/write race regressions plus review. Server sync remains H4. Worker authorized to proceed without a user checkpoint.
+
+## Decision 59 (execution ledger line 328)
+
+- Ruling: do not introduce Web Locks availability as a prerequisite for ordinary local settings edits. Worker correctly identified that a CAS before an awaited external write alone is insufficient. Investigate the existing Dexie.waitFor API (installed type/source verified) to hold a short chatHistories rw critical section across final local storage read/write after a separately committed pending token, rechecking initialization inside the critical section. Failed/uncertain effects leave the guard; no automatic replay or false certification. Cost if wrong is transaction liveness/abort behavior or excessive locking; require focused race/failure checks plus real IndexedDB qualification and escalate a concrete failing interleaving before adding a new browser capability restriction. WebUI's existing shim already defaults to local storage, so preserve its existing local records rather than assuming extension-style legacy sync layout.
+
+## Decision 60 (execution ledger line 334)
+
+- Ruling: F1's existing receipt-bound onOpened cleanup also applies to the per-message comparison action, which uses createChatBranch rather than createCompareBranch. Permit an optional UI callback on that existing action, excluded from selection/request/digest/persisted state, and invoke it only after the exact child receipt is installed. Preserve open:false, late-navigation suppression and known committed outcomes across callback failures. Cost if wrong is comparison-mode leakage or cleanup of another view; cover both bubble and cluster entry points plus immediate normal child send. The worker identified this during self-review before its final commit; no new owner/admission protocol is needed.
+
+## Decision 61 (execution ledger line 336)
+
+- Ruling: preserve the current destination settings guard during same-ID import inside the existing rw transaction, while stripping the incoming guard; reject destructive imports and ordinary history deletion/clear while affected guards remain pending. Otherwise a failed settings effect can lose its fence through reimport or deletion followed by stale undo. Root inspected the actual helpers and found message deletion precedes removeChatHistory; route those helpers through existing atomic deleteChatHistory so rejection occurs before any row removal. Preserve settled positive delete/undo/import and avoid a tombstone store or general recovery platform. Cost if wrong is conservatively blocking deletion after an uncertain settings write until resolved, or missing a lifecycle bypass; require pending-vs-clean import/delete regressions and independent review. Spec and fix/re-review briefs updated; no root production edits.
+
+## Decision 62 (execution ledger line 346)
+
+- Ruling: fix2 may expose a read-only persistent-backend flag bound to the WebUI Storage instance's selected backend and add one narrow shared strict assertion using that flag or installed Plasmo's captured primaryClient plus its actual routing. Worker verified that extension Plasmo can otherwise silently return undefined/no-op without its API. Invoke the strict check before baseline/pending publication and before reads/write certification as appropriate; do not infer authority merely from global API presence, add probe writes, or make ordinary constructors/SSR throw. Cost if wrong is false gating or another false absence certificate, so require actual WebUI and extension no-client cases, persistent positive paths, initialized/uninitialized histories and a fallback instance after global storage returns. Spec updated; no new payload/store/runtime framework.
+
+## Decision 63 (execution ledger line 352)
+
+- Ruling: Task4.2 may add a narrow eligibility result to the existing native purpose=fork capture, derived from the same coherent settings/assistant/behavior header and bound to its context digest. The current digest alone cannot prove a limited plain copy representable, and ambient settings caches are not owner authority. No second endpoint, raw settings payload or settings service; missing proof on older servers must gate this copy without breaking normal send. The worker must propose the concrete proof shape/policy before writing it. Cost if wrong is gating otherwise representable native history or silently dropping required context; real SQLite/PostgreSQL and API tests plus independent review must cover positive plain, required/malformed context and source drift. The plan and spec record this necessary dependency closure; native atomic receipt/H2 remains separate.
+
+## Decision 64 (execution ledger line 356)
+
+- Ruling: approved Task4.2 native snapshot.native_fork_context={policy:plain_v1, storage_context_digest, supported} from the existing coherent header. Supported means absent settings or exactly parsed {}, no behavior row, all assistant identity fields SQL NULL; present malformed/null/nonempty context is unsupported. New settings/behavior row-presence aliases also enter the context digest, because eligibility depends on presence even when corrupt values otherwise hash identically. Optional proof preserves normal-send compatibility; native fork requires affirmative matching proof. Cost if wrong is a false plain certificate or conservative capability gating; require actual SQLite/PostgreSQL owner/API evidence, presence/drift tests, missing/mismatched proof and explicit-null workspace-default bypass. Worker /root/h1_fork_outcomes notified and authorized; no new endpoint/raw context/receipt.
+
+## Decision 65 (execution ledger line 362)
+
+- Ruling: approve an owner/workspace/child-indexed known-candidate lookup and narrow uncached server settings path across the existing loader, Playground restore/persist and settings hook. Reject the proposed permanent copied-child settings-edit gate and nonplain-reopen failure: plain_v1 is copy eligibility, not a lifelong restriction, and a valid user edit must not make a child unreadable. Existing getChat/getChatSettings/updateChatSettings can reuse requestScope/signal without a persistent cache migration; explicit updates send only requested patches to the existing merge endpoint. Add the existing optional expected-user dependency narrowly where required, with unversioned compatibility tests. Pending owner/record reads cannot fall into ambient sync. Cost if wrong is a hydration/edit regression or wrong-owner state leak; require poisoned-cache, held-load, edit/reopen and scope-change coverage plus independent review. Worker notified; exact scope is appended to its brief.
+
+## Decision 66 (execution ledger line 376)
+
+- Ruling: Task4.2 includes the overlooked numeric createChatBranch callers in Playground.tsx timeline and ResearchWorkspace/ChatPane/index.tsx. Worker type checking exposed the former; root verified both actual calls and the shared useMessageOption API. Adapt the clicked row to stable owner message identity with focused routing coverage, retaining comparison qualification and explicit unsupported modes; no positional fallback or research variant redesign. Cost if wrong is a broken timeline/research fork or incorrect comparison boundary, so the changed callers must be covered in final focused consumer checks and independent review before Task4.2 acceptance. Task4.1's earlier review did not cover these callers; this new integration finding is not dismissed as a baseline error.
+
+## Decision 67 (execution ledger line 378)
+
+- Ruling: interpret the Task4.2 H2/atomic-receipt wording as a technical boundary, not product copy. Root checked the interim renderer for this specific conflict and found raw outcome states plus H2 jargon. Final UI must use translated plain-language titles (including Fork status unknown/Fork incomplete), outcome-appropriate explanations, clear inspection/separate-copy actions and secondary diagnostic IDs/codes. Saved outcomes must not receive an uncertainty warning. Cost if wrong is misleading users about a known save or possible duplicate; cover the outcome renderer and preserve existing translation/UI patterns. This follows the developer's product-communication rule and the spec's explicit status wording; no new protocol or visual framework.
+
+## Decision 68 (execution ledger line 382)
+
+- Ruling: the existing clearAssistantFromCockpit explicit assistantOverlay:null patch is part of the approved known-native-child settings closure. Worker identified, and root verified, that it currently detaches serverChatId before calling the ambient cache-backed writer. For retained fork candidates, perform the same requested patch through the verified controller while still bound, then preserve existing intentional detach/new-chat behavior only for the still-current action. Pending/failed/late scope changes cannot fall into ambient sync or clear a newly navigated view. Cost if wrong is lost assistant state, wrong-owner writes or stale UI clearing; require positive and held-response/profile-or-view-change tests. No broader assistant redesign is authorized and no real gap is deferred merely as a review concern.
+
+## Decision 69 (execution ledger line 393)
+
+- Ruling: Task4.2 fix1 includes the same F2 readiness coupling in readNativeForkSettings/updateNativeForkSettings. Root verified that captureHistorySnapshot already registers a coherent owner capability for legacy results while those settings functions demand captured=true. Permit settings through the verified live owner capability independently of ancestry readiness, retaining capability binding, lease and response-conversation checks and every send/fork requireCapture gate. Cost if wrong is premature settings access or another permanently unreadable candidate; require real service RED/GREEN and actual-controller consumer coverage in this fix report. No Python or broader settings redesign is necessary.

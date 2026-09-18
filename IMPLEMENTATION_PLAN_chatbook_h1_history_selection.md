@@ -442,7 +442,7 @@ Execution evidence: native tracked-character integration `4822de5d71` and recove
 
 **Tests:** H1-E/F/G, exact membership/order, cross-model parent normalization, source deletion/edit/file removal, deferred API failures and two-view dispatch claims.
 
-**Status:** In Progress (Task 4.1 complete after independent review and two fix rounds; Task 4.2 implements durable operation tracking and the limited native copy adapter).
+**Status:** Complete (both tasks reviewed, including Task 4.2 fix1; real storage/surface qualification remains Stage 5).
 
 ### Task 4.1: one allowlisted local copy projector
 
@@ -478,9 +478,11 @@ Execution evidence: implementation `eb5e0683e5`, fix1 `1a5492c542` and fix2 `287
 
 ### Task 4.2: pending operation store and no automatic fallback
 
-Dependency closure: integrate the existing `chat-action-utils.ts`, `useHistorySelection.ts`, both mounted chat hooks and their action/recovery presentation. Preserve the exact child-load receipt from Task 4.1; a displayed child ID is not owner adoption. Include the relevant mounted, owner-adapter and outcome UI tests, and fix the reviewed misleading post-commit failure notification.
+Dependency closure: integrate the existing `chat-action-utils.ts`, `useHistorySelection.ts`, both mounted chat hooks and their action/recovery presentation. Preserve the exact child-load receipt from Task 4.1; a displayed child ID is not owner adoption. Include the relevant mounted, owner-adapter and outcome UI tests, and fix the reviewed misleading post-commit failure notification. Known native fork candidates also require a coordinated uncached owner-scoped settings path in the existing `useServerChatLoader`, `Playground` attachment restore/persist and `useChatSettingsRecord` seams. Extend existing getChat/settings transport options with requestScope/signal and the optional expected-user endpoint dependency where required; do not introduce another persistent cache or silently import browser state. Preserve explicit settings edits and reopen after those edits; plain-copy eligibility is not a permanent reading restriction.
 
-Native eligibility requires a narrow addition to the existing same-statement snapshot/capture seam: the opaque storage-context digest alone cannot prove that a source has no required settings or assistant behavior. Task 4.2 may extend `core/DB_Management/chacha/message_store.py`, `core/Chat/history_selection.py`, `api/v1/schemas/history_selection_schemas.py`, the existing `chat.py` capture response and their real owner/API tests to return a minimal purpose-specific eligibility proof tied to that captured context. Update shared strict types/validation coherently. Do not add a parallel endpoint, settings service or raw context payload; an older server without affirmative proof is unsupported for this copy. Preserve existing send behavior and owner/sync gates. Propose the concrete proof shape and supported plain policy to root before implementation.
+Review closure must keep completed owner/candidate/settings qualification independent of ancestry readiness, including ordinary and known-candidate legacy conversations. Invalidated owner leases must clear presented outcomes and fence held reads/manual refresh without erasing durable records. Cover these through the actual controller and its settings/loader consumers; do not substitute mocked readiness for the reviewed failing paths.
+
+Native eligibility requires a narrow addition to the existing same-statement snapshot/capture seam: the opaque storage-context digest alone cannot prove that a source has no required settings or assistant behavior. Task 4.2 may extend `core/DB_Management/chacha/message_store.py`, `core/Chat/history_selection.py`, `api/v1/schemas/history_selection_schemas.py`, the existing `chat.py` capture response and their real owner/API tests to return a minimal purpose-specific eligibility proof tied to that captured context. Update shared strict types/validation coherently. Do not add a parallel endpoint, settings service or raw context payload; an older server without affirmative proof is unsupported for this copy. Preserve existing send behavior and owner/sync gates. Approved proof: optional `snapshot.native_fork_context` with `policy: plain_v1`, the same `storage_context_digest`, and `supported: boolean`. Support only absent settings or an exactly empty JSON object, no behavior row, and all assistant identity fields SQL NULL. Settings/behavior row presence also enters the context digest; malformed/null/nonempty stored settings never certify plain context. Real SQLite/PostgreSQL and API tests cover the narrow policy, drift and older-server compatibility.
 
 **Files:**
 
@@ -490,13 +492,17 @@ Native eligibility requires a narrow addition to the existing same-statement sna
 
 **Interfaces:** Consumes immutable `ForkRequestV1` and owner namespace. Produces owner-scoped prepared/dispatching/unknown/partial/completed/rejected records, atomic dispatch claim and `ForkResultV1` without automatic replay.
 
-- [ ] Add deferred server-create tests: reject before dispatch, lose creation response, acknowledge child then fail the second copied row, and abort while a response is pending. Assert calls to local copy and second server create remain zero after possible side effects.
-- [ ] Add operation tests for two views dispatching the same intent, reload of `dispatching`, scope/account switch and same ID with different digest. Retain candidate child ID and original request; new account sees none of the old owner's pending data.
-- [ ] Add `forkOperations` keyed by `[owner_key+operation_id]` with an indexed active intent identity and atomic prepared-to-dispatching claim. Freeze a single operation ID before asynchronous dispatch; attaching to an existing pending intent never dispatches it again. Temporary owner state remains memory-only.
-- [ ] Map errors by side-effect knowledge: pre-dispatch failure is rejected/blocked, uncertain creation is unknown, known partial child is partial. Mark old multi-request success `legacy_completed`; do not issue an atomic receipt claim.
-- [ ] Remove the catch fallback to local creation and the retry through a second local snapshot copier. Preserve the source view after failure; never navigate to partial child as successful completion or automatically clean it up.
-- [ ] Render pending state after reload with a known candidate link for inspection, no automatic retry, and explicit limitation that H2 supplies reliable reconciliation. A deliberate new user operation must be distinct from retrying the same unresolved operation. Do not reset the old namespace.
-- [ ] Run deferred handler/store tests and focused UI tests. Review/type-check and commit.
+Final consumer checking also found numeric `createChatBranch` callers in Playground's timeline action and ResearchWorkspace/ChatPane. Include their stable-message-ID adaptations and focused routing tests in this task, retaining comparison qualification and unsupported-mode gates. Missing identities must never fall back to rendered positions.
+
+- [x] Add deferred server-create tests: reject before dispatch, lose creation response, acknowledge child then fail the second copied row, and abort while a response is pending. Assert calls to local copy and second server create remain zero after possible side effects.
+- [x] Add operation tests for two views dispatching the same intent, reload of `dispatching`, scope/account switch and same ID with different digest. Retain candidate child ID and original request; new account sees none of the old owner's pending data.
+- [x] Add `forkOperations` keyed by `[owner_key+operation_id]` with an indexed active intent identity and atomic prepared-to-dispatching claim. Freeze a single operation ID before asynchronous dispatch; attaching to an existing pending intent never dispatches it again. Temporary owner state remains memory-only.
+- [x] Map errors by side-effect knowledge: pre-dispatch failure is rejected/blocked, uncertain creation is unknown, known partial child is partial. Mark old multi-request success `legacy_completed`; do not issue an atomic receipt claim.
+- [x] Remove the catch fallback to local creation and the retry through a second local snapshot copier. Preserve the source view after failure; never navigate to partial child as successful completion or automatically clean it up.
+- [x] Render pending state after reload with a known candidate link for inspection, no automatic retry, and a plain-language explanation of uncertainty and the consequences of another copy. Keep the H2 reconciliation boundary in technical documentation. A deliberate new user operation must be distinct from retrying the same unresolved operation. Do not reset the old namespace.
+- [x] Run deferred handler/store tests and focused UI tests. Review/type-check and commit.
+
+Execution evidence: Task 4.2 implementation `ec5f19816c`, locale completion `ac6919ae93` and fix1 `c884e6ba25` passed independent task review and scoped re-review. F1 invalid-owner outcome display and F2 legacy settings gating are addressed. Initial checks passed 628 client tests/35 files and 127 native tests with one intentional SQLite-only skip; the affected final fix passed 289 tests/16 files. Counts overlap. Focused core types pass; wider consumer checks retain the same 11 documented baseline diagnostics. Real IndexedDB migration/claims, successful native fork → send → reopen in each shell, builds and final branch review remain Stage 5. Minor notification failure-step wording remains for final review.
 
 ## Stage 5: real owner and surface qualification
 
@@ -514,6 +520,7 @@ Native eligibility requires a narrow addition to the existing same-statement sna
 
 - Create `apps/tldw-frontend/e2e/workflows/chat-history-selection.spec.ts`.
 - Create `apps/extension/tests/e2e/chat-history-selection.spec.ts`.
+- Reconcile the stale header-to-WebUI expectation in `apps/extension/tests/e2e/sidepanel-options-handoff.spec.ts`: selected-history expansion opens the extension full page; retain explicit composer WebUI draft-handoff coverage and settings-sharing coverage. Use existing isolated HTTP/IndexedDB test helpers or a narrow test-only helper, without a production testing backdoor.
 - Update `Docs/Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md`, created as an explicitly incomplete checkpoint during execution. Retain precise commands, review dispositions and capability limits; replace pending statuses only with qualifying evidence.
 - Regenerate `apps/tldw-frontend/lib/api/openapi.fingerprint.json` using `apps/tldw-frontend/scripts/generate-api-types.mjs`; its `lib/api/generated/openapi.json` and `schema.d.ts` outputs remain ignored build artifacts.
 - Update this plan, H1 spec implementation status, TASK-13261.1 and the parity inventory only where evidence supports a changed status.
@@ -523,6 +530,7 @@ Native eligibility requires a narrow addition to the existing same-statement sna
 - [ ] Build browser fixtures with real IndexedDB transactions and the actual mounted UI. Use existing extension persistent-context/build helpers and WebUI config; mock provider transport deterministically, not the local DB commit. Separate real backend admission assertions from mocked transport fault injection.
 - [ ] Run each full-page shell: select different variants in two views, normal send, before-first/empty, legacy review with alternatives, reopen, fork supported local content, edit/delete child, remove copied file, and reload an unknown server fork. Include the compact sidepanel controls and expansion into the extension full page.
 - [ ] Exercise real IndexedDB abort between child writes and reopen after successful commit. Assert source rows, files and server/sync control IDs are untouched. Include the comparison child-chain scenario and >20,000-row virtualized legacy review.
+- [ ] Qualify known native fork child adoption/reopen with poisoned unscoped browser settings, held owner/record/settings responses, scoped explicit settings patches and a later nonplain child. Verify pending resolution cannot import browser state, profile/workspace changes cannot retarget outcomes, and actual extension transport accepts only the authorized scoped metadata/settings paths.
 - [ ] Run the focused browser commands:
 
 ```bash

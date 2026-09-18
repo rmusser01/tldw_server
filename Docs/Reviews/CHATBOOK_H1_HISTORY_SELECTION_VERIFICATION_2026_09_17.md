@@ -6,6 +6,7 @@ Status: **In progress. H1 is not qualified for release.** This record separates 
 
 - Design: [H1 selected history and fork ownership](../Design/2026-09-16-chatbook-h1-history-selection-design.md).
 - Execution plan: [H1 implementation plan](../../IMPLEMENTATION_PLAN_chatbook_h1_history_selection.md).
+- Decisions: [chronological implementation decision history](CHATBOOK_H1_HISTORY_SELECTION_DECISIONS_2026_09_17.md), including superseded rulings and stated tradeoffs; this is not additional acceptance evidence.
 - Backlog: TASK-13261.1, In Progress.
 - Branch: `codex/chatbook-h1-history-selection`; isolated worktree `.worktrees/chatbook-h1-history-design`.
 - Implementation base: `f00e12a5aa`, based on server dev `59049e094e0845a4611ea725ae19b7c1754ea709`.
@@ -25,7 +26,7 @@ H1 is one part of the broader parity effort. Atomic native forks/receipts (H2), 
 | 3.1 — mounted selection/review/restore | Commits `9a2c54ff7f`, `5881b02870`; independent fix review clean. | Mounted view/controller tests. Workspace/Research/Document/Model panel routing is not claimed browser-qualified. |
 | 3.2 — ordinary/overlay send | Commits `0e71a732d4`, `16e911c79a`, `9213012401`; all original findings and the additional mounted before-first coverage gap resolved after two fix reviews. Milestone `6e8db34b0f`. | Original run 216 tests / 22 files; fix 1: 87 / 7; fix 2: 40 / 4. These overlap. Focused types pass; two proven baseline expanded prompt-sync diagnostics remain. Provider boundaries are mocked in mounted tests. |
 
-The implementation reports, commands, logs and review findings currently live in the plan-owned SDD workspace. The final record must retain the decisive evidence and controller rulings before any workflow-artifact cleanup.
+The implementation reports, commands, logs and review findings currently live in the plan-owned SDD workspace. The tracked decision history preserves the current controller rulings; it must be refreshed after later decisions. The final record must retain the decisive evidence and review dispositions before any workflow-artifact cleanup.
 
 ## Reviewed native-send milestone
 
@@ -80,12 +81,152 @@ Fix round 2 is committed as `28748d402b1a3e427f9f914b36fe21b9c58b33f9`, covering
 
 The settings fix intentionally moves local per-conversation settings to browser-local storage, preserving the existing local value or copying the legacy browser-sync value once without deleting it. Later implicit browser-sync updates no longer overwrite that local baseline. Failed or uncertain settings effects retain pending guards; these block forks and conversation deletion/destructive import, while ordinary settings edits remain possible. Recovery of abandoned guards and broader synchronization remain separate work. No new runtime dependency, schema version or Python change is included in this fix.
 
+## Native fork outcomes: task accepted
+
+Task 4.2 is committed as `ec5f19816c15be5b901a4c4a2b7ee2abe96d46ca` and generated-locale completion `ac6919ae936729048e2e39fb1d9eb7d96b1a339d`, from exact task base `f836426ad49644cea352abc1c91bff5f1e44e56f`. The combined change touches 44 code, test and generated-locale paths. Root read the full report, final saved results and distinct consumer configurations. The independent review found two Important integration defects, both resolved by the independently reviewed fix1 below. Task 4.2 is accepted within its bounded scope; browser/storage/build qualification remains outstanding.
+
+The implementation adds a durable client dispatch claim and retained fork outcomes, a limited frozen native copy, and uncached owner/workspace-scoped settings for known copied chats. It also repairs the overlooked timeline/Research stable-ID callers and Clear assistant's ambient settings callback, and uses plain-language outcome labels. Native copying remains a sequence of acknowledged requests; H2 atomic receipts/reconciliation and rich-state parity are not implemented.
+
+| Check | Result | Evidence and limit |
+|---|---|---|
+| Combined client tests | 628 passed / 35 files / 19.29 s; exit 0 | `/tmp/h1-42-client-final.log`; actual mounted hooks/components/proxy plus serialized DB test doubles. No skipped tests. Expected negative-transport/share logging and existing router flags remain visible. |
+| Native owner/API | 127 passed / 1 intentional skip / 9 warnings / 136.28 s; exit 0 | `/tmp/h1-42-native-final-authorized.log`; 43 SQLite and 43 PostgreSQL owner/migration passes, 21 contract-unit and 20 API passes. Actual-owner RLS included. |
+| Focused core types | Passed; exit 0 | `/tmp/h1-42-core-tsconfig.json` and empty `/tmp/h1-42-core-types.log`; new fork store, history service, scoped path guard and dependencies. |
+| Expanded consumer types | 11 existing diagnostics each; exit 2 | Distinct `/tmp/h1-42-extension-tsconfig.json` and `/tmp/h1-42-web-tsconfig.json`; the WebUI config resolves actual frontend shims. 63/66 included paths respectively. This is not a passing full-application check. |
+| Python security/compile | Bandit 0 findings / 0 errors; compile passed | Four changed production paths: character_chat_sessions.py, history_selection_schemas.py, core/Chat/history_selection.py and chacha/message_store.py. `/tmp/bandit_h1_task42.json`, `/tmp/h1-42-python-static.json`. |
+| Python lint | 2 existing diagnostics; exit 1 | F401 at 3896 and B904 at 8516 in character_chat_sessions.py; B904 shifted from 8513. Exact-base comparison has the same diagnostics. |
+| Locale generation | Passed; exit 0 | Extension cwd `node scripts/sync-public-locales.js playground.json`; only 17 English generated entries changed, preserving 9 public-only keys. `/tmp/h1-42-locales.log`. |
+
+The native command uses the same activated venv, dedicated H1 PostgreSQL configuration and `-o addopts='' -v -rs` options recorded above, targeting `test_history_selection_transactions.py`, `test_history_selection_migration.py`, `Chat/unit/test_history_selection.py` and `Chat_NEW/integration/test_history_selection_api.py`. It covers the optional plain-copy proof, settings/behavior row presence and context drift, malformed/required-state rejection, expected-user metadata/settings dependencies, workspace-default bypass and acknowledged child-chain reopen. The sole skip is PostgreSQL parametrization of the explicitly SQLite-only connection-lifetime check. The initial sandbox run could not reach the healthy dedicated PostgreSQL and produced 84 passes / 2 failures / 42 setup errors; root inspected both dynamic migration-fixture failures and confirmed no migration assertion was reached. The authorized same-scope run supersedes that environment failure without introducing availability skips or touching UAT 55475. Existing warning classes are Starlette/httpx, pytest config, Pydantic schema shadow/admission serialization, passlib crypt and the legacy character rate limiter.
+
+The client command uses installed Vitest from `apps/packages/ui`, `NODE_OPTIONS=--no-experimental-webstorage`, the 35 targets in `/tmp/h1-42-client-command.json`, and coverage of the 18 touched production modules. Coverage of entire touched files, including large existing components, is 40.18% lines / 33.48% branches, not a passed coverage threshold. The new operation store is 92.66% lines / 81.11% branches; the history service 90.39% / 79.7%; controller 83.15% / 73.84%; settings hook 100% / 95%. The final report and saved coverage retain exact denominators. Earlier failing fixture runs are preserved and not combined with the final pass count.
+
+<details>
+<summary>Exact Task 4.2 client command retained for reproduction</summary>
+
+```sh
+cd /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/chatbook-h1-history-design/apps/packages/ui
+NODE_OPTIONS=--no-experimental-webstorage node_modules/.bin/vitest \
+  run \
+  src/components/Common/Playground/__tests__/HistorySelectionReview.test.tsx \
+  src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.branch-share.test.tsx \
+  src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx \
+  src/components/Option/Playground/__tests__/PlaygroundChat.per-model-routing.integration.test.tsx \
+  src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage2.test.tsx \
+  src/components/Sidepanel/Chat/__tests__/body.dynamic-ui-fallback.test.tsx \
+  src/db/dexie/__tests__/branch-projection.test.ts \
+  src/db/dexie/__tests__/fork-operations.test.ts \
+  src/db/dexie/__tests__/helpers.history-selection.test.ts \
+  src/db/dexie/__tests__/history-selection.test.ts \
+  src/db/dexie/__tests__/message-target-by-id.test.ts \
+  src/hooks/__tests__/useLoadLocalConversation.history-selection.test.tsx \
+  src/hooks/__tests__/useMessage.history-selection.test.tsx \
+  src/hooks/__tests__/usePlaygroundSessionPersistence.history-selection.test.tsx \
+  src/hooks/__tests__/useServerChatLoader.scope.test.tsx \
+  src/hooks/__tests__/useServerChatLoader.test.ts \
+  src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx \
+  src/hooks/chat/__tests__/useChatSettingsRecord.fork.test.tsx \
+  src/hooks/chat/__tests__/useChatSettingsRecord.local.test.tsx \
+  src/hooks/chat/__tests__/useHistorySelection.test.tsx \
+  src/hooks/handlers/__tests__/messageHandlers.branch-controller.test.tsx \
+  src/hooks/handlers/__tests__/messageHandlers.branch.test.ts \
+  src/hooks/handlers/__tests__/messageHandlers.regenerate.test.ts \
+  src/services/__tests__/background-proxy.test.ts \
+  src/services/__tests__/chat-history-selection.test.ts \
+  src/services/__tests__/chat-settings.deep-research-history.test.ts \
+  src/services/__tests__/chat-settings.deep-research-pinned.test.ts \
+  src/services/__tests__/chat-settings.deep-research.test.ts \
+  src/services/__tests__/chat-settings.overlay.test.ts \
+  src/services/__tests__/chat-settings.persistent-extension.test.ts \
+  src/services/__tests__/chat-settings.sync.test.ts \
+  src/services/tldw/__tests__/service-prompt-scope-error.test.ts \
+  src/services/tldw/domains/__tests__/chat-rag.scope-error.test.ts \
+  src/utils/__tests__/history-selection.test.ts \
+  src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx \
+  --coverage \
+  --coverage.reportsDirectory=/tmp/h1-42-client-coverage \
+  --coverage.include=src/components/Common/Playground/HistorySelectionReview.tsx \
+  --coverage.include=src/components/Option/Playground/Playground.tsx \
+  --coverage.include=src/components/Option/ResearchWorkspace/ChatPane/index.tsx \
+  --coverage.include=src/components/Sidepanel/Chat/body.tsx \
+  --coverage.include=src/db/dexie/schema.ts \
+  --coverage.include=src/db/dexie/types.ts \
+  --coverage.include=src/hooks/chat/chat-action-utils.ts \
+  --coverage.include=src/hooks/chat/useChatActions.ts \
+  --coverage.include=src/hooks/chat/useChatSettingsRecord.ts \
+  --coverage.include=src/hooks/chat/useHistorySelection.ts \
+  --coverage.include=src/hooks/chat/useServerChatLoader.ts \
+  --coverage.include=src/hooks/handlers/messageHandlers.ts \
+  --coverage.include=src/services/chat-history-selection.ts \
+  --coverage.include=src/services/tldw/TldwApiClient.ts \
+  --coverage.include=src/services/tldw/domains/chat-rag.ts \
+  --coverage.include=src/services/tldw/service-prompt-scope-error.ts \
+  --coverage.include=src/types/history-selection.ts \
+  --coverage.include=src/db/dexie/fork-operations.ts
+```
+
+</details>
+
+The 11 consumer diagnostics are 9 proxy mock typing errors (TS2493×3, TS2532×2, TS2345×4) plus 2 prompt-sync TS2339 errors. Root reconciled the proxy baseline with Task2.3's actual identical-config/exact-base comparison, `/tmp/h1-2.3-fix-baseline-types.log`, and the current unchanged-source proof `/tmp/h1-42-type-baseline-source-proof.json`. Current logs are `/tmp/h1-42-extension-types-final.log` and `/tmp/h1-42-web-types-final.log`; neither exits successfully. Bandit has no findings but emits existing nosec/comment warnings. No pristine-output, clean whole-package typing or real IndexedDB claim is made.
+
+Both commits used normal hooks. Existing gc/unreachable-object warnings were left untouched. The exact two-commit review package is 192,771 bytes; root-owned documentation/tracking changes remain separate.
+
+The independent review reproduced two failures through the actual mounted controller: changing account/config invalidates the native lease but leaves previous-owner fork outcomes displayed, and a verified ordinary legacy chat remains behind the settings-pending guard after qualification has completed. Its focused command was `NODE_OPTIONS=--no-experimental-webstorage apps/packages/ui/node_modules/.bin/vitest run --config /private/tmp/h1-42-review/vitest.config.mjs -t 'review probe'`, with **2 expected failing reproductions**, 20 unrelated tests filtered out and 430 ms duration; `/private/tmp/h1-42-review/probe.log` retains the exact assertions. Root read the complete review and inspected both relevant code paths. Fix round 1 resumes the original implementer from `ac6919ae93`, requiring callback/held-read isolation and ordinary legacy settings through the real controller, while preserving known-child uncached behavior and all history-admission gates. The independent fix review below confirms both findings addressed.
+
+The review also records two Minor observations: disclosed baseline/test logging, and a new hard-coded saved-copy/opening-failed notification that can incorrectly name opening when only the client operation-record write failed. The old loader-throw result misclassification is fixed, but this distinct presentation case remains for final review. Real IndexedDB upgrade from populated v15, bookmark/send-recovery preservation, successful native fork → immediate send → reopen on both shells, full builds and broader integration preservation remain mandatory Task 5/final gates. No complete H1 verdict follows from this task's unit/mounted evidence.
+
+### Task 4.2 fix1: review complete
+
+Commit `c884e6ba25091f5b7d41bf33bd83fa55a4d3208b`, from exact fix base `ac6919ae936729048e2e39fb1d9eb7d96b1a339d`, changes two production TypeScript modules and six test files. Root read the complete fix appendix and saved final outputs, matched every one of the 16 requested test files to its passing output, and confirmed both consumer type logs exactly match the prior final logs. The scoped reviewer inspected the complete 49,503-byte one-commit package and confirmed F1/F2 addressed, with spec and quality PASS and no new Critical/Important breakage. Root read the full review and reconciled its browser/storage/build limits with the explicit Task 5 obligations. Static exit codes are from the implementer report with saved outputs; the reviewer did not rerun those commands.
+
+The fix clears outcome presentation on invalidation and fences both successful and failed asynchronous reads by epoch, view, owner and live lease. Settings qualification is independent of history readiness in both the controller and native settings service; the send/fork capture gates are unchanged. Real-controller consumer tests exercise ordinary legacy settings, loader hydration, attachment restoration and Clear assistant. Known-child legacy settings remain scoped and editable. An additional self-review reproduction caught a same-view refresh that React batched through loading; the epoch dependency restores its outcome read without inventing a new selection.
+
+| Check | Result | Evidence and limit |
+|---|---|---|
+| Initial permanent controller regressions | 5 expected failures, 2 already passing fail-closed cases, 20 filtered | `/tmp/h1-42-fix1-controller-red.log`; actual config subscription and ordinary/known-child legacy captures. |
+| Actual service legacy settings regression | 1 expected failure, 50 filtered | `/tmp/h1-42-fix1-service-red.log`; owner handshake succeeds while ancestry remains unaccepted. |
+| Same-view refresh reproduction | 3 expected failures, 24 filtered | `/tmp/h1-42-fix1-refresh-red.log`; subsequently repaired before final checks. |
+| Final covering tests | 289 passed / 16 files / 10.66 s / exit 0; no skips | `/tmp/h1-42-fix1-final.log`; whole amended modules: 89.37% lines, 79.49% branches. Counts overlap earlier task runs. Existing model-fetch logging remains. |
+| Core / consumer types | Core exit 0; each wider consumer exit 2 with the same 11 baseline diagnostics | `/tmp/h1-42-fix1-core-types.log`, `/tmp/h1-42-fix1-extension-types.log`, `/tmp/h1-42-fix1-web-types.log`; same distinct configs as the implementation check. |
+| Format / whitespace | Focused Prettier check and `git diff --check` exit 0 | `/tmp/h1-42-fix1-format-check.log`; normal commit hooks, no bypass. |
+| Native / Python | Unchanged by this fix | Prior 127-pass native result and production Bandit/compile evidence remain applicable; no redundant rerun or new security-scope claim. |
+
+<details>
+<summary>Exact fix1 covering command retained for reproduction</summary>
+
+```bash
+cd apps/packages/ui
+NODE_OPTIONS=--no-experimental-webstorage node_modules/.bin/vitest run \
+  src/hooks/chat/__tests__/useHistorySelection.test.tsx \
+  src/hooks/chat/__tests__/useChatSettingsRecord.fork.test.tsx \
+  src/hooks/chat/__tests__/useChatSettingsRecord.local.test.tsx \
+  src/hooks/__tests__/useServerChatLoader.scope.test.tsx \
+  src/hooks/__tests__/useServerChatLoader.test.ts \
+  src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx \
+  src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx \
+  src/hooks/chat/__tests__/useChatActions.history-selection.test.tsx \
+  src/hooks/__tests__/useMessage.history-selection.test.tsx \
+  src/hooks/handlers/__tests__/messageHandlers.branch-controller.test.tsx \
+  src/hooks/handlers/__tests__/messageHandlers.branch.test.ts \
+  src/db/dexie/__tests__/fork-operations.test.ts \
+  src/services/__tests__/chat-history-selection.test.ts \
+  src/components/Common/Playground/__tests__/HistorySelectionReview.test.tsx \
+  src/hooks/__tests__/usePlaygroundSessionPersistence.history-selection.test.tsx \
+  src/hooks/__tests__/useLoadLocalConversation.history-selection.test.tsx \
+  --coverage \
+  --coverage.include=src/hooks/chat/useHistorySelection.ts \
+  --coverage.include=src/services/chat-history-selection.ts \
+  --coverage.reportsDirectory=/tmp/h1-42-fix1-coverage
+```
+
+</details>
+
 ## Remaining qualification
 
 - Native selected-message edit/delete require an owner-safe mutation adapter and remain capability-gated in this H1 control repair. Local scoped edits and leaf deletion are required; deletion must not orphan hidden descendants or cascade through alternatives.
 - Adjacent regeneration and edit-and-resend remain capability-gated in H1. Task 4 must reject them before any copy/write/display truncation. Same-parent assistant admission and a read-only edited-input boundary override remain broader parity work; plain scoped edits/deletes are required here.
 - Task 4.1 code/review is complete: exact allowlisted local copies, scoped stable mutation IDs, independent child files/parents, required-state exclusions and comparison materialization. Real browser isolation and source file-removal evidence remain Task5.
-- Task 4.2: atomic client dispatch claims, honest unknown/partial outcomes and no automatic retry or owner fallback.
+- Task 4.2 code/review is complete: atomic client dispatch claims, honest unknown/partial outcomes and no automatic retry or owner fallback. Real database migration, cross-view claims and native fork/send/reopen qualification remain Task 5.
 - Task 5.1: actual WebUI, extension full page, compact sidepanel and extension expansion; real IndexedDB copy abort/reopen and concurrent bookmark/recovery updates; required native SQLite/PostgreSQL checks; consumer type checks, API generation and security checks.
 - Final whole-branch review and fixes. No skipped required mode counts as parity or successful qualification.
 
@@ -98,8 +239,8 @@ The settings fix intentionally moves local per-conversation settings to browser-
 | H1-C — complete legacy review, CAS and independent interpretations | Reviewed native owner and local adapter evidence; real IndexedDB and full-shell review/reopen pending. |
 | H1-D — accepted-parent admission and settlement with the existing composer | Ordinary/overlay and supported native tracked-character tasks reviewed; final regression and browser qualification pending. |
 | H1-E — independent local child, files and supported context | Task 4.1 implementation and scoped reviews complete; real IndexedDB evidence pending. |
-| H1-F — unknown/partial fork outcome and no automatic fallback/replay | Task 4.2 and reload/browser evidence pending. |
-| H1-G — model-qualified comparison child, shared controls and account/workspace scope | Local comparison copy and mounted controller evidence exist; native outcomes and full-shell qualification pending. |
+| H1-F — unknown/partial fork outcome and no automatic fallback/replay | Task 4.2 reviewed; real database/reload/browser evidence pending. |
+| H1-G — model-qualified comparison child, shared controls and account/workspace scope | Local comparison and native outcome/controller tasks reviewed; full-shell qualification pending. |
 | H1-H — capability rejection, unversioned compatibility and internal-field isolation | Existing API/adapter evidence; final client/native regression qualification pending. |
 
 No passing release verdict, complete parity verdict, push or merge is recorded here.
