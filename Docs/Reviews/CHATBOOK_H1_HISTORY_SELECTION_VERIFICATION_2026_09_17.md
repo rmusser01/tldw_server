@@ -272,7 +272,7 @@ TLDW_E2E_EXTENSION_HEADLESS=1 TLDW_E2E_SKIP_EXTENSION_BUILD=1 PLAYWRIGHT_CHROMIU
 
 | Required boundary | Executed evidence |
 |---|---|
-| Two independent views over one owner DB | Both full shells select A/B separately, retain unique view identities/bookmarks, submit exactly their selected content and reopen. Real IndexedDB; provider requests captured by HTTP fixture. |
+| Two independent views over one owner DB | Original Task5 cases select A/B separately, retain unique view identities/bookmarks and reopen using real IndexedDB. Those original cases did not send; the prior selected-provider-input claim was unsupported. Fix1 below adds actual original-view sends and captured provider paths. |
 | Before-first/empty and legacy alternatives | Both shells confirm/reload before-first and empty boundaries and preserve alternative source rows. WebUI independently qualifies20001-row before-first in addition to both-shell full-tip coverage. |
 | Complete large legacy review | Both full shells review20001 readable rows, confirm through19999, render the full20000 selected path without Chromium OOM, reopen, reach end row19999, search12345 and timeline-edit42; normal Cancel closes the editor and source remains unchanged. Owner/provider arrays remain complete; only rendering is windowed. |
 | Real transaction commit/abort | Both shells invoke the production local fork through mounted controls, adopt child for immediate send/reopen; injected real IndexedDB transaction abort leaves no child/partial rows. Source messages, files and server/sync control identity remain unchanged. |
@@ -288,7 +288,7 @@ TLDW_E2E_EXTENSION_HEADLESS=1 TLDW_E2E_SKIP_EXTENSION_BUILD=1 PLAYWRIGHT_CHROMIU
 | Populated schema upgrade | WebUI opens actual v15 IndexedDB then production v16 preserving legacy projection, bookmark and send-recovery records. This is real browser migration, not fake-indexeddb. |
 | Settings migration/concurrency/guard lifecycle | Both consumer bundles invoke production APIs with real durable backends: migration and two writes; held migration overlapping later write; legitimate missing data versus SecurityError read unavailability; one failed writer preserves its guard while another independent view succeeds; guarded fork rejection; delete/undo/import/reload preserve pending tokens. |
 | Compact controls and handoff | Strict unique review/header controls at390px, actual options expansion, explicit composer draft handoff in its supported Pro mode, and shared real extension settings. Default compact header tests retain casual mode. |
-| Native SQLite/PostgreSQL/API/security | Reused unchanged native checkpoint above:36 SQLite+36 PostgreSQL owner passes,277 API/regression passes, exact documented non-required skips;16 production Python files Bandit0 findings/errors. HTTP fixtures never substitute for those checks. |
+| Native SQLite/PostgreSQL/API/security | Reused latest affected Task4.2 checkpoint:127 passes (43 SQLite+43 PostgreSQL+21 contract-unit+20 API),1 intentional SQLite-only skip,9 warnings,136.28s; /tmp/h1-42-native-final-authorized.log. Unchanged277 broad API/regression passes are separate;16 production Python files Bandit0 findings/errors. HTTP fixtures never substitute for native DB checks. |
 
 Browser storage helpers are `apps/extension/tests/e2e/utils/history-storage-entry.ts` and `history-storage.ts`. Installed esbuild0.27.2 is resolved through the existing WXT package; `injectHistoryStorage()` bundles the production entrypoint with `platform:'browser',format:'iife',globalName:'__h1Storage'`, write:false and browser alias/plugin configuration, then Playwright injects the bundle. Metafiles `/tmp/chatbook_h1_storage_webui_metafile.json` and `_extension_metafile.json` record exact resolutions. Both use shared Dexie PageAssistDatabase/v16; WebUI uses its actual localStorage-backed Plasmo/WXT shims, extension uses installed Plasmo and browser-local/legacy-sync. Operations under test call production settings/delete/import/undo APIs; raw seeding only establishes fixtures. Two independent page/module instances are required to avoid accidentally inheriting the first Dexie promise zone. No production export, test route, CSP weakening, alternate settings authority or installed dependency was added. Fault injection holds/fails the actual storage boundary and restores it afterward. This is browser transaction evidence distinct from mounted-control evidence.
 
@@ -389,3 +389,257 @@ Task5 implementation/evidence commit: `253874def16ab8ee5e46af04881ca9dc37a89d6d`
 Build warnings retained: final WebUI Turbopack reports two broad documentation tracing patterns at unchanged `apps/tldw-frontend/lib/documentation.ts:47` and`:56`, each matching333238files, with possible build-performance/over-bundling consequences; stale caniuse-lite/Browserslist data; Node's missing `--localstorage-file` experimental warning. Extension build retains duplicate-import warnings for `MediaNavigationFormat` and `estimateStorageCost`, plus stale Browserslist data. These checks passed with warnings; no dependency refresh or unrelated build-system repair was made. WebUI standalone output includes test-profile assets because of broad tracing and is local qualification output, not a published deployment package.
 
 Source freshness boundary: historical qualification uses reviewed Chatbook `d8fb4053f9a27a799d5cdb8ee58f7fd1de91efce`. Root observed remote dev `e89f28d751bc8a5b4f4545b8894b87437252c657` at03:01:59UTC and is independently auditing that component-pattern-library delta. This task does not claim tests against that unreviewed source or expand implementation into it.
+
+
+## Task5.1 independent-review fix round1 (implementation complete; re-review pending)
+
+Fix base `0da98afec56c830cdecf78d5fc3205b764132c62`; associated TASK-13261.1. The four P2 review findings and C1–C3 evidence gaps are addressed by the implementation and evidence below. Original browser counts remain historical and do not independently prove the newly required assertions. Root owns final acceptance.
+
+Provenance correction: the previous WebUI release build also emitted two traced-copy `ENOENT` warnings at `/tmp/chatbook_h1_web_production_build_release.log:57` and `:65`, for copied extension `PlaygroundCompareCluster-CujP7ouU.js` and `options-jOX6wcZ_.js`. These occurred while separate build outputs could be replaced; fix1 runs the extension and WebUI production builds sequentially. The broad documentation trace is unchanged; success is not a warning-free build or deployable-artifact audit.
+
+The Pro composer control labeled “WebUI” opens the existing extension options destination. Its browser regression proves that explicit options handoff, not external WebUI transfer. Prior notification review probe `/tmp/h1-review-notification-authorized.log` passed1/1 in14.3s but its screenshot directory was reused; a retained settled-notification screenshot is required in this follow-up.
+
+
+### Fix1 behavior and evidence reconciliation
+
+Fix1 was executed September17–18,2026 in the same H1 worktree from exact base `0da98afec56c830cdecf78d5fc3205b764132c62`, under TASK-13261.1. Root's e89 source audit found no H1 contract delta; historical d8 qualification pins remain historical, and root owns the latest source/spec/parity disposition. No upstream tests were run in this fix.
+
+- **F1 / R84:** the actual virtualizer now adds only active editor block identities to its ordinary range, resolves those keys against the current block map, and scopes the timeline component to current owner/conversation. Full owner/provider arrays remain intact. Actual EditMessageForm marks its root; Save/Cancel releases retention, removing/reordering blocks cannot retain a stale index, and owner replacement unmounts the old draft. Focused tests use the real virtual timeline and real form with a deterministic virtual range; browser cases use installed virtualization, actual IndexedDB and both full-page consumers with20,001source rows/20,000selected rows. The browser saves only legacy42, compares every other source row, edits again, scrolls away/searches back, checks draft and actual viewport intersection before normal Cancel, confirms no Cancel write and that the row unmounts after scrolling away. Rendering remains below100message cards. This is render retention, not a new draft store or selection authority.
+- **R85 distinct hydration defect:** the newly revealed row initially rendered a flat card before its stored bubble preference loaded. The event reached its parent listener, then switching to the child discarded the editor. Actual listener/query evidence in `/tmp/h1_fix1_bubble_query.log` shows block42 and message found,11parent callbacks/0child callbacks at dispatch and flat `<article>` DOM; final failed screenshot shows a bubble. Parent now owns edit transitions and holds effective flat/bubble presentation only for that editor lifetime. Controlled child omits its own global listener; standalone child behavior remains. Both preference directions preserve the exact same form node and typed text until Save/Cancel, then apply the latest preference. Identity, role and authority still use current props. This is separate from Task5's earlier missing-listener predicate correction.
+- **Additional form defect:** actual-form Cancel was implicitly a submit button. The retention test exposed `onSumbit` firing on Cancel; adding `type="button"` prevents it. The original browser Cancel/no-save assertion had passed; no claim is made that every previous mounted Cancel persisted text.
+- **Indexed search repair:** `toBeVisible()` allowed a pinned offscreen editor to satisfy the earlier return assertion. Stronger `toBeInViewport()` failed in both consumers/layouts. Actual scroll trace showed a smooth jump from scrollTop3198223 toward a target at−3191813 stopping after239pixels while measured scrollHeight changed3198382→3198336. Indexed search now uses the existing ID-navigation policy: auto for more than100messages, smooth for small transcripts, with messages.length in callback dependencies. Both post-await owner fences remain. No delay, heap change or click-induced scrolling is accepted as search proof.
+- **F2:** both original source-view composers now actually send. A completion is held while B submits; exact captured provider paths are original question+A+authoredAinput and original question+B+authoredBinput, excluding the other variant. Real IndexedDB inputs parent to A/B respectively; each result parents to its own input. Original client-session identities keep their result cursors. Reload creates fresh restored identities with the same respective cursor. Four durable original/restored records are correct; they are not garbage-collected to force an incorrect global count2. The older table's unsupported two-view-send claim has been corrected.
+- **F3:** fixture response finish/close and browser requestfinished/requestfailed are observed before teardown. Each live observer asserts no stale_selection before release, then after a successful requestfinished awaits the initiating native handler's terminal stale_selection notification from its actual catch, rather than using B's already-idle composer as proof. Then B remains selected and fixture children have no copied rows, completion or message POST. WebUI unload is requestfailed net::ERR_ABORTED/closed; extension unload finishes through surviving background transport after its document/controller was torn down. That extension case is document teardown, not live handler settlement or universal cancellation. Full-page and390pxsidepanel live cases are included. These are deterministic HTTP/UI boundaries, not actual native DB delivery guarantees.
+- **F4:** prepared/dispatching/unknown/partial callouts now scope automatic-attempt language to the app, and uncertain connection outcomes disclose that multiple server copies may exist and should be inspected before a deliberate new fork. Actual English resources and real unknown/partial browser states are covered. Original empty-response six observed received creates plus a seventh late delivery remain a failed transport probe; the fixture allocated a distinct child on each POST. H1 does not guarantee at-most-once native effects; reliable receipt/reconciliation is H2. No idempotency/transport redesign was added.
+- **C1:** source files carry actual supported ingestJobId, ingestBatchId, ingestIdempotencyKey, documentDraftId, processingResultRef `{kind:'ingest_job',id:'source-job'}`, processingStatus `ready` and processingMode `ingest_to_library`. Child identity renews, all seven control fields are absent, and production child removal plus edits/deletion/reopen leave the complete source file/message snapshot unchanged. Both ordinary and canonical two-round comparison chains run in both consumers. No server identity was invented on a pure local history.
+- **C2:** the actual production settings API writes required author-note context on a supported local owner; mounted normal Fork rejects unsupported_fork_chat_settings. Histories/messages/files remain identical, operation records stay empty and no native POST is dispatched in either full shell.
+- **C3:** injected test-only bundle exports actual production bookmark/load/confirmation/dispatched/recovery APIs. Overlapping Promise.all writes preserve bookmark cursor/revision, pending original-view confirmation+dispatch metadata, generated-unsaved recovery text/turn IDs and another client view's independent bookmark. Reload/reinjection proves all fields survive both actual consumer storage backends. Existing settings migration/guard tests remain distinct; no raw-write stand-in, production export, alternate persistence authority or CSP change was added.
+
+### Fix1 failures retained and RED/GREEN
+
+All following paths are local retained evidence; failed probes are not converted into passes by renaming or retries.
+
+| Evidence | Actual result and cause |
+|---|---|
+| `/tmp/h1_fix1_editor_red.log` → `_editor_green.log` | Original default-layout scroll-away lost draft RED1fail; retention GREEN1pass12.6s. Later viewport evidence supersedes the weaker visible-return assertion. |
+| `/tmp/h1_fix1_edit_and_copy_unit.log` | Actual form Cancel RED1failed/24passed; implicit submit exposed. Final actual-form tests cover fix. |
+| `/tmp/h1_fix1_retry_copy_red.log` → `_retry_copy_green.log` |3failed/10passed →13passed; existing locale outcome text promised too much. |
+| `/tmp/h1_fix1_two_views.log`, `_send_boundaries.log` | Initial request filter counted OPTIONS; next expected2bookmarks but got legitimate4original/restored records. Corrected fixture assertions, no product retry or record deletion. F3 live/unload2passed in latter log. |
+| `/tmp/h1_fix1_storage_views.log` → `_files_bubble.log` |3passes plus two C1 failures: processingStatus completed was not supported. Valid ready seed passes normal/comparison; source reference/mode later corrected to their actual supported types. Bubble failed before typing, leading to R85 diagnosis. |
+| `/tmp/h1_fix1_bubble_diagnostic.log`, `_bubble_query.log` | First diagnostic wrapper did not preserve removeEventListener and was unsuitable as a valid listener-lifecycle probe; corrected wrapper maps removal and records actual flat→bubble transition. No diagnostic patch remains. An initial diagnostic-edit command used the wrong cwd and got ENOENT; no product file changed from that failed command. |
+| `/tmp/h1_fix1_layout_transition_red.log` → `_layout_transition_green.log` | Actual Message+child+EditMessageForm2failed/8passed →19passed/3files1.48s, including both Save and Cancel transitions plus existing standalone child actions and retention tests. Initial GREEN invocation from root incorrectly resolved vitest.setup.ts, collected no tests; `_green_initial.log` retains that setup error, corrected frontend cwd used thereafter. |
+| `/tmp/h1_fix1_bubble_green.log` | Original immediate offscreen bubble flow1passed13.3s after R85; later strict effective-child/viewport checks are stronger and supersede presentation claims from this subset. |
+| `/tmp/h1_fix1_{web,extension}_final.{log,json}` | Each full matrix28passed/1failed,0skips/0flaky/retries. Failure was second-edit child prerequisite after Save changed the search target; retaining an immediate first edit and explicitly searching saved text/awaiting actual current bubble before the second edit fixes the setup. JSONs remain failed historical runs. |
+| `/tmp/h1_fix1_{web,extension}_viewport.{log,json}` |2failures each, viewport ratio0 at first return: pinned offscreen node had fooled visible-only assertions. Earlier no-editor screenshots remain invalid visible-return evidence. |
+| `/tmp/h1_fix1_search_scroll_diagnostic.log` | One failure with actual smooth-scroll/scrollport trace described above; diagnostic instrumentation removed. |
+| `/tmp/h1_fix1_index_scroll_red.log` → `_index_scroll_green.log` |1failed/22passed →23passed4.13s; small transcript retains smooth behavior, large indexed reveal uses auto, existing held-owner fence tests remain. |
+| `/tmp/h1_fix1_frontend_tsc.log` | Initial new test typings added5diagnostics; fixed actual storage module casts and complete confirmation fences. Final diagnostics are entirely baseline. |
+| `/tmp/h1_fix1_locale_scoped_sync.log` | An initial unscoped locale generation refreshed three unrelated generated files; those exact originally-clean files were restored to HEAD, then only playground.json was synced. No unrelated generated locales are staged. |
+
+Final focused command from `apps/tldw-frontend`:
+
+```bash
+NODE_OPTIONS=--no-experimental-webstorage node_modules/.bin/vitest run \
+ ../packages/ui/src/components/Option/Playground/__tests__/VirtualChatTimeline.edit-retention.test.tsx \
+ ../packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx \
+ ../packages/ui/src/components/Common/Playground/__tests__/PlaygroundUserMessage.design-system.test.tsx \
+ ../packages/ui/src/components/Common/Playground/__tests__/HistorySelectionReview.test.tsx \
+ ../packages/ui/src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx \
+ ../packages/ui/src/db/dexie/__tests__/branch-projection.test.ts \
+ ../packages/ui/src/db/dexie/__tests__/history-selection.test.ts
+```
+
+`/tmp/h1_fix1_final_unit_viewport.log`: **159passed/7files,5.19s,exit0**, after final production edit. Earlier157/7 and19/3 subsets overlap, not additive.
+
+R87 additionally exposed a real bubble-layout defect after vertical return worked: viewport-width form content in the shrink-to-fit bubble placed textarea left−137 while the transcript started48, hiding draft text/plain Save (`/tmp/h1_fix1_bubble_bounds_red.log`,1failure; prior clipped PNG retained). Only the active edit bubble and inner wrapper now use available-width/min-width0 sizing. Browser assertions record textarea/form/Save/Save & Send/Cancel horizontal bounds against the actual transcript, preserve scroll-away/return draft+Cancel, and additionally execute plain Save in the actual delegated bubble, checking only legacy42 changed. `/tmp/h1_fix1_bubble_layout_unit.log`:19passed/3files1.93s after this CSS-only change; unchanged159/7 regression above is reused, with final browser geometry/durable-save proof below. No forced click or horizontal autoscroll is used.
+
+### Fix1 real-browser qualification
+
+All browser runs use installed Chromium145.0.7632.6, executable `/Users/macbook-dev/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`. WebUI is isolated advanced Next16.1.4/Turbopack dev runtime at18171; extension is actual production-profile chrome-mv3/options/sidepanel, with dedicated fixture profiles, permissions and real IndexedDB. HTTP/provider replies remain deterministic loopback fixtures, not live providers or actual SQLite/PostgreSQL. The test-only esbuild production API bundle and exact consumer resolution remain as previously documented; C3 extends its named production exports only.
+
+Common exact WebUI invocation from `apps/tldw-frontend` (use each table's JSON/log/artifact stem and grep):
+
+```bash
+TLDW_WEB_URL=http://localhost:18171 TLDW_WEB_AUTOSTART=false \
+ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Users/macbook-dev/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' \
+ PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/h1_fix1_web_bounds_green.json \
+ node_modules/.bin/playwright test e2e/workflows/chat-history-selection.spec.ts \
+ --project=chromium --workers=1 --retries=0 --grep 'full-tip' --reporter=line,json \
+ --output=/tmp/h1_fix1_web_bounds_green_artifacts > /tmp/h1_fix1_web_bounds_green.log 2>&1
+```
+
+Common exact extension invocation from `apps/extension`:
+
+```bash
+TLDW_E2E_EXTENSION_HEADLESS=1 TLDW_E2E_SKIP_EXTENSION_BUILD=1 \
+ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Users/macbook-dev/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' \
+ PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/h1_fix1_extension_bounds_green.json \
+ node_modules/.bin/playwright test tests/e2e/chat-history-selection.spec.ts \
+ --project=chromium-extension --workers=1 --retries=0 --grep 'full-tip' --reporter=line,json \
+ --output=/tmp/h1_fix1_extension_bounds_green_artifacts > /tmp/h1_fix1_extension_bounds_green.log 2>&1
+```
+
+All stems below are under `/tmp/`, with `.log`, `.json` and `_artifacts`. Complete extension matrix additionally passed `tests/e2e/sidepanel-options-handoff.spec.ts`; complete matrices omit grep. Required browser evidence is the latest executed assertion per named case, not an invented combined test run. Earlier failed full JSONs remain inspectable.
+
+| Stem | Filter / actual result / use |
+|---|---|
+| `h1_fix1_web_final` | Complete29cases:28pass/1fail,187.1s. Reuse unaffected successful cases; retain failed second-child setup, later superseded. |
+| `h1_fix1_extension_final` | Complete29cases including handoff:28pass/1fail,241.1s. Reuse unaffected successful cases; same disclosed fixture failure. |
+| `h1_fix1_web_affected` | `full-tip\|held first native`:4pass33.2s. Final F3 pre-release/terminal assertions; full-tip visible-only portion later superseded by actual viewport/bounds tests. |
+| `h1_fix1_extension_affected` | `full-tip\|rejected native metadata`:2pass23.2s; extension metadata assertion is nested in native-fork case and was not selected by this grep. These visible-only full-tip claims are superseded. |
+| `h1_fix1_web_feedback` | `rejected native metadata`:1pass8.4s, actual visible notification crop/full-page images checked. |
+| `h1_fix1_extension_feedback` | `full page: native fork adopts`:1pass13.3s, includes edit/reopen/rejected metadata and settled notification capture. |
+| `h1_fix1_web_viewport_green` | `full-tip`:2pass26.6s after indexed-scroll repair; vertical return proved, horizontally clipped bubble PNG remains RED for R87. |
+| `h1_fix1_extension_viewport_green` | `full-tip`:2pass25.7s on rebuilt current index-scroll code; same narrower vertical evidence. |
+| `h1_fix1_web_bounds_green` | `full-tip`:2pass27.7s; latest vertical/horizontal checks and delegated plain Save+Cancel after final CSS edit. |
+
+The latest source recheck is remote-only: root verified unchanged Chatbook `e89f28d751bc8a5b4f4545b8894b87437252c657` and server `59049e094e0845a4611ea725ae19b7c1754ea709` at2026-09-18 04:10:21UTC. This does not change historical test pins or imply upstream tests.
+
+Intermediate static scope before R88–R91: frontend `NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit`, cwd `apps/tldw-frontend`, `/tmp/h1_fix1_frontend_tsc_bounds.log`:90baseline diagnostics/124lines,exit2, **byte-identical** to initial-H1-base `/tmp/chatbook_h1_frontend_tsc_initial_base.log`, SHA256 `cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6`. Comparison receipt `/tmp/h1_fix1_frontend_tsc_comparison.json`. The earlier root-cwd final invocation differed only in path prefixes (raw9976762…); that normalization is preserved separately. Full frontend tsc still fails baseline; production Next config skips validation and cannot certify types.
+
+Extension `node_modules/.bin/tsc --noEmit -p tsconfig.compile.json` passes, `/tmp/h1_fix1_extension_tsc_bounds.log`; this existing config excludes shared UI/tests. Scoped ESLint uses installed frontend ESLint API, `overrideConfigFile:'apps/tldw-frontend/eslint.config.mjs'`, cwd worktree root and the16paths recorded in `/tmp/h1_fix1_eslint_bounds.json`. `/tmp/h1_fix1_eslint_bounds.json`:0errors/146warnings; exact-fix-base15existing files via `git show 0da98afec56c830cdecf78d5fc3205b764132c62:path`, same API/config/filePath, `/tmp/h1_fix1_eslint_viewport_baseline.json`:0errors/146warnings. No warning multiset was added; line positions/excerpts move, including the existing virtualizer React Compiler incompatibility warning. Root-cwd next no-html-link-for-pages emits the existing missing pages directory advisory; no lint rule was disabled. Formatting targeted the edited virtualizer/new test with installed Prettier `--no-semi --trailing-comma none`; no unrelated baseline formatting sweep.
+
+No Python/native contract change: reuse latest affected127native (43SQLite+43PostgreSQL+21unit+20API),1intentional SQLite-only skip9warnings136.28s `/tmp/h1-42-native-final-authorized.log`; unchanged277broad API separately. Reuse unchanged16-file Bandit0findings/errors and prior compile/Ruff baseline qualifications; no mocked HTTP row is counted as native evidence. No new library, production testing API, background automatic task, main/UAT resource, live provider, push or merge was introduced. R89 authorizes only the existing virtualizer patch described below.
+
+R88 supersedes the earlier auto-only stability claim. `/tmp/h1_fix1_extension_bounds_green.{log,json}` actually had **1pass/1fail33.7s**: bubble bounds/plain Save passed, but portrait first return remained offscreen and screenshot showed rows202/203. The later actual auto-scroll diagnostic `/tmp/h1_fix1_auto_scroll_trace.log` passed1/1 in13.4s and recorded3197846→5908,target114, so the failure is explicitly intermittent. The enabled mounted fast path bypassed the installed virtualizer's measured index alignment for pinned offscreen editors. At this intermediate R88 stage, `VirtualChatTimeline.reveal` invoked installed scrollToIndex for those already-mounted targets as well (superseded by R91 below), preserving its mounted receipt, current block identity and nonvirtual behavior. Installed virtual-core1069–1139 owns offset remeasurement and superseded-index cancellation; no custom timer/retry system was added. Retained-row unit RED `/tmp/h1_fix1_retained_reveal_red.log`1failed/4passed → GREEN `/tmp/h1_fix1_retained_reveal_green.log`28passed/2files5.34s, including both existing stale-owner post-await fence tests. WebUI measured preliminary2/2 passed28.6s; final justified repetition runs both full-tip layouts twice with retries0, using `--repeat-each=2 --grep 'full-tip'` on the common commands above.
+
+R89 closes a separately reproduced installed-library lifecycle defect. The first isolated class diagnostic expected a null-window exception when a dynamic cached row remained after cleanup; that expected-bug case was removed from permanent regressions and retained only at /tmp/h1_fix1_installed_lifecycle_diagnostic.test.tsx and its original log. Actual VirtualChatTimeline + installed react-virtual mount/owner replacement then reproduced the exception before the first queued RAF (/tmp/h1_fix1_actual_lifecycle_mounted.log,1failed/1passed389ms); after the first frame, teardown was safe. This actual test mocks only browser measurement/RAF/scroll boundaries and never manually calls virtualizer cleanup or detached measurement. Earlier harness setup failures remain /tmp/h1_fix1_actual_lifecycle.log (missing jsdom scrollTo boundary) and /tmp/h1_fix1_actual_lifecycle_observation.log (timeline mounted before the parent ref became available); the final outer-container-first harness models production mounting and is the behavioral RED.
+
+Root approved the supported 3.13.19 patch: exact @tanstack/react-virtual pins in the three existing consumer manifests and only the corresponding workspace/package entries in apps/bun.lock. Official upstream production change is the null targetWindow guard in commit843109c5bf780591a762f9767f3808fd15e3f94e (PR1129); no wrapper or node_modules patch. Command from apps: bun install --ignore-scripts. /tmp/h1_fix1_virtualizer_31319_install.log reports5packages installed2.71s; lock diff is5insertions/5deletions with no unrelated resolution changes. /tmp/h1_fix1_virtualizer_31319_resolution.log verifies all three consumers resolve react-virtual/core3.13.19. Actual mounted before/after-first-RAF regressions now pass2/2 with no exception or stale scroll; retained navigation5/5, combined /tmp/h1_fix1_actual_lifecycle_31319_green.log7tests/2files837ms. This cleanup patch does not claim to fix the separate intermittent viewport drift.
+
+R90 resolves the independently traced auto-bottom race. On the failed overflow-anchor:none control, actual index12345 was aligned at1974789, then useSmartScroll issued scrollTo({top:3198981,behavior:'smooth'}), moving it away. The exact initiating stack and scrollport events are /tmp/h1_fix1_anchor_none_trace_1.json. Parent-scroll suppression alone failed4/4; anchoring-none with normal parent alignment was3pass/1fail55.0s. These are failed diagnostic controls, not acceptance. One wrong-cwd diagnostic setup was stopped and saved as /tmp/h1_fix1_anchor_none_setup_failed.{log,json} (1passed/1interrupted/2didnotrun), excluded from all qualification. Instrumented helper snapshots and all original logs remain in /tmp; diagnostics are removed from permanent tests.
+
+The existing smart-scroll hook now exposes pauseAutoScroll. Valid ID/index navigation synchronously revokes ref+state automatic permission and clears the existing delayed bottom re-enable timer before awaiting reveal. Both existing queued RAF callbacks consult current permission before writing. Normal streaming, explicit return-to-bottom, empty reset and dock offsets retain their existing behavior. Required calls are unconditional in permanent tests. Behavioral RED /tmp/h1_fix1_smart_scroll_red.log3failed/1passed shows1unwanted smooth message write,2streaming auto writes and unwanted delayed re-enable. Mounted ordering RED /tmp/h1_fix1_navigation_pause_red.log2failed/21passed. GREEN /tmp/h1_fix1_auto_pause_green.log32tests/4files4.11s covers both RAF paths, timer revocation, positive resume/dock, callback ordering, existing held-owner fences and sticky-composer assertions. The first GREEN command was mistakenly invoked from repo root without its frontend node_modules binary (exit127); the corrected invocation uses apps/tldw-frontend.
+
+Final-source intermediate R90 checks: /tmp/h1_fix1_unit_final_31319.log171tests/11files5.56s; /tmp/h1_fix1_frontend_tsc_31319.log90baseline diagnostics/124lines byte-equal initialH1base cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6, receipt /tmp/h1_fix1_frontend_tsc_31319_comparison.json. Extension compile config passes. ESLint actual19files0errors147warnings vs exactfixbase16existingfiles0/147; adding the previously unscoped existing smart-scroll hook accounts for the extra baseline warning, with no new finding. Installed Bun frozen check bun install --frozen-lockfile --ignore-scripts reports1893installs/1923packages, no changes409ms (/tmp/h1_fix1_virtualizer_frozen_lock.log).
+
+R90 browser repetition: WebUI /tmp/h1_fix1_web_auto_pause_repeat.{log,json}4/4passes1.1m; extension /tmp/h1_fix1_extension_auto_pause_repeat.{log,json}3pass/1fail1.1m. Initial search and first returned editors passed; remaining bubble failure was second-edit explicit end-scroll losing row19999. /tmp/h1_fix1_end_scroll_trace_0.json entries67–72 then prove the separate native index42 RAF retry after end-scroll3197063: ResizeObserver adjusts+39 then old native loop scrolls to5759. This occurs even in a passing instrumented case because the end row can be observed transiently. The direct next search has a distinct reveal stack atentry91. This remaining failure is not claimed fixed by R90, nor described as browser anchoring.
+
+R91 supersedes R88's repeated index reconciliation after the later trace established its cost. The test-only getOffsetForIndex(index,'center')→scrollToOffset(offset,{align:'start'}) control passed4/4 in1.0m (/tmp/h1_fix1_coarse_reveal_control.{log,json}) with parent alignment unchanged. Production enabled reveal now uses exactly that one coarse offset step, rejecting unavailable offsets and preserving current block mapping, pending mounted receipt and cleanup. The same step handles retained targets. Existing parent DOM alignment occurs only after its owner/view fence; no alignment-completion receipt, timer, retry or custom cancellation mechanism was added. Nonvirtual behavior remains unchanged.
+
+Actual VirtualChatTimeline regression RED /tmp/h1_fix1_native_retry_red.log1failed/2passed564ms captures later-scroll writes after draining old index RAFs. GREEN /tmp/h1_fix1_coarse_reveal_green.log32tests/3files5.11s covers later scroll surviving queued frames, current timeline owner replacement, retained editor behavior and existing held ID/index owner fences. Existing sidepanel still uses native measured index navigation; its R89 cleanup qualification now uses a small actual installed useVirtualizer React harness, separately labeled from current VirtualChatTimeline behavior. Both before-first-RAF and after-first-RAF native owner teardown remain no-error/no-stale-scroll regressions. Missing-offset rejection adds a separate focused regression before final verification.
+
+### Final fix1 qualification
+
+Final production source and dependency checks:174passed/11Vitest files,5.51s (/tmp/h1_fix1_unit_final_coarse.log). The unchanged sticky-composer tests pass their layout assertions but log their existing incomplete tldwClient mock methods getProvidersStatus/getConfig; these warnings are not provider/backend qualification. Node localStorage experimental warnings remain. Final frontend tsc exits2 with90diagnostics/124lines, byte-identical to initialH1base SHA256cd5c459a665d099e9c695fc348d4d89a970eed03efae0ba23e2f2aec26c164f6 (/tmp/h1_fix1_frontend_tsc_final_coarse.log and _comparison.json). Extension tsconfig.compile.json passes (/tmp/h1_fix1_extension_tsc_31319.log); its existing exclusions do not typecheck sharedUI/tests.
+
+Final ESLint /tmp/h1_fix1_eslint_final_coarse.json:19files,0errors/148warnings; exactfixbase16existingfiles0errors/147warnings (/tmp/h1_fix1_eslint_31319_baseline.json). The sole added warning is known react-hooks/incompatible-library in the new actual installed useVirtualizer test harness. It qualifies supported native cleanup and was not hidden with an alias, mock or disabled rule. No new production warning is introduced; remaining message differences are shifted line references/excerpts. All exact lint paths are /tmp/h1_fix1_lint_paths.json; root-cwd missing-pages advisory is retained in _stderr.log. No zero-warning claim is made.
+
+Both final mounted full-tip layouts run twice, retries0:WebUI4/4passed56.9s and extension4/4passed51.5s (/tmp/h1_fix1_{web,extension}_final_coarse.{log,json}, corresponding _artifacts directories). Each checker receipt reports executed4/expected4/skipped0/unexpected0/flaky0. JSON actual result rows are all passed with retry0 and no errors. Original28/29full matrices and all failed/intermediate repetitions remain separate historical evidence. /tmp/h1_fix1_final_case_mapping.json is an executed-case union:29named cases per consumer,31actual passing result rows per consumer because the two final full-tip cases repeat twice. It explicitly reuses unchanged earlier passing cases; it is not a fabricated combined suite or a claim that the full29cases ran on the last build.
+
+Final extension production build: /tmp/h1_fix1_extension_build_final_coarse.log,40.5s,48.73MB; existing duplicate-import/Browserslist warnings retained. Final WebUI artifact is .next-live-tier-h1-production from the quiescent build /tmp/h1_fix1_web_quiescent_clean_build.log:exit0,compiled41s,154/154pages. Next skips type validation by existing configuration; this successful build does not replace the explicit failing baseline typecheck. It retains two unchanged broad documentation.ts47/56 tracing warnings (632634files), stale caniuse-lite and Node localStorage warnings, but no traced-copy ENOENT. The standalone output includes traced test-profile assets and is local qualification output, not a published/deployment-audited artifact.
+
+The preceding quiescent attempt /tmp/h1_fix1_web_quiescent_final_build.log still reported two ENOENTs from a retained17:51 H1 browser profile, not concurrent current builds. Receipt /tmp/h1_fix1_stale_profile_links.json verifies PID55871absent and only RunningChromeVersion→145.0.7632.6:1 and SingletonLock→Roberts-MacBook-Pro-2.local-55871 were dangling in apps/extension/tmp-playwright-profile/user-data-5w9qR6. Only those two link entries were unlinked after verification; their targets were never followed/deleted and profile data/screenshots/logs remained. This environment cleanup justified the final rebuild. Earlier missing extension-chunk warnings are separately retained above.
+
+Final explicit-/static token check passes83019e351ca18894.css; shared_app578.2KB gzip/600KB budget across33files, heaviestdebugroute876.4KB, budget pass (/tmp/h1_fix1_clean_final_tokens.log,/tmp/h1_fix1_clean_final_budget.log).
+
+Final source freshness is remote-only:root rechecked unchanged Chatbooke89f28d751bc8a5b4f4545b8894b87437252c657/server59049e094e0845a4611ea725ae19b7c1754ea709 at2026-09-18 04:50:48UTC. Historical qualification pins are unchanged; no upstream tests were run.
+
+Final visual review checked the actual viewport screenshots:
+- /tmp/h1_fix1_extension_final_coarse_artifacts/chat-history-selection-ful-0b202--bubble-full-tip-transcript-chromium-extension-repeat1/legacy-bubble-retained-editor.png shows the retained Cancel draft and allthree buttons within chat width.
+- /tmp/h1_fix1_web_final_coarse_artifacts/workflows-chat-history-sel-60ed4-001-row-full-tip-transcript-chromium-repeat1/legacy-full-tip-navigation.png shows the returned flat editor and Save/Save&Send/Cancel.
+- Other final full-tip directories retain selected-history-review.png and legacy-20001-review.png; horizontal bounds are inline JSON attachments named bubble-editor-horizontal-bounds. Actual normal Save/Cancel and source-array assertions follow screenshots.
+- Settled notification evidence is in /tmp/h1_fix1_{web,extension}_feedback_artifacts; feedback locator crop and full-page capture use animation/hit-test settlement. The earlier absent-toast/offscreen-editor/clipped-bubble PNGs remain failed visual evidence, superseded only by the explicit final checks.
+
+Self-review checked active stable block identity and bounded retention, actual editor nodes across both preference transitions, current-role/owner action authority, one coarse reveal plus post-await fences, missing-offset rejection, queued auto-scroll revocation and delayed re-enable, supported native cleanup, exact dependency/lock scope, F2request/path/result parents, F3original-handler terminal receipt versus unload/background transport, production file/settings/selection-record API provenance and actual locale wording. No full owner/provider array was truncated. No new Python/security surface changed; unchanged native127affected+277broad and16-fileBandit0findings remain explicitly reused. Release limitations remain native duplicate delivery/H2reconciliation, baseline full frontend type failures, disclosed lint/build warnings, local traced artifact scope and separate non-H1 WorkspaceChatPanel boundary. Independent root re-review/acceptance remains pending.
+
+### Final command receipts
+
+Commands run from apps/tldw-frontend unless otherwise stated:
+
+```sh
+NODE_OPTIONS=--max-old-space-size=8192 node_modules/.bin/tsc --noEmit
+node scripts/assert-playwright-no-skips.mjs /tmp/h1_fix1_web_final_coarse.json
+node scripts/assert-playwright-no-skips.mjs /tmp/h1_fix1_extension_final_coarse.json
+PATH="$PWD/node_modules/.bin:$PATH" TLDW_BUILD_PROFILE=production TLDW_NEXT_DIST_DIR=.next-live-tier-h1-production NODE_OPTIONS=--max-old-space-size=8192 node scripts/build-with-profile.mjs --bundler=turbopack
+node scripts/verify-shared-token-sync.mjs --dir .next-live-tier-h1-production/static
+node scripts/check-bundle-budget.mjs --dir .next-live-tier-h1-production
+```
+
+Final browser commands are the common commands above with stems h1_fix1_web_final_coarse and h1_fix1_extension_final_coarse, --repeat-each=2 --grep 'full-tip', workers1/retries0; extension production build command is unchanged. Exact final Vitest file arguments:
+
+```sh
+node_modules/.bin/vitest run \
+  ../packages/ui/src/components/Common/Playground/__tests__/PlaygroundUserMessage.design-system.test.tsx \
+  ../packages/ui/src/db/dexie/__tests__/history-selection.test.ts \
+  ../packages/ui/src/components/Option/Playground/__tests__/VirtualChatTimeline.edit-retention.test.tsx \
+  ../packages/ui/src/components/Option/Playground/__tests__/VirtualChatTimeline.lifecycle.test.tsx \
+  ../packages/ui/src/db/dexie/__tests__/branch-projection.test.ts \
+  ../packages/ui/src/components/Common/Playground/__tests__/HistorySelectionReview.test.tsx \
+  ../packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx \
+  ../packages/ui/src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx \
+  ../packages/ui/src/hooks/__tests__/useSmartScroll.navigation.test.tsx \
+  ../packages/ui/src/hooks/__tests__/useSmartScroll.dock-offset.test.tsx \
+  ../packages/ui/src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx
+```
+
+### Executed case mapping
+
+
+web (actual mounted consumer unless the case explicitly names injected production storage APIs):
+
+| Case | Evidence JSON | Passed result rows |
+|---|---|---|
+| two mounted views share real IndexedDB and keep independent selected variants | /tmp/h1_fix1_web_final.json | 1 |
+| a supported local fork adopts child ownership for immediate send and reopen | /tmp/h1_fix1_web_final.json | 1 |
+| legacy alternatives survive confirmed before-first and empty boundaries on reopen | /tmp/h1_fix1_web_final.json | 1 |
+| real IndexedDB: unsupported required context | /tmp/h1_fix1_web_final.json | 1 |
+| real IndexedDB: transaction abort | /tmp/h1_fix1_web_final.json | 1 |
+| real IndexedDB: 20001-row legacy review | /tmp/h1_fix1_web_final.json | 1 |
+| real IndexedDB: 20001-row full-tip transcript | /tmp/h1_fix1_web_final_coarse.json | 2 |
+| real IndexedDB: 20001-row bubble full-tip transcript | /tmp/h1_fix1_web_final_coarse.json | 2 |
+| populated IndexedDB v15 upgrades to v16 preserving projection, bookmarks and send recovery | /tmp/h1_fix1_web_final.json | 1 |
+| native HTTP fork adopts scoped child for next send and reopen through actual controller | /tmp/h1_fix1_web_final.json | 1 |
+| a new unowned draft binds a local owner before first send without automatic server copying | /tmp/h1_fix1_web_final.json | 1 |
+| unknown native copy survives reload and a second actual view without redispatch | /tmp/h1_fix1_web_final.json | 1 |
+| timeline edit and cancel work in actual portrait card layout | /tmp/h1_fix1_web_final.json | 1 |
+| timeline edit and cancel work in actual user bubble layout | /tmp/h1_fix1_web_final.json | 1 |
+| unload: held native create response cannot redirect a later local view or downgrade its saved result | /tmp/h1_fix1_web_final.json | 1 |
+| unload: held native settings response cannot redirect a later local view or downgrade its saved result | /tmp/h1_fix1_web_final.json | 1 |
+| live navigation: held native create response cannot redirect a later local view or downgrade its saved result | /tmp/h1_fix1_web_final.json | 1 |
+| live navigation: held native settings response cannot redirect a later local view or downgrade its saved result | /tmp/h1_fix1_web_final.json | 1 |
+| production storage APIs preserve migration, concurrent writes and unavailable guards across delete import undo and reload | /tmp/h1_fix1_web_final.json | 1 |
+| production storage interleaves migration and writers while distinguishing failed reads from empty data | /tmp/h1_fix1_web_final.json | 1 |
+| rejected native metadata cannot redirect explicit settings to browser mirror storage | /tmp/h1_fix1_web_feedback.json | 1 |
+| unload: held first native character create cannot adopt or dispatch after local navigation | /tmp/h1_fix1_web_affected.json | 1 |
+| live navigation: held first native character create cannot adopt or dispatch after local navigation | /tmp/h1_fix1_web_affected.json | 1 |
+| child edits deletion and copied-file removal isolate source: normal | /tmp/h1_fix1_web_final.json | 1 |
+| child edits deletion and copied-file removal isolate source: comparison | /tmp/h1_fix1_web_final.json | 1 |
+| global H1 filters foreign workspace operations and invalidates held reads after account config changes | /tmp/h1_fix1_web_final.json | 1 |
+| first native character send follows acknowledged result and reopens for a second native turn | /tmp/h1_fix1_web_final.json | 1 |
+| native character missing ACK remains uncertain without replay | /tmp/h1_fix1_web_final.json | 1 |
+| native character wrong ACK remains uncertain without replay | /tmp/h1_fix1_web_final.json | 1 |
+
+extension (actual mounted consumer unless the case explicitly names injected production storage APIs):
+
+| Case | Evidence JSON | Passed result rows |
+|---|---|---|
+| full-page selected variants use independent views over one real owner DB | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: local fork adopts child for immediate send and reopen | /tmp/h1_fix1_extension_final.json | 1 |
+| compact sidepanel: local fork adopts child for immediate send and reopen | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: legacy before-first and empty survive reload without losing alternatives | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: native fork adopts scoped child for immediate send and reopen | /tmp/h1_fix1_extension_feedback.json | 1 |
+| compact sidepanel: native fork adopts scoped child for immediate send and reopen | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: unsupported required context | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: transaction abort | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: 20001-row full-tip transcript | /tmp/h1_fix1_extension_final_coarse.json | 2 |
+| full page: 20001-row bubble full-tip transcript | /tmp/h1_fix1_extension_final_coarse.json | 2 |
+| full page: unknown native copy | /tmp/h1_fix1_extension_final.json | 1 |
+| production storage APIs preserve migration, concurrent writes and unavailable guards across delete import undo and reload | /tmp/h1_fix1_extension_final.json | 1 |
+| production storage interleaves migration and writers while distinguishing failed reads from empty data | /tmp/h1_fix1_extension_final.json | 1 |
+| unload: held first native character create cannot adopt or dispatch after local navigation | /tmp/h1_fix1_extension_final.json | 1 |
+| live navigation: held first native character create cannot adopt or dispatch after local navigation | /tmp/h1_fix1_extension_final.json | 1 |
+| child edits deletion and copied-file removal isolate source: normal | /tmp/h1_fix1_extension_final.json | 1 |
+| child edits deletion and copied-file removal isolate source: comparison | /tmp/h1_fix1_extension_final.json | 1 |
+| global H1 filters foreign workspace operations and invalidates held reads after account config changes | /tmp/h1_fix1_extension_final.json | 1 |
+| full page: first native character send follows acknowledged result and reopens | /tmp/h1_fix1_extension_final.json | 1 |
+| sidepanel: first native character send follows acknowledged result and reopens | /tmp/h1_fix1_extension_final.json | 1 |
+| live navigation: held native create cannot redirect local view | /tmp/h1_fix1_extension_final.json | 1 |
+| live navigation: held native settings cannot redirect local view | /tmp/h1_fix1_extension_final.json | 1 |
+| native character missing ACK remains uncertain without replay | /tmp/h1_fix1_extension_final.json | 1 |
+| native character wrong ACK remains uncertain without replay | /tmp/h1_fix1_extension_final.json | 1 |
+| sidepanel: held first native create cannot adopt after live local navigation | /tmp/h1_fix1_extension_final.json | 1 |
+| comparison sidepanel expansion preserves readable unsupported owner and forks its model chain | /tmp/h1_fix1_extension_final.json | 1 |
+| selected sidepanel expansion opens extension full page with an independent view over the same owner | /tmp/h1_fix1_extension_final.json | 1 |
+| explicit Continue in WebUI composer action preserves its existing full-app draft handoff | /tmp/h1_fix1_extension_final.json | 1 |
+| settings written in options remain shared with the sidepanel through real extension storage | /tmp/h1_fix1_extension_final.json | 1 |

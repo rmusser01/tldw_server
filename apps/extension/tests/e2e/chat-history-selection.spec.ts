@@ -1,9 +1,9 @@
-import { qualifyHistoryStorage, qualifyStorageInterleavings } from './utils/history-storage'
+import { qualifySelectionRecordConcurrency, qualifyHistoryStorage, qualifyStorageInterleavings } from './utils/history-storage'
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import { launchWithExtension } from './utils/extension'
 import { grantHostPermission } from './utils/permissions'
-import { startHistoryServer, historySeedConfig, nativeCharacterSeedConfig, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, seedSidepanelReference, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, unknownNativeFork, abortLocalFork, largeLegacyReview, editNativeChildSettings, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, heldNativeForkNavigation, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead } from './utils/history-selection'
+import { sendIndependentSourceViews, rejectUnsupportedLocalFork, startHistoryServer, historySeedConfig, nativeCharacterSeedConfig, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, seedSidepanelReference, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, unknownNativeFork, abortLocalFork, largeLegacyReview, editNativeChildSettings, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, heldNativeForkNavigation, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead } from './utils/history-selection'
 
 test('full-page selected variants use independent views over one real owner DB', async () => {
   test.setTimeout(120_000)
@@ -26,6 +26,7 @@ test('full-page selected variants use independent views over one real owner DB',
     await expect(page.getByText('H1 variant B', { exact: true })).toHaveCount(0)
     await page.reload()
     await expect(page.getByText('H1 variant A', { exact: true })).toBeVisible()
+    await sendIndependentSourceViews(page, second, server)
   } finally { await context.close(); await server.close() }
 })
 
@@ -94,11 +95,11 @@ for (const surface of ['full page', 'compact sidepanel'] as const) {
   })
 }
 
-for (const scenario of ['transaction abort', '20001-row full-tip transcript', 'unknown native copy'] as const) {
+for (const scenario of ['unsupported required context', 'transaction abort', '20001-row full-tip transcript', '20001-row bubble full-tip transcript', 'unknown native copy'] as const) {
   test('full page: ' + scenario, async () => {
     test.setTimeout(120_000)
     const server = await startHistoryServer({ native: true, loseForkResponse: scenario === 'unknown native copy' })
-    const { context, page, extensionId, optionsUrl } = await launchWithExtension(path.resolve('build/chrome-mv3'), { seedConfig: historySeedConfig(server.url) })
+    const { context, page, extensionId, optionsUrl } = await launchWithExtension(path.resolve('build/chrome-mv3'), { seedConfig: { ...historySeedConfig(server.url), ...(scenario.includes('bubble') ? { chatShowCharacterPortraits: false } : {}) } })
     try {
       expect(await grantHostPermission(context, extensionId, server.url + '/*')).toBe(true)
       await page.goto(optionsUrl + '#/chat')
@@ -109,11 +110,12 @@ for (const scenario of ['transaction abort', '20001-row full-tip transcript', 'u
         await page.reload()
         await unknownNativeFork(page, server, async () => { const second = await context.newPage(); await second.goto(nativeHistoryUrl(optionsUrl + '#/chat')); return second })
       } else {
-        await seedHistory(page, scenario === 'transaction abort' ? {} : { legacy: true, count: 20001 })
+        await seedHistory(page, ['transaction abort', 'unsupported required context'].includes(scenario) ? {} : { legacy: true, count: 20001 })
         await page.goto(historyUrl(optionsUrl + '#/chat'))
         await page.reload()
-        if (scenario === 'transaction abort') await abortLocalFork(page)
-        else await largeLegacyReview(page, true)
+        if (scenario === 'unsupported required context') { await rejectUnsupportedLocalFork(page); expect(server.requests.filter(row => row.method === 'POST')).toEqual([]) }
+      else if (scenario === 'transaction abort') await abortLocalFork(page)
+        else await largeLegacyReview(page, true, scenario.includes('bubble'))
       }
     } finally { await context.close(); await server.close() }
   })
@@ -138,6 +140,7 @@ test('production storage interleaves migration and writers while distinguishing 
     await expect(page.getByTestId('chat-input')).toBeVisible()
     await seedHistory(page)
     await qualifyStorageInterleavings(page)
+    await qualifySelectionRecordConcurrency(page)
   } finally { await context.close(); await server.close() }
 })
 

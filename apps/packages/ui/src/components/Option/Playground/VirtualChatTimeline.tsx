@@ -1,5 +1,5 @@
 import React from "react"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 
 export type ChatTimelineNavigation = {
   reveal: (messageIndex: number) => Promise<boolean>
@@ -7,7 +7,12 @@ export type ChatTimelineNavigation = {
 
 /** Window rendering only. Selection, search and provider input retain every row. */
 export function VirtualChatTimeline<T>({
-  blocks, getKey, messageBlocks, scrollParentRef, navigationRef, renderBlock
+  blocks,
+  getKey,
+  messageBlocks,
+  scrollParentRef,
+  navigationRef,
+  renderBlock
 }: {
   blocks: T[]
   getKey: (index: number) => string
@@ -17,7 +22,10 @@ export function VirtualChatTimeline<T>({
   renderBlock: (block: T, index: number) => React.ReactNode
 }) {
   const container = React.useRef<HTMLDivElement>(null)
-  const pending = React.useRef<{ index: number; resolve: (mounted: boolean) => void } | null>(null)
+  const pending = React.useRef<{
+    index: number
+    resolve: (mounted: boolean) => void
+  } | null>(null)
   const [scrollMargin, setScrollMargin] = React.useState(0)
   const enabled = Boolean(scrollParentRef) && blocks.length > 100
   const virtualizer = useVirtualizer({
@@ -25,6 +33,29 @@ export function VirtualChatTimeline<T>({
     enabled,
     getScrollElement: () => scrollParentRef?.current ?? null,
     getItemKey: getKey,
+    rangeExtractor: (range) => {
+      const retainedKeys = new Set(
+        Array.from(
+          container.current?.querySelectorAll("[data-chat-message-editor]") ??
+            []
+        ).map(
+          (editor) =>
+            editor.closest<HTMLElement>("[data-timeline-key]")?.dataset
+              .timelineKey
+        )
+      )
+      const indexes = new Set(defaultRangeExtractor(range))
+      // Resolve retained DOM identity against this render's current block map.
+      // An editor from a removed/replaced owner cannot retain an old index.
+      for (
+        let index = 0;
+        retainedKeys.size > 0 && index < blocks.length;
+        index++
+      ) {
+        if (retainedKeys.has(getKey(index))) indexes.add(index)
+      }
+      return [...indexes].sort((a, b) => a - b)
+    },
     estimateSize: () => 160,
     overscan: 4,
     scrollMargin
@@ -34,7 +65,12 @@ export function VirtualChatTimeline<T>({
     const parent = scrollParentRef?.current
     const element = container.current
     if (!parent || !element || !enabled) return
-    const measure = () => setScrollMargin(element.getBoundingClientRect().top - parent.getBoundingClientRect().top + parent.scrollTop)
+    const measure = () =>
+      setScrollMargin(
+        element.getBoundingClientRect().top -
+          parent.getBoundingClientRect().top +
+          parent.scrollTop
+      )
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(parent)
@@ -42,7 +78,12 @@ export function VirtualChatTimeline<T>({
     return () => observer.disconnect()
   }, [enabled, scrollParentRef])
   React.useEffect(() => {
-    if (pending.current && container.current?.querySelector(`[data-timeline-block="${pending.current.index}"]`)) {
+    if (
+      pending.current &&
+      container.current?.querySelector(
+        `[data-timeline-block="${pending.current.index}"]`
+      )
+    ) {
       pending.current.resolve(true)
       pending.current = null
     }
@@ -50,15 +91,25 @@ export function VirtualChatTimeline<T>({
   React.useLayoutEffect(() => {
     if (!navigationRef) return
     navigationRef.current = {
-      reveal: async messageIndex => {
+      reveal: async (messageIndex) => {
         const index = messageBlocks.get(messageIndex)
         if (index === undefined) return false
         pending.current?.resolve(false)
         pending.current = null
-        if (!enabled || container.current?.querySelector(`[data-timeline-block="${index}"]`)) return true
-        return new Promise<boolean>(resolve => {
+        if (!enabled) return true
+        const offset = virtualizer.getOffsetForIndex(index, "center")
+        if (!offset) return false
+        if (
+          container.current?.querySelector(`[data-timeline-block="${index}"]`)
+        ) {
+          // Coarse mounting only; the caller aligns the mounted message after
+          // checking its view fence. No old index retry can undo a later scroll.
+          virtualizer.scrollToOffset(offset[0], { align: "start" })
+          return true
+        }
+        return new Promise<boolean>((resolve) => {
           pending.current = { index, resolve }
-          virtualizer.scrollToIndex(index, { align: "center" })
+          virtualizer.scrollToOffset(offset[0], { align: "start" })
         })
       }
     }
@@ -69,12 +120,33 @@ export function VirtualChatTimeline<T>({
     }
   }, [enabled, messageBlocks, navigationRef, virtualizer])
   return (
-    <div ref={container} className="relative w-full" style={enabled ? { height: virtualizer.getTotalSize() } : undefined}>
-      {(enabled ? rows.map(row => ({ index: row.index, row })) : blocks.map((_, index) => ({ index, row: null }))).map(({ index, row }) => (
-        <div key={getKey(index)} data-index={index} data-timeline-block={index}
+    <div
+      ref={container}
+      className="relative w-full"
+      style={enabled ? { height: virtualizer.getTotalSize() } : undefined}
+    >
+      {(enabled
+        ? rows.map((row) => ({ index: row.index, row }))
+        : blocks.map((_, index) => ({ index, row: null }))
+      ).map(({ index, row }) => (
+        <div
+          key={getKey(index)}
+          data-index={index}
+          data-timeline-block={index}
+          data-timeline-key={getKey(index)}
           ref={enabled ? virtualizer.measureElement : undefined}
           className="flex w-full flex-col items-center"
-          style={row ? { position: "absolute", top: 0, left: 0, transform: `translateY(${row.start - scrollMargin}px)` } : undefined}>
+          style={
+            row
+              ? {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  transform: `translateY(${row.start - scrollMargin}px)`
+                }
+              : undefined
+          }
+        >
           {renderBlock(blocks[index], index)}
         </div>
       ))}

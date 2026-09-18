@@ -150,3 +150,50 @@ export async function qualifyStorageInterleavings(page: Page) {
     expect(final.error).toBe('fork_chat_settings_unavailable')
   } finally { await second.close() }
 }
+
+/** Overlapping production transactions must preserve cursor, confirmation and recovery fields. */
+export async function qualifySelectionRecordConcurrency(page: Page) {
+  const { expect } = await import('@playwright/test')
+  await injectHistoryStorage(page)
+  const expected = await page.evaluate(async () => {
+    const api = (window as unknown as Window & { __h1Storage: typeof import('./history-storage-entry') }).__h1Storage
+    const owner = await api.getLocalHistoryOwner('h1-source')
+    const scope = { profile_id: owner.profile_id, client_session_id: 'concurrent-owner-view' }
+    const view = { view_session_id: 'concurrent-view', owner_key: owner.owner_key, conversation_id: owner.conversation_id, interpretation: { kind: 'parent_graph_v1' as const }, cursor: { kind: 'after_message' as const, message_id: 'h1-a' }, selection_revision: 1 }
+    const confirmation = { version: 1 as const, projection_id: 'concurrent-confirmation', owner_key: owner.owner_key, conversation_id: owner.conversation_id, source_digest: 'source', fences: { conversation: 'c', history: 'h', settings: 's' }, source_members: [], ordered_path_ids: [], cursor: { kind: 'empty' as const }, selection_revision: 1 }
+    const turn = { operation_id: 'concurrent-turn', origin_view: view, owner_key: owner.owner_key, conversation_id: owner.conversation_id, selection_digest: 'selected', request_context_digest: 'request', created_at: 1, input_id: 'pending-input', assistant_id: 'pending-result', input_text: 'Pending input', input_images: [], result_text: '', state: 'dispatching' as const }
+    const later = { ...view, cursor: { kind: 'after_message' as const, message_id: 'h1-b' }, selection_revision: 2 }
+    await Promise.all([
+      api.saveHistoryBookmark(scope, later),
+      api.savePendingHistoryConfirmation(scope, view, confirmation),
+      api.saveHistoryTurnRecovery(scope, view, turn)
+    ])
+    const anotherScope = { ...scope, client_session_id: 'independent-owner-view' }
+    const anotherView = { ...view, view_session_id: 'independent-view' }
+    await Promise.all([
+      api.markPendingHistoryConfirmationDispatched(scope, view, confirmation),
+      api.saveHistoryTurnRecovery(scope, view, { ...turn, result_text: 'Unacknowledged result', state: 'generated_unsaved' }),
+      api.saveHistoryBookmark(scope, { ...later, selection_revision: 3 }),
+      api.saveHistoryBookmark(anotherScope, anotherView)
+    ])
+    return { scope, anotherScope, owner: { owner_key: owner.owner_key, conversation_id: owner.conversation_id }, view: { ...later, selection_revision: 3 }, confirmation, anotherView }
+  })
+  const verify = async () => {
+    const stored = await page.evaluate(async data => {
+      const api = (window as unknown as Window & { __h1Storage: typeof import('./history-storage-entry') }).__h1Storage
+      return { main: await api.loadHistoryBookmark(data.scope, data.owner), other: await api.loadHistoryBookmark(data.anotherScope, data.owner), turns: await api.loadHistoryTurnRecoveries(data.scope, data.owner) }
+    }, expected)
+    expect(stored.main?.view).toEqual(expected.view)
+    expect(stored.main?.pending_confirmation).toEqual(expected.confirmation)
+    expect(stored.main?.pending_dispatch_started).toBe(true)
+    expect(stored.main?.pending_view_session_id).toBe('concurrent-view')
+    expect(stored.main?.pending_turns?.['concurrent-turn']).toMatchObject({ input_id: 'pending-input', assistant_id: 'pending-result', state: 'generated_unsaved', result_text: 'Unacknowledged result' })
+    expect(stored.other?.view).toEqual(expected.anotherView)
+    expect(stored.other?.pending_turns).toBeUndefined()
+    expect(stored.turns).toHaveLength(1)
+  }
+  await verify()
+  await page.reload()
+  await injectHistoryStorage(page)
+  await verify()
+}

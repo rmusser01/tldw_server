@@ -340,7 +340,8 @@ export type MessageResearchActions = {
 export const PlaygroundMessage = (props: Props) => {
   const articleRef = useRef<HTMLElement | null>(null)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
-  const [editMode, setEditMode] = React.useState(false)
+  const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
+  const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [isUserChatBubble] = useStorage("userChatBubble", true)
   const [autoCopyResponseToClipboard] = useStorage(
@@ -817,7 +818,16 @@ export const PlaygroundMessage = (props: Props) => {
   )
   const resolvedRole = props.role ?? (props.isBot ? "assistant" : "user")
   const isSystemMessage = resolvedRole === "system"
-  const renderUserBubble = isUserChatBubble && !props.isBot && !isSystemMessage && !showCharacterPortraits
+  const prefersUserBubble = isUserChatBubble && !props.isBot && !isSystemMessage && !showCharacterPortraits
+  // Keep the active form mounted while presentation preferences hydrate/change.
+  // Identity, role and action authority continue to come from current props.
+  const renderUserBubble = !props.isBot && !isSystemMessage &&
+    (editPresentation === null ? prefersUserBubble : editPresentation === "bubble")
+  const setEditMode = React.useCallback((editing: boolean) => {
+    setEditPresentation(current => editing
+      ? current ?? (prefersUserBubble ? "bubble" : "flat")
+      : null)
+  }, [prefersUserBubble])
   const speakerMatchesCharacterIdentity =
     props.speakerCharacterId == null ||
     !props.characterIdentity?.id ||
@@ -948,7 +958,6 @@ export const PlaygroundMessage = (props: Props) => {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    if (renderUserBubble) return
 
     const handleEditMessage = (event: Event) => {
       const detail = (event as CustomEvent<{ messageId?: string }>).detail
@@ -966,7 +975,7 @@ export const PlaygroundMessage = (props: Props) => {
     return () => {
       window.removeEventListener(EDIT_MESSAGE_EVENT, handleEditMessage)
     }
-  }, [renderUserBubble, props.isBot, props.messageId, props.serverMessageId])
+  }, [setEditMode, props.isBot, props.messageId, props.serverMessageId])
 
   const {
     thumb,
@@ -1902,6 +1911,8 @@ export const PlaygroundMessage = (props: Props) => {
     return (
       <PlaygroundUserMessageBubble
         {...props}
+        editMode={editMode}
+        onEditModeChange={setEditMode}
         role={resolvedRole}
         onDelete={props.onDeleteMessage ? handleDelete : undefined}
       />

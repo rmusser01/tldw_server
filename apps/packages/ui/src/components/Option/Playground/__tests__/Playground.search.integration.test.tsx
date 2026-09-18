@@ -89,7 +89,8 @@ const smartScrollState = vi.hoisted(() => ({
   value: {
     containerRef: { current: null } as React.MutableRefObject<HTMLDivElement | null>,
     isAutoScrollToBottom: true,
-    autoScrollToBottom: vi.fn()
+    autoScrollToBottom: vi.fn(),
+    pauseAutoScroll: vi.fn()
   }
 }))
 
@@ -435,6 +436,8 @@ describe("Playground thread search integration", () => {
       action: "edit", historyId: "history-1", messageId: "m-2"
     } })))
     await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    expect(smartScrollState.value.pauseAutoScroll).toHaveBeenCalled()
+    expect(smartScrollState.value.pauseAutoScroll.mock.invocationCallOrder.at(-1)).toBeLessThan(reveal.mock.invocationCallOrder[0])
     act(() => actual.result.current.reset())
     await act(async () => { release(true); await Promise.resolve() })
     expect(scroll).not.toHaveBeenCalled()
@@ -459,10 +462,33 @@ describe("Playground thread search integration", () => {
     fireEvent.keyDown(window, { key: "f", ctrlKey: true })
     fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), { target: { value: "beta" } })
     await waitFor(() => expect(reveal).toHaveBeenCalledWith(1))
+    expect(smartScrollState.value.pauseAutoScroll).toHaveBeenCalled()
+    expect(smartScrollState.value.pauseAutoScroll.mock.invocationCallOrder.at(-1)).toBeLessThan(reveal.mock.invocationCallOrder[0])
     act(() => actual.result.current.reset())
     await act(async () => { release(true); await Promise.resolve() })
     expect(scroll).not.toHaveBeenCalled()
     page.unmount()
+  })
+
+  it.each([2, 101])("uses settled indexed navigation for %i messages", async (count) => {
+    const previous = messageOptionState.value.messages
+    messageOptionState.value.messages = [...previous, ...Array.from({length: count - previous.length}, (_, index) => ({id: `extra-${index}`, message: "Other row", isBot: false, role: "user"}))]
+    timelineReveal.current = vi.fn(async () => true)
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    try {
+      smartScrollState.value.containerRef.current!.append(target)
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+      fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), {target: {value: "beta"}})
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: count > 100 ? "auto" : "smooth"}))
+    } finally {
+      page.unmount()
+      messageOptionState.value.messages = previous
+    }
   })
 
   it("forks timeline messages using stable IDs rather than rendered positions", async () => {

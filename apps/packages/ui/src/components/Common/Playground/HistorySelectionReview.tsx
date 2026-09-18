@@ -9,19 +9,19 @@ import { useTranslation } from "react-i18next"
 const forkCopy = {
   prepared: [
     "Fork prepared",
-    "This fork has not been sent. No copy will be retried automatically."
+    "This fork has not been sent. The app will not start another attempt automatically."
   ],
   dispatching: [
     "Fork in progress",
-    "The copy outcome is not confirmed yet. No copy will be retried automatically."
+    "The copy outcome is not confirmed yet. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   ],
   unknown: [
     "Fork status unknown",
-    "A copy may have been created, but its outcome could not be confirmed. No copy will be retried automatically."
+    "A copy may have been created, but its outcome could not be confirmed. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   ],
   partial: [
     "Fork incomplete",
-    "A copy was created. Some content may be missing because copying could not be confirmed as complete. No copy will be retried automatically."
+    "A copy was created. Some content may be missing because copying could not be confirmed as complete. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   ],
   completed: [
     "Fork saved",

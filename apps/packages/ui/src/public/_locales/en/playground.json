@@ -3513,25 +3513,25 @@
     "message": "Fork prepared"
   },
   "historySelection_forkStates_prepared_message": {
-    "message": "This fork has not been sent. No copy will be retried automatically."
+    "message": "This fork has not been sent. The app will not start another attempt automatically."
   },
   "historySelection_forkStates_dispatching_title": {
     "message": "Fork in progress"
   },
   "historySelection_forkStates_dispatching_message": {
-    "message": "The copy outcome is not confirmed yet. No copy will be retried automatically."
+    "message": "The copy outcome is not confirmed yet. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   },
   "historySelection_forkStates_unknown_title": {
     "message": "Fork status unknown"
   },
   "historySelection_forkStates_unknown_message": {
-    "message": "A copy may have been created, but its outcome could not be confirmed. No copy will be retried automatically."
+    "message": "A copy may have been created, but its outcome could not be confirmed. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   },
   "historySelection_forkStates_partial_title": {
     "message": "Fork incomplete"
   },
   "historySelection_forkStates_partial_message": {
-    "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. No copy will be retried automatically."
+    "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
   },
   "historySelection_forkStates_completed_title": {
     "message": "Fork saved"

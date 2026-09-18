@@ -677,7 +677,7 @@ const PlaygroundContent = () => {
     },
     [],
   );
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
+  const { containerRef, isAutoScrollToBottom, autoScrollToBottom, pauseAutoScroll } =
     useSmartScroll(messages, streaming, 120, {
       bottomOffsetPx: composerBottomOffsetPx,
     });
@@ -2233,7 +2233,9 @@ const PlaygroundContent = () => {
     async (messageId: string) => {
       const current = historySelection.fence();
       const index = findMessageIndex(messageId);
-      if (index < 0 || (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index))) return false;
+      if (index < 0) return false;
+      pauseAutoScroll();
+      if (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index)) return false;
       const container = containerRef.current;
       if (!current() || !container) return false;
       const target = container.querySelector<HTMLElement>(
@@ -2243,11 +2245,13 @@ const PlaygroundContent = () => {
       target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
       return true;
     },
-    [containerRef, findMessageIndex, historySelection, messages.length],
+    [containerRef, findMessageIndex, historySelection, messages.length, pauseAutoScroll],
   );
   const scrollToMessageIndex = React.useCallback(
     async (index: number) => {
       const current = historySelection.fence();
+      if (index < 0 || index >= messages.length) return false;
+      pauseAutoScroll();
       if (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index)) return false;
       const container = containerRef.current;
       if (!current() || !container) return false;
@@ -2255,10 +2259,10 @@ const PlaygroundContent = () => {
         `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
       return true;
     },
-    [containerRef, historySelection],
+    [containerRef, historySelection, messages.length, pauseAutoScroll],
   );
 
   const dispatchEditMessage = React.useCallback((messageId: string) => {

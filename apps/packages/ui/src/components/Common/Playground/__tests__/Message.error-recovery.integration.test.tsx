@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
 
+const storedPreferences = vi.hoisted(() => new Map<string, unknown>())
+
 const decodeChatErrorPayloadMock = vi.hoisted(() => vi.fn(() => null))
 const updateChatModelSettingMock = vi.hoisted(() => vi.fn())
 const antdMessageApi = vi.hoisted(() => ({
@@ -58,7 +60,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
+  useStorage: (key: string, defaultValue: unknown) => [storedPreferences.has(key) ? storedPreferences.get(key) : defaultValue, vi.fn()]
 }))
 
 vi.mock("@/components/Common/Markdown", () => ({
@@ -69,16 +71,6 @@ vi.mock("@/components/Common/Markdown", () => ({
 
 vi.mock("../ActionInfo", () => ({
   LoadingStatus: () => null
-}))
-
-vi.mock("../EditMessageForm", () => ({
-  EditMessageForm: () => <div data-testid="edit-form" />
-}))
-
-vi.mock("../PlaygroundUserMessage", () => ({
-  PlaygroundUserMessageBubble: ({ message }: { message: string }) => (
-    <div>{message}</div>
-  )
 }))
 
 vi.mock("@/components/Sidepanel/Chat/FeedbackModal", () => ({
@@ -577,5 +569,29 @@ describe("PlaygroundMessage error recovery integration", () => {
 it('opens a user editor from timeline navigation when portrait cards own rendering', () => {
   render(<PlaygroundMessage {...baseProps} isBot={false} role="user" messageId="timeline-user" message="Selected user row" />)
   act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'timeline-user' } })))
-  expect(screen.getByTestId('edit-form')).toBeInTheDocument()
+  expect(screen.getByRole('textbox')).toBeInTheDocument()
 })
+
+for (const initialPortraits of [true, false]) {
+  it.each(["save", "cancel"])(`keeps the active editor and draft while portrait preference changes from ${initialPortraits} until %s`, async (action) => {
+    const user = userEvent.setup()
+    storedPreferences.set('chatShowCharacterPortraits', initialPortraits)
+    const submit = vi.fn()
+    const props = { ...baseProps, isBot: false, role: 'user' as const, messageId: 'stable-user', message: 'Original row', onEditFormSubmit: submit }
+    const view = render(<PlaygroundMessage {...props} />)
+    act(() => window.dispatchEvent(new CustomEvent('tldw:edit-message', { detail: { messageId: 'stable-user' } })))
+    const editor = screen.getByRole('textbox')
+    await user.clear(editor)
+    await user.type(editor, 'Retained authored draft')
+    storedPreferences.set('chatShowCharacterPortraits', !initialPortraits)
+    view.rerender(<PlaygroundMessage {...props} />)
+    expect(screen.getByRole('textbox')).toBe(editor)
+    expect(editor).toHaveValue('Retained authored draft')
+    await user.click(screen.getByRole('button', { name: action, exact: true }))
+    if (action === 'save') expect(submit).toHaveBeenCalledWith('Retained authored draft', false)
+    else expect(submit).not.toHaveBeenCalled()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByTestId('chat-message').tagName).toBe(initialPortraits ? 'DIV' : 'ARTICLE')
+    storedPreferences.clear()
+  })
+}

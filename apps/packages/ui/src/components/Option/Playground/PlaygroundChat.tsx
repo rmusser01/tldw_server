@@ -1386,7 +1386,7 @@ export const PlaygroundChat = ({
             onFollowUp={onPrepareResearchFollowUp}
           />
         </React.Suspense>
-        <VirtualChatTimeline blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
+        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
             const previousUserMessage = getPreviousUserMessage(block.index)

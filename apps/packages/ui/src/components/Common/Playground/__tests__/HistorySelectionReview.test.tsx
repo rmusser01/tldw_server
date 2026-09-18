@@ -282,3 +282,11 @@ it("retains unresolved fork separately from sends with candidate inspection and 
   expect(selection.allowNewFork).toHaveBeenCalledWith(selection.forkOperations[0])
   expect(screen.queryByRole("button", {name: /Retry fork/})).toBeNull()
 })
+
+it.each(['dispatching', 'unknown', 'partial'] as const)('scopes %s copy guarantees to application attempts and discloses possible server duplicates', state => {
+  const selection = { ...controller(), status: 'ready', forkOperations: [{ operation_id: 'op', owner_key: 'original', state }], inspectForkOperation: vi.fn(), allowNewFork: vi.fn() } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText(/The app will not start another attempt automatically/)).toBeVisible()
+  expect(screen.getByText(/connection failure may have left multiple server copies/)).toBeVisible()
+  expect(screen.queryByText(/No copy will be retried automatically/)).toBeNull()
+})

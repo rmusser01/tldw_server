@@ -1292,19 +1292,19 @@
     "forkStates": {
       "prepared": {
         "title": "Fork prepared",
-        "message": "This fork has not been sent. No copy will be retried automatically."
+        "message": "This fork has not been sent. The app will not start another attempt automatically."
       },
       "dispatching": {
         "title": "Fork in progress",
-        "message": "The copy outcome is not confirmed yet. No copy will be retried automatically."
+        "message": "The copy outcome is not confirmed yet. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
       },
       "unknown": {
         "title": "Fork status unknown",
-        "message": "A copy may have been created, but its outcome could not be confirmed. No copy will be retried automatically."
+        "message": "A copy may have been created, but its outcome could not be confirmed. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
       },
       "partial": {
         "title": "Fork incomplete",
-        "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. No copy will be retried automatically."
+        "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
       },
       "completed": {
         "title": "Fork saved",

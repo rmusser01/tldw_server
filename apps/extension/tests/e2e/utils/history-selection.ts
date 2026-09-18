@@ -1,5 +1,5 @@
 import { injectHistoryStorage } from './history-storage'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Request } from '@playwright/test'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -13,14 +13,16 @@ export async function startHistoryServer(options: { native?: boolean; loseForkRe
   ]]])
   const nativeMetadataOverrides = new Map<string, Record<string, unknown>>()
   const nativeSettings = new Map<string, any>()
-  const holds = new Map<string, { started: () => void; released: Promise<void> }>()
+  const holds = new Map<string, { started: () => void; released: Promise<void>; settled: (event: string) => void }>()
   const holdNext = (method: string, path: string) => {
     let signalStarted!: () => void
     let release!: () => void
     const started = new Promise<void>(resolve => { signalStarted = resolve })
     const released = new Promise<void>(resolve => { release = resolve })
-    holds.set(method + ' ' + path, { started: signalStarted, released })
-    return { started, release }
+    let signalSettled!: (event: string) => void
+    const responseSettled = new Promise<string>(resolve => { signalSettled = resolve })
+    holds.set(method + ' ' + path, { started: signalStarted, released, settled: signalSettled })
+    return { started, release, responseSettled }
   }
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = []
@@ -41,7 +43,11 @@ export async function startHistoryServer(options: { native?: boolean; loseForkRe
     }
     if (req.method === 'OPTIONS') return json({})
     const held = holds.get(req.method + ' ' + path)
-    if (held) holds.delete(req.method + ' ' + path)
+    if (held) {
+      holds.delete(req.method + ' ' + path)
+      res.once('finish', () => held.settled('finished'))
+      res.once('close', () => held.settled('closed'))
+    }
     const waitHeld = async () => { if (held) { held.started(); await held.released } }
     if (!(path === '/api/v1/chats/' && req.method === 'POST')) await waitHeld()
     {
@@ -340,7 +346,7 @@ export async function abortLocalFork(page: Page) {
   expect(await readStore(page, 'messages')).toEqual(before)
 }
 
-export async function largeLegacyReview(page: Page, fullTip = false) {
+export async function largeLegacyReview(page: Page, fullTip = false, bubble = false) {
   await review(page)
   await expect(page.getByText('Complete source / included path: 20001 / 20001', { exact: true })).toBeVisible()
   const list = page.getByRole('list', { name: 'Complete source messages' })
@@ -371,10 +377,65 @@ export async function largeLegacyReview(page: Page, fullTip = false) {
     await expect(page.locator('[data-message-id="legacy-12345"][data-testid="chat-message"]')).toBeVisible()
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('tldw:timeline-action', { detail: { action: 'edit', historyId: 'h1-source', messageId: 'legacy-42' } })))
     await expect(page.locator('[data-message-id="legacy-42"] textarea')).toBeVisible()
+    const editor = page.locator('[data-message-id="legacy-42"] textarea')
+    const assertEditorFits = async () => {
+      const bounds = await editor.evaluate(element => {
+        const form = element.closest('form')!
+        const parent = document.querySelector('[role="log"][aria-label="Chat messages"]')!
+        const box = (node: Element) => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width } }
+        return { scrollport: box(parent), elements: [element, form, ...form.querySelectorAll('button')].map(node => ({ name: node.tagName === 'BUTTON' ? node.textContent : node.tagName, ...box(node) })) }
+      })
+      await test.info().attach('bubble-editor-horizontal-bounds', { body: JSON.stringify(bounds), contentType: 'application/json' })
+      for (const item of bounds.elements) {
+        expect(item.left, item.name ?? 'editor').toBeGreaterThanOrEqual(bounds.scrollport.left)
+        expect(item.right, item.name ?? 'editor').toBeLessThanOrEqual(bounds.scrollport.right)
+      }
+    }
+    const sourceBefore = await readStore(page, 'messages')
+    await editor.fill('UNSAVED REVIEW DRAFT')
+    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
+    expect(await page.getByTestId('chat-message').count()).toBeLessThan(100)
+    await page.getByPlaceholder('Search messages in this conversation').fill('Legacy row 42')
+    await expect(editor).toBeVisible()
+    await expect(editor).toBeInViewport()
+    await expect(editor).toHaveValue('UNSAVED REVIEW DRAFT')
     await page.screenshot({ path: test.info().outputPath('legacy-full-tip-navigation.png') })
+    await page.locator('[data-message-id="legacy-42"]').getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(async () => (await readStore(page, 'messages')).find(row => row.id === 'legacy-42').content).toBe('UNSAVED REVIEW DRAFT')
+    expect((await readStore(page, 'messages')).filter(row => row.id !== 'legacy-42')).toEqual(sourceBefore.filter(row => row.id !== 'legacy-42'))
+    await page.getByPlaceholder('Search messages in this conversation').fill('UNSAVED REVIEW DRAFT')
+    if (bubble) await expect(page.locator('[data-message-id="legacy-42"] .message-bubble')).toBeVisible()
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('tldw:timeline-action', { detail: { action: 'edit', historyId: 'h1-source', messageId: 'legacy-42' } })))
+    if (bubble) await expect(page.locator('[data-message-id="legacy-42"] .message-bubble textarea')).toBeVisible()
+    await editor.fill('CANCEL ONLY THIS DRAFT')
+    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
+    await page.getByPlaceholder('Search messages in this conversation').fill('UNSAVED REVIEW')
+    await expect(editor).toBeVisible()
+    await expect(editor).toBeInViewport()
+    await expect(editor).toHaveValue('CANCEL ONLY THIS DRAFT')
+    if (bubble) {
+      await assertEditorFits()
+      await page.screenshot({ path: test.info().outputPath('legacy-bubble-retained-editor.png') })
+    }
     await page.locator('[data-message-id="legacy-42"]').getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page.locator('[data-message-id="legacy-42"] textarea')).toHaveCount(0)
-    expect((await readStore(page, 'messages')).find(row => row.id === 'legacy-42').content).toBe('Legacy row 42')
+    await expect(editor).toHaveCount(0)
+    expect((await readStore(page, 'messages')).find(row => row.id === 'legacy-42').content).toBe('UNSAVED REVIEW DRAFT')
+    await transcript.evaluate(element => { element.scrollTop = element.scrollHeight })
+    await expect(page.locator('[data-message-id="legacy-19999"][data-testid="chat-message"]')).toBeVisible()
+    await expect(page.locator('[data-message-id="legacy-42"]')).toHaveCount(0)
+    if (bubble) {
+      await page.getByPlaceholder('Search messages in this conversation').fill('UNSAVED REVIEW DRAFT')
+      await expect(page.locator('[data-message-id="legacy-42"] .message-bubble')).toBeVisible()
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('tldw:timeline-action', { detail: { action: 'edit', historyId: 'h1-source', messageId: 'legacy-42' } })))
+      await expect(page.locator('[data-message-id="legacy-42"] .message-bubble textarea')).toBeVisible()
+      await editor.fill('SAVED BUBBLE DRAFT')
+      await assertEditorFits()
+      await page.locator('[data-message-id="legacy-42"]').getByRole('button', { name: 'Save', exact: true }).click()
+      await expect.poll(async () => (await readStore(page, 'messages')).find(row => row.id === 'legacy-42').content).toBe('SAVED BUBBLE DRAFT')
+      expect((await readStore(page, 'messages')).filter(row => row.id !== 'legacy-42')).toEqual(sourceBefore.filter(row => row.id !== 'legacy-42'))
+    }
   }
 }
 
@@ -432,6 +493,7 @@ export async function unknownNativeFork(page: Page, server: Awaited<ReturnType<t
   expect(before.candidate_child_id).toBeUndefined()
   await page.reload()
   await expect(page.getByText('Fork status unknown', { exact: true })).toBeVisible()
+  await expect(page.getByText(/The app will not start another attempt automatically.*multiple server copies/)).toBeVisible()
   const second = await secondPage()
   await expect(second.getByText('Fork status unknown', { exact: true })).toBeVisible()
   await forkAt(second, 'native-a')
@@ -508,6 +570,7 @@ export async function heldNativeForkNavigation(page: Page, server: Awaited<Retur
     await page.goto(nativeHistoryUrl(base))
     if (base.includes('#')) await page.reload()
     await expect(page.getByText(boundary === 'create' ? live ? 'Fork incomplete' : 'Fork status unknown' : 'Fork saved', { exact: true })).toBeVisible()
+    if (boundary === 'create') await expect(page.getByText(/The app will not start another attempt automatically.*multiple server copies/)).toBeVisible()
     const operation = (await readStore(page, 'forkOperations'))[0]
     expect(operation.owner_key).toBe('native-h1-owner')
     expect(operation.conversation_id).toBe('native-source')
@@ -535,7 +598,19 @@ export async function rejectNativeMetadataSettings(page: Page, server: Awaited<R
   await note.fill('REJECTED NATIVE NOTE')
   await note.press('Tab')
   await expect(page.getByText('fork_settings_owner_unavailable', { exact: true })).toBeVisible()
-  await page.screenshot({ path: test.info().outputPath('rejected-native-feedback.png'), fullPage: true })
+  const feedback = page.getByText('fork_settings_owner_unavailable', { exact: true })
+  await feedback.evaluate(async element => {
+    const notice = element.closest('.ant-notification-notice') ?? element
+    await Promise.all(notice.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)))
+  })
+  await expect.poll(() => feedback.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+    return { opacity: getComputedStyle(element).opacity, onTop: hit === element || element.contains(hit) }
+  })).toEqual({ opacity: '1', onTop: true })
+  console.log('H1_FEEDBACK_CAPTURE', await feedback.boundingBox())
+  await feedback.screenshot({ path: test.info().outputPath('rejected-native-feedback-detail.png'), animations: 'disabled' })
+  await page.screenshot({ path: test.info().outputPath('rejected-native-feedback.png'), fullPage: true, animations: 'disabled' })
   expect(settingsWrites()).toHaveLength(before)
   const notes = await page.evaluate(async () => {
     const values = location.protocol === 'chrome-extension:' ? { ...await chrome.storage.sync.get(null), ...await chrome.storage.local.get(null) } : Object.fromEntries(Object.keys(localStorage).map(key => [key, localStorage.getItem(key)]))
@@ -574,6 +649,14 @@ export async function heldNativeFirstCreate(page: Page, server: Awaited<ReturnTy
   await selectNativeCharacter(page)
   await expect(page.getByTestId('chat-input')).toBeVisible()
   const held = server.holdNext('POST', '/api/v1/chats/')
+  const context = page.context()
+  let settle!: (value: { event: 'finished' | 'failed'; error?: string }) => void
+  const requestSettled = new Promise<{ event: 'finished' | 'failed'; error?: string }>(resolve => { settle = resolve })
+  const matches = (request: Request) => request.method() === 'POST' && request.url() === server.url + '/api/v1/chats/'
+  const finished = (request: Request) => { if (matches(request)) settle({ event: 'finished' }) }
+  const failed = (request: Request) => { if (matches(request)) settle({ event: 'failed', error: request.failure()?.errorText }) }
+  context.on('requestfinished', finished)
+  context.on('requestfailed', failed)
   try {
     await page.getByTestId('chat-input').fill('Held first character send')
     await page.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -582,13 +665,24 @@ export async function heldNativeFirstCreate(page: Page, server: Awaited<ReturnTy
     if (live) await page.evaluate(() => { (window as any).__h1LivePage = true; window.dispatchEvent(new CustomEvent('tldw:open-history', { detail: { historyId: 'h1-source', messageId: 'h1-b' } })) })
     else { await page.goto(historyUrl(base)); if (base.includes('#')) await page.reload() }
     await expect(page.getByText('H1 variant B', { exact: true })).toBeVisible()
-    if (live) expect(await page.evaluate(() => (window as any).__h1LivePage)).toBe(true)
+    if (live) {
+      expect(await page.evaluate(() => (window as any).__h1LivePage)).toBe(true)
+      expect(await page.evaluate(() => (window as Window & { __h1QualificationErrors?: string[] }).__h1QualificationErrors ?? [])).not.toContain('stale_selection')
+    }
     held.release()
+    const [delivery, request] = await Promise.all([held.responseSettled, requestSettled])
+    if (request.event === 'failed') expect(request.error).toMatch(/abort|cancel|closed/i)
+    if (live && request.event === 'finished') {
+      // Both actual native handlers report this terminal catch after rejecting the late ACK.
+      await expect.poll(() => page.evaluate(() => (window as Window & { __h1QualificationErrors?: string[] }).__h1QualificationErrors ?? [])).toContain('stale_selection')
+    }
+    console.log('H1_FIRST_CREATE_SETTLED', { live, delivery, request })
+    await expect(page.getByRole('button', { name: /Stop (streaming|generation)/i })).toHaveCount(0)
     await expect(page.getByText('H1 variant B', { exact: true })).toBeVisible()
     expect(server.nativeChats.get('native-child-1')).toEqual([])
     expect(server.requests.filter(row => row.path.endsWith('/chat/completions'))).toEqual([])
     expect(server.requests.filter(row => row.method === 'POST' && row.path.includes('/messages'))).toEqual([])
-  } finally { console.log('H1_FIRST_CREATE_DIAGNOSTICS', JSON.stringify({ errors: await page.evaluate(() => (window as any).__h1QualificationErrors).catch(() => []), requests: server.requests.filter(row => row.method === 'POST') })); held.release() }
+  } finally { console.log('H1_FIRST_CREATE_DIAGNOSTICS', JSON.stringify({ errors: await page.evaluate(() => (window as any).__h1QualificationErrors).catch(() => []), requests: server.requests.filter(row => row.method === 'POST') })); held.release(); context.off('requestfinished', finished); context.off('requestfailed', failed) }
 }
 
 export async function firstNativeCharacterSend(page: Page, server: Awaited<ReturnType<typeof startHistoryServer>>) {
@@ -617,7 +711,7 @@ export async function qualifyChildIsolation(page: Page, server: Awaited<ReturnTy
   await injectHistoryStorage(page)
   await page.evaluate(async compare => {
     const a = (window as any).__h1Storage
-    await a.addFileToSession('h1-source', { id: 'source-file', filename: 'h1-source.txt', type: 'text/plain', content: 'H1 copied document', size: 18, uploadedAt: 1, processed: true })
+    await a.addFileToSession('h1-source', { id: 'source-file', filename: 'h1-source.txt', type: 'text/plain', content: 'H1 copied document', size: 18, uploadedAt: 1, processed: true, ingestJobId: 'source-job', ingestBatchId: 'source-batch', ingestIdempotencyKey: 'source-idempotency', documentDraftId: 'source-document-draft', processingResultRef: { kind: 'ingest_job', id: 'source-job' }, processingStatus: 'ready', processingMode: 'ingest_to_library' })
     if (compare) {
       if (location.protocol === 'chrome-extension:') await chrome.storage.sync.set({ ff_compareMode: true })
       else localStorage.setItem('ff_compareMode', 'true')
@@ -667,6 +761,7 @@ export async function qualifyChildIsolation(page: Page, server: Awaited<ReturnTy
   expect(files.files).toHaveLength(1)
   expect(files.files[0].id).not.toBe('source-file')
   expect(files.files[0].content).toBe('H1 copied document')
+  for (const field of ['ingestJobId', 'ingestBatchId', 'ingestIdempotencyKey', 'documentDraftId', 'processingResultRef', 'processingStatus', 'processingMode']) expect(files.files[0]).not.toHaveProperty(field)
   await injectHistoryStorage(page)
   await page.evaluate(async ({ child, id }) => { await (window as any).__h1Storage.removeFileFromSession(child, id) }, { child, id: files.files[0].id })
   expect((await readStore(page, 'sessionFiles')).find(row => row.sessionId === child).files).toEqual([])
@@ -751,4 +846,69 @@ export async function uncertainNativeCharacterSend(page: Page, server: Awaited<R
  expect(await pending()).toEqual(original)
  expect(server.requests.filter(row => row.method === 'POST' && row.path.endsWith('/chat/completions'))).toHaveLength(1)
  await page.screenshot({ path: test.info().outputPath('native-character-uncertain.png'), fullPage: true })
+}
+
+export async function sendIndependentSourceViews(first: Page, second: Page, server: Awaited<ReturnType<typeof startHistoryServer>>) {
+  const reference = (page: Page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('tldw-h1-playground-reference')!))
+  const original = [await reference(first), await reference(second)]
+  expect(original[0].client_session_id).not.toBe(original[1].client_session_id)
+  const restored: string[] = []
+  const held = server.holdNext('POST', '/api/v1/chat/completions')
+  try {
+    await first.getByTestId('chat-input').fill('Source A continuation')
+    await first.getByRole('button', { name: 'Send message', exact: true }).click()
+    await held.started
+    await send(second, 'Source B continuation')
+    await expect.poll(async () => (await readStore(second, 'messages')).filter(row => row.content === 'H1 deterministic reply').length).toBe(1)
+    held.release()
+    await expect.poll(async () => (await readStore(first, 'messages')).filter(row => row.content === 'H1 deterministic reply').length).toBe(2)
+    const completions = server.requests.filter(row => row.method === 'POST' && row.path.endsWith('/chat/completions'))
+    expect(completions).toHaveLength(2)
+    const rows = await readStore(first, 'messages')
+    expect(rows).toHaveLength(7)
+    const results: string[] = []
+    for (const [variant, page] of [['A', first], ['B', second]] as const) {
+      const input = rows.find(row => row.content === `Source ${variant} continuation`)
+      expect(input.parent_message_id).toBe(`h1-${variant.toLowerCase()}`)
+      const result = rows.find(row => row.parent_message_id === input.id && row.role === 'assistant')
+      expect(result.content).toBe('H1 deterministic reply')
+      results.push(result.id)
+      const request = completions.find(row => row.body.messages.some((message: { content: string }) => message.content === input.content))!
+      expect(request.body.messages.map((message: { content: string }) => message.content)).toEqual(['H1 original question', `H1 variant ${variant}`, input.content])
+      await expect.poll(async () => (await readStore(page, 'historySelections')).some(row => row.view.cursor.message_id === result.id)).toBe(true)
+      const origin = original[variant === 'A' ? 0 : 1]
+      const beforeReload = (await readStore(page, 'historySelections')).find(row => row.client_session_id === origin.client_session_id)
+      expect(beforeReload.view.cursor).toEqual({ kind: 'after_message', message_id: result.id })
+      await page.reload()
+      await expect(page.locator('[data-message-id]').getByText(input.content, { exact: true })).toBeVisible()
+      await expect(page.locator('[data-message-id]').getByText(`H1 variant ${variant === 'A' ? 'B' : 'A'}`, { exact: true })).toHaveCount(0)
+      const fresh = await reference(page)
+      expect(fresh.client_session_id).not.toBe(origin.client_session_id)
+      restored.push(fresh.client_session_id)
+      expect((await readStore(page, 'historySelections')).find(row => row.client_session_id === fresh.client_session_id).view.cursor).toEqual(beforeReload.view.cursor)
+    }
+    const views = (await readStore(first, 'historySelections')).filter(row => results.includes(row.view.cursor.message_id))
+    const testedIds = [...original.map(row => row.client_session_id), ...restored]
+    const testedViews = views.filter(row => testedIds.includes(row.client_session_id))
+    expect(testedViews).toHaveLength(4)
+    expect(new Set(testedViews.map(row => row.view.view_session_id)).size).toBe(4)
+  } finally { held.release() }
+}
+
+export async function rejectUnsupportedLocalFork(page: Page) {
+  await choose(page, 'h1-a')
+  await injectHistoryStorage(page)
+  await page.evaluate(async () => {
+    const api = (window as unknown as Window & { __h1Storage: typeof import('./history-storage-entry') }).__h1Storage
+    await api.saveChatSettingsForKey('local:h1-source', { schemaVersion: 2, updatedAt: '2026-09-17T00:00:00Z', authorNote: 'Required source context' })
+  })
+  await page.reload()
+  await expect(page.getByText('H1 variant A', { exact: true })).toBeVisible()
+  const before = { rows: await readStore(page, 'messages'), histories: await readStore(page, 'chatHistories'), files: await readStore(page, 'sessionFiles') }
+  await forkAt(page, 'h1-a')
+  await expect(page.getByText('unsupported_fork_chat_settings', { exact: true })).toBeVisible()
+  expect(await readStore(page, 'messages')).toEqual(before.rows)
+  expect(await readStore(page, 'chatHistories')).toEqual(before.histories)
+  expect(await readStore(page, 'sessionFiles')).toEqual(before.files)
+  expect(await readStore(page, 'forkOperations')).toEqual([])
 }

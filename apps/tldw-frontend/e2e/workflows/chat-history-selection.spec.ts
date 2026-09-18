@@ -1,6 +1,6 @@
-import { qualifyHistoryStorage, qualifyStorageInterleavings } from '../../../extension/tests/e2e/utils/history-storage'
+import { qualifySelectionRecordConcurrency, qualifyHistoryStorage, qualifyStorageInterleavings } from '../../../extension/tests/e2e/utils/history-storage'
 import { test, expect } from '@playwright/test'
-import { startHistoryServer, seedWebStorage, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, abortLocalFork, largeLegacyReview, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, send, unknownNativeFork, editNativeChildSettings, heldNativeForkNavigation, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead } from '../../../extension/tests/e2e/utils/history-selection'
+import { sendIndependentSourceViews, rejectUnsupportedLocalFork, startHistoryServer, seedWebStorage, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, abortLocalFork, largeLegacyReview, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, send, unknownNativeFork, editNativeChildSettings, heldNativeForkNavigation, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead } from '../../../extension/tests/e2e/utils/history-selection'
 
 test('two mounted views share real IndexedDB and keep independent selected variants', async ({ browser }) => {
   test.setTimeout(90_000)
@@ -25,6 +25,7 @@ test('two mounted views share real IndexedDB and keep independent selected varia
     await first.reload()
     await expect(first.getByText('H1 variant A', { exact: true })).toBeVisible()
     expect((await readStore(first, 'messages')).length).toBe(3)
+    await sendIndependentSourceViews(first, second, server)
   } finally { await context.close(); await server.close() }
 })
 
@@ -57,7 +58,7 @@ test('legacy alternatives survive confirmed before-first and empty boundaries on
   } finally { await context.close(); await server.close() }
 })
 
-for (const scenario of ['transaction abort', '20001-row legacy review', '20001-row full-tip transcript'] as const) {
+for (const scenario of ['unsupported required context', 'transaction abort', '20001-row legacy review', '20001-row full-tip transcript', '20001-row bubble full-tip transcript'] as const) {
   test(`real IndexedDB: ${scenario}`, async ({ browser }) => {
     test.setTimeout(120_000)
     const server = await startHistoryServer()
@@ -65,12 +66,14 @@ for (const scenario of ['transaction abort', '20001-row legacy review', '20001-r
     try {
       const page = await context.newPage()
       await seedWebStorage(page, server.url)
+      if (scenario.includes('bubble')) await page.addInitScript(() => localStorage.setItem('chatShowCharacterPortraits', 'false'))
       await page.goto('/chat')
       await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 30000 })
-      await seedHistory(page, scenario === 'transaction abort' ? {} : { legacy: true, count: 20001 })
+      await seedHistory(page, ['transaction abort', 'unsupported required context'].includes(scenario) ? {} : { legacy: true, count: 20001 })
       await page.goto(historyUrl('/chat'))
-      if (scenario === 'transaction abort') await abortLocalFork(page)
-      else await largeLegacyReview(page, scenario === '20001-row full-tip transcript')
+      if (scenario === 'unsupported required context') { await rejectUnsupportedLocalFork(page); expect(server.requests.filter(row => row.method === 'POST')).toEqual([]) }
+      else if (scenario === 'transaction abort') await abortLocalFork(page)
+      else await largeLegacyReview(page, scenario.includes('full-tip'), scenario.includes('bubble'))
     } finally { await context.close(); await server.close() }
   })
 }
@@ -242,6 +245,7 @@ test('production storage interleaves migration and writers while distinguishing 
     await expect(page.getByTestId('chat-input')).toBeVisible()
     await seedHistory(page)
     await qualifyStorageInterleavings(page)
+    await qualifySelectionRecordConcurrency(page)
   } finally { await context.close(); await server.close() }
 })
 
