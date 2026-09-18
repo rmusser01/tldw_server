@@ -1,0 +1,129 @@
+{
+  "at": "2026-09-18T01:54:13.326Z",
+  "acceptedFindings": [],
+  "partialBoundaryEvidence": [
+    236
+  ],
+  "nativeAcceptancePending": [
+    236
+  ],
+  "revision": "2787043410fc918b2c280d90f753d8fd02b6b35b",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/native236-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native236-review/REVIEW.md",
+      "bytes": 3957,
+      "sha256": "ad0c7e93890c4008c70a2283373ad14f06a82802df4835fc4b4e19b400e2862b",
+      "sourceBytes": 3957,
+      "sourceSha256": "ad0c7e93890c4008c70a2283373ad14f06a82802df4835fc4b4e19b400e2862b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native236-review/AUDIT.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native236-review/AUDIT.json",
+      "bytes": 3834,
+      "sha256": "254471d4dd1eb026ae40f8225e510519360dd8126491401e61b518bf6e6bb6f1",
+      "sourceBytes": 3834,
+      "sourceSha256": "254471d4dd1eb026ae40f8225e510519360dd8126491401e61b518bf6e6bb6f1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native236-review/TIMESTAMP-PROVENANCE-SUPPLEMENT.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native236-review/TIMESTAMP-PROVENANCE-SUPPLEMENT.md",
+      "bytes": 2542,
+      "sha256": "915abdfc76c58aae60e74b367e48692a21e2e2c8971e0837ccd15118ab20868c",
+      "sourceBytes": 2542,
+      "sourceSha256": "915abdfc76c58aae60e74b367e48692a21e2e2c8971e0837ccd15118ab20868c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native236-review/timestamp-provenance.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native236-review/timestamp-provenance.json",
+      "bytes": 4521,
+      "sha256": "905fd0b435870af8b69b65de88a664cd87f2065dec2b94a561e65913eb54e7c8",
+      "sourceBytes": 4521,
+      "sourceSha256": "905fd0b435870af8b69b65de88a664cd87f2065dec2b94a561e65913eb54e7c8",
+      "encoding": "identity"
+    }
+  ],
+  "omitted": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/retry256-worldbook255-gate.json",
+      "sha256": "005697aa71f6477938a50c73d9725f163611833923a2fd717adb09bc9664f1e3",
+      "status": "RELEASED",
+      "at": "2026-09-17T23:41:52.536Z",
+      "fact": "Released targeted existing-profile upgrade at frozen source commit.",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/retry256-startup-safe.json",
+      "sha256": "b267bcd53f5e1d4874024eb50414d500e818d161677a223d4d74d8a83512748c",
+      "at": "2026-09-17T23:50:34.397Z",
+      "fact": "Records frozen source commit and successful second identical helper launch without profile/data changes.",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/binding.private.json",
+      "sha256": "b4012e7af0fab8a83f59f5cb1f2baf147475510ee74913346dbe5a4b38b11172",
+      "status": "inspected by selected non-secret fields only",
+      "fact": "Binds pg-single to frozen source commit.",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/frontend-1789688709480-0a70b120-4229-4036-bf29-a8e9ee3af0c2.process.private.json",
+      "sha256": "16f9a8f047d2ee3007c4a1de6b98a848370bc75497dd934f51e4d32f8bd9e401",
+      "status": "final receipt status exited",
+      "startedAt": "2026-09-17T23:45:09.480Z",
+      "fact": "Frontend process source commit is frozen 2787043410fc918b2c280d90f753d8fd02b6b35b.",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/backend-1789688805806-06132a52-fb3a-449f-b4b8-cf7f60670181.process.private.json",
+      "sha256": "d761c147d74eb860490323fcae6591fa3c80e54f9ab3ea4cac3cd5f8b5da9379",
+      "status": "final receipt status exited",
+      "startedAt": "2026-09-17T23:46:45.806Z",
+      "fact": "Backend process source commit is frozen 2787043410fc918b2c280d90f753d8fd02b6b35b.",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model236-picker.txt",
+      "sha256": "ca38013de5052aee03a57da4c55dec39db164df56b6ee1a3509b40479e3ba25e",
+      "at": "2026-09-17T23:54:19.166Z",
+      "status": "configured qualified model healthy in picker",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model236-reselected.txt",
+      "sha256": "24810e5d4f89495306a510b831be0b0f11d1291660428227e8f9ecccf8bd28ae",
+      "at": "2026-09-17T23:55:27.168Z",
+      "status": "same selection rendered healthy as LLaMa.cpp",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model236-sent.txt",
+      "sha256": "ec40bc78c017ccf57cb951b2c6291d46923662e7eec4f4cce7094226ef8346d6",
+      "at": "2026-09-17T23:57:24.318Z",
+      "status": "character-mode send after selection",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model236-reloaded-output.txt",
+      "sha256": "0ac938c96f80d9725e07c3dc7a2c79c9c1fca97f4d2eacbcb91e90cbb9ed5726",
+      "status": "post-send reload retained",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model236-canonical-final-projection.json",
+      "sha256": "52a2060a621002b5237490050983f59510c0dee8e2098e9e964560115b100a82",
+      "at": "2026-09-18T00:00:33.575Z",
+      "status": "HTTP 200 canonical readback; exact output predicate false and not accepted for UAT236",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    }
+  ]
+}

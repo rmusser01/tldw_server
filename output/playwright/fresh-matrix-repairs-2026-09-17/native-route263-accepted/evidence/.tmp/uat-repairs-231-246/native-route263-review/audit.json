@@ -1,0 +1,500 @@
+{
+  "task": "UAT263 / TASK13260.205 native Character retry route acceptance",
+  "at": "2026-09-18T01:55:38.473Z",
+  "verdict": "CLEAR bounded UAT263 owned child route and reload",
+  "checks": [
+    {
+      "name": "Original saved parent loaded by normal navigation with actual200 canonical two rows",
+      "pass": true
+    },
+    {
+      "name": "Original user question and reasoning-only failed assistant remain intact",
+      "pass": true
+    },
+    {
+      "name": "Native action clicks visible Retry same model without response injection",
+      "pass": true
+    },
+    {
+      "name": "Actual child201 retains original parent and Character3",
+      "pass": true
+    },
+    {
+      "name": "Exactly two accepted copied-prefix messages preserve user and prior failed assistant",
+      "pass": true
+    },
+    {
+      "name": "Actual Character completion and successful persistence target accepted child",
+      "pass": true
+    },
+    {
+      "name": "Persist request contains exact final BEEP BOOP for new assistant",
+      "pass": true
+    },
+    {
+      "name": "Accepted branch URL and visible saved answer agree before reload",
+      "pass": true
+    },
+    {
+      "name": "Actual feedback identity follows child and new saved assistant",
+      "pass": true
+    },
+    {
+      "name": "Normal reload remains on same child and returns three canonical rows",
+      "pass": true
+    },
+    {
+      "name": "Reload retains accepted copied-prefix IDs and exact old content",
+      "pass": true
+    },
+    {
+      "name": "New canonical assistant independently verifies exact final answer and raw hash",
+      "pass": true
+    },
+    {
+      "name": "Safe root projection matches all canonical IDs/bytes/final answers",
+      "pass": true
+    },
+    {
+      "name": "Old failure remains visibly present after successful child reload",
+      "pass": true
+    },
+    {
+      "name": "Pre-submit UI includes prior local success variant; not assumed clean two-row state",
+      "pass": true
+    },
+    {
+      "name": "Observer is passive for captured chat requests and emits no auth header values",
+      "pass": true
+    },
+    {
+      "name": "Reviewed source and original fixture fingerprints match immutable binding",
+      "pass": true
+    },
+    {
+      "name": "Preparation gate/completion/dependency-reuse proofs match binding",
+      "pass": true
+    },
+    {
+      "name": "Owned API/Next receipts cover original load through child reload",
+      "pass": true
+    },
+    {
+      "name": "Startup snapshot independently matches exact receipt PIDs and binding",
+      "pass": true
+    },
+    {
+      "name": "Upgrade preserves preceding original profile/init/holder fingerprints",
+      "pass": true
+    },
+    {
+      "name": "Six copied source/test files equal independently reviewed and manifested hashes",
+      "pass": true
+    },
+    {
+      "name": "Source intentionally copies accepted prefix before publishing child route/store",
+      "pass": true
+    },
+    {
+      "name": "Existing Character callback carries accepted child through guarded route replacement",
+      "pass": true
+    },
+    {
+      "name": "Independent maintained causal/control review approved with109 plus8 passes",
+      "pass": true
+    },
+    {
+      "name": "Original stale-route diagnosis remains independently retained",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "parent": "fc286396-bc65-4a6a-9e92-9034a3183294",
+    "child": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+    "characterId": 3,
+    "originalRead": {
+      "at": "2026-09-18T01:43:52.637Z",
+      "observedAt": "2026-09-18T01:43:56.268Z",
+      "status": 200,
+      "messages": [
+        {
+          "id": "0b7eadcb-d20c-433f-82a1-c1be9b8ee796",
+          "conversationId": "fc286396-bc65-4a6a-9e92-9034a3183294",
+          "sender": "user",
+          "contentChars": 19,
+          "contentSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc",
+          "finalChars": 19,
+          "finalSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc"
+        },
+        {
+          "id": "192c8d4b-b96e-409e-a94a-7cc5fd50bc7d",
+          "conversationId": "fc286396-bc65-4a6a-9e92-9034a3183294",
+          "sender": "assistant",
+          "contentChars": 13271,
+          "contentSha256": "8ade5470903fb6919060027a8d394a1112884979e349a56ac3a5d646bd1873b9",
+          "finalChars": 0,
+          "finalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    "retry": {
+      "at": "2026-09-18T01:44:32.133Z",
+      "createAt": "2026-09-18T01:44:32.219Z",
+      "status": 201,
+      "copiedPrefix": [
+        {
+          "at": "2026-09-18T01:44:32.257Z",
+          "status": 201,
+          "id": "439fe389-cd47-4bd4-b3e1-876bbbe4c0b8",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "sender": "user",
+          "contentChars": 19,
+          "contentSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc",
+          "finalChars": 19,
+          "finalSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc"
+        },
+        {
+          "at": "2026-09-18T01:44:32.283Z",
+          "status": 201,
+          "id": "2743aaa5-6fc6-4e5d-8778-a81904e83475",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "sender": "assistant",
+          "contentChars": 13271,
+          "contentSha256": "8ade5470903fb6919060027a8d394a1112884979e349a56ac3a5d646bd1873b9",
+          "finalChars": 0,
+          "finalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "completionRequestAt": "2026-09-18T01:44:32.453Z",
+      "completionResponseAt": "2026-09-18T01:44:34.535Z",
+      "completionStatus": 200,
+      "persistAt": "2026-09-18T01:44:34.668Z",
+      "persistStatus": 200,
+      "newAssistantMessageId": "pa_9a9f-515c-dd9-8ecc",
+      "persistContentSha256": "eb2720e4d395baf6d1f0e307daf11ae505a959bc20e794a7a78bda09319dd240",
+      "persistContentChars": 13212,
+      "observedUrl": "http://127.0.0.1:18782/chat?mode=character&characterId=3&chatId=0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+      "observedAt": "2026-09-18T01:45:28.036Z",
+      "feedback": [
+        {
+          "at": "2026-09-18T01:44:37.711Z",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "messageId": "pa_9a9f-515c-dd9-8ecc"
+        }
+      ]
+    },
+    "canonicalReload": {
+      "at": "2026-09-18T01:46:13.785Z",
+      "observedAt": "2026-09-18T01:46:14.633Z",
+      "url": "http://127.0.0.1:18782/chat?mode=character&characterId=3&chatId=0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+      "status": 200,
+      "messages": [
+        {
+          "id": "439fe389-cd47-4bd4-b3e1-876bbbe4c0b8",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "sender": "user",
+          "contentChars": 19,
+          "contentSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc",
+          "finalChars": 19,
+          "finalSha256": "94ef44494eff6e0b5af965c02942d0f070732e9e6d66033e6d1fa241e47cd8bc"
+        },
+        {
+          "id": "2743aaa5-6fc6-4e5d-8778-a81904e83475",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "sender": "assistant",
+          "contentChars": 13271,
+          "contentSha256": "8ade5470903fb6919060027a8d394a1112884979e349a56ac3a5d646bd1873b9",
+          "finalChars": 0,
+          "finalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "id": "pa_9a9f-515c-dd9-8ecc",
+          "conversationId": "0742e5b4-0ae7-4004-8691-1d0bc41c5f65",
+          "sender": "assistant",
+          "contentChars": 13212,
+          "contentSha256": "eb2720e4d395baf6d1f0e307daf11ae505a959bc20e794a7a78bda09319dd240",
+          "finalChars": 10,
+          "finalSha256": "e7b60945f214701508feede75e9847c3ff6096a8d097cf6143d07c1ad07b09b0"
+        }
+      ],
+      "newFinalAnswerExact": true,
+      "oldAssistantFinalEmpty": true
+    },
+    "runtime": {
+      "revision": "2ff90d14ae2d8cc1686cb403b8c3a147cc53427c",
+      "bindingSha256": "acad64112813e32bf195eb76a024372b0dd8f3adde5042a2002d726b461191ed",
+      "sourceManifestSha256": "a46959a992d3e66757197ec7f463c82f4eec09655e3548c4682aee364e7c0429",
+      "profileSha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "initializationSha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "holderSha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "receipts": [
+        {
+          "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/backend-1789695690958-5b7b7745-3ce6-4327-ba11-c38856bdb9e4.process.private.json",
+          "pid": 77447,
+          "action": "backend",
+          "startedAt": "2026-09-18T01:41:30.958Z",
+          "endedAt": null,
+          "observedSha256": "14786211055a81aa2ef54447aa465a20b9763cb9c230df723790e9f12248cf3b",
+          "bindingMatches": true,
+          "coversEvidence": true
+        },
+        {
+          "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/frontend-1789695714835-7d72f11c-5167-46f7-b87f-8e3cf1d24130.process.private.json",
+          "pid": 78635,
+          "action": "frontend",
+          "startedAt": "2026-09-18T01:41:54.836Z",
+          "endedAt": null,
+          "observedSha256": "3799633fa5dd689faac2b468155c5f3c1204c6c3193c86969c3f4dd7c775374a",
+          "bindingMatches": true,
+          "coversEvidence": true
+        }
+      ],
+      "sourceHashes": [
+        {
+          "path": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+          "sha256": "ee1349b4059581d49667e725767db308fe40ecac0f87c32002f82fa6cf60c3e9",
+          "reviewedSha256": "ee1349b4059581d49667e725767db308fe40ecac0f87c32002f82fa6cf60c3e9",
+          "matchesManifest": true
+        },
+        {
+          "path": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+          "sha256": "6fa7aa29e70104aa241113beb3a01a84f664ee3675e719ae5287e7ec547069db",
+          "reviewedSha256": "6fa7aa29e70104aa241113beb3a01a84f664ee3675e719ae5287e7ec547069db",
+          "matchesManifest": true
+        },
+        {
+          "path": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+          "sha256": "0b0524c04945282aba4f9add789fbba1d5f735a235fb92221a6d9fc0ae85db1b",
+          "reviewedSha256": "0b0524c04945282aba4f9add789fbba1d5f735a235fb92221a6d9fc0ae85db1b",
+          "matchesManifest": true
+        },
+        {
+          "path": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+          "sha256": "9ab6e6f727f3ce573edf25496a3421db597fe99e9f31089502556d29ecb91a98",
+          "reviewedSha256": "9ab6e6f727f3ce573edf25496a3421db597fe99e9f31089502556d29ecb91a98",
+          "matchesManifest": true
+        },
+        {
+          "path": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+          "sha256": "ec6ddb62f75bf7c12eceae7d8db1d2db7c1cb79e3d0941662cb2a2d5d012d3d0",
+          "reviewedSha256": "ec6ddb62f75bf7c12eceae7d8db1d2db7c1cb79e3d0941662cb2a2d5d012d3d0",
+          "matchesManifest": true
+        },
+        {
+          "path": "apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+          "sha256": "bc4983feb9e494c000832a2f63bf84930ee5c99718eb70f9dbf2979f17b4dbbe",
+          "reviewedSha256": "bc4983feb9e494c000832a2f63bf84930ee5c99718eb70f9dbf2979f17b4dbbe",
+          "matchesManifest": true
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Native UAT263 URL/child persistence/feedback/reload boundary accepted only. UAT261 provider deviations and old failed reasoning-only assistant remain unchanged; one successful response does not establish model reliability.",
+    "Original canonical GET had two rows and its immediate UI was still preparing. Retry-started UI later contains a prior visible successful variant at5:42 PM. The source copies an accepted history prefix; actual child has copied user, copied old failed assistant and newly persisted assistant. This is not proof that a fresh fully settled two-row parent always produces three rows.",
+    "The retained captures do not determine why the earlier local success variant reappeared between initial GET and Retry. They neither establish intended local-hydration behavior nor prove a separate stale-content defect. No new native calls were made to classify it.",
+    "The old assistant remains visibly interrupted after reload, while the new canonical assistant has exact final BEEP BOOP. Raw reasoning is omitted; hashes/lengths identify each distinct record.",
+    "Normal reload resolves child directly. This does not certify other browser histories, PG-multi native retry, all account/cancel permutations or full fresh48 acceptance; maintained controlled regression evidence supplies reviewed coverage.",
+    "Process receipts are immutable-binding references with observed lifecycle bytes, not new live-process inspection. No product/browser/model/DB/runtime/Git/Backlog changes; only this safe review packet was written."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-original-opened.txt",
+      "bytes": 20884,
+      "sha256": "135772f4b29fd2947e53b3944172d90a2be9afc3e160a911b5ffa35f31e40a2d",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-retry-started.txt",
+      "bytes": 6567,
+      "sha256": "21ad332b5ac45f4bdf82c9e99f8e7860969cb1f399f159c22760c030ddd3292f",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-retry-observed.txt",
+      "bytes": 157322,
+      "sha256": "9ce38de307fc2e51bf6814917ff58b000b0b10f6dff0a808a90d97b94b7e59a9",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-reloaded.txt",
+      "bytes": 35680,
+      "sha256": "2c469d91445d4eba36943f171b3b3a7c6c8ff03d9737dd67d3144c0609d39667",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-reloaded-projection.json",
+      "bytes": 968,
+      "sha256": "161b6e341b557100d1c380bf8df9412bc31c3b186bde477285cb45ca2d9b402c",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-observer-installed.txt",
+      "bytes": 2900,
+      "sha256": "4bbd3a598cbba3efc8f20d47315062f41c6d8b29735e75a685978e05d9d7dbf0",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-original-open.js",
+      "bytes": 468,
+      "sha256": "9532378b63b0febae57ea672b14091a6f7afe9ef552205e0b48123c82a55872c",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/route263-reload.js",
+      "bytes": 433,
+      "sha256": "cc9073a5f979aeeda68aba9f3c3ce766af96257e37c2a7600bede0537f36c0ed",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/binding.private.json",
+      "bytes": 1652,
+      "sha256": "acad64112813e32bf195eb76a024372b0dd8f3adde5042a2002d726b461191ed",
+      "privateHashOnly": true
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "bytes": 11397,
+      "sha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "privateHashOnly": true
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "bytes": 217,
+      "sha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "privateHashOnly": true
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "bytes": 1594,
+      "sha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "privateHashOnly": true
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/pg-single-source-manifest.json",
+      "bytes": 8594853,
+      "sha256": "a46959a992d3e66757197ec7f463c82f4eec09655e3548c4682aee364e7c0429",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/gate.json",
+      "bytes": 1293,
+      "sha256": "a04a40c411bd6a197f6999d73a626f22d53b08fbb17bc62fa90b53ada3f9eefd",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/complete.json",
+      "bytes": 562,
+      "sha256": "4b762f05def1d47c22b3051e7259d9e4b8f42b4f5f8aa582b301b095006f4d7f",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/python-reuse.json",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/backend-1789695690958-5b7b7745-3ce6-4327-ba11-c38856bdb9e4.process.private.json",
+      "bytes": 1230,
+      "sha256": "14786211055a81aa2ef54447aa465a20b9763cb9c230df723790e9f12248cf3b",
+      "privateHashOnly": true
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/frontend-1789695714835-7d72f11c-5167-46f7-b87f-8e3cf1d24130.process.private.json",
+      "bytes": 1353,
+      "sha256": "3799633fa5dd689faac2b468155c5f3c1204c6c3193c86969c3f4dd7c775374a",
+      "privateHashOnly": true
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/routes263264-startup-safe.json",
+      "bytes": 1538,
+      "sha256": "b232f2c8c4789ff4b1da4a87ca5831862ace7971ac073fca57d4458ed46e7a2a",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/binding.private.json",
+      "bytes": 1672,
+      "sha256": "9c1706060b1cf2a987b17b2610f489c8446181dbab829dc7f59de33516a5a6a4",
+      "privateHashOnly": true
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "bytes": 160147,
+      "sha256": "ee1349b4059581d49667e725767db308fe40ecac0f87c32002f82fa6cf60c3e9",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "bytes": 77763,
+      "sha256": "6fa7aa29e70104aa241113beb3a01a84f664ee3675e719ae5287e7ec547069db",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "bytes": 167448,
+      "sha256": "0b0524c04945282aba4f9add789fbba1d5f735a235fb92221a6d9fc0ae85db1b",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "bytes": 68438,
+      "sha256": "9ab6e6f727f3ce573edf25496a3421db597fe99e9f31089502556d29ecb91a98",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "bytes": 17709,
+      "sha256": "ec6ddb62f75bf7c12eceae7d8db1d2db7c1cb79e3d0941662cb2a2d5d012d3d0",
+      "privateHashOnly": false
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+      "bytes": 2565,
+      "sha256": "bc4983feb9e494c000832a2f63bf84930ee5c99718eb70f9dbf2979f17b4dbbe",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/character-route263-review/REVIEW.md",
+      "bytes": 4521,
+      "sha256": "a59bb2bd926e2af3be36c2c05714e4d7fe8cfae741847b3ad7f91300de486702",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/testbot-interruption-diagnosis/retry-route-audit.json",
+      "bytes": 12259,
+      "sha256": "85fdae39c7a6d4604f6c619caa70760b141d5a374d23acf430750a99437303b5",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/testbot-interruption-diagnosis/retry-route-REVIEW.md",
+      "bytes": 4821,
+      "sha256": "4b7bd0d9d9a22cca43177de9fb5327cbfeba913e82c4ea78996cf7ca31853e63",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/testbot-interruption-diagnosis/audit.json",
+      "bytes": 16780,
+      "sha256": "e0f0acafadb6f4620f98f8b59edd82d08ca01b4096b73d48251d6e2ee3d1f536",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/routes263264-pre-stop-safe.json",
+      "bytes": 2558,
+      "sha256": "a394fde6458190cd53a5cd6bf0210474afe249c672177356adb25ac10c1c2381",
+      "privateHashOnly": false
+    },
+    {
+      "path": "backlog/tasks/task-13260.205 - Keep-Character-retry-branch-URL-aligned-with-saved-conversation-UAT-263.md",
+      "bytes": 2848,
+      "sha256": "c3d4c4ca787d17fd553bbe505986761a5ff33beefed9e570509ef68456aefce6",
+      "privateHashOnly": false
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-route263-review/audit.mjs",
+      "bytes": 16228,
+      "sha256": "de7f93fbc084f90b6a7e52930ca46ef972b081a8800e7dd4f90b7df87b3500ec",
+      "privateHashOnly": false
+    }
+  ]
+}

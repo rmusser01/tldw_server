@@ -255,3 +255,11 @@ TASK13260.208. OfficialPGsuite6passed1failed exposes rawconnectioncontext inatta
 TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d14ae. Root retainedoriginalAliceUI/requestevidence; read-onlydiagnosis assigned. No productioneditwhileWorldBookauthoractive. Require actualPG+SQLitecausalcontrols, preserveentitlements/ownership andoriginalAlicecatalogue200acceptance.
 
 - UAT238/257/259native38+retention16checks CLEAR; tasks180199201Done.259verified/3awaiting236263264/5active260261265266267. Fullmatrixheld.265nativeSave500 retained.
+
+-236remainsopen: rootrejectspicker-onlyreviewasAC3closurebecausecapturedreselection. Missingfreshsetup/noreselectioncriterionnowbeingtestedonexistingpreservedMCP251freshprofilea7. Firstchatready200, UIkeyentrydone, originalmodelselectionunchanged.
+
+-263native26+retention16checksaccepted; TASK13260.205Done.260verified/2awaiting236264/5active260261265266267.260265266implemented/frozenunderindependentreview;267soleauthoractive.
+
+## Task210: full World Book lifecycle compatibility
+
+**Status:** In Progress. User-approved concurrent ownership is disjoint from Sources267. Official fixture RED identifies268 PostgreSQL entry connection misuse and269 SQLite entry writes escaping caller rollback. Add independent seeded operation cases for remaining supported mutations; preserve all causal failures and narrow fixes to proven boundaries. Independent review/native acceptance required. Existing260/265/266 fixes committed0d7f2a23c9 and remain the frozen native candidate.

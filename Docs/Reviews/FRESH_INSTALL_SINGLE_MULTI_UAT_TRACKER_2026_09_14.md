@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 267 findings total: 259 verified, 3 reviewed implementations awaiting native acceptance (236/263/264), and 5 active repairs (260/261/265/266/267). UAT262 is verified and committed. Original PostgreSQL ingestion, cited QA and Trash/Restore are verified after independent native and retention reviews. UAT258 is verified after native and retention reviews. Character retry route263 and Sources route264 are reviewed and committed, awaiting an explicit runtime upgrade. World Book timestamp260 is being repaired; provider outcomes261 remain unresolved. Full UAT has not restarted.
+- **Current repair gate:** 269 findings: 260 verified; 5 reviewed fixes awaiting native acceptance (236, 260, 264, 265, 266); 4 under investigation or repair (261, 267, 268, 269). Fresh-setup TestBot now completes and reloads without model reselection; independent review is underway. World Book timestamp/edit/attachment fixes are committed and awaiting native checks. Separate implementers own Sources portability and the remaining World Book lifecycle. Shared-model calls remain serialized. The next full fresh-install matrix has not started.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2914,3 +2914,20 @@ TASK13260.209. OriginalAliceSources reload on2ff90d14ae01:43:19/20 sends Authori
 Tasks180/199/201Done after38nativechecks85hashedinputs and16retentionchecks. SameoriginalQArequest yieldsfiveownedcontexts/citedfacts; citationopensMedia1; Delete204/Trash1/Restore200/Trashempty andnormalreloadpreserve1914characters andallversions. Safe packetmanifest7ecc624ecfbf57158b4858ee3ffc2b374b81885dbe58c1dec9d912b2302b67f2;84inputsfullmatch, solemutabletracker discrepancy explicitlyretained. Private/provider-bearingcaptures hash-only. [Acceptance](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-accepted/README.md) and [retention review](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-authscope257259-238-retention-review/retention-REVIEW.md). Prior defaultanalysis502, quotedTWO, controlled400/no-newversion andharnesserrors remainrecorded; nofullmatrix/providerreliabilityclaim.
 
 -265 nativebaseline confirmed01:50:26.804 on2ff90d14ae: Alice originalWorldBook1 normalDescriptionedit/Save PUTexpected_version1 returns500; visibleerrortoast. Editedsyntheticdescription remainsunsavedinform, persistedcatalogue retainsoriginaldescription. Evidence worldbook265-save-failed.txt.
+
+-236acceptance audit correction: picker-only healthyselection/reselection evidence does notsatisfy taskAC3freshsetup→libraryChat withoutunnecessaryreselection. Taskremainsopen; correctedpartialpacket manifeste704172149b03af0353ad2b18f1e70b9e3fbc5ba3764d43e8dc51b43fc0f98c5 hasacceptedFindings[] andnativeAcceptancePending[236]. Originalreviewprovenanceparagraph separatelysupersededbyfull278timestampbinding; alloriginalsretained. RootcontinuespreservedMCP251freshPGsinglea7setup: originalfirstchat01:55:38.866HTTP200/statusready, normalAPIkeyUIaccess01:57:42; noChatpickerreselection. Thisisboundedmissingcriterionverification, notfullmatrix.
+
+- UAT263verified/Done afternative26checks33inputs+retention16checks. AcceptedchildURL/persistence/feedback/normalreload agree; exactfinalBEEPBOOPretained. Oldfailedassistant andpriorlocalvariant preservedwithunclassifiedcause; no261providerfix/freshsettledtwo-row/fullmatrixclaim. Packetmanifest40299bd2b7992e11f094638e1803ae2820f7a779dabcfa5879993c8d6ab58c70; all33inputhashes match. [Acceptance](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-route263-accepted/README.md).
+
+## UAT268 / UAT269 — World Book lifecycle failures
+
+Both findings are tracked under TASK13260.210, the approved full-lifecycle compatibility work. The official fixture RED run `worldbook210-red-20260917190503` retained four failures.
+
+- **UAT268 — P1:** PostgreSQL `add_entry` uses an unsupported raw connection context and fails before saving. Independent operation cases will check related edit/delete/reorder/detach boundaries so this first failure does not mask them.
+- **UAT269 — P1:** SQLite `add_entry` commits inside a caller-owned transaction. Raising an error in the outer transaction leaves the new entry persisted instead of rolling it back.
+
+A separate test assertion used `entry_id` where the public result has `id`; that is a harness correction, not a product finding. Original failures remain retained. Repairs use the existing transaction API, with actual SQLite/PostgreSQL and rollback controls.
+
+### Parallel execution update
+
+The user approved two implementers in disjoint areas, with a coordinator and independent reviewer/native-UAT worker. Sources267 and World Book lifecycle210 now proceed concurrently. Git, shared infrastructure and fixture ownership remain coordinated. Native workers have exclusive browser/profile/port ownership, and the shared local model is used serially.

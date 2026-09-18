@@ -1,0 +1,42 @@
+{
+  "scope": "read-only native acceptance review for TASK13260.178 / UAT236",
+  "verdict": "ACCEPTED_FOR_PICKER_PROVIDER_MODEL_AVAILABILITY_ONLY",
+  "limitations": [
+    "The retained native picker sequence used the preserved pg-single profile prepared at source revision 86458ab88ce3fa62e6518c9d813c3860254ddb2c; the later runtime source manifest is a7d3155a567afb25982eb360ea24b973cc3249c9. It is not a native replay at frozen review baseline 2787043410fc918b2c280d90f753d8fd02b6b35b.",
+    "The exact TestBot output condition is not accepted here. The canonical UAT261-related projection records exactMatch false. A separate retry-branch projection that is exact is a child branch and cannot stand in for the canonical run.",
+    "The UAT263 route repair is independently implementation-reviewed; it was not replayed through this retained native UAT236 sequence."
+  ],
+  "native_picker_facts": {
+    "picker_before_reselection": "The selected qualified model was visible and healthy, but the picker label grouped it under Custom.",
+    "picker_after_reselection": "The same configured model was rendered as a healthy LLaMa.cpp selection.",
+    "continued_character_flow": "The retained sequence entered Character mode, sent, and reloaded the resulting conversation. This establishes availability and routing to the configured model; it does not establish output semantics."
+  },
+  "independent_focused_command": [
+    "node", "node_modules/vitest/vitest.mjs", "run", "--config", "../../.tmp/uat-repairs-231-246/chat231-232-236-243/vitest.config.ts",
+    "../packages/ui/src/utils/__tests__/resolve-api-provider.test.ts",
+    "../packages/ui/src/utils/__tests__/chat-model-availability.test.ts",
+    "../packages/ui/src/components/Option/Models/__tests__/ModelsBody.model-owner.test.tsx"
+  ],
+  "independent_focused_result": {"exit": 0, "testFiles": 3, "tests": 82, "skips": 0},
+  "inputs": {
+    "owned_manifest_sha256": "43713006f45a461a49d7c6a5e202c98c94838c2da60c6e14ca9bdf3df4a97c8c",
+    "freeze_verification_sha256": "05d8805b3a3eb3a0f10f7113c68dad8d34840e475c7bc3e68258f4a410dd0d0e",
+    "native_profile_safe_manifest_sha256": "c6b146da8364c304a0c61d5c2f85a1757ac6198446c3a201e625aa8a352dabee",
+    "original_pg_single_source_manifest_sha256": "b90438572f42d03c24125349c7566122f0d64e856c11c354a94b8c67e6a5c4ef",
+    "upgraded_pg_single_source_manifest_sha256": "b7901065c3f7859edee24dc879536ef4dfeeccd9715b04d9b6df0a62fcf122fb",
+    "model236_picker_sha256": "ca38013de5052aee03a57da4c55dec39db164df56b6ee1a3509b40479e3ba25e",
+    "model236_reselected_sha256": "24810e5d4f89495306a510b831be0b0f11d1291660428227e8f9ecccf8bd28ae",
+    "model236_sent_sha256": "ec40bc78c017ccf57cb951b2c6291d46923662e7eec4f4cce7094226ef8346d6",
+    "model236_reloaded_output_sha256": "0ac938c96f80d9725e07c3dc7a2c79c9c1fca97f4d2eacbcb91e90cbb9ed5726",
+    "model236_canonical_projection_sha256": "52a2060a621002b5237490050983f59510c0dee8e2098e9e964560115b100a82",
+    "uat261_canonical_projection_sha256": "8a9b64b12af507b902c81719b43abecae06404ec98379381b56199d09274b4ab",
+    "uat261_retry_branch_projection_sha256": "0a90f467756aed2435b3ff8a014f24e947ca1ad4af19a66dec2441bad411e3d9",
+    "uat261_retry_reloaded_projection_sha256": "c5527449379988b81520adc82978b54512db9f6080cc69d2dc16f72f6a35f395"
+  },
+  "reviewed_source_hashes": {
+    "resolve_api_provider": "4228aa4ce1fa50192a783ff61152d709d5827fe7367964c17f0f7127d3630db1",
+    "chat_model_availability": "54482c418ab37454c538a0aa3093012d0d21e167177e49618437fa2d4612aa00",
+    "models_settings_owner": "099bd3d1706b9a24de1f8bf6fc690da801f0c9604ffbfdb30384e72aa8c61b05"
+  },
+  "safety": "This audit contains hashes, source revisions, and summarized UI/contract facts only. It intentionally excludes provider reasoning, credentials, private profiles, request bodies, and runtime logs."
+}
