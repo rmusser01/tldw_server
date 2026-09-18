@@ -5060,7 +5060,8 @@ async def delete_preset(
 # ========================================================================
 
 @router.get("/{chat_id}", response_model=ChatSessionResponse,
-            summary="Get chat session details", tags=["Chat Sessions"])
+            summary="Get chat session details", tags=["Chat Sessions"],
+            dependencies=[Depends(require_expected_user)])
 async def get_chat_session(
     chat_id: str = Path(..., description="Chat session ID"),
     include_settings: bool = Query(
@@ -7460,6 +7461,7 @@ async def update_chat_session(
     "/{chat_id}/settings",
     response_model=ChatSettingsResponse,
     summary="Get chat settings",
+    dependencies=[Depends(require_expected_user)],
     tags=["Chat Sessions"],
 )
 async def get_chat_settings(
@@ -7538,6 +7540,7 @@ async def get_chat_settings(
     "/{chat_id}/settings",
     response_model=ChatSettingsResponse,
     summary="Update chat settings",
+    dependencies=[Depends(require_expected_user)],
     tags=["Chat Sessions"],
 )
 async def update_chat_settings(

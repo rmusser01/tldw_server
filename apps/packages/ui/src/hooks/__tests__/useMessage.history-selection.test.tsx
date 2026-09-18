@@ -1418,6 +1418,8 @@ vi.mock("@/db/dexie/branch", () => ({
   forkRequestDigest: (request: any) => localForks.digest(request)
 }))
 it("mounted branch action captures a stable boundary and returns the committed owner result", async () => {
+  const {historyDigest} = await vi.importActual<any>("@/db/dexie/history-selection")
+  localForks.digest = (value: any) => historyDigest({operation_id: value.operation_id, owner_key: value.owner_key, destination_owner_key: value.destination_owner_key, input: value.input})
   const current = h1.controller.getCurrent()
   current.owner = {
     kind: "local",
@@ -1434,15 +1436,15 @@ it("mounted branch action captures a stable boundary and returns the committed o
     kind: "normal",
     selection: { conversation_id: "history-1" }
   })
-  localForks.prepare.mockResolvedValue({
+  localForks.prepare.mockImplementation(async (request: any) => ({request,
     history: { id: "child" },
     messages: [],
     files: undefined
-  })
+  }))
   localForks.commit.mockImplementation(async (prepared: any) => ({
     state: "committed",
     owner_key: "local-key",
-    operation_id: "op",
+    operation_id: prepared.request.operation_id,
     child_id: prepared.history.id,
     message_map: { a1: "child-a1" }
   }))
@@ -1619,3 +1621,22 @@ it.each(["missing", "unavailable", "mismatch"])(
     expect(mocks.setMessages).not.toHaveBeenCalled()
   }
 )
+it("mounted native fork without local history retains an unknown create and never dispatches the same intent again", async () => {
+  const {memory} = await import("@/hooks/chat/__tests__/local-history-fixture")
+  memory.forkOperations.rows.clear()
+  const projector = await vi.importActual<any>("@/db/dexie/branch")
+  localForks.digest = projector.forkRequestDigest
+  h1.capture.mockImplementation(async (_id, request) => ({...captureFor(request.view), purpose: request.purpose,
+    snapshot: {...captureFor(request.view).snapshot, native_fork_context: {policy: "plain_v1", supported: true, storage_context_digest: "storage"}}}))
+  h1.create.mockRejectedValue(new Error("creation response lost"))
+  mocks.chatBaseState.historyId = null
+  const {result} = renderHook(() => useMessage())
+  let first: any, second: any
+  await act(async () => {first = await result.current.createChatBranch("a1")})
+  await act(async () => {second = await result.current.createChatBranch("a1")})
+  expect(first).toMatchObject({state: "unknown", owner_key: "native-key"})
+  expect(second.operation_id).toBe(first.operation_id)
+  expect(h1.create).toHaveBeenCalledTimes(1)
+  expect(localForks.commit).not.toHaveBeenCalled()
+  expect([...memory.forkOperations.rows.values()][0].request.operation_id).toBe(first.operation_id)
+})

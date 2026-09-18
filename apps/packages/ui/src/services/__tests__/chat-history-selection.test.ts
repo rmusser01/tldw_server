@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls = vi.hoisted(() => ({
   capture: vi.fn(),
+  create: vi.fn(),
+  getSettings: vi.fn(),
+  updateSettings: vi.fn(),
   confirm: vi.fn(),
   append: vi.fn(),
   pending: vi.fn(),
@@ -10,6 +13,9 @@ const calls = vi.hoisted(() => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    createChat: calls.create,
+    getChatSettings: calls.getSettings,
+    updateChatSettings: calls.updateSettings,
     captureHistorySelection: calls.capture,
     confirmHistoryProjection: calls.confirm,
     addChatMessage: calls.append
@@ -578,4 +584,150 @@ it("normalizes absent empty display defaults on the generic native route", () =>
       modelImage: ""
     })
   ).toEqual({ id: "reply", role: "assistant", content: "Reply" })
+})
+
+const plainCapture = () => ({...capture(), purpose: "fork", snapshot: {...capture().snapshot,
+  native_fork_context: {policy: "plain_v1", supported: true, storage_context_digest: "storage"}}})
+const nativeRequest = async (native = owner()) => {
+  calls.capture.mockResolvedValue(plainCapture())
+  const input = await service.captureNativeForkSelection(native, view)
+  const value = {operation_id: "fork-op", owner_key: "native-key", destination_owner_key: "native-key", input}
+  const {historyDigest} = await import("@/db/dexie/history-selection")
+  return {native, request: {...value, request_digest: historyDigest(value)}}
+}
+it.each([undefined, {policy: "plain_v1", supported: false, storage_context_digest: "storage"},
+  {policy: "plain_v1", supported: true, storage_context_digest: "other"}])("requires affirmative same-context native fork proof %j", async proof => {
+  calls.capture.mockResolvedValue({...plainCapture(), snapshot: {...capture().snapshot, native_fork_context: proof}})
+  await expect(service.captureNativeForkSelection(owner(), view)).rejects.toThrow("native_fork_context_unsupported")
+})
+it("revalidates frozen native selection before dispatch and passes original lease/workspace", async () => {
+  const native = {...owner(), scope: {type: "workspace" as const, workspaceId: "original"}}
+  const {request} = await nativeRequest(native)
+  const prepared = await service.prepareNativeFork(native, request)
+  calls.create.mockResolvedValue({id: "child"})
+  const candidate = vi.fn()
+  expect(await service.commitNativeFork(prepared, candidate)).toEqual({state: "legacy_completed", operation_id: "fork-op", owner_key: "native-key", child_id: "child"})
+  expect(calls.create).toHaveBeenCalledWith(expect.objectContaining({character_id: null, assistant_kind: null, assistant_id: null, persona_memory_mode: null}),
+    expect.objectContaining({requestScope: native.request_scope, scope: native.scope}))
+  expect(candidate).toHaveBeenCalledWith("child")
+  await expect(service.commitNativeFork(prepared, candidate)).rejects.toThrow("fork_preparation_consumed")
+})
+it("rejects changed context before any native write", async () => {
+  const {native, request} = await nativeRequest()
+  calls.capture.mockResolvedValue({...plainCapture(), snapshot: {...plainCapture().snapshot, fences: {conversation: "changed", history: "1", settings: "1"}}})
+  await expect(service.prepareNativeFork(native, request)).rejects.toThrow("stale_selection")
+  expect(calls.create).not.toHaveBeenCalled()
+})
+it.each(["response lost", "AbortError"])("uncertain native create never dispatches another copy (%s)", async reason => {
+  const {native, request} = await nativeRequest()
+  const prepared = await service.prepareNativeFork(native, request)
+  calls.create.mockRejectedValue(new Error(reason))
+  expect(await service.commitNativeFork(prepared, vi.fn())).toMatchObject({state: "unknown", owner_key: "native-key", operation_id: "fork-op"})
+  expect(calls.create).toHaveBeenCalledTimes(1)
+  expect(calls.append).not.toHaveBeenCalled()
+})
+it("records candidate before copying and uses only acknowledged child IDs as parents", async () => {
+  const native = owner()
+  const rows = [{id: "u", revision: "1", parent_id: null, role: "user", settled: true},
+    {id: "a", revision: "1", parent_id: "u", role: "assistant", settled: true}]
+  const selectedView = {...view, cursor: {kind: "after_message" as const, message_id: "a"}}
+  calls.capture.mockResolvedValue({...plainCapture(), rows, selected_content: rows.map(row => ({id: row.id, revision: row.revision, message: "  exact  ", images: []})),
+    snapshot: {...plainCapture().snapshot, nodes: rows}, view: selectedView})
+  const input = await service.captureNativeForkSelection(native, selectedView)
+  const value = {operation_id: "fork-op", owner_key: "native-key", destination_owner_key: "native-key", input}
+  const {historyDigest} = await import("@/db/dexie/history-selection")
+  const prepared = await service.prepareNativeFork(native, {...value, request_digest: historyDigest(value)})
+  calls.create.mockResolvedValue({id: "child"})
+  const candidate = vi.fn()
+  calls.append.mockImplementationOnce(async (_cid, payload) => {
+    expect(candidate).toHaveBeenCalledWith("child")
+    expect(payload).toMatchObject({content: "  exact  ", parent_message_id: null})
+    return {id: "child-u", conversation_id: "child", parent_message_id: null, sender: "user"}
+  }).mockRejectedValueOnce(new Error("second row lost"))
+  expect(await service.commitNativeFork(prepared, candidate)).toMatchObject({state: "partial", candidate_child_id: "child"})
+  expect(calls.append.mock.calls[1][1]).toMatchObject({content: "  exact  ", parent_message_id: "child-u"})
+  expect(calls.create).toHaveBeenCalledTimes(1)
+})
+it("fork child settings read/update retain scoped owner and validate response without any browser cache", async () => {
+  const native = {...owner(), scope: {type: "workspace" as const, workspaceId: "original"}}
+  await service.captureHistorySnapshot(native, view, "send")
+  calls.getSettings.mockResolvedValue({conversation_id: "chat", settings: {authorNote: "current server settings"}})
+  expect(await service.readNativeForkSettings(native)).toMatchObject({authorNote: "current server settings"})
+  const patch = {authorNote: "explicit edit"}
+  calls.updateSettings.mockResolvedValue({conversation_id: "chat", settings: patch})
+  expect(await service.updateNativeForkSettings(native, patch)).toMatchObject(patch)
+  expect(calls.updateSettings).toHaveBeenCalledWith("chat", patch, expect.objectContaining({requestScope: native.request_scope, scope: native.scope}))
+  calls.getSettings.mockResolvedValue({conversation_id: "other", settings: patch})
+  await expect(service.readNativeForkSettings(native)).rejects.toThrow("fork_settings_owner_mismatch")
+})
+it("scope loss while fork settings read is held discards its result", async () => {
+  let valid = true
+  const native = {...owner(), validate_lease: () => valid}
+  await service.captureHistorySnapshot(native, view, "send")
+  let resolve!: (value: any) => void
+  calls.getSettings.mockImplementation(() => new Promise(done => {resolve = done}))
+  const pending = service.readNativeForkSettings(native)
+  await vi.waitFor(() => expect(calls.getSettings).toHaveBeenCalledTimes(1))
+  valid = false
+  resolve({conversation_id: "chat", settings: {authorNote: "stale"}})
+  await expect(pending).rejects.toThrow("request_config_scope_changed")
+})
+it("abort during pending creation retains a late acknowledged candidate and sends no rows", async () => {
+  const {native, request} = await nativeRequest()
+  const abort = new AbortController()
+  const prepared = await service.prepareNativeFork(native, request, {signal: abort.signal})
+  let resolve!: (child: any) => void
+  calls.create.mockImplementation(() => new Promise(done => {resolve = done}))
+  const candidate = vi.fn()
+  const pending = service.commitNativeFork(prepared, candidate)
+  await vi.waitFor(() => expect(calls.create).toHaveBeenCalledTimes(1))
+  abort.abort()
+  resolve({id: "late-child"})
+  expect(await pending).toMatchObject({state: "partial", candidate_child_id: "late-child"})
+  expect(candidate).toHaveBeenCalledWith("late-child")
+  expect(calls.create).toHaveBeenCalledTimes(1)
+  expect(calls.append).not.toHaveBeenCalled()
+})
+it("invalidated owner before native dispatch rejects without creating a child", async () => {
+  let valid = true
+  const {native, request} = await nativeRequest({...owner(), validate_lease: () => valid})
+  const prepared = await service.prepareNativeFork(native, request)
+  valid = false
+  expect(await service.commitNativeFork(prepared, vi.fn())).toMatchObject({state: "rejected", code: "request_config_scope_changed"})
+  expect(calls.create).not.toHaveBeenCalled()
+})
+it.each(["", "   "])("rejects unrepresentable blank row %j before first write", async text => {
+  const row = {id: "u", revision: "1", parent_id: null, role: "user", settled: true}
+  const selectedView = {...view, cursor: {kind: "after_message" as const, message_id: "u"}}
+  calls.capture.mockResolvedValue({...plainCapture(), rows: [row], selected_content: [{id: "u", revision: "1", message: text, images: []}],
+    snapshot: {...plainCapture().snapshot, nodes: [row]}, view: selectedView})
+  await expect(service.captureNativeForkSelection(owner(), selectedView)).rejects.toThrow("unsupported_message_payload")
+  expect(calls.create).not.toHaveBeenCalled()
+})
+it("prepared native dispatch retains original scoped authorization and workspace objects", async () => {
+  const native = {...owner(), scope: {type: "workspace" as const, workspaceId: "original"}}
+  const {request} = await nativeRequest(native)
+  const prepared = await service.prepareNativeFork(native, request)
+  native.scope.workspaceId = "ambient-change"
+  native.request_scope.config.serverUrl = "https://other.test"
+  calls.create.mockResolvedValue({id: "child"})
+  expect(await service.commitNativeFork(prepared, vi.fn())).toMatchObject({state: "legacy_completed"})
+  expect(calls.create.mock.calls[0][1]).toMatchObject({scope: {type: "workspace", workspaceId: "original"}, requestScope: {config: {serverUrl: "https://server.test"}}})
+})
+
+it.each(["image", "wrong-parent", "wrong-conversation", "wrong-role"])("validates the image-only native row and acknowledgement (%s)", async mode => {
+  const native = owner()
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJp0AAAAASUVORK5CYII="
+  const row = {id: "u", revision: "1", parent_id: null, role: "user", settled: true}
+  const selectedView = {...view, cursor: {kind: "after_message" as const, message_id: "u"}}
+  calls.capture.mockResolvedValue({...plainCapture(), rows: [row], selected_content: [{id: "u", revision: "1", message: "", images: [image]}], snapshot: {...plainCapture().snapshot, nodes: [row]}, view: selectedView})
+  const input = await service.captureNativeForkSelection(native, selectedView)
+  const value = {operation_id: "image-op", owner_key: "native-key", destination_owner_key: "native-key", input}
+  const {historyDigest} = await import("@/db/dexie/history-selection")
+  const prepared = await service.prepareNativeFork(native, {...value, request_digest: historyDigest(value)})
+  calls.create.mockResolvedValue({id: "child"})
+  calls.append.mockResolvedValue({id: "child-u", conversation_id: mode === "wrong-conversation" ? "elsewhere" : "child", parent_message_id: mode === "wrong-parent" ? "source-u" : null, sender: mode === "wrong-role" ? "assistant" : "user"})
+  expect(await service.commitNativeFork(prepared, vi.fn())).toMatchObject({state: mode === "image" ? "legacy_completed" : "partial"})
+  expect(calls.append).toHaveBeenCalledWith("child", expect.objectContaining({content: "", image_base64: image, parent_message_id: null}), expect.anything())
+  expect(calls.create).toHaveBeenCalledTimes(1)
 })

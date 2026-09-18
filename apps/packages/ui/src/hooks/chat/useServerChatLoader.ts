@@ -760,7 +760,16 @@ export const useServerChatLoader = ({
             setServerChatLoadError("unbound_server_mirror")
             return
           }
-          await tldwClient.initialize().catch(() => null)
+          const control = selectionRef.current
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") {
+            if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+            selectionCurrent = control.fence()
+          }
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") return
+          const forkChild = control?.settingsMode?.(serverChatId, scope) === "fork"
+          const forkOwner = forkChild ? control?.getCurrent().owner : null
+          if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
+          if (!forkChild) await tldwClient.initialize().catch(() => null)
 
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
@@ -773,7 +782,7 @@ export const useServerChatLoader = ({
             try {
               const chat = await tldwClient.getChat(
                 serverChatId,
-                scope ? { scope } : undefined
+                forkOwner?.kind === "native" ? {scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: controller.signal} : scope ? { scope } : undefined
               )
               if (!canCommitCurrentLoad()) {
                 return
@@ -845,9 +854,10 @@ export const useServerChatLoader = ({
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
-                syncedSettings = await syncChatSettingsForServerChat({
+                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : await syncChatSettingsForServerChat({
                   historyId: null,
                   serverChatId,
+                  scope,
                   allowScratchFallback: false
                 })
               } catch {
@@ -973,7 +983,7 @@ export const useServerChatLoader = ({
             return null
           })()
 
-          const list = await fetchAllServerChatMessages(
+          const list = forkChild ? [] : await fetchAllServerChatMessages(
             ({ limit, offset, signal }) =>
               tldwClient.listChatMessages(
                 serverChatId,

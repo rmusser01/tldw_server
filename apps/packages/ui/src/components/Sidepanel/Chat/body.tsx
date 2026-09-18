@@ -1,3 +1,4 @@
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
@@ -257,6 +258,7 @@ export const SidePanelBody = ({
 
   return (
     <>
+      {historySelection && <HistorySelectionReview selection={historySelection} />}
       <div
         role="log"
         aria-live="polite"

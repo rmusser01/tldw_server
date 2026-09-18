@@ -1,4 +1,12 @@
 import {
+  findForkCandidate,
+  loadForkOperations,
+  allowNewForkOperation
+} from "@/db/dexie/fork-operations"
+import type { ForkOperation } from "@/db/dexie/types"
+import type { ChatSettingsRecord } from "@/types/chat-session-settings"
+import type { ChatScope } from "@/types/chat-scope"
+import {
   createElement,
   Fragment,
   type ReactNode,
@@ -21,6 +29,8 @@ import type {
   HistoryTurnRecovery
 } from "@/db/dexie/types"
 import {
+  readNativeForkSettings,
+  updateNativeForkSettings,
   captureHistorySnapshot,
   confirmLegacyHistoryProjection,
   type HistoryOwnerV1
@@ -49,6 +59,8 @@ type PendingConfirmation = {
   intent: LegacyHistoryProjectionConfirmV1
 }
 type SelectionState = {
+  forkCandidate: ForkOperation | null
+  forkSettings: ChatSettingsRecord | null
   owner: HistoryOwnerV1 | null
   bookmarkScope: HistoryBookmarkScope | null
   view: HistoryViewSelectionV1 | null
@@ -68,6 +80,8 @@ type SelectionState = {
   pending: PendingConfirmation | null
 }
 const initialState = (): SelectionState => ({
+  forkCandidate: null,
+  forkSettings: null,
   owner: null,
   bookmarkScope: null,
   view: null,
@@ -195,7 +209,24 @@ export function useHistorySelection(
       pending: PendingConfirmation | null = null
     ) => {
       if (!mounted.current || token !== epoch.current) return false
+      const forkCandidate =
+        owner.kind === "native"
+          ? await findForkCandidate({
+              owner_key: result.view.owner_key,
+              child_id: owner.conversation_id,
+              kind: "native",
+              scope: owner.scope ?? { type: "global" }
+            })
+          : null
+      if (!mounted.current || token !== epoch.current) return false
+      const forkSettings =
+        forkCandidate && owner.kind === "native"
+          ? await readNativeForkSettings(owner, request.current?.signal)
+          : null
+      if (!mounted.current || token !== epoch.current) return false
       publish({
+        forkCandidate,
+        forkSettings,
         owner,
         bookmarkScope: scope,
         view: result.view,
@@ -794,6 +825,188 @@ export function useHistorySelection(
       return null
     }
   }, [publish])
+  const settingsMode = useCallback(
+    (
+      chatId: string | null,
+      scope?: ChatScope
+    ): "ordinary" | "pending" | "fork" => {
+      if (!chatId) return "ordinary"
+      const current = live.current
+      const owner = current.owner
+      if (
+        current.status !== "ready" ||
+        owner?.kind !== "native" ||
+        owner.conversation_id !== chatId ||
+        current.view?.conversation_id !== chatId ||
+        !owner.validate_lease()
+      )
+        return "pending"
+      const actual = owner.scope ?? { type: "global" }
+      const expected = scope ?? actual
+      if (
+        actual.type !== expected.type ||
+        (actual.type === "workspace" &&
+          expected.type === "workspace" &&
+          actual.workspaceId !== expected.workspaceId)
+      )
+        return "pending"
+      return current.forkCandidate ? "fork" : "ordinary"
+    },
+    []
+  )
+  const updateForkSettings = useCallback(
+    async (patch: Partial<ChatSettingsRecord>) => {
+      const current = live.current
+      if (
+        !current.forkCandidate ||
+        current.owner?.kind !== "native" ||
+        current.status !== "ready"
+      )
+        throw new Error("fork_settings_owner_unavailable")
+      const owner = current.owner
+      const token = epoch.current
+      const next = await updateNativeForkSettings(
+        owner,
+        patch,
+        request.current?.signal
+      )
+      if (token !== epoch.current || live.current.owner !== owner)
+        throw new Error("request_config_scope_changed")
+      publish({ ...live.current, forkSettings: next })
+      return next
+    },
+    [publish]
+  )
+  const [forkOperations, setForkOperations] = useState<ForkOperation[]>([])
+  const [forkOperationsError, setForkOperationsError] = useState<string | null>(
+    null
+  )
+  const refreshForkOperations = useCallback(async () => {
+    const current = live.current
+    if (
+      !current.view ||
+      !current.owner ||
+      current.owner.kind === "unavailable"
+    ) {
+      setForkOperations([])
+      return
+    }
+    const view = current.view
+    const owner = current.owner
+    try {
+      const entries = await loadForkOperations({
+        owner_key: view.owner_key,
+        conversation_id: view.conversation_id,
+        kind: owner.kind,
+        scope:
+          owner.kind === "native"
+            ? (owner.scope ?? { type: "global" })
+            : { type: "global" }
+      })
+      if (sameView(live.current.view, view) && live.current.owner === owner) {
+        setForkOperations(entries)
+        setForkOperationsError(null)
+      }
+    } catch (error) {
+      if (sameView(live.current.view, view))
+        setForkOperationsError(errorCode(error))
+    }
+  }, [])
+  useEffect(() => {
+    setForkOperations([])
+    setForkOperationsError(null)
+    void refreshForkOperations()
+  }, [
+    state.owner,
+    state.view?.view_session_id,
+    state.view?.selection_revision,
+    refreshForkOperations
+  ])
+  const inspectForkOperation = useCallback(
+    async (entry: ForkOperation) => {
+      const current = live.current
+      const owner = current.owner
+      if (
+        !entry.candidate_child_id ||
+        !current.view ||
+        !owner ||
+        owner.kind === "unavailable" ||
+        current.view.owner_key !== entry.owner_key ||
+        current.view.conversation_id !== entry.conversation_id
+      )
+        return false
+      if (owner.kind === "native") {
+        const scope = owner.scope ?? { type: "global" }
+        if (
+          !owner.validate_lease() ||
+          scope.type !== entry.context.scope.type ||
+          (scope.type === "workspace" &&
+            entry.context.scope.type === "workspace" &&
+            scope.workspaceId !== entry.context.scope.workspaceId)
+        )
+          return false
+      }
+      const { useStoreMessageOption } = await import("@/store/option")
+      if (live.current.owner !== owner || live.current.view !== current.view)
+        return false
+      return loadConversation(
+        owner.kind === "native"
+          ? {
+              serverChatId: entry.candidate_child_id,
+              scope: entry.context.scope
+            }
+          : { historyId: entry.candidate_child_id },
+        undefined,
+        (receipt) => {
+          if (
+            live.current.owner !== receipt.owner ||
+            live.current.view !== receipt.view ||
+            receipt.view.owner_key !== entry.owner_key ||
+            receipt.view.conversation_id !== entry.candidate_child_id
+          )
+            return
+          const store = useStoreMessageOption.getState()
+          store.setHistoryId(
+            owner.kind === "native" ? null : entry.candidate_child_id!
+          )
+          store.setServerChatMetaLoaded(false)
+          store.setServerChatId(
+            owner.kind === "native" ? entry.candidate_child_id! : null
+          )
+        }
+      )
+    },
+    [loadConversation]
+  )
+  const allowNewFork = useCallback(
+    async (entry: ForkOperation) => {
+      const current = live.current
+      const owner = current.owner
+      if (
+        !current.view ||
+        !owner ||
+        owner.kind === "unavailable" ||
+        owner.kind !== entry.context.kind ||
+        current.view.owner_key !== entry.owner_key ||
+        current.view.conversation_id !== entry.conversation_id
+      )
+        return
+      if (owner.kind === "native") {
+        const scope = owner.scope ?? { type: "global" }
+        if (
+          !owner.validate_lease() ||
+          scope.type !== entry.context.scope.type ||
+          (scope.type === "workspace" &&
+            entry.context.scope.type === "workspace" &&
+            scope.workspaceId !== entry.context.scope.workspaceId)
+        )
+          return
+      }
+      await allowNewForkOperation(entry)
+      await refreshForkOperations()
+    },
+    [refreshForkOperations]
+  )
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [recoveries, setRecoveries] = useState<
     Array<{ scope: HistoryBookmarkScope; turn: HistoryTurnRecovery }>
@@ -865,6 +1078,13 @@ export function useHistorySelection(
       : null
   return {
     ...state,
+    forkOperations,
+    forkOperationsError,
+    refreshForkOperations,
+    inspectForkOperation,
+    allowNewFork,
+    settingsMode,
+    updateForkSettings,
     recoveries,
     recoveryError,
     refreshRecovery,

@@ -415,24 +415,16 @@ export const createSelectedForkAction =
       !origin?.owner ||
       !origin.view ||
       !messageId ||
-      !historyId ||
-      historyId === "temp"
+      (origin.owner.kind === "local" && (!historyId || historyId === "temp"))
     )
       return report({
         ...binding,
         state: "blocked",
         code: "history_selection_unavailable",
       });
-    if (origin.owner.kind !== "local")
-      return report({
-        ...binding,
-        state: "blocked",
-        code:
-          origin.owner.kind === "unavailable"
-            ? origin.owner.code
-            : "native_fork_projection_unavailable",
-      });
-    if (origin.view.conversation_id !== historyId)
+    if (origin.owner.kind === "unavailable")
+      return report({...binding, state: "blocked", code: origin.owner.code});
+    if (origin.view.conversation_id !== origin.owner.conversation_id || (origin.owner.kind === "local" && origin.view.conversation_id !== historyId))
       return report({
         ...binding,
         state: "rejected",
@@ -442,7 +434,12 @@ export const createSelectedForkAction =
     try {
       const { captureLocalForkSelection, forkRequestDigest } =
         await import("@/db/dexie/branch");
-      const input = await captureLocalForkSelection(
+      if (origin.owner.kind === "native" && comparison)
+        return report({...binding, state: "blocked", code: "native_comparison_fork_unsupported"});
+      const input = origin.owner.kind === "native"
+        ? await (await import("@/services/chat-history-selection")).captureNativeForkSelection(origin.owner,
+          {...view, cursor: {kind: "after_message", message_id: messageId}}, {validate_lease: current})
+        : await captureLocalForkSelection(
         origin.owner,
         comparison
           ? {

@@ -1,18 +1,31 @@
-import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
-import { type ChatHistory, type Message } from "~/store/option"
+import type { UploadedFile } from "@/db"
+import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
+import {
+  type ForkDispatchClaim,
+  claimForkOperation,
+  finishForkOperation,
+  forkOperationResult,
+  prepareForkOperation,
+  recordForkCandidate
+} from "@/db/dexie/fork-operations"
 import {
   formatToChatHistory,
   formatToMessage,
   updateMessageById
 } from "@/db/dexie/helpers"
-import { prepareLocalFork, commitLocalFork } from "@/db/dexie/branch"
-import type { UploadedFile } from "@/db"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import {
+  commitNativeFork,
+  prepareNativeFork
+} from "@/services/chat-history-selection"
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
-import type { NotificationInstance } from "antd/es/notification/interface"
 import type { ChatScope } from "@/types/chat-scope"
 import type { ForkRequestV1, ForkResultV1 } from "@/types/history-selection"
 import { isGreetingMessageType } from "@/utils/character-greetings"
 import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
+import type { NotificationInstance } from "antd/es/notification/interface"
+
+import { type ChatHistory, type Message } from "~/store/option"
 
 /** Derive provider display history from the same visible identities after a successful mutation. */
 export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
@@ -152,39 +165,69 @@ export const createBranchMessage =
       owner_key: request.owner_key
     }
     const current = options.captureViewFence?.() ?? (() => true)
-    if (options.serverChatId || options.serverOnly)
+    const origin = options.historySelection?.getCurrent?.()
+    const native = origin?.owner?.kind === "native" ? origin.owner : null
+    if ((options.serverChatId || options.serverOnly) && !native)
       return {
         ...binding,
         state: "blocked",
         code: "native_fork_projection_unavailable"
       }
-    if (!options.historyId || options.historyId === "temp")
+    if (!native && (!options.historyId || options.historyId === "temp"))
       return {
         ...binding,
         state: "blocked",
         code: "temporary_history_unavailable"
       }
-    if (request.input.selection.conversation_id !== options.historyId)
+    if (
+      request.input.selection.conversation_id !==
+      (native?.conversation_id ?? options.historyId)
+    )
       return {
         ...binding,
         state: "rejected",
         code: "owner_conversation_mismatch"
       }
     let observed: ForkResultV1 | undefined
+    let claim: ForkDispatchClaim | null = null
     try {
-      const prepared = await prepareLocalFork(request, {
-        validate_lease: current
+      const operation = await prepareForkOperation(request, {
+        kind: native ? "native" : "local",
+        scope: native?.scope ?? { type: "global" }
       })
-      if (!current())
-        return { ...binding, state: "rejected", code: "stale_selection" }
+      if (
+        operation.operation_id !== request.operation_id ||
+        operation.state !== "prepared"
+      )
+        return forkOperationResult(operation)
+      claim = await claimForkOperation(operation)
+      if (!claim) return forkOperationResult(operation)
+      const prepared = native
+        ? await prepareNativeFork(native, request, { validate_lease: current })
+        : await prepareLocalFork(request, { validate_lease: current })
+      if (!current()) throw new Error("stale_selection")
       // Dispatch has begun: a later view change only suppresses application of the actual owner result.
-      const result = await commitLocalFork(prepared)
+      const result = native
+        ? await commitNativeFork(
+            prepared as Awaited<ReturnType<typeof prepareNativeFork>>,
+            (childId) => recordForkCandidate(claim!, childId)
+          )
+        : await commitLocalFork(
+            prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          )
       observed = result
-      if (result.state !== "committed" || !current()) return result
+      await finishForkOperation(claim, result)
+      if (
+        (result.state !== "committed" && result.state !== "legacy_completed") ||
+        !current()
+      )
+        return result
       const controller = options.historySelection
       if (!controller) return result
       await controller.loadConversation(
-        { historyId: result.child_id },
+        native
+          ? { serverChatId: result.child_id, scope: native.scope }
+          : { historyId: result.child_id },
         undefined,
         (receipt) => {
           const live = controller.getCurrent()
@@ -192,19 +235,43 @@ export const createBranchMessage =
             live.status !== "ready" ||
             live.owner !== receipt.owner ||
             live.view !== receipt.view ||
-            receipt.owner.kind !== "local" ||
-            receipt.owner.owner_key !== result.owner_key ||
+            receipt.owner.kind !== (native ? "native" : "local") ||
             receipt.owner.conversation_id !== result.child_id ||
             receipt.view.conversation_id !== result.child_id ||
             receipt.view.owner_key !== result.owner_key
           )
             return
-          options.setHistory(formatToChatHistory(prepared.messages))
-          options.setMessages(formatToMessage(prepared.messages))
-          options.setContext?.(prepared.files?.files ?? [])
+          if (native) {
+            if (
+              receipt.owner.kind !== "native" ||
+              !receipt.owner.validate_lease()
+            )
+              return
+            const expected = native.scope ?? { type: "global" }
+            const actual = receipt.owner.scope ?? { type: "global" }
+            if (
+              actual.type !== expected.type ||
+              (actual.type === "workspace" &&
+                expected.type === "workspace" &&
+                actual.workspaceId !== expected.workspaceId)
+            )
+              return
+            options.setHistoryId(null)
+            options.setContext?.([])
+            options.setSelectedSystemPrompt?.("")
+            options.setSystemPrompt?.("")
+            options.setServerChatMetaLoaded?.(false)
+            options.setServerChatId?.(result.child_id)
+            options.onOpened?.(result.child_id)
+            return
+          }
+          const local = prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          options.setHistory(formatToChatHistory(local.messages))
+          options.setMessages(formatToMessage(local.messages))
+          options.setContext?.(local.files?.files ?? [])
           options.setSelectedSystemPrompt?.("")
           options.setSystemPrompt?.(
-            prepared.history.last_used_prompt?.prompt_content ?? ""
+            local.history.last_used_prompt?.prompt_content ?? ""
           )
           options.setHistoryId(result.child_id)
           options.onOpened?.(result.child_id)
@@ -213,11 +280,31 @@ export const createBranchMessage =
       return result
     } catch (error) {
       const code = error instanceof Error ? error.message : "local_fork_failed"
-      options.notification.error({
-        message: "Branch failed",
-        description: code
-      })
-      return observed ?? { ...binding, state: "rejected", code }
+      if (
+        observed?.state === "committed" ||
+        observed?.state === "legacy_completed"
+      )
+        options.notification.warning({
+          message: "Copy saved; opening failed",
+          description: code
+        })
+      else
+        options.notification.error({
+          message: "Branch failed",
+          description: code
+        })
+      const result = observed ?? {
+        ...binding,
+        state: "rejected" as const,
+        code
+      }
+      if (!observed && claim)
+        await finishForkOperation(claim, result).catch(() => {})
+      return result
+    } finally {
+      await Promise.resolve(
+        options.historySelection?.refreshForkOperations?.()
+      ).catch(() => {})
     }
   }
 

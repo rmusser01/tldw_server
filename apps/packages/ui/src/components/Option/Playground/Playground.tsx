@@ -1380,10 +1380,13 @@ const PlaygroundContent = () => {
       pinned: AttachedResearchContext | null,
       history: AttachedResearchContext[],
     ) => {
-      if (!serverChatId || !stableHistoryId) {
-        return;
-      }
+      const settingsMode = historySelection.settingsMode(serverChatId);
+      if (!serverChatId || settingsMode === "pending" || (!stableHistoryId && settingsMode !== "fork")) return;
       try {
+        const patch = {deepResearchAttachment: context ? toPersistedDeepResearchAttachment(context) : null,
+          deepResearchPinnedAttachment: pinned ? toPersistedDeepResearchAttachment(pinned) : null,
+          deepResearchAttachmentHistory: history.map(entry => toPersistedDeepResearchAttachment(entry, entry.attached_at))};
+        if (settingsMode === "fork") {await historySelection.updateForkSettings(patch); return;}
         await applyChatSettingsPatch({
           historyId: stableHistoryId,
           serverChatId,
@@ -1403,11 +1406,11 @@ const PlaygroundContent = () => {
         // Attachment persistence is best-effort and should never block chat use.
       }
     },
-    [serverChatId, stableHistoryId],
+    [serverChatId, stableHistoryId, historySelection],
   );
 
   React.useEffect(() => {
-    if (!playgroundReady || !serverChatId) {
+    if (!playgroundReady || !serverChatId || historySelection.settingsMode(serverChatId) === "pending") {
       return;
     }
     let cancelled = false;
@@ -1415,10 +1418,9 @@ const PlaygroundContent = () => {
 
     const restorePersistedAttachment = async () => {
       try {
-        const settings = await syncChatSettingsForServerChat({
-          historyId: stableHistoryId,
-          serverChatId,
-        });
+        const settings = historySelection.settingsMode(serverChatId) === "fork"
+          ? historySelection.forkSettings
+          : await syncChatSettingsForServerChat({historyId: stableHistoryId, serverChatId});
         if (cancelled || previousThreadRef.current !== threadKey) {
           return;
         }
@@ -1458,7 +1460,7 @@ const PlaygroundContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [playgroundReady, serverChatId, stableHistoryId]);
+  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historySelection.forkSettings]);
 
   const handleAttachResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
@@ -2272,7 +2274,7 @@ const PlaygroundContent = () => {
         if (messages.length === 0) return false;
         const index = findMessageIndex(detail.messageId);
         if (index < 0) return true;
-        void createChatBranch(index);
+        void createChatBranch(detail.messageId);
         return true;
       }
 
@@ -2762,9 +2764,25 @@ const PlaygroundContent = () => {
     });
   }, [cockpitAssistantSelectTab]);
   const clearAssistantFromCockpit = React.useCallback(async () => {
+    const settingsMode = historySelection.settingsMode(serverChatId);
+    if (settingsMode === "pending") return;
+    const forkChild = settingsMode === "fork";
+    const current = historySelection.fence();
+    if (forkChild) {
+      try {
+        await historySelection.updateForkSettings({ assistantOverlay: null });
+      } catch {
+        return;
+      }
+      if (!current()) return;
+    }
     await setSelectedAssistant(null);
+    if (forkChild && !current()) return;
     await setSelectedCharacter(null);
-    await clearPersistedSession();
+    if (forkChild && !current()) return;
+    // Resetting selection is part of the intentional detach; keep the remaining state changes synchronous.
+    if (forkChild) clearPersistedSession();
+    else await clearPersistedSession();
     setServerChatCharacterId(null);
     setServerChatAssistantKind(null);
     setServerChatAssistantId(null);
@@ -2774,7 +2792,7 @@ const PlaygroundContent = () => {
     setCharacterModeIntentActive(false);
     void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-    await applyChatSettingsPatch({
+    if (!forkChild) await applyChatSettingsPatch({
       historyId: stableHistoryId,
       serverChatId,
       patch: {
@@ -2782,6 +2800,7 @@ const PlaygroundContent = () => {
       },
     }).catch(() => undefined);
   }, [
+    historySelection,
     clearPersistedSession,
     serverChatId,
     setChatWorkflowMode,

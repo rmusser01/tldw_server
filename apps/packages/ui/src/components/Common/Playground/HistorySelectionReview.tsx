@@ -1,10 +1,37 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
-import { useVirtualizer } from "@tanstack/react-virtual"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistoryCursorV1 } from "@/types/history-selection"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import React from "react"
+import { useTranslation } from "react-i18next"
+
+const forkCopy = {
+  prepared: [
+    "Fork prepared",
+    "This fork has not been sent. No copy will be retried automatically."
+  ],
+  dispatching: [
+    "Fork in progress",
+    "The copy outcome is not confirmed yet. No copy will be retried automatically."
+  ],
+  unknown: [
+    "Fork status unknown",
+    "A copy may have been created, but its outcome could not be confirmed. No copy will be retried automatically."
+  ],
+  partial: [
+    "Fork incomplete",
+    "A copy was created. Some content may be missing because copying could not be confirmed as complete. No copy will be retried automatically."
+  ],
+  completed: [
+    "Fork saved",
+    "The selected supported content was copied. You can inspect the saved copy."
+  ],
+  rejected: [
+    "Fork not started",
+    "No copy was created by this operation. Review the details before starting a new fork."
+  ]
+} as const
 
 /** Complete-manifest review; virtualization affects presentation, never consent. */
 export function HistorySelectionReview({
@@ -95,8 +122,58 @@ export function HistorySelectionReview({
   return (
     <section
       className="w-full min-w-0 px-3 py-2"
-      aria-label={text("region", "Conversation history selection")}
-    >
+      aria-label={text("region", "Conversation history selection")}>
+      {selection.forkOperationsError && (
+        <p role="alert">
+          {text("forkLoadError", "Could not load retained fork outcomes.")}
+        </p>
+      )}
+      {selection.forkOperations?.map((entry) => (
+        <div
+          key={entry.operation_id}
+          role="status"
+          className="mb-3 rounded border p-3">
+          <p className="font-medium">
+            {text(`forkStates.${entry.state}.title`, forkCopy[entry.state][0])}
+          </p>
+          <p>
+            {text(
+              `forkStates.${entry.state}.message`,
+              forkCopy[entry.state][1]
+            )}
+          </p>
+          <details className="text-sm text-text-muted">
+            <summary>{text("forkDetails", "Operation details")}</summary>
+            <p className="break-words">{entry.operation_id}</p>
+            {entry.result && "code" in entry.result && (
+              <p>{entry.result.code}</p>
+            )}
+          </details>
+          {entry.candidate_child_id && (
+            <Button onClick={() => void selection.inspectForkOperation(entry)}>
+              {text("forkInspect", "Inspect copy")}: {entry.candidate_child_id}
+            </Button>
+          )}
+          {entry.active_intent &&
+            (entry.state === "prepared" ||
+              entry.state === "unknown" ||
+              entry.state === "partial") && (
+              <Button onClick={() => void selection.allowNewFork(entry)}>
+                {text("forkAllowNew", "Allow a new fork action")}
+              </Button>
+            )}
+          {(entry.state === "prepared" ||
+            entry.state === "unknown" ||
+            entry.state === "partial") && (
+            <p>
+              {text(
+                "forkNewExplanation",
+                "Allowing a new action permits a separate copy and keeps this result. It does not retry this operation."
+              )}
+            </p>
+          )}
+        </div>
+      ))}
       {selection.recoveryError && (
         <p role="alert">
           {text(
@@ -109,8 +186,7 @@ export function HistorySelectionReview({
         <div
           key={entry.turn.operation_id}
           className="mb-3 rounded border p-3"
-          role="status"
-        >
+          role="status">
           <p className="font-medium">
             {text("recoveryTitle", "Turn needs review")}
           </p>
@@ -144,8 +220,7 @@ export function HistorySelectionReview({
               void navigator.clipboard.writeText(
                 entry.turn.result_text || entry.turn.input_text
               )
-            }
-          >
+            }>
             {text("copyRecovery", "Copy recovered text")}
           </Button>
           <Button onClick={() => void selection.dismissRecovery(entry)}>
@@ -232,8 +307,7 @@ export function HistorySelectionReview({
             ref={trigger}
             variant="text"
             onClick={beginReview}
-            disabled={pending}
-          >
+            disabled={pending}>
             {text("review", "Review conversation history")}
           </Button>
         )}
@@ -241,8 +315,7 @@ export function HistorySelectionReview({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void selection.choose({ kind: "empty" })}
-          >
+            onClick={() => void selection.choose({ kind: "empty" })}>
             {text("empty", "Use no prior messages")}
           </Button>
         )}
@@ -272,14 +345,12 @@ export function HistorySelectionReview({
             className="max-h-[30rem] overflow-auto"
             style={{ height: Math.min(480, nodes.length * 132) }}
             role="list"
-            aria-label={text("source", "Complete source messages")}
-          >
+            aria-label={text("source", "Complete source messages")}>
             <div
               style={{
                 height: virtualizer.getTotalSize(),
                 position: "relative"
-              }}
-            >
+              }}>
               {virtualizer.getVirtualItems().map((item) => {
                 const node = nodes[item.index]
                 const position = included.indexOf(node.id)
@@ -310,8 +381,7 @@ export function HistorySelectionReview({
                       const direction = event.key === "ArrowDown" ? 1 : -1
                       if (event.altKey) move(node.id, direction)
                       else focusRow(item.index + direction)
-                    }}
-                  >
+                    }}>
                     <label className="flex items-start gap-2">
                       <input
                         type="checkbox"
@@ -337,8 +407,7 @@ export function HistorySelectionReview({
                             variant="ghost"
                             disabled={pending || position === 0}
                             onClick={() => move(node.id, -1)}
-                            ariaLabel={`${text("up", "Move earlier")}: ${preview}`}
-                          >
+                            ariaLabel={`${text("up", "Move earlier")}: ${preview}`}>
                             {text("up", "Move earlier")}
                           </Button>
                           <Button
@@ -348,8 +417,7 @@ export function HistorySelectionReview({
                               pending || position === included.length - 1
                             }
                             onClick={() => move(node.id, 1)}
-                            ariaLabel={`${text("down", "Move later")}: ${preview}`}
-                          >
+                            ariaLabel={`${text("down", "Move later")}: ${preview}`}>
                             {text("down", "Move later")}
                           </Button>
                         </>
@@ -363,8 +431,7 @@ export function HistorySelectionReview({
                             kind: "after_message",
                             message_id: node.id
                           })
-                        }
-                      >
+                        }>
                         {text("chooseBoundary", "Continue after this message")}
                       </Button>
                     </div>
@@ -379,15 +446,13 @@ export function HistorySelectionReview({
               disabled={pending || !included.length}
               onClick={() =>
                 setCursor({ kind: "before_message", message_id: included[0] })
-              }
-            >
+              }>
               {text("beforeFirst", "Before first included message")}
             </Button>
             <Button
               variant="secondary"
               disabled={pending}
-              onClick={() => setCursor({ kind: "empty" })}
-            >
+              onClick={() => setCursor({ kind: "empty" })}>
               {text("empty", "Use no prior messages")}
             </Button>
             <Button
@@ -398,8 +463,7 @@ export function HistorySelectionReview({
                   kind: "after_message",
                   message_id: included[included.length - 1]
                 })
-              }
-            >
+              }>
               {text("throughLast", "Through last included message")}
             </Button>
           </div>
@@ -412,8 +476,7 @@ export function HistorySelectionReview({
           <div className="flex flex-wrap gap-2">
             <Button
               disabled={pending || selection.status === "loading"}
-              onClick={() => void selection.confirm(included, cursor)}
-            >
+              onClick={() => void selection.confirm(included, cursor)}>
               {text("confirm", "Confirm selected history")}
             </Button>
             <Button
@@ -421,8 +484,7 @@ export function HistorySelectionReview({
               onClick={() => {
                 setExpanded(false)
                 trigger.current?.focus()
-              }}
-            >
+              }}>
               {text("cancel", "Cancel review")}
             </Button>
           </div>

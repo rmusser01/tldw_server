@@ -218,3 +218,26 @@ it("keeps an ancestor toolbar loader from fetching or overwriting the selected s
   expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
   vi.useRealTimers()
 })
+it("holds native fork owner qualification before any ambient settings import and uses scoped metadata", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  const held = deferred<boolean>()
+  let ready = false
+  mocks.store.serverChatId = "child"
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.serverChatMetaLoaded = true
+  mocks.selection = {fence: () => () => true, settingsMode: () => ready ? "fork" : "pending",
+    loadConversation: vi.fn(() => held.promise), getCurrent: () => ({owner: {kind: "native", conversation_id: "child", validate_lease: () => true},
+      capture: {status: "captured"}, forkSettings: {authorNote: "server only"}})}
+  renderHook(() => useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification: {error: vi.fn()}, t: ((key: string) => key) as any}))
+  await act(async () => {await vi.advanceTimersByTimeAsync(300)})
+  expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  expect(mocks.initialize).not.toHaveBeenCalled()
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  await act(async () => {ready = true; held.resolve(true); await vi.runOnlyPendingTimersAsync()})
+  expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  expect(mocks.initialize).not.toHaveBeenCalled()
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  vi.useRealTimers()
+})

@@ -4382,6 +4382,7 @@ export const useChatActions = ({
   }
 
   const branchOptions = {
+    scope,
     historySelection,
     captureViewFence: historySelection?.fence,
     notification,

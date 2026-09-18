@@ -608,3 +608,22 @@ export type TtsClip = {
   messageId?: string | null
   serverMessageId?: string | null
 }
+
+/** Credential-free namespace of a fork; workspace is independent of authenticated owner. */
+export type ForkOperationContext = {
+  readonly kind: "local" | "native" | "temporary"
+  readonly scope: import("@/types/chat-scope").ChatScope
+}
+export type ForkOperation = {
+  readonly owner_key: string
+  readonly operation_id: string
+  readonly conversation_id: string
+  readonly source_key: string
+  readonly context: ForkOperationContext
+  readonly request: import("@/types/history-selection").ForkRequestV1
+  active_intent?: string
+  state: "prepared" | "dispatching" | "unknown" | "partial" | "completed" | "rejected"
+  candidate_child_id?: string
+  candidate_key?: string
+  result?: import("@/types/history-selection").ForkResultV1
+}

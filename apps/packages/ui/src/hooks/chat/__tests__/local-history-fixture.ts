@@ -8,12 +8,13 @@ export const memory: Record<string, any> = (() => {
     "sessionFiles",
     "compareStates",
     "historySelections",
+    "forkOperations",
     "historyProjections"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
       JSON.stringify(
-        name === "historySelections"
+        name === "forkOperations" ? [v.owner_key, v.operation_id] : name === "historySelections"
           ? [v.profile_id, v.client_session_id, v.owner_key, v.conversation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]

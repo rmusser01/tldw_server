@@ -118,6 +118,14 @@ class HistorySelectedContentV1(HistoryMessageRevisionV1):
     _freeze_images = field_validator("images", mode="before")(_wire_array)
 
 
+class NativeForkContextV1(HistoryWireModel):
+    """Digest-bound eligibility for the deliberately limited legacy plain copier."""
+
+    policy: Literal["plain_v1"]
+    storage_context_digest: str = Field(min_length=1)
+    supported: StrictBool
+
+
 class HistorySelectionSnapshotV1(HistoryWireModel):
     version: Literal[1]
     owner_key: str = Field(min_length=1)
@@ -127,8 +135,17 @@ class HistorySelectionSnapshotV1(HistoryWireModel):
     source_digest: str
     interpretation_status: HistoryInterpretationStatusV1
     storage_context_digest: str
+    native_fork_context: NativeForkContextV1 | None = None
 
     _freeze_nodes = field_validator("nodes", mode="before")(_wire_array)
+
+
+    @model_validator(mode="after")
+    def validate_native_fork_context(self) -> HistorySelectionSnapshotV1:
+        """Do not accept an eligibility proof from another context capture."""
+        if self.native_fork_context and self.native_fork_context.storage_context_digest != self.storage_context_digest:
+            raise ValueError("native_fork_context_mismatch")
+        return self
 
 
 class HistoryViewSelectionV1(HistoryWireModel):

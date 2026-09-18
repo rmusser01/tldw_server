@@ -1284,6 +1284,37 @@
       "accepted_unsent": "User input accepted; response not saved",
       "accepted_response_unknown": "User input accepted; response outcome unknown",
       "generated_unsaved": "Generated response needs review"
-    }
+    },
+    "forkLoadError": "Could not load retained fork outcomes.",
+    "forkInspect": "Inspect copy",
+    "forkAllowNew": "Allow a new fork action",
+    "forkNewExplanation": "Allowing a new action permits a separate copy and keeps this result. It does not retry this operation.",
+    "forkStates": {
+      "prepared": {
+        "title": "Fork prepared",
+        "message": "This fork has not been sent. No copy will be retried automatically."
+      },
+      "dispatching": {
+        "title": "Fork in progress",
+        "message": "The copy outcome is not confirmed yet. No copy will be retried automatically."
+      },
+      "unknown": {
+        "title": "Fork status unknown",
+        "message": "A copy may have been created, but its outcome could not be confirmed. No copy will be retried automatically."
+      },
+      "partial": {
+        "title": "Fork incomplete",
+        "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. No copy will be retried automatically."
+      },
+      "completed": {
+        "title": "Fork saved",
+        "message": "The selected supported content was copied. You can inspect the saved copy."
+      },
+      "rejected": {
+        "title": "Fork not started",
+        "message": "No copy was created by this operation. Review the details before starting a new fork."
+      }
+    },
+    "forkDetails": "Operation details"
   }
 }

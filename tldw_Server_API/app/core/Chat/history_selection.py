@@ -78,10 +78,12 @@ class HistorySelectionSnapshotV1:
     source_digest: str
     interpretation_status: Mapping[str, Any]
     storage_context_digest: str
+    native_fork_context: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Freeze the complete manifest and selected interpretation evidence."""
 
+        object.__setattr__(self, "native_fork_context", _freeze_json(self.native_fork_context))
         object.__setattr__(self, "nodes", tuple(_freeze_json(row) for row in self.nodes))
         object.__setattr__(self, "interpretation_status", _freeze_json(self.interpretation_status))
 
@@ -146,6 +148,7 @@ def snapshot_to_wire(snapshot: HistorySelectionSnapshotV1) -> dict[str, Any]:
     """Serialize frozen manifest fields as ordinary JSON-shaped wire values."""
 
     return {
+        **({"native_fork_context": _wire_json(snapshot.native_fork_context)} if snapshot.native_fork_context is not None else {}),
         "version": snapshot.version,
         "owner_key": snapshot.owner_key,
         "conversation_id": snapshot.conversation_id,

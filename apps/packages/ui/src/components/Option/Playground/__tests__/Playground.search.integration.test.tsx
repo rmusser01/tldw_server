@@ -18,6 +18,15 @@ import {
 const h1 = vi.hoisted(() => ({ enabled: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
+const forkPresentation = vi.hoisted(() => ({mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {...actual, useHistorySelectionContext: () => {
+    const controller = actual.useHistorySelectionContext()
+    return forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller
+  }}
+})
+
 const messageOptionState = vi.hoisted(() => ({
   value: {
     messages: [
@@ -331,6 +340,8 @@ describe("Playground thread search integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     h1.enabled = false
+    forkPresentation.mode = null
+    forkPresentation.settings = null
     routerState.hashRouter = false
     storageState.value.clear()
     mobileViewportState.value = false
@@ -363,6 +374,33 @@ describe("Playground thread search integration", () => {
     })
     tldwClientState.getDocumentUploadDraft.mockResolvedValue({ payload: {} })
     window.history.replaceState(null, "", "/chat")
+  })
+
+  it("does not import ambient attachment settings while a copied child is pending or verified", async () => {
+    forkPresentation.mode = "pending"
+    messageOptionState.value.serverChatId = "child"
+    const mounted = render(<Playground />)
+    await act(async () => {})
+    expect(chatSettingsState.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+    forkPresentation.mode = "fork"
+    forkPresentation.settings = {authorNote: "server"}
+    mounted.rerender(<Playground />)
+    await act(async () => {})
+    expect(chatSettingsState.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled()
+    forkPresentation.mode = "ordinary"
+    forkPresentation.settings = null
+    mounted.rerender(<Playground />)
+    await waitFor(() => expect(chatSettingsState.syncChatSettingsForServerChat).toHaveBeenCalled())
+  })
+
+  it("forks timeline messages using stable IDs rather than rendered positions", async () => {
+    render(<Playground />)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:timeline-action", {detail: {
+      action: "branch", historyId: "history-1", messageId: "m-2"
+    }})))
+    await waitFor(() => expect(messageOptionState.value.createChatBranch).toHaveBeenCalledWith("m-2"))
   })
 
   it("opens in-thread search on Cmd/Ctrl+F and forwards query to PlaygroundChat", async () => {
@@ -720,6 +758,8 @@ describe("Playground H1 URL initialization with the mounted session/controller",
   beforeEach(() => {
     routerState.hashRouter = false
     h1.enabled = true
+    forkPresentation.mode = null
+    forkPresentation.settings = null
     h1.controller = null
     h1.bookmarks.clear()
     h1.confirm.mockClear()

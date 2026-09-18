@@ -114,6 +114,15 @@ const node = revision
   .strict()
 const snapshot = z
   .object({
+    native_fork_context: z
+      .object({
+        policy: z.literal("plain_v1"),
+        storage_context_digest: str,
+        supported: z.boolean()
+      })
+      .strict()
+      .nullable()
+      .optional(),
     version: z.literal(1),
     owner_key: str,
     conversation_id: str,
@@ -530,13 +539,18 @@ export const historyAdmissionReference = (
 
 /** Validate native admission without inventing a client-selected server input ID. */
 export const parseNativeHistoryAdmission = (
-  owner: NativeHistoryOwnerV1, selection: HistorySelectionV1, value: unknown
+  owner: NativeHistoryOwnerV1,
+  selection: HistorySelectionV1,
+  value: unknown
 ): HistoryAdmissionV1 => {
   const admission = parse(admissionSchema, value) as HistoryAdmissionV1
   assertNativeBinding(owner, admission, true)
-  if (admission.selection_digest !== selection.selection_digest ||
-      admission.originating_selection_revision !== selection.selection_revision ||
-      canonicalHistoryJson(admission.messages) !== canonicalHistoryJson(selection.messages))
+  if (
+    admission.selection_digest !== selection.selection_digest ||
+    admission.originating_selection_revision !== selection.selection_revision ||
+    canonicalHistoryJson(admission.messages) !==
+      canonicalHistoryJson(selection.messages)
+  )
     fail("invalid_history_admission")
   return freeze(admission)
 }
@@ -618,4 +632,258 @@ export const settleAcceptedAssistant = async (
   )
   if (response.id !== input.id) fail("invalid_history_settlement")
   return response
+}
+
+const NATIVE_FORK_POLICY = { policy: "native-plain-fork-v1" }
+type ForkRequest = import("@/types/history-selection").ForkRequestV1
+type ForkResult = import("@/types/history-selection").ForkResultV1
+type NativeForkPrepared = {
+  readonly request: ForkRequest
+  readonly rows: readonly Readonly<Record<string, unknown>>[]
+}
+const forkCaptures = new WeakMap<
+  object,
+  { owner: NativeHistoryOwnerV1; view: HistoryViewSelectionV1 }
+>()
+const nativeForkPreparations = new WeakMap<
+  NativeForkPrepared,
+  {
+    owner: NativeHistoryOwnerV1
+    options?: HistoryOperationOptions
+    dispatchOptions: ReturnType<typeof nativeOptions>
+  }
+>()
+const assertPlainForkContext = (capture: HistorySelectionCaptureV1) => {
+  const proof = capture.snapshot.native_fork_context
+  if (
+    !proof?.supported ||
+    proof.policy !== "plain_v1" ||
+    proof.storage_context_digest !== capture.storage_context_digest
+  )
+    fail("native_fork_context_unsupported")
+}
+const nativeForkRows = (capture: HistorySelectionCaptureV1) => {
+  assertPlainForkContext(capture)
+  return capture.rows.map((row, index) => {
+    const content = capture.selected_content[index]
+    if (
+      content.tool_calls?.length ||
+      (content.extra_metadata && Object.keys(content.extra_metadata).length) ||
+      row.comparison ||
+      row.metadata?.length
+    )
+      fail("unsupported_message_payload")
+    // Use the existing exact text/inline-image validator. The legacy endpoint supports system rows too.
+    if (!["user", "assistant", "system"].includes(row.role))
+      fail("unsupported_message_payload")
+    const payload = nativeHistoryMessagePayload({
+      id: row.id,
+      role: row.role === "system" ? "user" : row.role,
+      content: content.message,
+      images: [...content.images]
+    } as Message)
+    const { id: _sourceId, ...detached } = payload
+    return {
+      ...detached,
+      ...(typeof content.message === "string"
+        ? { content: content.message }
+        : {}),
+      role: row.role
+    }
+  })
+}
+/** Capture a selected limited projection, with no live metadata/settings reads. */
+export const captureNativeForkSelection = async (
+  owner: NativeHistoryOwnerV1,
+  view: HistoryViewSelectionV1,
+  options?: HistoryOperationOptions
+): Promise<ForkRequest["input"]> => {
+  assertOwnerLease(owner, options)
+  const capture = await captureHistorySnapshot(
+    owner,
+    view,
+    "fork",
+    options?.signal
+  )
+  if (capture.status !== "captured") return fail(capture.code)
+  nativeForkRows(capture)
+  const prepared = prepareHistoryContext(
+    NATIVE_FORK_POLICY,
+    () => owner.validate_lease() && options?.validate_lease?.() !== false
+  )
+  const input = freeze({
+    kind: "normal" as const,
+    selection: finalizeHistorySelection(owner, capture, prepared, view)
+  })
+  forkCaptures.set(input, { owner, view: freeze(structuredClone(view)) })
+  return input
+}
+/** Recapture immediately before dispatch; once dispatched the accepted projection never changes. */
+export const prepareNativeFork = async (
+  owner: NativeHistoryOwnerV1,
+  request: ForkRequest,
+  options?: HistoryOperationOptions
+): Promise<NativeForkPrepared> => {
+  assertOwnerLease(owner, options)
+  const source = forkCaptures.get(request.input)
+  if (!source || source.owner !== owner || request.input.kind !== "normal")
+    return fail("native_fork_projection_unavailable")
+  if (
+    request.owner_key !== request.destination_owner_key ||
+    request.owner_key !== request.input.selection.owner_key ||
+    request.request_digest !==
+      historyDigest({
+        operation_id: request.operation_id,
+        owner_key: request.owner_key,
+        destination_owner_key: request.destination_owner_key,
+        input: request.input
+      })
+  )
+    return fail("fork_request_mismatch")
+  const capture = await captureHistorySnapshot(
+    owner,
+    source.view,
+    "fork",
+    options?.signal
+  )
+  if (capture.status !== "captured") return fail(capture.code)
+  const rows = nativeForkRows(capture)
+  const context = prepareHistoryContext(
+    NATIVE_FORK_POLICY,
+    () => owner.validate_lease() && options?.validate_lease?.() !== false
+  )
+  const selection = finalizeHistorySelection(
+    owner,
+    capture,
+    context,
+    source.view
+  )
+  if (
+    canonicalHistoryJson(selection) !==
+    canonicalHistoryJson(request.input.selection)
+  )
+    return fail("stale_selection")
+  const prepared = freeze({ request: structuredClone(request), rows })
+  nativeForkPreparations.set(prepared, {
+    owner,
+    options,
+    dispatchOptions: {
+      requestScope: freeze(structuredClone(owner.request_scope)),
+      scope: freeze(structuredClone(owner.scope ?? { type: "global" })),
+      signal: options?.signal
+    }
+  })
+  return prepared
+}
+/** Multi-request legacy copy: acknowledged completion is not an atomic receipt. Never replay. */
+export const commitNativeFork = async (
+  prepared: NativeForkPrepared,
+  onCandidate: (childId: string) => Promise<unknown> | unknown
+): Promise<ForkResult> => {
+  const capability = nativeForkPreparations.get(prepared)
+  if (!capability) return fail("fork_preparation_consumed")
+  nativeForkPreparations.delete(prepared)
+  const { owner, options, dispatchOptions } = capability
+  const binding = {
+    owner_key: prepared.request.owner_key,
+    operation_id: prepared.request.operation_id
+  }
+  let dispatched = false
+  let childId: string | undefined
+  try {
+    assertOwnerLease(owner, options)
+    dispatched = true
+    const child = await tldwClient.createChat(
+      {
+        title: "Forked conversation",
+        character_id: null,
+        assistant_kind: null,
+        assistant_id: null,
+        persona_memory_mode: null
+      },
+      dispatchOptions
+    )
+    if (
+      typeof child?.id !== "string" ||
+      !child.id.trim() ||
+      child.id === owner.conversation_id
+    )
+      fail("invalid_child_acknowledgement")
+    childId = child.id
+    // Save the acknowledged child before inspecting any later lease or row failure.
+    await onCandidate(childId)
+    assertOwnerLease(owner, { signal: options?.signal })
+    let parentId: string | null = null
+    const seen = new Set<string>()
+    for (const row of prepared.rows) {
+      assertOwnerLease(owner, { signal: options?.signal })
+      const response = (await tldwClient.addChatMessage(
+        childId,
+        { ...row, parent_message_id: parentId },
+        dispatchOptions
+      )) as unknown as Record<string, unknown>
+      const id = response?.id
+      if (typeof id !== "string")
+        throw new Error("invalid_message_acknowledgement")
+      if (
+        !id.trim() ||
+        seen.has(id) ||
+        response.conversation_id !== childId ||
+        response.parent_message_id !== parentId ||
+        response.sender !== row.role
+      )
+        fail("invalid_message_acknowledgement")
+      seen.add(id)
+      parentId = id
+    }
+    return { ...binding, state: "legacy_completed", child_id: childId }
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "native_fork_failed"
+    return childId
+      ? { ...binding, state: "partial", candidate_child_id: childId, code }
+      : { ...binding, state: dispatched ? "unknown" : "rejected", code }
+  }
+}
+
+/** Known fork children use current scoped server settings, never the server-ID browser cache. */
+export const readNativeForkSettings = async (
+  owner: NativeHistoryOwnerV1,
+  signal?: AbortSignal
+) => {
+  assertOwnerLease(owner, { signal })
+  if (!nativeCapabilities.get(owner)?.captured)
+    fail("unsupported_history_capability")
+  const response = await tldwClient.getChatSettings(
+    owner.conversation_id,
+    nativeOptions(owner, signal)
+  )
+  assertOwnerLease(owner, { signal })
+  if (response?.conversation_id !== owner.conversation_id)
+    fail("fork_settings_owner_mismatch")
+  const { normalizeChatSettingsRecord } =
+    await import("@/services/chat-settings")
+  assertOwnerLease(owner, { signal })
+  return normalizeChatSettingsRecord(response.settings)
+}
+export const updateNativeForkSettings = async (
+  owner: NativeHistoryOwnerV1,
+  patch: Partial<import("@/types/chat-session-settings").ChatSettingsRecord>,
+  signal?: AbortSignal
+) => {
+  assertOwnerLease(owner, { signal })
+  if (!nativeCapabilities.get(owner)?.captured)
+    fail("unsupported_history_capability")
+  const detached = structuredClone(patch)
+  const response = await tldwClient.updateChatSettings(
+    owner.conversation_id,
+    detached,
+    nativeOptions(owner, signal)
+  )
+  assertOwnerLease(owner, { signal })
+  if (response?.conversation_id !== owner.conversation_id)
+    fail("fork_settings_owner_mismatch")
+  const { normalizeChatSettingsRecord } =
+    await import("@/services/chat-settings")
+  assertOwnerLease(owner, { signal })
+  return normalizeChatSettingsRecord(response.settings)
 }

@@ -116,7 +116,8 @@ class MessageStore:
         query = f"""
             WITH requested AS ({requested_sql})
             SELECT c.version AS conversation_version, c.history_version,
-                   cs.settings_version,
+                   cs.settings_version, cs.conversation_id AS settings_row_id,
+                   bs.conversation_id AS behavior_row_id,
                    bs.status AS behavior_status, bs.schema_version AS behavior_schema_version,
                    bs.digest AS behavior_digest, bs.size_bytes AS behavior_size_bytes,
                    CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
@@ -288,6 +289,8 @@ class MessageStore:
             key: header[key]
             for key in (
                 "settings_json",
+                "settings_row_id",
+                "behavior_row_id",
                 "behavior_status",
                 "behavior_schema_version",
                 "behavior_digest",
@@ -301,6 +304,24 @@ class MessageStore:
                 "workspace_id",
             )
         }
+        # Only the explicitly empty plain policy is representable by H1's legacy copier.
+        # Row presence is digest-bound: unreadable required state is never a default.
+        plain_settings = header["settings_row_id"] is None
+        if not plain_settings:
+            try:
+                plain_settings = json.loads(header["settings_json"]) == {}
+            except (TypeError, ValueError):
+                plain_settings = False
+        context_digest = self._history_digest(context)
+        native_fork_context = {
+            "policy": "plain_v1",
+            "storage_context_digest": context_digest,
+            "supported": plain_settings
+            and header["behavior_row_id"] is None
+            and all(header[key] is None for key in (
+                "character_id", "assistant_kind", "assistant_id", "persona_memory_mode"
+            )),
+        }
         snapshot = HistorySelectionSnapshotV1(
             version=1,
             owner_key=owner_key,
@@ -309,7 +330,8 @@ class MessageStore:
             nodes=manifest,
             source_digest=self._history_digest(manifest),
             interpretation_status=status,
-            storage_context_digest=self._history_digest(context),
+            storage_context_digest=context_digest,
+            native_fork_context=native_fork_context,
         )
         if any(mid not in contents for mid in selected_ids):
             raise HistorySelectionError("selected_content_mismatch")

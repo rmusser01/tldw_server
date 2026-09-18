@@ -180,3 +180,16 @@ describe('H1 scoped routes', () => {
     expect(isServicePromptRequestPath(path, 'POST')).toBe(false)
   })
 })
+
+it.each([
+  ["/api/v1/chats/child", "GET", true],
+  ["/api/v1/chats/child/settings?scope_type=workspace", "GET", true],
+  ["/api/v1/chats/child/settings", "PUT", true],
+  ["/api/v1/chats/child", "PUT", false],
+  ["/api/v1/chats/child/settings", "POST", false],
+  ["/api/v1/chats/child/settings/extra", "PUT", false],
+  ["/api/v1/chats/%2e%2e/settings", "PUT", false],
+  ["/api/v1/chats/child%2fother/settings", "GET", false]
+])("scoped fork settings path %s %s has exact access %s", (path, method, expected) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(expected)
+})

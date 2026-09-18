@@ -9,13 +9,16 @@ const memory: Record<string, any> = vi.hoisted(() => {
     "sessionFiles",
     "compareStates",
     "historySelections",
-    "historyProjections"
+    "historyProjections",
+    "forkOperations"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
       JSON.stringify(
         name === "historySelections"
           ? [v.profile_id, v.client_session_id, v.owner_key, v.conversation_id]
+          : name === "forkOperations"
+            ? [v.owner_key, v.operation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
             : v.id ?? v.sessionId ?? v.history_id

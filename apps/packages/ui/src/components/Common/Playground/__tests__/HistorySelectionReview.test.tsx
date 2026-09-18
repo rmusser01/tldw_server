@@ -270,3 +270,15 @@ it("client-managed generated text retains its existing review label", () => {
     screen.queryByText("User input accepted; response outcome unknown")
   ).toBeNull()
 })
+it("retains unresolved fork separately from sends with candidate inspection and deliberate-new-action control", () => {
+  const selection = {...controller(), status: "ready", forkOperations: [{operation_id: "op", owner_key: "original", state: "partial", candidate_child_id: "child", active_intent: "intent", result: {state: "partial", code: "response_lost"}}], inspectForkOperation: vi.fn(), allowNewFork: vi.fn()} as any
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText("Fork incomplete")).toBeTruthy()
+  expect(screen.getByText(/Some content may be missing/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", {name: /Inspect copy/}))
+  expect(selection.inspectForkOperation).toHaveBeenCalledWith(selection.forkOperations[0])
+  expect(selection.allowNewFork).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", {name: "Allow a new fork action"}))
+  expect(selection.allowNewFork).toHaveBeenCalledWith(selection.forkOperations[0])
+  expect(screen.queryByRole("button", {name: /Retry fork/})).toBeNull()
+})

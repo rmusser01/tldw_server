@@ -1,5 +1,3 @@
-import React from "react"
-import { useStorage } from "@plasmohq/storage/hook"
 import {
   applyChatSettingsPatch,
   chatSettingsStorageForKey,
@@ -9,6 +7,11 @@ import {
   resolveChatSettingsKey
 } from "@/services/chat-settings"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
+import React from "react"
+
+import { useStorage } from "@plasmohq/storage/hook"
+
+import { useHistorySelectionContext } from "./useHistorySelection"
 
 type UseChatSettingsRecordParams = {
   historyId: string | null
@@ -19,10 +22,16 @@ export const useChatSettingsRecord = ({
   historyId,
   serverChatId
 }: UseChatSettingsRecordParams) => {
+  const controller = useHistorySelectionContext()
+  const mode = controller?.settingsMode?.(serverChatId) ?? "ordinary"
+  const guarded = mode !== "ordinary"
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null
   const chatKey = React.useMemo(
-    () => resolveChatSettingsKey({ historyId: stableHistoryId, serverChatId }),
-    [serverChatId, stableHistoryId]
+    () =>
+      guarded
+        ? "h1-fork-settings-presentation"
+        : resolveChatSettingsKey({ historyId: stableHistoryId, serverChatId }),
+    [serverChatId, stableHistoryId, guarded]
   )
   const storageKey = React.useMemo(
     () => getChatSettingsStorageKey(chatKey),
@@ -34,15 +43,22 @@ export const useChatSettingsRecord = ({
     instance: chatSettingsStorageForKey(chatKey)
   })
   React.useEffect(() => {
-    void getChatSettingsForKey(chatKey)
-  }, [chatKey])
+    if (!guarded) void getChatSettingsForKey(chatKey)
+  }, [chatKey, guarded])
   const settings = React.useMemo(
-    () => normalizeChatSettingsRecord(rawSettings),
-    [rawSettings]
+    () =>
+      guarded
+        ? mode === "fork"
+          ? (controller?.forkSettings ?? null)
+          : null
+        : normalizeChatSettingsRecord(rawSettings),
+    [rawSettings, guarded, mode, controller?.forkSettings]
   )
 
   const updateSettings = React.useCallback(
     async (patch: Partial<ChatSettingsRecord>) => {
+      if (mode === "pending") throw new Error("fork_settings_owner_unavailable")
+      if (mode === "fork") return controller!.updateForkSettings(patch)
       const next = await applyChatSettingsPatch({
         historyId: stableHistoryId,
         serverChatId,
@@ -50,7 +66,7 @@ export const useChatSettingsRecord = ({
       })
       return next
     },
-    [serverChatId, stableHistoryId]
+    [serverChatId, stableHistoryId, mode, controller]
   )
 
   return { settings, updateSettings, chatKey }

@@ -1,4 +1,4 @@
-import type { HistoryBookmark } from "./types";
+import type { HistoryBookmark, ForkOperation } from "./types";
 import type { LegacyHistoryProjectionV1 } from "@/types/history-selection";
 
 import Dexie, { type Table } from 'dexie';
@@ -28,6 +28,7 @@ import {
 } from "./types"
 
 export class PageAssistDexieDB extends Dexie {
+  forkOperations!: Table<ForkOperation>;
   historySelections!: Table<HistoryBookmark>;
   historyProjections!: Table<LegacyHistoryProjectionV1>;
   chatHistories!: Table<HistoryInfo>;
@@ -400,6 +401,9 @@ export class PageAssistDexieDB extends Dexie {
     this.version(15).stores({
       historySelections: "[profile_id+client_session_id+owner_key+conversation_id], owner_key, conversation_id",
       historyProjections: "[owner_key+conversation_id+projection_id], owner_key, conversation_id"
+    });
+    this.version(16).stores({
+      forkOperations: "[owner_key+operation_id], source_key, candidate_key, &active_intent"
     });
   }
 }

@@ -38,6 +38,10 @@ vi.mock("@/db/dexie/history-selection", () => ({
   saveHistoryBookmark: async (scope: any, view: any) =>
     mocks.bookmarks.set(bookmarkKey(scope, view), { ...scope, view })
 }))
+vi.mock("@/db/dexie/fork-operations", () => ({
+  findForkCandidate: async () => null,
+  loadForkOperations: async () => []
+}))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
     getHistoryInfo = mocks.details

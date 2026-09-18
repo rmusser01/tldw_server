@@ -400,3 +400,58 @@ def test_native_endpoint_strips_provider_receipts_and_only_acks_owner_save(histo
     else:
         assert replies and saved_ids == {row["id"] for row in replies}
         assert all(row["parent_message_id"] == admissions[0]["input_message_id"] for row in replies)
+
+
+def test_native_fork_context_and_scoped_settings_expected_owner(history_api):
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    assert body["snapshot"]["native_fork_context"] == {
+        "policy": "plain_v1", "supported": True,
+        "storage_context_digest": body["storage_context_digest"],
+    }
+    # Omitted expected-user remains backward compatible; a stale assertion cannot read or write.
+    assert client.get(f"/api/v1/chats/{cid}/settings", headers=headers).status_code == 200
+    stale = {**headers, "X-TLDW-Expected-User-ID": "another-account"}
+    assert client.get(f"/api/v1/chats/{cid}", headers=stale).status_code == 412
+    assert client.get(f"/api/v1/chats/{cid}/settings", headers=stale).status_code == 412
+    assert client.put(f"/api/v1/chats/{cid}/settings", headers=stale, json={"settings": {"authorNote": "wrong owner"}}).status_code == 412
+    assert db.get_conversation_settings(cid) is None
+
+
+def test_limited_native_copy_explicit_plain_identity_and_child_chain_reopen(history_api):
+    client, db, _, headers = history_api
+    workspace = db.upsert_workspace("fork-workspace", "Fork workspace")
+    db.update_workspace("fork-workspace", {"assistant_defaults_json": {
+        "assistant_kind": "persona", "assistant_id": "would-be-required", "persona_memory_mode": "read_only"
+    }}, expected_version=workspace["version"])
+    created = client.post("/api/v1/chats/", headers=headers, json={
+        "title": "Plain fork", "scope_type": "workspace", "workspace_id": "fork-workspace",
+        "character_id": None, "assistant_kind": None, "assistant_id": None, "persona_memory_mode": None,
+    })
+    assert created.status_code == 201, created.text
+    child = created.json()["id"]
+    assert db.get_conversation_by_id(child)["assistant_kind"] is None
+    assert db.get_conversation_by_id(child)["assistant_id"] is None
+    scope = "?scope_type=workspace&workspace_id=fork-workspace"
+    parent = None
+    ids = []
+    for role, content in (("user", "  exact user  "), ("assistant", "  exact reply  "), ("system", "system context")):
+        response = client.post(f"/api/v1/chats/{child}/messages{scope}", headers=headers,
+            json={"role": role, "content": content, "parent_message_id": parent})
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["conversation_id"] == child
+        assert body["parent_message_id"] == parent
+        parent = body["id"]
+        ids.append(parent)
+    reopened = client.post(f"/api/v1/chat/conversations/{child}/history/selection{scope}", headers=headers,
+        json={"purpose": "fork", "view": {"view_session_id": "child-view", "conversation_id": child,
+            "interpretation": {"kind": "parent_graph_v1"}, "cursor": {"kind": "after_message", "message_id": parent}, "selection_revision": 0}})
+    assert reopened.status_code == 200, reopened.text
+    body = reopened.json()
+    assert body["status"] == "captured"
+    assert [row["id"] for row in body["rows"]] == ids
+    assert [row["message"] for row in body["selected_content"]] == ["  exact user  ", "  exact reply  ", "system context"]
+    edited = client.put(f"/api/v1/chats/{child}/settings{scope}", headers=headers, json={"settings": {"authorNote": "legitimate edit"}})
+    assert edited.status_code == 200, edited.text
+    assert client.get(f"/api/v1/chats/{child}/settings{scope}", headers=headers).json()["settings"]["authorNote"] == "legitimate edit"

@@ -21,6 +21,15 @@ import {
   TOGGLE_WEB_SEARCH_EVENT,
 } from "../playground-cockpit-actions";
 
+const forkSettings = vi.hoisted(() => ({mode: "ordinary", current: true, update: vi.fn<(...args: any[]) => Promise<any>>(async () => ({}))}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {...actual, useHistorySelectionContext: () => {
+    const controller = actual.useHistorySelectionContext()
+    return {...controller, settingsMode: () => forkSettings.mode, updateForkSettings: forkSettings.update, fence: () => () => forkSettings.current}
+  }}
+})
+
 const messageOptionState = vi.hoisted(() => ({
   value: {
     messages: [
@@ -400,6 +409,7 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
+    forkSettings.mode = "ordinary"; forkSettings.current = true; forkSettings.update.mockReset(); forkSettings.update.mockResolvedValue({});
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
@@ -1218,6 +1228,33 @@ describe("Playground cockpit controls", () => {
     });
     expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+  });
+
+  it.each(["success", "scope-change", "failed", "pending"])("clears a copied child's overlay only through its current scoped settings action: %s", async outcome => {
+    forkSettings.mode = outcome === "pending" ? "pending" : "fork";
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "fork-child";
+    messageOptionState.value.selectedAssistant = {kind: "persona", id: "overlay", name: "Overlay", metadata: {selectionMode: "overlay"}} as any;
+    messageOptionState.value.selectedCharacter = null;
+    let finish!: () => void;
+    forkSettings.update.mockImplementation(() => new Promise((resolve, reject) => { finish = () => outcome === "failed" ? reject(new Error("lost response")) : resolve({}); }));
+    render(<Playground />);
+    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
+    if (outcome !== "pending") {
+      await waitFor(() => expect(forkSettings.update).toHaveBeenCalledWith({assistantOverlay: null}));
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      if (outcome === "scope-change") forkSettings.current = false;
+      await act(async () => finish());
+    } else await act(async () => {});
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled();
+    if (outcome === "success") expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+    else {
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setSelectedAssistant).not.toHaveBeenCalled();
+      expect(sessionPersistenceState.value.clearPersistedSession).not.toHaveBeenCalled();
+    }
   });
 
   it("does not render cockpit control rails in focus mode", async () => {

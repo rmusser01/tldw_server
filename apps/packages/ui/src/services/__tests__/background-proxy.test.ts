@@ -4359,3 +4359,19 @@ describe("background proxy GET coalescing", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
 })
+
+it.each([
+  ["/api/v1/chats/child", "GET"],
+  ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "GET"],
+  ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "PUT"]
+])("forwards scoped fork inspection/settings through actual proxy: %s %s", async (path, method) => {
+  mocks.runtimeId = "test-extension"
+  mocks.sendMessage.mockReset()
+  mocks.storageGet.mockResolvedValue(null)
+  mocks.sessionStorageGet.mockResolvedValue(null)
+  mocks.sendMessage.mockResolvedValue({ok: true, status: 200, data: {conversation_id: "child", settings: {}}})
+  const {bgRequest} = await importProxy()
+  const servicePromptConfig = {serverUrl: "https://api.example.com", authMode: "multi-user" as const, expectedUserId: 7}
+  await bgRequest({path: path as `/api/v1/${string}`, method: method as "GET" | "PUT", servicePromptConfig, headers: {"X-TLDW-Expected-User-ID": "7"}, ...(method === "PUT" ? {body: {settings: {authorNote: "explicit"}}} : {})})
+  expect(mocks.sendMessage).toHaveBeenCalledWith(expect.objectContaining({payload: expect.objectContaining({path, method, servicePromptConfig})}))
+})

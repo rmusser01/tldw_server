@@ -16,6 +16,10 @@ import { resolveHistorySelection } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
   bookmarks: new Map<string, any>(),
+  forkCandidate: vi.fn(async (..._args: any[]) => null as any),
+  forkRecords: vi.fn(async (..._args: any[]) => [] as any[]),
+  forkSettings: vi.fn(async (..._args: any[]) => null as any),
+  updateForkSettings: vi.fn(async (..._args: any[]) => null as any),
   capture: vi.fn(),
   confirm: vi.fn(),
   profile: vi.fn(),
@@ -24,6 +28,11 @@ const mocks = vi.hoisted(() => ({
   link: vi.fn(),
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
   dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
+}))
+vi.mock("@/db/dexie/fork-operations", () => ({
+  findForkCandidate: (...args: any[]) => mocks.forkCandidate(...args),
+  loadForkOperations: (...args: any[]) => mocks.forkRecords(...args),
+  allowNewForkOperation: vi.fn()
 }))
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: () => mocks.profile(),
@@ -52,6 +61,8 @@ vi.mock("@/db/dexie/history-selection", () => ({
 }))
 vi.mock("@/services/chat-history-selection", () => ({
   captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
+  readNativeForkSettings: (...args: any[]) => mocks.forkSettings(...args),
+  updateNativeForkSettings: (...args: any[]) => mocks.updateForkSettings(...args),
   confirmLegacyHistoryProjection: (...args: any[]) => mocks.confirm(...args)
 }))
 vi.mock("@/db/dexie/chat", () => ({
@@ -143,6 +154,10 @@ function View({ label, reference }: { label: string; reference?: any }) {
   )
 }
 beforeEach(() => {
+  mocks.forkCandidate.mockReset().mockResolvedValue(null)
+  mocks.forkRecords.mockReset().mockResolvedValue([])
+  mocks.forkSettings.mockReset().mockResolvedValue(null)
+  mocks.updateForkSettings.mockReset().mockResolvedValue(null)
   controllers = {}
   mocks.bookmarks.clear()
   mocks.profile.mockReset().mockResolvedValue("profile")
@@ -694,4 +709,46 @@ it("a same-owner cursor change after open cannot become that load's receipt", as
   expect(result.current.status).toBe("ready")
   expect(result.current.view?.cursor).toEqual({ kind: "empty" })
   expect(receipt).not.toHaveBeenCalled()
+})
+
+it("held fork candidate qualification exposes no ordinary settings fallback, then scoped settings edit/reopen works", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  const native: any = {kind: "native", owner_key: "owner", conversation_id: "chat", scope: {type: "workspace", workspaceId: "original"}, validate_lease: () => true}
+  let release!: (value: any) => void
+  mocks.forkCandidate.mockImplementationOnce(() => new Promise(done => {release = done}))
+  mocks.forkSettings.mockResolvedValue({authorNote: "server only"})
+  let opening!: Promise<boolean>
+  act(() => { opening = result.current.open(native) })
+  await waitFor(() => expect(mocks.forkCandidate).toHaveBeenCalled())
+  expect(result.current.settingsMode("chat", native.scope)).toBe("pending")
+  expect(mocks.forkSettings).not.toHaveBeenCalled()
+  await act(async () => {release({owner_key: "owner", candidate_child_id: "chat"}); await opening})
+  expect(result.current.settingsMode("chat", native.scope)).toBe("fork")
+  expect(result.current.forkSettings).toEqual({authorNote: "server only"})
+  mocks.updateForkSettings.mockResolvedValue({authorNote: "explicit edit"})
+  await act(async () => {await result.current.updateForkSettings({authorNote: "explicit edit"})})
+  expect(result.current.forkSettings).toEqual({authorNote: "explicit edit"})
+  expect(result.current.settingsMode("chat", {type: "workspace", workspaceId: "elsewhere"})).toBe("pending")
+  mocks.forkCandidate.mockResolvedValue({owner_key: "owner", candidate_child_id: "chat"})
+  mocks.forkSettings.mockResolvedValue({authorNote: "legitimate later edit"})
+  await act(async () => {await result.current.open(native)})
+  expect(result.current.forkSettings).toEqual({authorNote: "legitimate later edit"})
+})
+it("fork operations refresh hides another owner/workspace and retains original source after selection changes", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  await act(async () => {await result.current.open(owner)})
+  mocks.forkRecords.mockResolvedValue([{owner_key: "owner", operation_id: "op", state: "partial", candidate_child_id: "child"}])
+  await act(async () => {await result.current.refreshForkOperations()})
+  expect(result.current.forkOperations).toHaveLength(1)
+  await act(async () => {result.current.reset()})
+  expect(result.current.forkOperations).toHaveLength(0)
+})
+it("an old workspace fork control cannot release another namespace's active intent", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  const native: any = {kind: "native", owner_key: "owner", conversation_id: "chat", scope: {type: "workspace", workspaceId: "current"}, validate_lease: () => true}
+  await act(async () => {await result.current.open(native)})
+  const store = await import("@/db/dexie/fork-operations")
+  vi.mocked(store.allowNewForkOperation).mockClear()
+  await act(async () => {await result.current.allowNewFork({owner_key: "owner", conversation_id: "chat", context: {kind: "native", scope: {type: "workspace", workspaceId: "old"}}} as any)})
+  expect(store.allowNewForkOperation).not.toHaveBeenCalled()
 })

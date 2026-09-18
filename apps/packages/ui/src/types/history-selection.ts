@@ -39,7 +39,14 @@ export type HistorySelectedContentV1 = HistoryMessageRevisionV1 & {
   readonly extra_metadata?: Readonly<Record<string, unknown>> | null
 }
 
+export type NativeForkContextV1 = {
+  readonly policy: "plain_v1"
+  readonly storage_context_digest: string
+  readonly supported: boolean
+}
+
 export type HistorySelectionSnapshotV1 = {
+  readonly native_fork_context?: NativeForkContextV1 | null
   readonly version: 1
   readonly owner_key: string
   readonly conversation_id: string

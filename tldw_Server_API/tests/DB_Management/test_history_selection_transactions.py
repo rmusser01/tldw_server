@@ -760,3 +760,45 @@ def test_legacy_settlement_ignores_old_source_drift_but_checks_accepted_chain(hi
     with pytest.raises(HistorySelectionError, match="stale_parent"):
         settle(db, cid, accepted, mid="must-not-write")
     assert db.get_message_by_id("must-not-write") is None
+
+
+def test_native_plain_fork_context_is_bound_to_same_statement(history_db):
+    db, _ = history_db
+    cid = db.add_conversation({"title": "Plain", "character_id": None})
+    plain = snapshot_to_wire(snapshot(db, cid))
+    assert plain["native_fork_context"] == {
+        "policy": "plain_v1", "supported": True,
+        "storage_context_digest": plain["storage_context_digest"],
+    }
+    db.upsert_conversation_settings(cid, {})
+    empty = snapshot_to_wire(snapshot(db, cid))
+    assert empty["native_fork_context"]["supported"] is True
+    assert empty["storage_context_digest"] != plain["storage_context_digest"]
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?", ('{"system_prompt":"required"}', cid))
+    required = snapshot_to_wire(snapshot(db, cid))
+    assert required["native_fork_context"]["supported"] is False
+    assert required["storage_context_digest"] != empty["storage_context_digest"]
+
+
+@pytest.mark.parametrize("stored", ["null", "[]", "", "broken", '{"unknown":null}'])
+def test_native_plain_fork_rejects_unreadable_or_required_settings(history_db, stored):
+    db, _ = history_db
+    cid = db.add_conversation({"title": "Plain", "character_id": None})
+    db.upsert_conversation_settings(cid, {})
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?", (stored, cid))
+    assert snapshot_to_wire(snapshot(db, cid))["native_fork_context"]["supported"] is False
+
+
+def test_native_plain_fork_rejects_required_identity_and_behavior(history_db):
+    db, character = history_db
+    assert snapshot_to_wire(snapshot(db, character))["native_fork_context"]["supported"] is False
+    cid = db.add_conversation({"title": "Plain", "character_id": None})
+    before = snapshot(db, cid)
+    from tldw_Server_API.tests.DB_Management.test_character_behavior_snapshot_migration import _snapshot
+    with db.transaction() as conn:
+        db.conversation_resume_store.put_behavior_snapshot(cid, _snapshot(), conn=conn)
+    after = snapshot_to_wire(snapshot(db, cid))
+    assert after["native_fork_context"]["supported"] is False
+    assert after["storage_context_digest"] != before.storage_context_digest

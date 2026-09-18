@@ -747,13 +747,17 @@ export const chatRagMethods = {
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
-      method: "GET"
+      method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
     return this.normalizeChatSummary(res)
   },
@@ -761,13 +765,17 @@ export const chatRagMethods = {
   async getChatSettings(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       expectedStatuses: [404]
     })
   },
@@ -776,14 +784,17 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chat_id: string | number,
     settings: Record<string, unknown>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       body: { settings }
     })
   },

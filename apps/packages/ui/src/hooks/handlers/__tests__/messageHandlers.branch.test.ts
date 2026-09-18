@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const forks = vi.hoisted(() => ({ prepare: vi.fn(), commit: vi.fn() }))
+const nativeForks = vi.hoisted(() => ({prepare: vi.fn(), commit: vi.fn()}))
+vi.mock("@/services/chat-history-selection", () => ({prepareNativeFork: nativeForks.prepare, commitNativeFork: nativeForks.commit}))
+vi.mock("@/db/dexie/fork-operations", () => ({
+  prepareForkOperation: async (request: any, context: any) => ({...request, request, context, state: "prepared"}),
+  claimForkOperation: async (record: any) => ({record}),
+  recordForkCandidate: vi.fn(async () => {}), finishForkOperation: vi.fn(async () => {}), forkOperationResult: (record: any) => record.result
+}))
 const edits = vi.hoisted(() => ({ update: vi.fn() }))
 vi.mock("@/db/dexie/branch", () => ({
   prepareLocalFork: forks.prepare,
@@ -218,4 +225,26 @@ it("a settled load without a receipt never presents the committed child", async 
   })
   expect(await createBranchMessage(options)(request)).toEqual(committed)
   expect(options.setHistoryId).not.toHaveBeenCalled()
+})
+
+it("a throwing child loader reports saved copy without calling it a fork failure", async () => {
+  const options = setup()
+  options.historySelection.loadConversation.mockRejectedValue(new Error("opening failed"))
+  expect(await createBranchMessage(options)(request)).toEqual(committed)
+  expect(options.notification.error).not.toHaveBeenCalled()
+  expect(options.notification.warning).toHaveBeenCalledWith(expect.objectContaining({message: "Copy saved; opening failed"}))
+})
+it.each(["unknown", "partial"])("retains native %s after deferred response without local fallback", async state => {
+  const native = {kind: "native", owner_key: "local", conversation_id: "source", scope: {type: "workspace", workspaceId: "original"}}
+  let resolve!: (result: any) => void
+  nativeForks.prepare.mockResolvedValue({request})
+  nativeForks.commit.mockImplementation(() => new Promise(done => { resolve = done }))
+  const options = setup({serverChatId: "source", historyId: null, historySelection: {getCurrent: () => ({owner: native}), refreshForkOperations: vi.fn(), loadConversation: vi.fn()}})
+  const pending = createBranchMessage(options)(request)
+  await vi.waitFor(() => expect(nativeForks.commit).toHaveBeenCalledTimes(1))
+  resolve({state, owner_key: "local", operation_id: "op", code: "response_lost", candidate_child_id: state === "partial" ? "child" : undefined})
+  expect(await pending).toMatchObject({state, operation_id: "op"})
+  expect(forks.prepare).not.toHaveBeenCalled()
+  expect(forks.commit).not.toHaveBeenCalled()
+  expect(options.historySelection.loadConversation).not.toHaveBeenCalled()
 })
