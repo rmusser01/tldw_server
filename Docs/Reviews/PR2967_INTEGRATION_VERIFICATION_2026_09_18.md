@@ -113,3 +113,6 @@ The final credential repair passes 113 focused and adjacent tests and all three 
 The canonical OpenAPI fingerprint is 6dcb5357a7a6d13b636b6d1cae6a7275a432796b6a2105745fcde7e7dc89bc06. Only the two legacy flashcard field descriptions change; path and schema counts remain 2097 and 3207. Nine touched backend production files have zero Bandit findings.
 
 Source repair is complete locally. Publication, individual Qodo replies and final required hosted CI remain merge gates. These results do not close UAT261 or certify the pending full fresh-install matrix. The requester-provided Change summary is already published, and the latest fetch still identifies dev as 59049e094e0845a4611ea725ae19b7c1754ea709.
+
+
+Publication checkpoint: all reviewed source fixes are pushed at 38b686f0b2. All 14 Qodo threads are resolved, and the updated review reports zero open bugs, rule violations or cross-repo conflicts. Individual replies include fix commits and verification evidence. Final required hosted CI remains pending.
