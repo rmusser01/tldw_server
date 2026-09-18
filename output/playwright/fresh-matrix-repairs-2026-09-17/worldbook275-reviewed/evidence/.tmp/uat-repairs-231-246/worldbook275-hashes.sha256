@@ -1,0 +1,12 @@
+312053fec35ecfb9a35c5a438b91e812b436486ffe8999bdd3077c1a342cc791  apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx
+c55ad3faa5596e945902712eccbffc275a4ae97f1fa61b446b4245422a4c9a14  apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.parentSummaryInvalidation.test.tsx
+d4dd93472689cfff0e141b29833a48a23fac8fe50cf9bf7dbd02a8899cbfa9e3  .superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-216-brief.md
+639aceb10241e6eb2ec7c322dd3d93df39e9db08e249ad9fe8487d362b3c6416  .superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-216-report.md
+8634d90add5554730d1f2bf6b28b79a3e9d8920a1125c386390043dfa18d9301  .tmp/uat-repairs-231-246/worldbook275-initial-readiness-attempt.md
+f0d3da472598e56c45437ca433b37c8a1a97805d1f6144f61a32c316b4b050e3  .tmp/uat-repairs-231-246/worldbook275-causal-red.log
+afc7498e68e46e34b3ca10653b6d378a1db07b159c05181edf6de4f373254203  .tmp/uat-repairs-231-246/worldbook275-move-causal-red.log
+69da222c16653204b032e69d7fde097aa50740d31399505fb4a2e49d0763b50f  .tmp/uat-repairs-231-246/worldbook275-causal-green.log
+b0a752263a389f384c5314f95da30bdf8d496614bdbd2f630fb815d38194784c  .tmp/uat-repairs-231-246/worldbook275-focused-final.log
+627899bfc89ec156651930574f64dfc6a6e1a1eb0712fd9b1c3fe1ad1858a081  .tmp/uat-repairs-231-246/worldbook275-eslint-final.log
+72f09747325746df1b87d8576efe5bce13b27eec8643095d5cf2cb3e4eb9f846  .tmp/uat-repairs-231-246/worldbook275-bandit-final.json
+4f7b3afedd98567e5eb28143aab21fdb7142d0327e4c23b908769ed94e180135  .tmp/uat-repairs-231-246/worldbook275-verification.json

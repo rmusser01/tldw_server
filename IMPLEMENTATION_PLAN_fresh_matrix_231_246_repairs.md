@@ -266,7 +266,7 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task211: legacy World Book regression harness
 
-**Status:** In Progress. TASK13260.211/UAT270 records ten failures reproduced on both0d7 and210. An implementer owns only the legacy test file, with production210 and its new lifecycle test frozen. Require faithful database doubles, unchanged behavior assertions, independent review and adjacent real-backend controls.
+**Status:** Complete. TASK13260.211/UAT270 records ten failures reproduced on both0d7 and210. An implementer owns only the legacy test file, with production210 and its new lifecycle test frozen. Require faithful database doubles, unchanged behavior assertions, independent review and adjacent real-backend controls.
 
 - UAT236 fresh-profile AC3 and independent retention are verified; TASK13260.178 Done. Current270 findings:261verified,4reviewed/native-pending,5active. Root independent210 checks pass21 actual SQLite/PG lifecycle and timestamp cases plus10permissions/negative cases. Native260265266 runs on immutable0d7 source with unchanged original profile/init/holder; no inference.
 
@@ -274,17 +274,17 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task212: preserve Character editor optimistic version
 
-**Status:** In Progress. Native271 PUT422 lacks required expected_version beforeWorldBook attachment. TASK13260.212 scopes loaded-version hydration/request propagation and causal frontend regressions; preserveconflicts/ownership. OriginalAliceCharacter4 nativeedit/attachment/reload required after reviewedcommit. Sources267 andWorldBook210 are committed97036058f8/1b9ea8bc27; legacy211committedcb9cf4a4a4. Hold nexttargetedupgrade toinclude271 ifreviewready.
+**Status:** Complete. Native271 PUT422 lacks required expected_version beforeWorldBook attachment. TASK13260.212 scopes loaded-version hydration/request propagation and causal frontend regressions; preserveconflicts/ownership. OriginalAliceCharacter4 nativeedit/attachment/reload required after reviewedcommit. Sources267 andWorldBook210 are committed97036058f8/1b9ea8bc27; legacy211committedcb9cf4a4a4. Hold nexttargetedupgrade toinclude271 ifreviewready.
 
 ## Task213: truthful reciprocal WorldBook attachment view
 
-**Status:** In Progress. TASK13260.213/UAT272 preserves actualsavedCharacter6/book1 versusreciprocalfalsezero. WorldBooks Manager/detailpanel/tests ownership isdisjoint from271Characterhook/tests. Reproducecache/hydrationcause, preservelazyfetch/owner/errorsemantics, independentreview andoriginalnativebook1/Character6readback required.
+**Status:** Complete. TASK13260.213/UAT272 preserves actualsavedCharacter6/book1 versusreciprocalfalsezero. WorldBooks Manager/detailpanel/tests ownership isdisjoint from271Characterhook/tests. Reproducecache/hydrationcause, preservelazyfetch/owner/errorsemantics, independentreview andoriginalnativebook1/Character6readback required.
 
 - Native260/265/266accepted after30checks61inputs andexactretentionvalidation; tasks202207208Done. Native271/272remainseparatefrontendrepairs. UAT273optionalvisualauthoringcapabilitygate isTASK13260.214, waiting271freezebeforeimplementation. Model261criterionclarification ispending whilefrontendworkcontinues.
 
 ## Task214: gate optional visual metadata authoring
 
-**Status:** In Progress. TASK13260.214/UAT273 covers automatic unsupported packs requests despite a false capability. The author owns Common/VisualIdentity/VisualIdentityPackPanel and focused tests after freezing UAT271 for independent review. Require a capability-false causal test, supported and legacy controls, useful availability guidance, and original PostgreSQL Metadata expansion acceptance.
+**Status:** Complete. TASK13260.214/UAT273 covers automatic unsupported packs requests despite a false capability. The author owns Common/VisualIdentity/VisualIdentityPackPanel and focused tests after freezing UAT271 for independent review. Require a capability-false causal test, supported and legacy controls, useful availability guidance, and original PostgreSQL Metadata expansion acceptance.
 
 - UAT271 is under independent review. The original author observed the causal failure but did not retain its log; the reviewer is reproducing that failure through an isolated baseline-hook overlay without changing production files. UAT272 review requested truthful handling of relationship-read failures, a concrete retry action, and direct coverage of both client implementations. Previous passing receipts remain retained, not final acceptance.
 - UAT261 diagnosis is preserved in `output/playwright/fresh-matrix-repairs-2026-09-17/model261-diagnosis-pending`. The original extra-introduction stream has terminal stop/DONE; missing observer bodies leave the other terminal results unknown. No application cause has been established. The finding and the model-output criterion question remain open; no provider settings or runtime behavior changed.
@@ -300,8 +300,10 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 
 ## Task216: refresh parent World Book counts after entry mutations
 
-**Status:** Not Started. TASK13260.216/UAT275 records stale parent0entries after successful create while the entry panel shows1; normal reload corrects it. After274 freezes, the same entry-file author owns a causal query-refresh regression and minimal invalidation correction. Require create/delete native summaries to update without reload and agree with canonical reload. Separate task and evidence preserve this UX defect; no concurrent edits to the shared entry manager. Gate275:265verified,7native-pending,3active.
+**Status:** In Progress. TASK13260.216/UAT275 records stale parent0entries after successful create while the entry panel shows1; normal reload corrects it. After274 freezes, the same entry-file author owns a causal query-refresh regression and minimal invalidation correction. Require create/delete native summaries to update without reload and agree with canonical reload. Separate task and evidence preserve this UX defect; no concurrent edits to the shared entry manager. Gate275:265verified,7native-pending,3active.
 
 - Tasks206/209/212/213/214 are Complete after original Alice native38checks76inputs and root98retention comparisons. Accepted packet `native-worldbook-sources264267271272273-accepted`, manifestf8d42ec77678ea579c5e67c88deb3d504d52b5a0fdb74b74f007130b0944a5a7. Gate275:270verified,2native-pending268269,3active261274275. Source remains270682 in the running original PGmulti instance; browser returned to root with preserved book3/blueentry1 and detachedCharacter7. No full matrix or inference. Continue274 then275, independently review/commit, upgrade and complete entry/book lifecycle acceptance.
 
 - Task215/UAT274 source review is Complete; native acceptance remains pending. Final guarded identifier mapping passes independent13checks44inputs, author17focused and independent12focused tests; reviewed packet2e28dc41a94261ad60353cd18aa469a6a3ea9faa6726eff2ab0a4c21d8ee838f retained with281rootcomparisons. Task216/UAT275 is In Progress with a separate real-QueryClient summary regression before source edits. Gate275:270verified,3native-pending268269274,2active261275. Model261 isolated diagnostic capture independently replays1test; no live inference or disposition change.
+
+- Task216/UAT275 source review is clear: independent13checks30inputs, three real-QueryClient controls pass and the exact baseline overlay reproduces two failures with its negative control passing. Author adjacent suite17passed/one unchanged retired-drawer skip; partial bulk-add is source-reviewed only. Reviewed packet manifest21b55c880f4e46b6438ec688fc89d2e957e2f5334236f1ca28e5d6b92e2e3be7 retained with74rootcomparisons. Current275 findings:270verified,4reviewed/native-pending268269274275,1active261. Original PostgreSQL combined entry/count acceptance is next; no full fresh matrix or model criterion change.

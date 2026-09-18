@@ -1,0 +1,9 @@
+{
+  "headCommit": "c6da2588c8a3bdaa996b650188bc764693c07fa2",
+  "baselineSource": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx",
+  "baselineSha256": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+  "baselineSnapshotMatches": true,
+  "skipPath": "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBooksManager.entryStage1.test.tsx",
+  "skipSha256": "7b6fb8d06716bac9520048be7c3cd0d49dd05db25024d5c1f01dfd8317ad5b4a",
+  "skipUnchanged": true
+}
