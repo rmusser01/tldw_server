@@ -1,0 +1,416 @@
+{
+  "at": "2026-09-18T01:23:01.589Z",
+  "acceptedFindings": [
+    258
+  ],
+  "revision": "edfd06ec40a173f2e38ec65af715abb29f3aa002",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/capability258-native-diagnosis/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/capability258-native-diagnosis/REVIEW.md",
+      "bytes": 6178,
+      "sha256": "bf7a438107cfc9d7da667573d2005fc118526977ca173f281d0d240962ed91ae",
+      "sourceBytes": 6178,
+      "sourceSha256": "bf7a438107cfc9d7da667573d2005fc118526977ca173f281d0d240962ed91ae",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/capability258-native-diagnosis/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/capability258-native-diagnosis/audit.mjs",
+      "bytes": 12658,
+      "sha256": "e2d79c5af1a084e96feecfef44a73d120a4d498f383560c94cf2bc910e9806ea",
+      "sourceBytes": 12658,
+      "sourceSha256": "e2d79c5af1a084e96feecfef44a73d120a4d498f383560c94cf2bc910e9806ea",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/capability258-native-diagnosis/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/capability258-native-diagnosis/audit.json",
+      "bytes": 41204,
+      "sha256": "c39c8fb391bac40a634ababb0bd13098c2b96eb0033633a5d3780b6ef1eabbf6",
+      "sourceBytes": 41204,
+      "sourceSha256": "c39c8fb391bac40a634ababb0bd13098c2b96eb0033633a5d3780b6ef1eabbf6",
+      "encoding": "identity"
+    }
+  ],
+  "omitted": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/capability258-fresh.txt",
+      "bytes": 3008,
+      "sha256": "2004a1d44bf6e9f1268b2a3c5b0fd37baab214ac1789d632b6e8fc2c0e7cc7d9",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/capability258-fresh.js",
+      "bytes": 1083,
+      "sha256": "f4486d427f77f360b9cbb05a2cbd5106801871953bc9ea798682873929f134b2",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-fresh.txt",
+      "bytes": 3224,
+      "sha256": "e8f6fa4679cc211fb1a4b39f01d19e33ebaa10031afa2d6b4eafc8cb03822397",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-fresh.js",
+      "bytes": 1083,
+      "sha256": "07e5852625e9118d2b5788fa2203f8852eb4d3bafc1cb4954dd4ee43c4587f76",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-authenticated.txt",
+      "bytes": 10075,
+      "sha256": "d00aa4011ff189f250945c7d14977428129885692d06c4eaefe3fffb90bb25f2",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-authenticated-reloaded.txt",
+      "bytes": 7558,
+      "sha256": "9b5c87d40aae7321d31ab26ca5632487f417a2bd669848cc6947beb6766a3c01",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources.txt",
+      "bytes": 3160,
+      "sha256": "106cf5b4c3d7a4e23e589554fca48c013bb9c71b89df65589ad169fb7cad5d54",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources-settled.txt",
+      "bytes": 2824,
+      "sha256": "44c6648c0d0a8990f3fe9b977e593f04a9cd9b56a48616c5c0b91c03b4f29b08",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources-retry.txt",
+      "bytes": 2411,
+      "sha256": "318e0b877fd7eeb90483e958739858442f27d394020986f2ab6390d447bc13f8",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/observe-native.js",
+      "bytes": 2404,
+      "sha256": "6dcb52db48fa61c446f158b67d36c22a2f4d7ca9616db7b9db2fef08f701f8b3",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-authenticated.js",
+      "bytes": 448,
+      "sha256": "430806bbc441bf003a2ca3626cc8fe656fb0aedd18a4f9fdfdf7db5a818f8ad4",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-authenticated-reload.js",
+      "bytes": 348,
+      "sha256": "c68cabcf9eba05b0de89dc1f3f8246c4ea5535673904c768fb43b0476f853f9b",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources.js",
+      "bytes": 285,
+      "sha256": "daaf52b917dc919aab26f692841979f05553b18ea7925d8b19e6445c4c3b2309",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources-settled.js",
+      "bytes": 170,
+      "sha256": "6ee2e5c51e26d1a401d427b1d16414cd5f455047328793951add9de99f2b1f0f",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-sources-retry.js",
+      "bytes": 304,
+      "sha256": "e4546667bcc0d4b8aa81d9ec53a08564dc14d597a960de3eb21ca90d64fb3cb1",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-source-observer-retry.txt",
+      "bytes": 5463,
+      "sha256": "bc5368bb985faaf69ff18f12ed0026b14feab4441019a26db165bc2e1ccf9b9b",
+      "privateHashOnly": false,
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/capability258-source-request-observer.js",
+      "bytes": 897,
+      "sha256": "67e32b8fcfabaf5e392176b60c7a5977a74a6a02e7a46b0b347a50b8928a52e1",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/binding.private.json",
+      "bytes": 1672,
+      "sha256": "9c1706060b1cf2a987b17b2610f489c8446181dbab829dc7f59de33516a5a6a4",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "bytes": 11397,
+      "sha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "bytes": 217,
+      "sha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "bytes": 1594,
+      "sha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/pg-single-source-manifest.json",
+      "bytes": 8575432,
+      "sha256": "6b4b2d3e5bc5ffb6a98cf0eff460475961bcdaf9189ac84be67655a36c94fdbe",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/backend-1789693120302-9be6d56a-dc55-40fe-a815-e61a3910550f.process.private.json",
+      "bytes": 1260,
+      "sha256": "6ba1a31a07ccfc3ee455817a65b90c44ae25ce999fef50276e59f3405ac12f71",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-single/frontend-1789693164801-019802f2-a46d-45ee-8fcb-12b793451826.process.private.json",
+      "bytes": 1403,
+      "sha256": "2720f0ab38a3436e2e30dc4a53c14786647d0515c3377e391eef8eade1e53eb0",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-single/apps/packages/ui/src/services/tldw/server-capabilities.ts",
+      "bytes": 30298,
+      "sha256": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-multi/binding.private.json",
+      "bytes": 1669,
+      "sha256": "6d584f967d32aad0a01f5f2174fe785a737ac6807e5978e95e083fcf5072a9c2",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "bytes": 11348,
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "bytes": 217,
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "bytes": 1593,
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/preparation/pg-multi-source-manifest.json",
+      "bytes": 8575431,
+      "sha256": "91efbacc87b80dcb0a184c6d91268fbbae822398ab72d0f00dd2994c51a47757",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-multi/backend-1789693118645-57b10d5e-8252-4d0f-b503-7782e034f27a.process.private.json",
+      "bytes": 1256,
+      "sha256": "737d26b0a731a4e3d5021cb2c394d6761b4f109ebcf8ddd489d87d1157dfe629",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-multi/frontend-1789693165826-e17590e7-69c5-4787-b03c-97256c29b1fe.process.private.json",
+      "bytes": 1398,
+      "sha256": "b454fe4bf59b4fa142951094dbd1a52692501c228625cfe31ecc752354e37cae",
+      "privateHashOnly": true,
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/server-capabilities.ts",
+      "bytes": 30298,
+      "sha256": "d5f831bc56b29b185e600d167d3cee944867a8245d42e12823af3e72f58ae899",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/authscope257259-cap258-upgrade-20260918/pg-multi/backend-1789693118645-57b10d5e-8252-4d0f-b503-7782e034f27a.private.log",
+      "bytes": 733203,
+      "sha256": "9ab39db347239fc1a6c04713dc487c8bf2ec8dee44d792afe23ad91613e23d5c",
+      "privateHashOnly": true,
+      "retentionVerification": "Original reviewed log prefix remains byte-identical; live log appended after audit",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-multi/apps/packages/ui/src/services/tldw/domains/collections.ts",
+      "bytes": 38837,
+      "sha256": "876489240638247ab4781bdfe70af25855e812e6090c525d5be10467d6a7f7c4",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/domains/collections.ts",
+      "bytes": 38837,
+      "sha256": "876489240638247ab4781bdfe70af25855e812e6090c525d5be10467d6a7f7c4",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-multi/tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py",
+      "bytes": 28627,
+      "sha256": "3a9e8137a38234b0c3280879024c40681ad538c35e51037c8fd31a2123a68b7d",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/tldw_Server_API/app/api/v1/endpoints/ingestion_sources.py",
+      "bytes": 28627,
+      "sha256": "3a9e8137a38234b0c3280879024c40681ad538c35e51037c8fd31a2123a68b7d",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-multi/apps/tldw-frontend/next.config.mjs",
+      "bytes": 10706,
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/tldw-frontend/next.config.mjs",
+      "bytes": 10706,
+      "sha256": "55f31677133e8fc03759d961e6bca7534c1a6d007fd0554723ee54d5bd5e3188",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-multi/apps/packages/ui/src/components/ui/state/capability-state.ts",
+      "bytes": 6994,
+      "sha256": "ba28f1435c8bc6cd7987557d9e758e19897030a4c4737cc1abd0519699a6a3c5",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/components/ui/state/capability-state.ts",
+      "bytes": 6994,
+      "sha256": "ba28f1435c8bc6cd7987557d9e758e19897030a4c4737cc1abd0519699a6a3c5",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "bytes": 266613,
+      "sha256": "01d6a7a669c1fa1490bb60fa11f3f4b65cd3992a9b38b40eb91c6af38a2fbbca",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/services/background-proxy.ts",
+      "bytes": 80256,
+      "sha256": "70f1483af5b48f6573340a0e6728a2b363757d61ad4748f32249208ab1bae638",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/hooks/useTldwApiClient.tsx",
+      "bytes": 224,
+      "sha256": "71b0bb5fa90882282b7d7d51eb126c1284c6780e17d985aa72145a6a1105f955",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/hooks/use-ingestion-sources.ts",
+      "bytes": 7029,
+      "sha256": "616a1b0e2781ce63b298eaeefe1332ceb6da6cc8f0abb2cbb056d71d5a78dca8",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/Sources/SourcesWorkspacePage.tsx",
+      "bytes": 4640,
+      "sha256": "a9b69222fd61388b78f5ce8a3793454bfcbc62852a959b9c0dde343aa7b76975",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/Sources/SourcesAvailabilityGate.tsx",
+      "bytes": 2085,
+      "sha256": "59c2e45cbe5bf517aa616a623afb10d56c7f40b50cc47d6379d6ee69c9663ac8",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Common/WorkspaceConnectionGate.tsx",
+      "bytes": 4303,
+      "sha256": "84e0c91ee94c71f6e2a461d1b3a9c0f36b8816279e91ce31d38f5cd4cb4377c8",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/services/__tests__/tldw-api-client.ingestion-sources.test.ts",
+      "bytes": 9103,
+      "sha256": "8a109ad2981d1dfe11b845eebae38f666193a01c2ef756e32bffff439f3cc2c1",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/authscope257259-cap258-upgrade-20260918/pg-multi/apps/packages/ui/src/hooks/__tests__/use-ingestion-sources.test.tsx",
+      "bytes": 8377,
+      "sha256": "7a7187352922dd66b91685cf9b858868afc46bc083f5c63fd4d2114d37abc6db",
+      "privateHashOnly": false,
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-review/ROUND2-audit.json",
+      "bytes": 7344,
+      "sha256": "d188f878b82fd6932373ae91b4d91fd9c3008d2860d048f5fb090d5a658729ba",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/capability258-native-diagnosis/audit.mjs",
+      "bytes": 12658,
+      "sha256": "e2d79c5af1a084e96feecfef44a73d120a4d498f383560c94cf2bc910e9806ea",
+      "privateHashOnly": false,
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    }
+  ]
+}
