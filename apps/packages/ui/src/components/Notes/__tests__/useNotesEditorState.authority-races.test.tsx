@@ -1,5 +1,5 @@
 import React from 'react'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState'
@@ -74,6 +74,74 @@ describe('Notes editor authority races', () => {
     view.rerender({ scope: 'bob' })
     expect(view.result.current.loadingDetail).toBe(false)
     await act(async () => { old.resolve({ id: 'old' }) })
+  })
+
+  it('does not acknowledge an offline save before its authority scope is confirmed', async () => {
+    const view = renderEditor()
+    view.rerender({ scope: null })
+
+    act(() => {
+      view.result.current.setTitle('Draft awaiting authority')
+      view.result.current.setContent('Keep this edit dirty until scoped persistence is available.')
+      view.result.current.setIsDirty(true)
+    })
+
+    let saved!: boolean
+    await act(async () => {
+      saved = await view.result.current.saveNote({ showSuccessMessage: false })
+    })
+
+    expect(saved).toBe(false)
+    expect(view.result.current.isDirty).toBe(true)
+    expect(view.result.current.offlineDraftQueue).toEqual({})
+  })
+
+  it('keeps an offline edit dirty when scoped draft persistence throws', async () => {
+    const view = renderEditor()
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage unavailable')
+    })
+    try {
+      act(() => {
+        view.result.current.setTitle('Draft with unavailable storage')
+        view.result.current.setContent('Do not acknowledge a draft that was not written.')
+        view.result.current.setIsDirty(true)
+      })
+
+      let saved!: boolean
+      await act(async () => {
+        saved = await view.result.current.saveNote({ showSuccessMessage: false })
+      })
+
+      expect(saved).toBe(false)
+      expect(view.result.current.isDirty).toBe(true)
+    } finally {
+      setItem.mockRestore()
+    }
+  })
+
+  it('does not acknowledge an offline draft unless scoped storage retains it', async () => {
+    const view = renderEditor()
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined)
+    try {
+      act(() => {
+        view.result.current.setTitle('Draft without a retained write')
+        view.result.current.setContent('A silent storage failure must not clear this edit.')
+        view.result.current.setIsDirty(true)
+      })
+
+      let saved!: boolean
+      await act(async () => {
+        saved = await view.result.current.saveNote({ showSuccessMessage: false })
+      })
+
+      expect(saved).toBe(false)
+      expect(view.result.current.isDirty).toBe(true)
+    } finally {
+      setItem.mockRestore()
+    }
   })
 
   it('does not show a stale error or end the next authority’s loading state', async () => {

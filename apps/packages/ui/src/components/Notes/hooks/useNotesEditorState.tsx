@@ -388,6 +388,37 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     [buildCurrentOfflineDraft, setOfflineDraftQueue]
   )
 
+  const persistOfflineDraft = React.useCallback(
+    (
+      overrides?: Partial<Pick<OfflineDraftEntry, 'syncState' | 'lastError' | 'updatedAt' | 'baseVersion'>>
+    ) => {
+      if (!authorityScope || authorityScopeRef.current !== authorityScope) return false
+      if (!offlineDraftStorageKey || !offlineDraftQueueHydrated || typeof window === 'undefined') return false
+      const nextDraft = buildCurrentOfflineDraft(overrides)
+      const nextQueue = {
+        ...offlineDraftQueueRef.current,
+        [nextDraft.key]: nextDraft
+      }
+      try {
+        const serializedQueue = JSON.stringify(nextQueue)
+        window.localStorage.setItem(offlineDraftStorageKey, serializedQueue)
+        if (window.localStorage.getItem(offlineDraftStorageKey) !== serializedQueue) return false
+      } catch {
+        return false
+      }
+      offlineDraftQueueRef.current = nextQueue
+      setOfflineDraftQueue(nextQueue)
+      return true
+    },
+    [
+      authorityScope,
+      buildCurrentOfflineDraft,
+      offlineDraftQueueHydrated,
+      offlineDraftStorageKey,
+      setOfflineDraftQueue
+    ]
+  )
+
   const removeOfflineDraftByKey = React.useCallback((key: string) => {
     const normalized = String(key || '').trim()
     if (!normalized) return
@@ -1078,11 +1109,22 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
       if (!isOnline) {
         const queuedAt = new Date().toISOString()
-        upsertOfflineDraft({
+        const persisted = persistOfflineDraft({
           syncState: 'queued',
           lastError: null,
           updatedAt: queuedAt
         })
+        if (!persisted || !isCurrent()) {
+          if (isCurrent()) {
+            const unavailableMessage = t('option:notesSearch.offlineSaveUnavailable', {
+              defaultValue: 'Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved.'
+            })
+            setSaveIndicator('error')
+            setSaveRecoveryNotice({ kind: 'error', message: unavailableMessage })
+            if (showSuccessMessage) message.error(unavailableMessage)
+          }
+          return false
+        }
         setIsDirty(false)
         setSaveIndicator('idle')
         setSaveRecoveryNotice(null)
@@ -1388,7 +1430,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       showKeywordSyncWarning,
       t,
       title,
-      upsertOfflineDraft
+      persistOfflineDraft
     ]
   )
 

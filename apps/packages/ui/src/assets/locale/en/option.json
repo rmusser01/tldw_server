@@ -1309,6 +1309,7 @@
     "toolbarCopyTooltip": "Copy note content",
     "toolbarDeleteTooltip": "Delete note",
     "toolbarSave": "Save",
+    "offlineSaveUnavailable": "Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved.",
     "linkedConversation": "Linked to conversation",
     "openConversation": "Open conversation",
     "openConversationTooltip": "Open linked conversation",

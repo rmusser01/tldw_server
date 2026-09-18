@@ -10,7 +10,7 @@ import { tldwClient, type TldwConfig } from '@/services/tldw/TldwApiClient';
 
 /** Both title surfaces follow the active conversation, never the legacy catalog. */
 export function useActiveChatTitle() {
-  const { historyId, serverChatId, serverChatTitle, temporaryChat } = useStoreMessageOption();
+  const { historyId, serverChatId, serverChatTitle, serverChatMetaLoaded, temporaryChat } = useStoreMessageOption();
   const { config, authorityLoading } = useCanonicalConnectionConfig();
   const [, refresh] = useReducer((value: number) => value + 1, 0);
   const active = useRef<{
@@ -20,14 +20,32 @@ export function useActiveChatTitle() {
     config: TldwConfig | null;
     controller: AbortController;
     saving: boolean;
+    authorityRefreshPending: boolean;
+    sawUnloadedServerMetadata: boolean;
   } | null>(null);
+  const serverChatMetaLoadedRef = useRef(serverChatMetaLoaded);
+  serverChatMetaLoadedRef.current = serverChatMetaLoaded;
   let owner = active.current;
+  const authorityChanged = !authorityLoading && !!config && !!owner && (
+    owner.controller.signal.aborted ||
+    (!!owner.config && !connectionAuthoritiesMatch(config, owner.config))
+  );
   if (
     !owner ||
     owner.historyId !== historyId ||
     owner.serverChatId !== serverChatId ||
-    owner.temporaryChat !== temporaryChat
+    owner.temporaryChat !== temporaryChat ||
+    authorityChanged
   ) {
+    const previousOwner = owner;
+    const selectionChanged = !!previousOwner && (
+      previousOwner.historyId !== historyId ||
+      previousOwner.serverChatId !== serverChatId ||
+      previousOwner.temporaryChat !== temporaryChat
+    );
+    const authorityRefreshPending = !selectionChanged && (
+      authorityChanged || previousOwner?.authorityRefreshPending === true
+    );
     owner?.controller.abort();
     owner = {
       historyId,
@@ -36,13 +54,20 @@ export function useActiveChatTitle() {
       config: authorityLoading ? null : config,
       controller: new AbortController(),
       saving: false,
+      authorityRefreshPending,
+      sawUnloadedServerMetadata: authorityRefreshPending && serverChatMetaLoaded === false,
     };
     active.current = owner;
   } else if (!authorityLoading && config) {
     if (!owner.config) owner.config = config;
-    else if (!connectionAuthoritiesMatch(config, owner.config)) owner.controller.abort();
   }
-  const ready = !authorityLoading && !!config && !owner.controller.signal.aborted && !temporaryChat;
+  if (owner.authorityRefreshPending && owner.serverChatId) {
+    if (serverChatMetaLoaded === false) owner.sawUnloadedServerMetadata = true;
+    else if (owner.sawUnloadedServerMetadata) owner.authorityRefreshPending = false;
+  }
+  const ready = !authorityLoading && !!config && !owner.controller.signal.aborted &&
+    !owner.authorityRefreshPending && !temporaryChat;
+  const serverChatTitleReady = serverChatMetaLoaded !== false;
   const readyRef = useRef(ready);
   readyRef.current = ready;
   const isCurrent = () => {
@@ -61,7 +86,12 @@ export function useActiveChatTitle() {
     // React Strict Mode remounts effects before rendering the surviving instance.
     if (!active.current) refresh();
     const invalidate = () => {
-      active.current?.controller.abort();
+      const current = active.current;
+      if (current) {
+        current.authorityRefreshPending = true;
+        current.sawUnloadedServerMetadata = serverChatMetaLoadedRef.current === false;
+        current.controller.abort();
+      }
       refresh();
     };
     const configChanged = (event: Event) => {
@@ -85,13 +115,13 @@ export function useActiveChatTitle() {
   const title = !ready
     ? ''
     : serverChatId
-      ? serverChatTitle || ''
+      ? serverChatTitleReady ? serverChatTitle || '' : ''
       : local?.owner === owner
         ? local.title
         : '';
 
   const renameTitle = async (value: string) => {
-    if (!isCurrent() || owner.saving || !historyId || historyId === 'temp') return;
+    if (!isCurrent() || owner.saving || !historyId || historyId === 'temp' || (serverChatId && !serverChatTitleReady)) return;
     owner.saving = true;
     refresh();
     const nextTitle = value.trim() || 'Untitled';
