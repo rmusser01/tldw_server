@@ -1,0 +1,13 @@
+{
+  "at": "2026-09-18T02:38:36.494Z",
+  "manifestSha256": "cb667c9e90cc60a720c55488da80addb247afa384ac013d2dba2e479c15a88e6",
+  "payloadsVerified": 4,
+  "inputsVerified": 61,
+  "acceptedFindings": [
+    260,
+    265,
+    266
+  ],
+  "fullMatrixAccepted": false,
+  "verification": "Root reviewed native report and reran30check audit; this projection compares retained payloads and all61 provenance inputs before task closure"
+}

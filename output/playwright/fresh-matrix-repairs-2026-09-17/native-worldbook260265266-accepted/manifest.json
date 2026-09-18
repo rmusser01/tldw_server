@@ -1,0 +1,543 @@
+{
+  "at": "2026-09-18T02:38:12.091Z",
+  "acceptedFindings": [
+    260,
+    265,
+    266
+  ],
+  "revision": "0d7f2a23c95e9fc301959610721f7e1175e5cafa",
+  "fullMatrixAccepted": false,
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-worldbook260265266-review/REVIEW.md",
+      "bytes": 6266,
+      "sha256": "171deb492a58b787ed982639287681a2a9105422d13035490b00d91b0b9bde91",
+      "sourceBytes": 6266,
+      "sourceSha256": "171deb492a58b787ed982639287681a2a9105422d13035490b00d91b0b9bde91",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.mjs",
+      "bytes": 18627,
+      "sha256": "4e626f20a41203a3b0419a2e9fd929f6760571f422cc041e9b7db61a4e5de16e",
+      "sourceBytes": 18627,
+      "sourceSha256": "4e626f20a41203a3b0419a2e9fd929f6760571f422cc041e9b7db61a4e5de16e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.json",
+      "bytes": 33042,
+      "sha256": "13ee8b8993da5f12fc0f9ed1bb164a8b153ca63f6f25355bb06abb7eb61707ab",
+      "sourceBytes": 33042,
+      "sourceSha256": "13ee8b8993da5f12fc0f9ed1bb164a8b153ca63f6f25355bb06abb7eb61707ab",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/runtime-observed-safe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/native-worldbook260265266-review/runtime-observed-safe.json",
+      "bytes": 1331,
+      "sha256": "466c7d06a5140c62ad2d6e93ef103c6bb7d6ec7a3b747a961c1a2f7ae1b1d140",
+      "sourceBytes": 1331,
+      "sourceSha256": "466c7d06a5140c62ad2d6e93ef103c6bb7d6ec7a3b747a961c1a2f7ae1b1d140",
+      "encoding": "identity"
+    }
+  ],
+  "omitted": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/04-original-opened.txt",
+      "bytes": 33160,
+      "sha256": "db6360ee5f904609a2a0d09c50d71923f1409e3b46bdfd53900fd4e5f3c36ea0",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/05-original-saved.txt",
+      "bytes": 5866,
+      "sha256": "d7f9059323b9c8e5512b00a3f18b3e754e745c97e88b5d92b6d124b901443f38",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/07-original-reloaded.txt",
+      "bytes": 10274,
+      "sha256": "614e9474f0ce0a889fcd9f8ce6c0a9ccbb9c410a846d7228a68e71400966ded8",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/09-new-book-created.txt",
+      "bytes": 7826,
+      "sha256": "616c397cb7a44307db6ae766ae7c97b9a82812ceed835b95a87526eb12dc3138",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/10-new-book-reloaded.txt",
+      "bytes": 10670,
+      "sha256": "135ecf1fb6f038b66278aa235da19d6d187d2b05c80264e620238b92faa9c651",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/19-character-validation.txt",
+      "bytes": 796,
+      "sha256": "b859acd3d16f21f910edb0cb05cf43073018382d5ff000ac98229ce58867a3c1",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/22-created-attached.txt",
+      "bytes": 17973,
+      "sha256": "b8681b189770f7a2f44c899fe93c4785b32f6fdc5a6fe2557d29e72e1c60e831",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/23-attachment-reloaded.txt",
+      "bytes": 27272,
+      "sha256": "8f88ca43aeca5b1c88a4d56224a60f1c25b5c85e7688e1f5cbfd50c18851e708",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/25-handback.txt",
+      "bytes": 177084,
+      "sha256": "244a38420c64d9107efdd1e76fcf5cc4f70fdd252c97ca53ba6faf43b4bb5290",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "bytes": 11348,
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f",
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/credentials.private.json",
+      "bytes": 784,
+      "sha256": "ce6ad6074ccd07fdaf5fe4ff9d0e831266aac6b26bf52320ea569e61232788fa",
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-multi/worldbook265-save-failed.txt",
+      "bytes": 5280,
+      "sha256": "1dc101720e3a90def261ba56911ac074c092d8bfd7ab4df10b715860f90961e6",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/02-reload.js",
+      "bytes": 1781,
+      "sha256": "edf6f591add8115367efeeea35a9dcd42c66f250fe1b0a7dd2ab31fa27982415",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/04-open-original.js",
+      "bytes": 507,
+      "sha256": "7fd89e93992a116bb92375f1a297a3eb6b3dc6ddf231df0fa75cc9929d5b341b",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/05-save-original.js",
+      "bytes": 792,
+      "sha256": "bd5b0cfb69e3f1d00dd58b183250b7a7803a0d74bc3d4a989a857c9eef008233",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/07-original-reload.js",
+      "bytes": 733,
+      "sha256": "ebcf9a95fd3a8c6e5a2834c5129e7a807f185f99478cfba86f44a942a7d063b8",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/09-create-timestamp.js",
+      "bytes": 1025,
+      "sha256": "f18530f057c4e22f7f2945f89edce1f29b2a0c75167a685d8e98d56f0d3dae19",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/10-new-book-reload.js",
+      "bytes": 708,
+      "sha256": "80a02ac11c0e709af1b3bbf000502135a6f6d959294f111df2563b1e28d83e59",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/17-attach.js",
+      "bytes": 973,
+      "sha256": "19bd06131af01f5c3ce6cbd99fe69fb5cb404f428adb6cb133534afeb12fa51a",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/22-create-attached.js",
+      "bytes": 1117,
+      "sha256": "6461af9ecc270578fa0405af7f3e4f292b4c3d597a0d457a2d505fb13e6455a3",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/23-attachment-reload.js",
+      "bytes": 1127,
+      "sha256": "563768477bd1fda43488af121a5d8f2ae1535bc4be9baa4d19440bfeefbc5400",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/25-handback.js",
+      "bytes": 455,
+      "sha256": "bd5c23ba3b0308536994b69c5903250891879f5f376a6b7b8d429536c0d65980",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/worldbook260265266-startup-safe.json",
+      "bytes": 2050,
+      "sha256": "83226918eb9a0ee867e4ddd47361698bc5c3ff16371a5c9ac16a1d2f641f3c14",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook260265266-upgrade-20260918/pg-multi/binding.private.json",
+      "bytes": 1661,
+      "sha256": "0104b412eee50bf08f3dca9b3547e696f72f32272614065380cc511b74e78f3d",
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "bytes": 1593,
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db",
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "bytes": 217,
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9",
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/runtime-observed-safe.json",
+      "bytes": 1331,
+      "sha256": "466c7d06a5140c62ad2d6e93ef103c6bb7d6ec7a3b747a961c1a2f7ae1b1d140",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook260265266-upgrade-20260918/pg-multi/backend-1789697563347-4133757f-95b9-42c0-8251-b8ba5759752a.process.private.json",
+      "bytes": 1244,
+      "sha256": "3ce17bbc4ffaf27b46582dcd00c0f844475487a7df4a4413d87ad09c9d601377",
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook260265266-upgrade-20260918/pg-multi/frontend-1789697506799-21449e85-a023-4ef4-8366-31c4bbfdb61e.process.private.json",
+      "bytes": 1378,
+      "sha256": "af1ff70fa4812a58d58be1941b63599fa3d7d6bb026cd00bd0b71da8d5540196",
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt",
+      "reason": "Private configuration/process record; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/preparation/pg-multi-source-manifest.json",
+      "bytes": 8613183,
+      "sha256": "ded36079c68660d07e873cc120984f5553e57316bc4d4c882217347c3b49f2d9",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/preparation/complete.json",
+      "bytes": 574,
+      "sha256": "86473914cc5ce78de28275d87c6f550d3d4f2f30ef651b6c34395876c1e397a8",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/preparation/gate.json",
+      "bytes": 1184,
+      "sha256": "b620be4a5f3a901246388284feca2a48f9217bc653557372b23603d29c212055",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/preparation/python-reuse.json",
+      "bytes": 1417,
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook260-review/REVIEW.md",
+      "bytes": 4312,
+      "sha256": "c0043c397741952ea5f514811812f18ccc566233e318943e95c212330d90fc28",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/pg-multi/tldw_Server_API/app/core/Character_Chat/world_book_manager.py",
+      "bytes": 107425,
+      "sha256": "1ffb3839115e34daa162abae2f9b6648741597814744798d435c70960010c870",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/pg-multi/tldw_Server_API/tests/DB_Management/test_world_book_timestamp_responses_backends.py",
+      "bytes": 7455,
+      "sha256": "928dbf57c452f6ea020a09272c26359e4677450fc2d64ac0b7b0e3f16bd078cf",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/worldbook260265266-upgrade-20260918/pg-multi/apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookListUtils.test.ts",
+      "bytes": 3841,
+      "sha256": "3f051d0e8f05490434f51e184a5c9bfc13bc853da4c6e45ce8dcdd71de64c1ca",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Immutable source archive input; hash-only provenance"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook239-255-review/audit.json",
+      "bytes": 19582,
+      "sha256": "3dd602b639d16b2403bab3eacdfeae271ba7a85d729bcf3457e35382463f6949",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/02-reloaded.txt",
+      "bytes": 158,
+      "sha256": "7cfb19d9877fc897db4d58a36e82fee1213ecb6f1a7662c3a9e054ec5c60620d",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/06-original-reloaded.txt",
+      "bytes": 133,
+      "sha256": "1199cab1905d11fbc8e587d3e6f197bd1556d6c5653baf22f2434ec1d4c200a9",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/16-attached.txt",
+      "bytes": 791,
+      "sha256": "5990cfad47a47849223a76ceebf7437f9557029d3a67f896b1208dcfb1fcd436",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/17-attached.txt",
+      "bytes": 107,
+      "sha256": "d81887922d692b5e40f9dd7a6b8fbf08d08071701150870209bdae5ff1ec37d6",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/24-final-readback.txt",
+      "bytes": 107,
+      "sha256": "fa6e76f442413f399661524aedaf3ea3ec725d7b533587cae2f5d48cb8511304",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/01-initial-snapshot.txt",
+      "bytes": 1045,
+      "sha256": "0cb7f32837243819b4bca6c800ff7606d90fbb3b1318a6137fce9b3b755783b0",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/03-current-snapshot.txt",
+      "bytes": 6107,
+      "sha256": "7afc6cf58d7101b04c2913cbf572b64a2f0ce180f4bb2aae43e0710f7bc3865e",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/06-original-reload.js",
+      "bytes": 735,
+      "sha256": "2165cfba6feb336ca5ae017b3d358bcff0c7b22fc69dd24351a574db0ef46e56",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/08-create-form.txt",
+      "bytes": 4402,
+      "sha256": "8b7dfce81e1ba9127245961eaa705b9abed7430f527dde5781ef2105edfd22a5",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/11-attachments-opened.txt",
+      "bytes": 4636,
+      "sha256": "dbb0ff0c8d2366a6cfe0d6fa366245dace94fb562046501f549fc4a53eb50410",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/12-characters-opened.txt",
+      "bytes": 9339,
+      "sha256": "5a6cf3796405bd1bda38ced4f6307318c7bf66a95e23f7e4479e5c9abf07e07e",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/13-character-editor.txt",
+      "bytes": 11545,
+      "sha256": "d0a90a62376bbb2a0517ee259b75bac5f87a917c5df3677eae1f02c0ed7dd3eb",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/14-character-metadata.txt",
+      "bytes": 15002,
+      "sha256": "a52fe110bec44d0a6020056bd57f6deb75ce3ebd3a04761bad39e167137d5ff0",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/15-attachment-options.txt",
+      "bytes": 14610,
+      "sha256": "874905bac50bd65dfd5f02f17c466e1247ac812a8554de53f7566ad995e5c589",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/16-attach.js",
+      "bytes": 869,
+      "sha256": "7c9053096df7bc56472d2f5da2387d05ad2b91e145250ca16dfc94b04d9cba24",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/18-attachment-current.txt",
+      "bytes": 44253,
+      "sha256": "51f96530e58d80dbbf1f73194cb0ec530508cf77a9a5ec29fb8f80c903ae7658",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/20-new-character-form.txt",
+      "bytes": 10485,
+      "sha256": "60f3b123bb127cdb1f48fe1453b5fab2ab06519db14be46280c9d25ca386553e",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/21-new-character-attachment-form.txt",
+      "bytes": 9040,
+      "sha256": "476d3e029f6bfbdc578f0f4c6f50f66d0b739f0ac042210f998745432e1494de",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local native capture may contain provider reasoning; safe independently checked facts retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/24-final-readback.js",
+      "bytes": 1159,
+      "sha256": "efa4357ae50ecdac92237e7c66a286d99f05cb9973d613168ee7767a6be11705",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": "backlog/tasks/task-13260.202 - Preserve-timezone-in-PostgreSQL-World-Book-timestamps-UAT-260.md",
+      "bytes": 3713,
+      "sha256": "6682bfa06f6ac8b223279ec727542cc909d094be59dcb9b4d574f9c540977c7f",
+      "privateHashOnly": false,
+      "classification": "running-task-metadata",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": "backlog/tasks/task-13260.207 - Repair-PostgreSQL-World-Book-update-transaction-lifecycle-UAT-265.md",
+      "bytes": 3081,
+      "sha256": "fa1249edb0f806042ddc9058c294b137f2625d468aad963beb72b136fa4350b4",
+      "privateHashOnly": false,
+      "classification": "running-task-metadata",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": "backlog/tasks/task-13260.208 - Repair-PostgreSQL-World-Book-attachment-transaction-lifecycle-UAT-266.md",
+      "bytes": 2501,
+      "sha256": "e0b23a5e8e51110072aea909070371df0c62fef82af4b274e868470f942bb9bf",
+      "privateHashOnly": false,
+      "classification": "running-task-metadata",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-worldbook260265266-review/audit.mjs",
+      "bytes": 18627,
+      "sha256": "4e626f20a41203a3b0419a2e9fd929f6760571f422cc041e9b7db61a4e5de16e",
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Original local helper/startup record; safe independent audit retained"
+    }
+  ]
+}

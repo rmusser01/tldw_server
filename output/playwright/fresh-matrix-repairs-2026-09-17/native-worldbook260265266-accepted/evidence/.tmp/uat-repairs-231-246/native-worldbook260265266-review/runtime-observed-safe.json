@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-18T02:31:41.908Z",
+  "processes": [
+    {
+      "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook260265266-upgrade-20260918/pg-multi/backend-1789697563347-4133757f-95b9-42c0-8251-b8ba5759752a.process.private.json",
+      "sha256": "3ce17bbc4ffaf27b46582dcd00c0f844475487a7df4a4413d87ad09c9d601377",
+      "pid": 36086,
+      "status": "started",
+      "sourceCommit": "0d7f2a23c95e9fc301959610721f7e1175e5cafa",
+      "startedAt": "2026-09-18T02:12:43.347Z",
+      "bindingHash": "0104b412eee50bf08f3dca9b3547e696f72f32272614065380cc511b74e78f3d",
+      "originalStartupHash": "3ce17bbc4ffaf27b46582dcd00c0f844475487a7df4a4413d87ad09c9d601377"
+    },
+    {
+      "receipt": ".tmp/uat-next-matrix-20260916/targeted-upgrades/worldbook260265266-upgrade-20260918/pg-multi/frontend-1789697506799-21449e85-a023-4ef4-8366-31c4bbfdb61e.process.private.json",
+      "sha256": "af1ff70fa4812a58d58be1941b63599fa3d7d6bb026cd00bd0b71da8d5540196",
+      "pid": 35312,
+      "status": "started",
+      "sourceCommit": "0d7f2a23c95e9fc301959610721f7e1175e5cafa",
+      "startedAt": "2026-09-18T02:11:46.799Z",
+      "bindingHash": "0104b412eee50bf08f3dca9b3547e696f72f32272614065380cc511b74e78f3d",
+      "originalStartupHash": "af1ff70fa4812a58d58be1941b63599fa3d7d6bb026cd00bd0b71da8d5540196"
+    }
+  ]
+}

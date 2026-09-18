@@ -271,3 +271,17 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 - UAT236 fresh-profile AC3 and independent retention are verified; TASK13260.178 Done. Current270 findings:261verified,4reviewed/native-pending,5active. Root independent210 checks pass21 actual SQLite/PG lifecycle and timestamp cases plus10permissions/negative cases. Native260265266 runs on immutable0d7 source with unchanged original profile/init/holder; no inference.
 
 - Task210 implementation review is clear; actual database/permission checks pass and native lifecycle acceptance remains pending. Task267 implementation review likewise passes actual SQLite/PG and worker/API/cleanup checks; original Alice catalogue acceptance remains pending. Task211 is Complete:39legacytests pass with independent review and test-only scope. Current270 findings:262verified,7reviewed/native-pending,1active261.
+
+## Task212: preserve Character editor optimistic version
+
+**Status:** In Progress. Native271 PUT422 lacks required expected_version beforeWorldBook attachment. TASK13260.212 scopes loaded-version hydration/request propagation and causal frontend regressions; preserveconflicts/ownership. OriginalAliceCharacter4 nativeedit/attachment/reload required after reviewedcommit. Sources267 andWorldBook210 are committed97036058f8/1b9ea8bc27; legacy211committedcb9cf4a4a4. Hold nexttargetedupgrade toinclude271 ifreviewready.
+
+## Task213: truthful reciprocal WorldBook attachment view
+
+**Status:** In Progress. TASK13260.213/UAT272 preserves actualsavedCharacter6/book1 versusreciprocalfalsezero. WorldBooks Manager/detailpanel/tests ownership isdisjoint from271Characterhook/tests. Reproducecache/hydrationcause, preservelazyfetch/owner/errorsemantics, independentreview andoriginalnativebook1/Character6readback required.
+
+- Native260/265/266accepted after30checks61inputs andexactretentionvalidation; tasks202207208Done. Native271/272remainseparatefrontendrepairs. UAT273optionalvisualauthoringcapabilitygate isTASK13260.214, waiting271freezebeforeimplementation. Model261criterionclarification ispending whilefrontendworkcontinues.
+
+## Task214: gate optional visual metadata authoring
+
+**Status:** Not Started (tracked). TASK13260.214/UAT273 preservesautomaticunsupportedpacks501 despitecapabilityfalse. ScopeCommon/VisualIdentity/VisualIdentityPackPanel andfocusedtests. Wait271authorfreeze, thenkeep2implementationauthors withdisjoint272WorldBooks/clientlistwork. Requirecapabilityfalse causaltest, supported/legacycontrols, usefulavailabilityUI andoriginalPGMetadataexpansionacceptance.
