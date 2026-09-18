@@ -71,10 +71,12 @@ Repair release: reviewed frozen evidence committed `4815d44d4a`. Authentication 
 **Files:** `hooks/chat/useServerChatLoader.ts`, NotesManager linked-Chat action, existing server-history linking/Dexie and session persistence utilities; `hooks/__tests__/useServerChatLoader.test.ts`, `usePlaygroundSessionPersistence.test.tsx`, and an adjacent integrated round-trip suite. Coordinate NotesManager edits with .13/.25.
 
 - [ ] Reproduce the exact pre-fix greeting/user mirror lacking serverMessageId with a fetched third reply, using real formatters/Dexie/session restoration.
-- [ ] Preserve server IDs and reconcile the owned existing mirror while retaining genuine unsynced/streaming/newer local rows.
+- [x] Preserve server IDs and reconcile the owned existing mirror while retaining genuine unsynced/streaming/newer local rows.
 - [ ] Exercise concurrent bootstrap/loader mapping, account changes during transactions and repeated reload. Assert rows are not moved to a competing linked history. Use the existing browser harness for real Dexie; the named mocked Vitest fixtures alone do not prove this round trip.
 - [ ] Reproduce Cedar Note backlink retaining Robot selection and missing saved-message actions; restore owned conversation/character/message identities together with dirty/account/stale-source guards.
-- [ ] Independently review and perform the real tracked Chat→Note→backlink→settled reload sequence before committing.
+- [ ] Independently review, preserve the tested correction in its own commit, then perform the real tracked Chat→Note→backlink→settled reload sequence on the integrated dev baseline. The user's baseline clarification moves native acceptance after TASK-13260.32 integration; no earlier-checkout native pass is substituted.
+
+- Reviewed code checkpoint `a0c48e84c4`: parent58/6 and implementation309/25 precede the final one-line earlier-await correction. Final independent68/5 and parent17/2 pass after it; all five unchanged review probes pass. Reconciliation publishes preserved owned rows and IDs together, with permanent held-typing/history/stream/account guards. Independent re-review is clear; native acceptance remains pending. Combined dev validation retains the90-diagnostic compiler baseline and adds no scoped lint findings.
 
 ### Integrated-runtime follow-up: TASK-13260.33 / UAT093
 

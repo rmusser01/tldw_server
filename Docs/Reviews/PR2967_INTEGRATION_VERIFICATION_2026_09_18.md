@@ -46,9 +46,29 @@ retains only the unchanged random-jitter B311. TypeScript is outside Bandit's
 supported scope. These checks do not constitute whole-repository security
 certification.
 
+## Latest integration checkpoint
+
+On8eca6c6bc4, all eight frontend unit shards pass. Shard2 passes31 frontend
+and563 UI tests, including all10 Settings timeout/form cases and the original
+save/reload scenario. The full extension gate also passes. The final
+frontend-required job105657458181 subsequently fails its WebUI session-key
+lifecycle assertion before reload on all three attempts: the helper returns
+after local metadata exists, before the separate session credential write.
+Independent review supported a storage-specific readiness correction. The
+first corrected local run passes device and legacy cases but still fails session
+readiness after15 seconds, without retries. Diagnosis continues; neither a
+completed session save nor a production root cause is established yet.
+
+The requester supplied the human-written Change summary, now published
+verbatim in PR2967. The requested rebase replayed327 commits onto freshly
+fetched dev59049e094e0845a4611ea725ae19b7c1754ea709. Original application/test
+files match the pre-rebase candidate; the recovery ref preserves8eca6.
+Historical plan details and local generated evidence are preserved. No
+output/playwright files are tracked. Qodo review will run on the updated PR.
+
 ## Remaining merge gates
 
-- Confirm the Settings readiness helper in hosted CI. At fa50b25ca4, shard2
+- The Settings readiness helper is confirmed in8eca6 hosted CI. At fa50b25ca4, shard2
   passes562 tests and fails only the first ordinary save/reload case's blank
   Server URL; the radio repair passes. The candidate now discovers the real
   textbox once, then waits for its unchanged exact value. It separates two
@@ -64,8 +84,8 @@ certification.
   pass. Only the original extension fixture and two Settings assertions fail,
   plus the frontend aggregate. Conditional jobs do not imply broader coverage;
   historical local failures and every intermediate attempt remain retained.
-- Obtain the requester's own human-written Change summary explaining what
-  changed and why, as required by the repository merge policy.
+- Verify the session-key fixture correction and final candidate CI; read and
+  address every Qodo finding/comment after the PR is ready for review.
 - Merge normally, verify the remote result, and resume UAT with UAT-261 first.
 
 Existing PostgreSQL World Books without recorded ownership remain intact but

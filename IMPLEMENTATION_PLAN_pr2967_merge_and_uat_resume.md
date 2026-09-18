@@ -30,8 +30,14 @@ At fa50b25ca4, final hosted extension acceptance passes36 scenarios with zero sk
 **Tests:** Fresh PR status/head/base/check review immediately before merge; inspect remote merged state afterward.
 **Status:** Not Started.
 
+Requester checkpoint2026-09-18: the user supplied their own Change summary and explicitly requested latest-dev rebase, remediation of all Qodo findings/comments, then merge. The exact summary is published in PR2967. Fresh origin/dev remains59049e094e0845a4611ea725ae19b7c1754ea709. Rebase replayed327 non-merge commits, preserving the previous8eca6 head in codex/pr2967-before-rebase-20260918. Historical tracker/task conflicts retain their accepted records; the original cycle3 plan detail is restored. Application/test files match the pre-rebase candidate. Generated output/playwright files remain excluded and their local archive is preserved. Before pushing, integrate and verify the final CI fixture correction below; then mark ready for Qodo review and address every finding before normal merge.
+
+At8eca6, all eight frontend unit shards pass; shard2 has31 frontend and563 UI tests, including all10 Settings timeout/form cases. Final frontend-required then fails the immediate session-credential assertion in manual-api-key-persistence.spec.ts before reload, on all three hosted attempts. Independent review confirms that the helper checks any local configuration even though session saving writes local metadata before the separate session credential. Wait for the exact credential record in its selected storage area; retain all reload/reopen/auth and local-secret-absence assertions. Production credential-loss behavior is not established by this failure. Relevant local validation and final hosted CI remain required.
+
 ## Stage 4: resume UAT from261, then the full workflow scope
 **Goal:** Continue the original UAT → review → fix loop on the integrated code.
 **Success Criteria:** First resumed scenario is original TestBot character flow, all outcomes retained; subsequent fresh four-configuration workflow matrix proceeds with261 still open until genuinely resolved. No green-only retries or acceptance weakening.
 **Tests:** Characters → TestBot → Chat, exact public question and instruction, real completion/canonical reload; then the retained twelve-row protocol across SQLite/PostgreSQL and single/multi-user setups, including actual image attachment.
 **Status:** Not Started.
+
+The first corrected local browser run passes device and legacy persistence but fails session readiness after the unchanged15-second wait, with retries0. Thus the original weak readiness check does not explain the full failure. Retain that failed attempt and trace actual save/storage behavior before another candidate. Local evidence: .tmp/pr2967-merge-20260918/manual-api-key-e2e/. The rebased branch may be reviewed by Qodo while this known gate is diagnosed; it is not merge-ready.
