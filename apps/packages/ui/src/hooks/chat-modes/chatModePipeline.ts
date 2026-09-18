@@ -1,7 +1,11 @@
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
 import { startTransition } from "react"
 import { generateID } from "@/db/dexie/helpers"
 import { getModelNicknameByID } from "@/db/dexie/nickname"
-import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning"
+import {
+  isReasoningEnded, isReasoningStarted, isReasoningOnlyResponse,
+  MISSING_FINAL_ANSWER_MESSAGE
+} from "@/libs/reasoning"
 import { pageAssistModel } from "@/models"
 import type { ActorSettings } from "@/types/actor"
 import type { ChatDocuments } from "@/models/ChatTypes"
@@ -50,6 +54,7 @@ import type { MessageMetadataExtra } from "@/store/option"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
@@ -221,9 +226,20 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ? String(rawModelIdOverride).trim()
     : undefined
 
+  const failedTurnError = decodeChatErrorPayload(regenerateFromMessage?.message || "")
+  const diagnosticUser = isRegenerate && regenerateFromMessage
+    ? getLocalRagDiagnosticUser(messages, regenerateFromMessage) : undefined
+  const retryFailedTurn = Boolean(isRegenerate && (failedTurnError || diagnosticUser))
+  // A local capability refusal can prove no request was dispatched. Keep the
+  // local failed-user identity while avoiding server reuse of an older turn.
+  const serverRetryRequired = retryFailedTurn && !diagnosticUser && failedTurnError?.serverRetryRequired !== false
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
-    !isRegenerate ? userMessageId ?? generateID() : undefined
+    !isRegenerate
+      ? userMessageId ?? generateID()
+      : retryFailedTurn
+        ? userMessageId ?? diagnosticUser?.id ?? regenerateFromMessage?.parentMessageId ?? getLastUserMessageId(messages) ?? undefined
+        : undefined
   const createdAt = Date.now()
   let generateMessageId = resolvedAssistantMessageId
   const modelInfo = await getModelNicknameByID(selectedModel)
@@ -280,6 +296,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     regenerateVariants
   }
 
+  let modelClient: Awaited<ReturnType<typeof pageAssistModel>> | undefined
   let fullText = ""
   let contentToSave = ""
   let timetaken = 0
@@ -387,7 +404,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               message: pendingStreamingText,
               reasoning_time_taken: pendingReasoningTime
             })
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
   }
@@ -582,7 +601,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   reasoning_time_taken: timetaken
                 })
               )
-            : msg
+            : msg.id === resolvedUserMessageId && isLocalRagDiagnosticInfo(preflightGenerationInfoForSave)
+              ? { ...msg, generationInfo: preflightGenerationInfoForSave }
+              : msg
         )
       )
       setHistorySafely(nextHistory)
@@ -603,6 +624,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -632,6 +654,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       return chatSubmitSubmitted()
     }
 
+    // Rewrite builders also read visible messages. Keep the context identity
+    // used by preflight retrieval caches, while projecting only prompt rows.
+    context.messages = excludeLocalRagDiagnostics(context.messages)
     const promptData = await mode.preparePrompt(context)
     if (params.dynamicUIRequest?.renderer === "openui") {
       promptData.chatHistory = [
@@ -658,11 +683,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const sources = promptData.sources ?? []
     const humanMessage = promptData.humanMessage
 
-    const modelClient = await pageAssistModel({
+    modelClient = await pageAssistModel({
       model: selectedModel,
       toolChoice,
       conversationId,
       researchContext: context.researchContext,
+      clientMessageId: resolvedUserMessageId,
+      retryFailedTurn: serverRetryRequired,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
 
@@ -800,6 +827,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     ) {
       throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
     }
+    if (
+      isReasoningOnlyResponse(fullText) &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(MISSING_FINAL_ANSWER_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
@@ -827,6 +861,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: fullText,
+                serverMessageId: modelClient.serverMessageId,
                 sources,
                 generationInfo: finalGenerationInfo,
                 toolCalls,
@@ -836,7 +871,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                   : {})
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -867,6 +904,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
+        userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -915,6 +955,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       modelId: resolvedModelId,
       userModelId,
       userMessageId: resolvedUserMessageId,
+      retryFailedTurn,
+      userServerMessageId: modelClient?.userServerMessageId,
       assistantMessageId: resolvedAssistantMessageId,
       userParentMessageId: userParentMessageId ?? null,
       assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
@@ -926,6 +968,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       reasoning_time_taken: timetaken,
       saveToDb: Boolean(modelClient.saveToDb),
       conversationId: modelClient.conversationId,
+      assistantServerMessageId: modelClient.serverMessageId,
       imageEventSyncPolicy,
       scopeSignal: params.servicePromptSnapshot?.scopeSignal,
       scopeInvalidatedSignal:
@@ -995,6 +1038,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ? normalizeImageVariantsForMessage(
               updateActiveVariant(msg, {
                 message: assistantContent,
+                ...(modelClient?.serverMessageId ? { serverMessageId: modelClient.serverMessageId } : {}),
                 generationInfo: {
                   ...(msg.generationInfo || {}),
                   interrupted: true,
@@ -1003,7 +1047,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 }
               })
             )
-          : msg
+          : msg.id === resolvedUserMessageId && msg.message === message && modelClient?.userServerMessageId
+            ? { ...msg, serverMessageId: modelClient.userServerMessageId }
+            : msg
       )
     )
 
@@ -1026,9 +1072,12 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         modelId: resolvedModelId,
         userModelId,
         userMessageId: resolvedUserMessageId,
+        retryFailedTurn,
+        userServerMessageId: modelClient?.userServerMessageId,
+        assistantServerMessageId: modelClient?.serverMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         userParentMessageId: userParentMessageId ?? null,
-        assistantParentMessageId: assistantParentMessageId ?? null,
+        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
         documents,
         isContinue: mode.isContinue,
         prompt_content: promptContent,

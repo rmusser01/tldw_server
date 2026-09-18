@@ -27,6 +27,8 @@ const selectedAssistantSubscribers = new Set<Subscriber>()
 let selectedAssistantOperationRevision = 0
 let selectedAssistantCommitChain: Promise<void> = Promise.resolve()
 
+export const getSelectedAssistantOperationRevision = (): number => selectedAssistantOperationRevision
+
 export type SelectedAssistantCommitOptions = {
   isCurrent?: () => boolean
 }
@@ -128,6 +130,7 @@ export const useSelectedAssistant = (
       next: AssistantSelection | null,
       options: SelectedAssistantCommitOptions = {}
     ) => {
+      if (options.isCurrent && !options.isCurrent()) return
       const normalizedCurrent = normalizeAssistantSelection(
         parseSelectedAssistantValue(latestSelectedAssistantRef.current)
       )

@@ -276,6 +276,13 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             'Return JSON array: [{"front": "Q", "back": "A", "tags": []}]'
         )
 
+    system_prompt += (
+        "\nUse only facts explicitly stated in the source. Do not add outside knowledge, "
+        "inferred details, or explanations absent from it, including in notes or extra fields. "
+        "Keep answers concise and self-contained; use complete source-supported statements "
+        "instead of isolated terms where possible."
+    )
+
     try:
         messages = [{"role": "user", "content": f"Generate flashcards from:\n\n{text[:8000]}"}]
         response = await perform_chat_api_call_async(

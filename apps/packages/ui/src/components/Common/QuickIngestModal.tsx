@@ -1,4 +1,6 @@
 import React, { useCallback } from 'react'
+import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
+import { useMilestoneStore } from '@/store/milestones'
 import { Modal, Button, Input, Select, Space, Switch, Typography, Tag, message, Collapse, InputNumber, Tooltip as AntTooltip, Spin } from 'antd'
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from 'react-i18next'
@@ -40,6 +42,7 @@ import {
   useIngestQueue,
   useIngestResults,
   getFileInstanceId,
+  buildQueuedFileStub,
   normalizeResultItem,
   normalizeResultStatus,
   mediaIdFromPayload,
@@ -134,6 +137,8 @@ export const QuickIngestModal: React.FC<Props> = ({
   onClose,
   autoProcessQueued = false
 }) => {
+  const homeScope = useHomeMilestoneScope()
+  const runMilestoneRef = React.useRef<{ ownerScope: string | null; storesMedia: boolean } | null>(null)
   const { t } = useTranslation(['option', 'settings'])
   const qi = React.useCallback(
     (key: string, defaultValue: string, options?: Record<string, any>) =>
@@ -544,6 +549,10 @@ export const QuickIngestModal: React.FC<Props> = ({
       const primarySourceLabel = firstSuccessfulItem?.url || firstSuccessfulItem?.fileName || null
 
       if (hasOkResults) {
+        const ownerScope = runMilestoneRef.current?.ownerScope
+        if (ownerScope && runMilestoneRef.current?.storesMedia && firstMediaId != null) {
+          useMilestoneStore.getState().markScopedMilestone(ownerScope, "first_ingest")
+        }
         recordRunSuccess({
           totalCount: out.length, successCount, failedCount: failCount,
           firstMediaId: firstMediaId === null || typeof firstMediaId === "undefined" ? null : String(firstMediaId),
@@ -600,6 +609,7 @@ export const QuickIngestModal: React.FC<Props> = ({
 
   // ---- Main run function ----
   const run = React.useCallback(async () => {
+    runMilestoneRef.current = { ownerScope: homeScope, storesMedia: storeRemote && !processOnly }
     setLastRunError(null)
     setLastRunCancelled(false)
     results.setDraftCreationError(null)
@@ -799,7 +809,7 @@ export const QuickIngestModal: React.FC<Props> = ({
     attachedFiles, attachedFileStubs, fileForStubId, formatBytes, markFailure,
     messageApi, mergeDefaults, processOnly, qi, fileTypeFromName,
     reviewBeforeStorage, rows, storeRemote, t, normalizedTypeDefaults,
-    missingFileStubs.length, setActiveSessionId, setLastRunCancelled, setLastRunError,
+    homeScope, missingFileStubs.length, setActiveSessionId, setLastRunCancelled, setLastRunError,
     setTotalPlanned, setProcessedCount, setLiveTotalCount, setRunStartedAt,
     setLastRunProcessOnly, setResults, lastFileLookupRef, lastFileIdByInstanceIdRef,
     unmountedRef, results, wizardReal
@@ -1016,7 +1026,6 @@ export const QuickIngestModal: React.FC<Props> = ({
   const resetQueueForRetry = React.useCallback(
     (nextRows: typeof rows, nextFiles: File[], msg: string) => {
       const defaultsSnapshot = createDefaultsSnapshot()
-      const { buildQueuedFileStub } = require('./hooks')
       const nextFileStubs = nextFiles.map((file: File) => buildQueuedFileStub(file, defaultsSnapshot))
       setRows(nextRows)
       setQueuedFiles(nextFileStubs)

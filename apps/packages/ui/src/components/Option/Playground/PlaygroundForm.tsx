@@ -36,6 +36,9 @@ import {
 // TldwButton moved to extracted sub-components
 import { useAntdNotification } from "@/hooks/useAntdNotification";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
+import { useMilestoneStore } from "@/store/milestones";
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig";
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference";
 import {
@@ -111,6 +114,7 @@ import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
   getAssistantSelectionMode,
+  type AssistantSelection,
 } from "@/types/assistant-selection";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
@@ -537,6 +541,7 @@ export const PlaygroundForm = ({
   );
   const {
     onSubmit,
+    regenerateLastMessage,
     messages,
     setMessages,
     selectedModel,
@@ -756,6 +761,9 @@ export const PlaygroundForm = ({
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig();
+  const homeScope = useHomeMilestoneScope();
+  const homeScopeRef = React.useRef(homeScope);
+  homeScopeRef.current = homeScope;
   const promptAssistBackendKey = React.useMemo(
     () =>
       canonicalConnectionLoading || !canonicalConnectionConfig
@@ -1604,6 +1612,62 @@ export const PlaygroundForm = ({
     return options;
   }, [composerModels, t]);
 
+  const assistantActionMountedRef = React.useRef(true);
+  const assistantActionRevisionRef = React.useRef(0);
+  React.useEffect(() => {
+    assistantActionMountedRef.current = true;
+    return () => { assistantActionMountedRef.current = false; };
+  }, []);
+  const captureAssistantActionGuard = React.useCallback(() => {
+    const actionRevision = assistantActionRevisionRef.current;
+    const expected = useStoreMessageOption.getState();
+    const targetId = expected.serverChatId;
+    const historyId = expected.historyId;
+    const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
+    return () => {
+      const current = useStoreMessageOption.getState();
+      return assistantActionMountedRef.current &&
+        assistantActionRevisionRef.current === actionRevision &&
+        usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
+        current.serverChatId === targetId && current.historyId === historyId;
+    };
+  }, []);
+  const applyAssistantSelection = React.useCallback(
+    async (selection: AssistantSelection | null): Promise<boolean> => {
+      assistantActionRevisionRef.current++;
+      const activeChat = useStoreMessageOption.getState();
+      const matchesActiveChat = selection?.kind === "character"
+        ? activeChat.serverChatAssistantKind === "character" &&
+          String(activeChat.serverChatCharacterId) === selection.id
+        : selection?.kind === "persona"
+          ? activeChat.serverChatAssistantKind === "persona" &&
+            String(activeChat.serverChatAssistantId) === selection.id
+          : activeChat.serverChatMetaLoaded &&
+            (activeChat.serverChatAssistantKind === null || activeChat.serverChatAssistantKind === undefined) &&
+            (activeChat.serverChatAssistantId === null || activeChat.serverChatAssistantId === undefined) &&
+            (activeChat.serverChatCharacterId === null || activeChat.serverChatCharacterId === undefined);
+      if (
+        activeChat.serverChatId &&
+        !matchesActiveChat &&
+        getAssistantSelectionMode(selection) !== "overlay"
+      ) {
+        activeChat.setHistoryId(null, { preserveServerChatId: false });
+        activeChat.setHistory([]);
+        activeChat.setMessages([]);
+        activeChat.setServerChatCharacterId(null);
+        activeChat.setServerChatAssistantKind(null);
+        activeChat.setServerChatAssistantId(null);
+        activeChat.setServerChatPersonaMemoryMode(null);
+        activeChat.setServerChatMetaLoaded(false);
+        activeChat.setServerChatId(null);
+      }
+      const isCurrent = captureAssistantActionGuard();
+      await setSelectedAssistant(selection, { isCurrent });
+      return isCurrent();
+    },
+    [captureAssistantActionGuard, setSelectedAssistant],
+  );
+
   const promptTemplates = usePromptTemplates({
     startupTemplatesRaw,
     setStartupTemplatesRaw,
@@ -1619,8 +1683,7 @@ export const PlaygroundForm = ({
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
-    setSelectedCharacter,
-    setSelectedAssistant,
+    applyAssistantSelection,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,
@@ -1640,7 +1703,7 @@ export const PlaygroundForm = ({
     selectedSystemPromptRecord,
     handleSaveStartupTemplate,
     handleOpenStartupTemplatePreview,
-    handleApplyStartupTemplate,
+    applyStartupTemplateBundle,
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
@@ -2161,9 +2224,8 @@ export const PlaygroundForm = ({
     [clearBehaviorTemplateIdentity, setSelectedQuickPrompt],
   );
   const clearRolePlayIdentity = React.useCallback(() => {
-    void setSelectedCharacter(null);
-    void setSelectedAssistant(null);
-  }, [setSelectedAssistant, setSelectedCharacter]);
+    void applyAssistantSelection(null);
+  }, [applyAssistantSelection]);
   const resetRolePlayGenerationStyle = React.useCallback(() => {
     const preset = getPresetByKey("balanced");
     if (!preset) return;
@@ -2172,32 +2234,9 @@ export const PlaygroundForm = ({
   const handleApplyRolePlaySetup = React.useCallback(
     async (payload: RolePlaySetupApplyPayload) => {
       if (payload.clearIdentity) {
-        await setSelectedAssistant(null);
+        if (!await applyAssistantSelection(null)) return false;
       } else if (payload.identitySelection) {
-        const selection = payload.identitySelection;
-        const activeChat = useStoreMessageOption.getState();
-        const matchesActiveChat = selection.kind === "character"
-          ? activeChat.serverChatAssistantKind === "character" &&
-            String(activeChat.serverChatCharacterId) === selection.id
-          : activeChat.serverChatAssistantKind === "persona" &&
-            String(activeChat.serverChatAssistantId) === selection.id;
-
-        await setSelectedAssistant(selection);
-        if (
-          getAssistantSelectionMode(selection) !== "overlay" &&
-          activeChat.serverChatId &&
-          !matchesActiveChat
-        ) {
-          activeChat.setHistoryId(null, { preserveServerChatId: false });
-          activeChat.setHistory([]);
-          activeChat.setMessages([]);
-          activeChat.setServerChatCharacterId(null);
-          activeChat.setServerChatAssistantKind(null);
-          activeChat.setServerChatAssistantId(null);
-          activeChat.setServerChatPersonaMemoryMode(null);
-          activeChat.setServerChatMetaLoaded(false);
-          activeChat.setServerChatId(null);
-        }
+        if (!await applyAssistantSelection(payload.identitySelection)) return false;
       }
       if (payload.clearBehavior) {
         clearPromptContext();
@@ -2212,40 +2251,61 @@ export const PlaygroundForm = ({
           updateChatModelSettings(preset.settings);
         }
       }
+      return true;
     },
     [
       clearPromptContext,
       handleTemplateSelect,
       resetRolePlayGenerationStyle,
-      setSelectedAssistant,
+      applyAssistantSelection,
       updateChatModelSettings,
     ],
   );
   const handleApplyStartupTemplatePreview = React.useCallback(async () => {
-    if (!startupTemplatePreview?.rolePlay) {
-      handleApplyStartupTemplate();
-      return;
-    }
+    if (!startupTemplatePreview) return;
 
-    if (startupTemplatePreview.rolePlay.source === "role-play-setup") {
-      const nextScene =
-        startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
-      await saveActorSettingsForChat({
-        historyId,
-        serverChatId,
-        settings: nextScene,
+    const applied = applyStartupTemplateBundle(startupTemplatePreview);
+    const destination = useStoreMessageOption.getState();
+    const targetId = destination.serverChatId;
+    const targetHistoryId = destination.historyId;
+    const isCurrent = captureAssistantActionGuard();
+    let settingsAccepted = false;
+    try {
+      if (await applied === false || !isCurrent()) return;
+      settingsAccepted = true;
+      if (startupTemplatePreview.rolePlay) {
+        const nextScene = startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
+        const saved = await saveActorSettingsForChat({
+          historyId: targetHistoryId,
+          serverChatId: targetId,
+          settings: nextScene,
+        });
+        if (!isCurrent()) return;
+        if (!saved) throw new Error("Scene settings save failed");
+        setActorSettings(nextScene);
+        const preview = summarizeRolePlayScene(nextScene);
+        setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+      }
+      setStartupTemplatePreview(null);
+      setModeAnnouncement(startupTemplatePreview.rolePlay
+        ? t("playground:composer.rolePlaySetupAppliedNotice", "Role-play setup applied.")
+        : t("playground:composer.startupTemplateAppliedNotice", "Startup template applied."));
+    } catch {
+      if (!isCurrent()) return;
+      notificationApi.error({
+        message: t("common:error", "Error"),
+        description: settingsAccepted && startupTemplatePreview.rolePlay
+          ? t("playground:composer.rolePlayScenePartialSaveError", "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply.")
+          : t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply."),
       });
-      setActorSettings(nextScene);
-      const preview = summarizeRolePlayScene(nextScene);
-      setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
     }
-
-    await handleApplySavedRolePlaySetup(startupTemplatePreview);
   }, [
-    handleApplySavedRolePlaySetup,
-    handleApplyStartupTemplate,
-    historyId,
-    serverChatId,
+    captureAssistantActionGuard,
+    applyStartupTemplateBundle,
+    notificationApi,
+    setModeAnnouncement,
+    setStartupTemplatePreview,
+    t,
     setActorPreviewAndTokens,
     setActorSettings,
     startupTemplatePreview,
@@ -2470,7 +2530,7 @@ export const PlaygroundForm = ({
       },
     ) => {
       const payload = normalizeMediaChatHandoffPayload(rawPayload);
-      if (!payload) {
+      if (!payload || (payload.ownerScope && payload.ownerScope !== homeScopeRef.current)) {
         if (options?.clearAfterUse) {
           void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
         }
@@ -2483,10 +2543,13 @@ export const PlaygroundForm = ({
       if (mode === "rag_media") {
         const mediaId = parseMediaIdAsNumber(payload);
         if (mediaId != null) {
+          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
           setChatMode("rag");
           setRagMediaIds([mediaId]);
+          setFileRetrievalEnabled(true);
         }
       } else {
+        usePlaygroundSessionStore.getState().markSourceSelectionIntent();
         setChatMode("normal");
         setRagMediaIds(null);
       }
@@ -2495,21 +2558,25 @@ export const PlaygroundForm = ({
       setMessageValue(hint, { collapseLarge: true, forceCollapse: true });
       textAreaFocus();
     },
-    [setChatMode, setMessageValue, setRagMediaIds, textAreaFocus],
+    [setChatMode, setFileRetrievalEnabled, setMessageValue, setRagMediaIds, textAreaFocus],
   );
 
   // Seed composer when a media item requests discussion (e.g., from Quick ingest or Review page)
   React.useEffect(() => {
+    const requestOwnerScope = homeScope;
     let cancelled = false;
     void (async () => {
       const payload = await getSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      if (cancelled || !payload) return;
+      if (cancelled || homeScopeRef.current !== requestOwnerScope || !payload) return;
+      // Legacy Review handoffs may have no token-derived identity (cookie auth).
+      // Owned Home handoffs wait for identity resolution before validation.
+      if (payload.ownerScope && !requestOwnerScope) return;
       applyDiscussMediaPayload(payload, { clearAfterUse: true });
     })();
     return () => {
       cancelled = true;
     };
-  }, [applyDiscussMediaPayload]);
+  }, [applyDiscussMediaPayload, homeScope]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
@@ -2949,10 +3016,14 @@ export const PlaygroundForm = ({
     mutationFn: onSubmit,
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
+      ownerScope: homeScope,
     }),
     onSuccess: (data, _variables, context) => {
       const result = normalizeChatSubmitResult(data);
       if (isChatSubmitSuccess(result)) {
+        if (context?.ownerScope) {
+          useMilestoneStore.getState().markScopedMilestone(context.ownerScope, "first_chat");
+        }
         dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
         void trackOnboardingChatSubmitSuccess(
           typeof window !== "undefined" ? window.location.pathname : "/chat",
@@ -2969,33 +3040,8 @@ export const PlaygroundForm = ({
   });
 
   const handleRetryChatError = React.useCallback(() => {
-    let lastUserMessage: any = null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const entry = messages[i]
-      const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
-      if (role === "user" || entry?.isBot === false) {
-        lastUserMessage = entry
-        break
-      }
-    }
-    const retryText =
-      typeof lastUserMessage?.message === "string"
-        ? lastUserMessage.message
-        : typeof lastUserMessage?.content === "string"
-          ? lastUserMessage.content
-          : ""
-    const trimmed = retryText.trim()
-    if (!trimmed) {
-      textAreaFocus()
-      return
-    }
-
-    void sendMessage({
-      message: trimmed,
-      image: "",
-      docs: [],
-    })
-  }, [messages, sendMessage, textAreaFocus])
+    void regenerateLastMessage().catch(() => textAreaFocus())
+  }, [regenerateLastMessage, textAreaFocus])
 
   const handleEditChatProvider = React.useCallback(() => {
     setOpenModelSettings(true)
@@ -3335,6 +3381,8 @@ export const PlaygroundForm = ({
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     history,
+    messages,
+    setMessages,
     clearChat,
     selectedCharacter,
     selectedAssistantMode,
@@ -5633,7 +5681,10 @@ export const PlaygroundForm = ({
                         onAddFile={handleKnowledgeAddFile}
                         onRemoveFile={removeUploadedFile}
                         onClearFiles={clearUploadedFiles}
-                        onFileRetrievalChange={setFileRetrievalEnabled}
+                        onFileRetrievalChange={(enabled) => {
+                          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
+                          setFileRetrievalEnabled(enabled);
+                        }}
                         wrapComposerProfile={wrapComposerProfile}
                         t={t}
                       />
@@ -6578,6 +6629,7 @@ export const PlaygroundForm = ({
               savedSetupNameFallback={startupTemplateNameFallback}
               onClose={() => setRolePlaySetupOpen(false)}
               onApply={handleApplyRolePlaySetup}
+              captureApplyGuard={captureAssistantActionGuard}
               onSavedSetupDraftNameChange={setStartupTemplateDraftName}
               onSaveRolePlaySetup={handleSaveRolePlaySetup}
               onPreviewSavedSetup={handleOpenStartupTemplatePreview}

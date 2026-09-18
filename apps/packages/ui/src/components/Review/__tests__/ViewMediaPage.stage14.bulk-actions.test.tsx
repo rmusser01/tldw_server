@@ -323,6 +323,9 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     mocks.bgRequest.mockReset()
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request?.path || '')
+      if (path === '/api/v1/media/capabilities') {
+        return { can_delete: true }
+      }
       if (request?.method === 'GET' && path.startsWith('/api/v1/media/?')) {
         return {
           items: mocks.queryData,

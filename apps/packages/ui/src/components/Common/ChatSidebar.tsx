@@ -53,6 +53,8 @@ interface ChatSidebarProps {
   className?: string
   /** Monotonic signal from parent layouts when the sidebar should reset open state */
   openResetKey?: number
+  /** Called after an explicit conversation target is accepted. */
+  onConversationSelected?: () => void
 }
 
 type SidebarTab = "server" | "folders"
@@ -61,7 +63,8 @@ export function ChatSidebar({
   collapsed = false,
   onToggleCollapse,
   className,
-  openResetKey
+  openResetKey,
+  onConversationSelected
 }: ChatSidebarProps) {
   const { t } = useTranslation(["common", "sidepanel", "option", "settings"])
   const navigate = useNavigate()
@@ -401,13 +404,13 @@ export function ChatSidebar({
     <div
       data-testid="chat-sidebar"
       className={cn(
-        "flex flex-col h-screen border-r border-border bg-surface2",
+        "flex h-screen min-h-0 flex-col overflow-hidden border-r border-border bg-surface2",
         className
       )}
       style={{ width: "var(--sidebar-width)" }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-border">
+      <div className="flex shrink-0 items-center justify-between px-3 py-3 border-b border-border">
         <h2 className="font-semibold text-text">
           {t("common:chatSidebar.title", "Chats")}
         </h2>
@@ -472,141 +475,140 @@ export function ChatSidebar({
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <button
-        type="button"
-        aria-expanded={showShortcuts}
-        aria-controls="chat-sidebar-shortcuts"
-        onClick={() => {
-          void setShortcutsCollapsed(showShortcuts)
-        }}
-        className={cn(
-          "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
-          focusRingClasses
-        )}
-        title={t("common:chatSidebar.shortcuts", "Shortcuts")}
-      >
-        <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          {t("common:chatSidebar.shortcuts", "Shortcuts")}
-        </span>
-        <ChevronDown
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Quick Actions */}
+        <button
+          type="button"
+          aria-expanded={showShortcuts}
+          aria-controls="chat-sidebar-shortcuts"
+          onClick={() => {
+            void setShortcutsCollapsed(showShortcuts)
+          }}
           className={cn(
-            "size-4 text-text-muted transition-transform group-hover:text-text",
-            showShortcuts ? "rotate-0" : "-rotate-90"
+            "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
+            focusRingClasses
           )}
-        />
-      </button>
-      {showShortcuts && (
-        <div id="chat-sidebar-shortcuts" className="px-3 pb-2 space-y-1">
-          {sidebarShortcuts.length > 0 ? (
-            sidebarShortcuts.map((item) => renderSidebarShortcut(item))
-          ) : (
-            <div className="px-2 py-2 text-xs text-text-subtle">
-              {t(
-                "settings:uiCustomization.shortcuts.empty",
-                "No shortcuts selected"
+          title={t("common:chatSidebar.shortcuts", "Shortcuts")}
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+            {t("common:chatSidebar.shortcuts", "Shortcuts")}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-4 text-text-muted transition-transform group-hover:text-text",
+              showShortcuts ? "rotate-0" : "-rotate-90"
+            )}
+          />
+        </button>
+        {showShortcuts && (
+          <div id="chat-sidebar-shortcuts" className="px-3 pb-2 space-y-1">
+            {sidebarShortcuts.length > 0 ? (
+              sidebarShortcuts.map((item) => renderSidebarShortcut(item))
+            ) : (
+              <div className="px-2 py-2 text-xs text-text-subtle">
+                {t(
+                  "settings:uiCustomization.shortcuts.empty",
+                  "No shortcuts selected"
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="h-px bg-border mx-3" />
+
+        {/* Recent Conversations */}
+        <button
+          type="button"
+          aria-expanded={recentConversationsExpanded}
+          aria-controls="chat-sidebar-recent-conversations"
+          onClick={toggleRecentConversations}
+          className={cn(
+            "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
+            focusRingClasses
+          )}
+          title={t(
+            "common:chatSidebar.recentConversations",
+            "Recent conversations"
+          )}
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+            {t("common:chatSidebar.recentConversations", "Recent conversations")}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-4 text-text-muted transition-transform group-hover:text-text",
+              recentConversationsExpanded ? "rotate-0" : "-rotate-90"
+            )}
+          />
+        </button>
+
+        {recentHistoryVisible && (
+          <div id="chat-sidebar-recent-conversations">
+            {/* Search */}
+            <div className="px-3 py-2 border-b border-border">
+              <Input
+                data-testid="chat-sidebar-search"
+                prefix={<Search className="size-3.5 text-text-subtle" />}
+                placeholder={t("common:chatSidebar.search", "Search chats...")}
+                value={searchQuery}
+                onChange={handleSearchChange}
+                size="small"
+                className="bg-surface"
+                allowClear
+              />
+            </div>
+
+            {/* Tabs */}
+            <div className="px-3 py-2 border-b border-border">
+              <label id="chat-sidebar-tab-label" className="sr-only">
+                {t("common:chatSidebar.tabsLabel", "Chat view")}
+              </label>
+              <Segmented<SidebarTab>
+                value={currentTab}
+                onChange={(value) => {
+                  void setCurrentTab(value)
+                }}
+                options={tabOptions}
+                block
+                size="small"
+                className="w-full"
+                aria-labelledby="chat-sidebar-tab-label"
+              />
+            </div>
+
+            {/* Tab Content */}
+            <div
+              className={
+                temporaryChat ? "pointer-events-none opacity-50" : ""
+              }
+            >
+              {currentTab === "server" && (
+                <ServerChatList
+                  searchQuery={debouncedSearchQuery}
+                  selectionMode={selectionMode}
+                  onConversationSelected={onConversationSelected}
+                />
+              )}
+
+              {currentTab === "folders" && (
+                <FolderChatList onConversationSelected={onConversationSelected} />
               )}
             </div>
-          )}
-        </div>
-      )}
-
-      <div className="h-px bg-border mx-3" />
-
-      {/* Recent Conversations */}
-      <button
-        type="button"
-        aria-expanded={recentConversationsExpanded}
-        aria-controls="chat-sidebar-recent-conversations"
-        onClick={toggleRecentConversations}
-        className={cn(
-          "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
-          focusRingClasses
-        )}
-        title={t(
-          "common:chatSidebar.recentConversations",
-          "Recent conversations"
-        )}
-      >
-        <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          {t("common:chatSidebar.recentConversations", "Recent conversations")}
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-4 text-text-muted transition-transform group-hover:text-text",
-            recentConversationsExpanded ? "rotate-0" : "-rotate-90"
-          )}
-        />
-      </button>
-
-      {recentHistoryVisible && (
-        <div
-          id="chat-sidebar-recent-conversations"
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          {/* Search */}
-          <div className="px-3 py-2 border-b border-border">
-            <Input
-              data-testid="chat-sidebar-search"
-              prefix={<Search className="size-3.5 text-text-subtle" />}
-              placeholder={t("common:chatSidebar.search", "Search chats...")}
-              value={searchQuery}
-              onChange={handleSearchChange}
-              size="small"
-              className="bg-surface"
-              allowClear
-            />
           </div>
+        )}
 
-          {/* Tabs */}
-          <div className="px-3 py-2 border-b border-border">
-            <label id="chat-sidebar-tab-label" className="sr-only">
-              {t("common:chatSidebar.tabsLabel", "Chat view")}
-            </label>
-            <Segmented<SidebarTab>
-              value={currentTab}
-              onChange={(value) => {
-                void setCurrentTab(value)
-              }}
-              options={tabOptions}
-              block
-              size="small"
-              className="w-full"
-              aria-labelledby="chat-sidebar-tab-label"
-            />
-          </div>
-
-          {/* Tab Content */}
+        {!recentHistoryVisible && (
           <div
-            className={cn(
-              "flex-1 overflow-y-auto",
-              temporaryChat ? "pointer-events-none opacity-50" : ""
-            )}
-          >
-            {currentTab === "server" && (
-              <ServerChatList
-                searchQuery={debouncedSearchQuery}
-                selectionMode={selectionMode}
-              />
-            )}
-
-            {currentTab === "folders" && (
-              <FolderChatList />
-            )}
-          </div>
-        </div>
-      )}
-
-      {!recentHistoryVisible && (
-        <div
-          id="chat-sidebar-recent-conversations"
-          className="flex-1"
-          hidden
-        />
-      )}
+            id="chat-sidebar-recent-conversations"
+            className="flex-1"
+            hidden
+          />
+        )}
+      </div>
 
       {/* Footer */}
-      <div className="border-t border-border px-3 py-2">
+      <div className="shrink-0 border-t border-border px-3 py-2">
         <button
           onClick={() => navigate("/settings")}
           aria-current={settingsShortcutActive ? "page" : undefined}

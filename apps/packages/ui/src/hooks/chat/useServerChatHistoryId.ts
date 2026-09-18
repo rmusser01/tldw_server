@@ -1,13 +1,9 @@
 import React from "react"
 import type { TFunction } from "i18next"
-import {
-  getHistoryByServerChatId,
-  saveHistory,
-  setHistoryServerChatId,
-  updateHistory
-} from "@/db/dexie/helpers"
-import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 
 type UseServerChatHistoryIdOptions = {
   serverChatId: string | null
@@ -31,6 +27,7 @@ export const useServerChatHistoryId = ({
   const serverChatHistoryIdRef = React.useRef<{
     chatId: string | null
     historyId: string | null
+    ownerKey?: string
   }>({ chatId: null, historyId: null })
 
   React.useEffect(() => {
@@ -50,9 +47,11 @@ export const useServerChatHistoryId = ({
     async (
       chatId: string,
       title?: string,
-      scopeInvalidatedSignal?: AbortSignal
+      scopeInvalidatedSignal?: AbortSignal,
+      snapshot?: ServicePromptSnapshot
     ) => {
       if (!chatId || temporaryChat) return null
+      if (!snapshot) throw createServicePromptScopeChangedError()
       const throwIfScopeInvalidated = () => {
         if (scopeInvalidatedSignal?.aborted) {
           throw createServicePromptScopeChangedError()
@@ -60,8 +59,15 @@ export const useServerChatHistoryId = ({
       }
       throwIfScopeInvalidated()
       const currentHistoryId = historyIdRef.current
+      const ownerKey = serverChatMirrorOwnerKey(snapshot)
+      const session = usePlaygroundSessionStore.getState()
+      const legacyHistoryId = session.isSessionValid(snapshot.scopeKey) &&
+        session.historyId === currentHistoryId &&
+        (!session.serverChatId || session.serverChatId === chatId)
+        ? currentHistoryId : null
       if (
         serverChatHistoryIdRef.current.chatId === chatId &&
+        serverChatHistoryIdRef.current.ownerKey === ownerKey &&
         serverChatHistoryIdRef.current.historyId
       ) {
         const existingId = serverChatHistoryIdRef.current.historyId
@@ -71,71 +77,36 @@ export const useServerChatHistoryId = ({
         return existingId
       }
 
-      const linkHistory = async () => {
-        const existing = await getHistoryByServerChatId(chatId)
-        const trimmedTitle = (title || existing?.title || "").trim()
-        const resolvedTitle =
-          trimmedTitle ||
-          t("common:untitled", { defaultValue: "Untitled" })
-
-        if (existing) {
-          if (resolvedTitle && resolvedTitle !== existing.title) {
-            await updateHistory(existing.id, resolvedTitle)
-          }
-          return {
-            historyId: existing.id,
-            shouldSetHistoryId: currentHistoryId !== existing.id
-          }
-        }
-
-        if (currentHistoryId && currentHistoryId !== "temp") {
-          await setHistoryServerChatId(currentHistoryId, chatId)
-          if (resolvedTitle) {
-            await updateHistory(currentHistoryId, resolvedTitle)
-          }
-          return {
-            historyId: currentHistoryId,
-            shouldSetHistoryId: false
-          }
-        }
-
-        const newHistory = await saveHistory(
-          resolvedTitle,
-          false,
-          "server",
-          undefined,
-          chatId
-        )
-        return {
-          historyId: newHistory.id,
-          shouldSetHistoryId: true
-        }
-      }
-
-      let linkedHistory: Awaited<ReturnType<typeof linkHistory>>
+      let linkedHistoryId: string
       try {
-        linkedHistory = scopeInvalidatedSignal
-          ? await runChatPersistenceTransaction(
-              scopeInvalidatedSignal,
-              linkHistory
-            )
-          : await linkHistory()
+        linkedHistoryId = await linkServerChatMirror({
+          chatId,
+          title: title?.trim() || t("common:untitled", { defaultValue: "Untitled" }),
+          ownerKey,
+          currentHistoryId,
+          legacyHistoryId,
+          signal: scopeInvalidatedSignal
+        })
       } catch (error) {
         if (scopeInvalidatedSignal?.aborted) {
           throw createServicePromptScopeChangedError()
         }
         throw error
       }
+      if (historyIdRef.current !== currentHistoryId) {
+        throw createServicePromptScopeChangedError()
+      }
 
       throwIfScopeInvalidated()
       serverChatHistoryIdRef.current = {
         chatId,
-        historyId: linkedHistory.historyId
+        historyId: linkedHistoryId,
+        ownerKey
       }
-      if (linkedHistory.shouldSetHistoryId) {
-        setHistoryId(linkedHistory.historyId, { preserveServerChatId: true })
+      if (currentHistoryId !== linkedHistoryId) {
+        setHistoryId(linkedHistoryId, { preserveServerChatId: true })
       }
-      return linkedHistory.historyId
+      return linkedHistoryId
     },
     [setHistoryId, t, temporaryChat]
   )

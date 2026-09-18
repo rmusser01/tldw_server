@@ -356,6 +356,7 @@ export function ConversationTab({
   onVersionChange,
   onPersonaMemoryModeChange
 }: ConversationTabProps) {
+  const numericFieldId = React.useId()
   const { t } = useTranslation(["common", "playground"])
   const notification = useAntdNotification()
   const queryClient = useQueryClient()
@@ -1162,21 +1163,27 @@ export function ConversationTab({
             }}
           />
           {authorNoteMode === "depth" && (
-            <InputNumber
-              min={0}
-              step={1}
-              value={authorNoteDepth}
-              onChange={(value) => {
-                setAuthorNoteDepth(sanitizeDepth(value))
-              }}
-              onBlur={() => {
-                void persistAuthorNotePosition("depth", authorNoteDepth)
-              }}
-              addonBefore={t(
-                "playground:composer.authorNotePosition.depthLabel",
-                "Depth"
-              )}
-            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-author-note-depth`}>
+                {t(
+                  "playground:composer.authorNotePosition.depthLabel",
+                  "Depth"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-author-note-depth`}
+                style={{ width: "100%" }}
+                min={0}
+                step={1}
+                value={authorNoteDepth}
+                onChange={(value) => {
+                  setAuthorNoteDepth(sanitizeDepth(value))
+                }}
+                onBlur={() => {
+                  void persistAuthorNotePosition("depth", authorNoteDepth)
+                }}
+              />
+            </div>
           )}
         </div>
       </Form.Item>
@@ -1273,68 +1280,86 @@ export function ConversationTab({
             }}
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <InputNumber
-              min={0}
-              max={2}
-              step={0.01}
-              precision={2}
-              disabled={!generationOverrideEnabledDraft}
-              value={generationTemperatureDraft}
-              addonBefore={t(
-                "playground:composer.chatGenerationOverride.temperature",
-                "Temp"
-              )}
-              onChange={(value) => {
-                setGenerationTemperatureDraft(
-                  sanitizeGenerationFloat(value, 0, 2)
-                )
-              }}
-              onBlur={() => {
-                void persistChatGenerationOverride({
-                  temperature: generationTemperatureDraft
-                })
-              }}
-            />
-            <InputNumber
-              min={0}
-              max={1}
-              step={0.01}
-              precision={2}
-              disabled={!generationOverrideEnabledDraft}
-              value={generationTopPDraft}
-              addonBefore={t(
-                "playground:composer.chatGenerationOverride.topP",
-                "Top-p"
-              )}
-              onChange={(value) => {
-                setGenerationTopPDraft(sanitizeGenerationFloat(value, 0, 1))
-              }}
-              onBlur={() => {
-                void persistChatGenerationOverride({ top_p: generationTopPDraft })
-              }}
-            />
-            <InputNumber
-              min={0}
-              max={3}
-              step={0.01}
-              precision={2}
-              disabled={!generationOverrideEnabledDraft}
-              value={generationRepetitionPenaltyDraft}
-              addonBefore={t(
-                "playground:composer.chatGenerationOverride.repetitionPenalty",
-                "Rep pen"
-              )}
-              onChange={(value) => {
-                setGenerationRepetitionPenaltyDraft(
-                  sanitizeGenerationFloat(value, 0, 3)
-                )
-              }}
-              onBlur={() => {
-                void persistChatGenerationOverride({
-                  repetition_penalty: generationRepetitionPenaltyDraft
-                })
-              }}
-            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-temperature`}>
+                {t(
+                  "playground:composer.chatGenerationOverride.temperature",
+                  "Temp"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-temperature`}
+                style={{ width: "100%" }}
+                min={0}
+                max={2}
+                step={0.01}
+                precision={2}
+                disabled={!generationOverrideEnabledDraft}
+                value={generationTemperatureDraft}
+                onChange={(value) => {
+                  setGenerationTemperatureDraft(
+                    sanitizeGenerationFloat(value, 0, 2)
+                  )
+                }}
+                onBlur={() => {
+                  void persistChatGenerationOverride({
+                    temperature: generationTemperatureDraft
+                  })
+                }}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-top-p`}>
+                {t(
+                  "playground:composer.chatGenerationOverride.topP",
+                  "Top-p"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-top-p`}
+                style={{ width: "100%" }}
+                min={0}
+                max={1}
+                step={0.01}
+                precision={2}
+                disabled={!generationOverrideEnabledDraft}
+                value={generationTopPDraft}
+                onChange={(value) => {
+                  setGenerationTopPDraft(sanitizeGenerationFloat(value, 0, 1))
+                }}
+                onBlur={() => {
+                  void persistChatGenerationOverride({ top_p: generationTopPDraft })
+                }}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-repetition-penalty`}>
+                {t(
+                  "playground:composer.chatGenerationOverride.repetitionPenalty",
+                  "Rep pen"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-repetition-penalty`}
+                style={{ width: "100%" }}
+                min={0}
+                max={3}
+                step={0.01}
+                precision={2}
+                disabled={!generationOverrideEnabledDraft}
+                value={generationRepetitionPenaltyDraft}
+                onChange={(value) => {
+                  setGenerationRepetitionPenaltyDraft(
+                    sanitizeGenerationFloat(value, 0, 3)
+                  )
+                }}
+                onBlur={() => {
+                  void persistChatGenerationOverride({
+                    repetition_penalty: generationRepetitionPenaltyDraft
+                  })
+                }}
+              />
+            </div>
           </div>
           <Input.TextArea
             rows={2}
@@ -1527,44 +1552,56 @@ export function ConversationTab({
             }}
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <InputNumber
-              min={2}
-              max={5000}
-              step={1}
-              value={autoSummaryThresholdDraft}
-              disabled={!autoSummaryEnabledDraft}
-              addonBefore={t(
-                "playground:composer.autoSummary.threshold",
-                "Threshold"
-              )}
-              onChange={(value) => {
-                setAutoSummaryThresholdDraft(
-                  sanitizeAutoSummaryThreshold(value)
-                )
-              }}
-              onBlur={() => {
-                void persistAutoSummaryThreshold(autoSummaryThresholdDraft)
-              }}
-            />
-            <InputNumber
-              min={1}
-              max={Math.max(1, autoSummaryThresholdDraft - 1)}
-              step={1}
-              value={autoSummaryWindowDraft}
-              disabled={!autoSummaryEnabledDraft}
-              addonBefore={t(
-                "playground:composer.autoSummary.window",
-                "Recent window"
-              )}
-              onChange={(value) => {
-                setAutoSummaryWindowDraft(
-                  sanitizeAutoSummaryWindow(value, autoSummaryThresholdDraft)
-                )
-              }}
-              onBlur={() => {
-                void persistAutoSummaryWindow(autoSummaryWindowDraft)
-              }}
-            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-summary-threshold`}>
+                {t(
+                  "playground:composer.autoSummary.threshold",
+                  "Threshold"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-summary-threshold`}
+                style={{ width: "100%" }}
+                min={2}
+                max={5000}
+                step={1}
+                value={autoSummaryThresholdDraft}
+                disabled={!autoSummaryEnabledDraft}
+                onChange={(value) => {
+                  setAutoSummaryThresholdDraft(
+                    sanitizeAutoSummaryThreshold(value)
+                  )
+                }}
+                onBlur={() => {
+                  void persistAutoSummaryThreshold(autoSummaryThresholdDraft)
+                }}
+              />
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <label htmlFor={`${numericFieldId}-summary-window`}>
+                {t(
+                  "playground:composer.autoSummary.window",
+                  "Recent window"
+                )}
+              </label>
+              <InputNumber
+                id={`${numericFieldId}-summary-window`}
+                style={{ width: "100%" }}
+                min={1}
+                max={Math.max(1, autoSummaryThresholdDraft - 1)}
+                step={1}
+                value={autoSummaryWindowDraft}
+                disabled={!autoSummaryEnabledDraft}
+                onChange={(value) => {
+                  setAutoSummaryWindowDraft(
+                    sanitizeAutoSummaryWindow(value, autoSummaryThresholdDraft)
+                  )
+                }}
+                onBlur={() => {
+                  void persistAutoSummaryWindow(autoSummaryWindowDraft)
+                }}
+              />
+            </div>
           </div>
         </div>
       </Form.Item>

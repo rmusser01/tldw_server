@@ -18,6 +18,7 @@ import { useBuddyManagementStore } from "@/store/buddy-management"
 import { usePersonaBuddyShellStore } from "@/store/persona-buddy-shell"
 const mocks = vi.hoisted(() => ({
   demoEnabled: false,
+  verifiedConnection: { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false },
   connection: {
     serverUrl: "https://server.invalid",
     accessToken: "token",
@@ -85,6 +86,9 @@ vi.mock("../BuddyManagementModal", () => ({
 vi.mock("@/context/demo-mode", () => ({
   useSafeDemoMode: () => ({ demoEnabled: mocks.demoEnabled })
 }))
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => mocks.verifiedConnection
+}))
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   useCanonicalConnectionConfig: () => ({
     loading: false,
@@ -94,6 +98,7 @@ vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.demoEnabled = false
+  mocks.verifiedConnection = { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false }
   mocks.connection = {
     serverUrl: "https://server.invalid",
     accessToken: "token",
@@ -144,7 +149,15 @@ it("loads an attached Buddy directly when it is outside the first page", async (
   })
   render(<IndependentBuddySession />)
   await screen.findByRole("button", { name: "Open Duck — Research" })
-  expect(mocks.getBuddy).toHaveBeenCalledWith("duck")
+  expect(mocks.getBuddy).toHaveBeenCalledWith("duck", { suppressBackendUnavailableEvent: true })
+})
+it("keeps passive collection and attachment refreshes out of the global offline dialog", async () => {
+  render(<IndependentBuddySession />)
+  await screen.findByRole("button", { name: "Open Duck — Research" })
+  const quiet = { suppressBackendUnavailableEvent: true }
+  expect(mocks.listBuddies).toHaveBeenCalledWith({ limit: 100, offset: 0 }, quiet)
+  expect(mocks.getBuddyAttachment).toHaveBeenCalledWith(quiet)
+  expect(mocks.listBuddyConversations).toHaveBeenCalledWith({ limit: 100, offset: 0 }, quiet)
 })
 it("distinguishes long same-titled workspace choices before selecting their stable IDs", async () => {
   const title = "Research with a long generated conversation title ".repeat(4)
@@ -267,7 +280,7 @@ it("keeps fetched profile pages through periodic refresh", async () => {
   render(<IndependentBuddySession />)
   fireEvent.click(await screen.findByRole("button", { name: "More Buddies" }))
   await waitFor(() =>
-    expect(mocks.listBuddies).toHaveBeenCalledWith({ limit: 100, offset: 100 })
+    expect(mocks.listBuddies).toHaveBeenCalledWith({ limit: 100, offset: 100 }, { suppressBackendUnavailableEvent: true })
   )
   fireEvent.click(screen.getByRole("button", { name: "Refresh collections" }))
   await waitFor(() =>
@@ -512,7 +525,7 @@ it("preserves animation props through unchanged polls and observes profile updat
   })
 })
 
-it("clears private Buddy state while demo mode is enabled", async () => {
+it.each(["demo", "disconnected"])("clears private Buddy state while %s", async (state) => {
   const { rerender } = render(<IndependentBuddyHost />)
   fireEvent.click(
     await screen.findByRole("button", { name: "Open Duck — Research" })
@@ -520,13 +533,68 @@ it("clears private Buddy state while demo mode is enabled", async () => {
   fireEvent.change(screen.getByLabelText("Draft reply"), {
     target: { value: "Private draft" }
   })
-  mocks.demoEnabled = true
+  if (state === "demo") mocks.demoEnabled = true
+  else mocks.verifiedConnection.isConnected = false
   rerender(<IndependentBuddyHost />)
   expect(screen.queryByTestId("independent-buddy")).not.toBeInTheDocument()
   mocks.demoEnabled = false
+  mocks.verifiedConnection.isConnected = true
   rerender(<IndependentBuddyHost />)
   fireEvent.click(
     await screen.findByRole("button", { name: "Open Duck — Research" })
   )
   expect(screen.getByLabelText("Draft reply")).toHaveValue("")
+})
+
+it.each([
+  { phase: "unconfigured", isConnected: false },
+  { phase: "searching", isConnected: false },
+  { phase: "error", isConnected: false },
+  { offlineBypass: true },
+  { mode: "demo" }
+])("does not poll private Buddy data without a verified connection: %j", async (state) => {
+  mocks.verifiedConnection = { ...mocks.verifiedConnection, ...state }
+  render(<IndependentBuddyHost />)
+  await act(async () => Promise.resolve())
+  expect(mocks.listBuddies).not.toHaveBeenCalled()
+  expect(mocks.getBuddyAttachment).not.toHaveBeenCalled()
+})
+
+it("stops Buddy polls on disconnect and discards late data before verified reconnect", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+  let resolveAttachment: ((value: unknown) => void) | undefined
+  mocks.getBuddyAttachment.mockImplementationOnce(
+    () => new Promise((resolve) => { resolveAttachment = resolve })
+  )
+  const view = render(<IndependentBuddyHost />)
+  await act(async () => Promise.resolve())
+  expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(1)
+
+  mocks.verifiedConnection = { ...mocks.verifiedConnection, phase: "unconfigured", isConnected: false }
+  view.rerender(<IndependentBuddyHost />)
+  await act(async () => resolveAttachment?.({
+    version: 1,
+    attachment: { buddy_id: "duck", scope_type: "conversation", scope_id: "old-private-chat" }
+  }))
+  await act(async () => vi.advanceTimersByTimeAsync(15_000))
+  expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(1)
+  expect(mocks.listBuddies).toHaveBeenCalledTimes(1)
+  expect(mocks.listBuddyConversations).not.toHaveBeenCalled()
+  expect(useBuddyManagementStore.getState().attached).toBe(false)
+  expect(screen.queryByTestId("independent-buddy")).not.toBeInTheDocument()
+
+  mocks.verifiedConnection = { ...mocks.verifiedConnection, phase: "searching" }
+  view.rerender(<IndependentBuddyHost />)
+  await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  expect(mocks.listBuddies).toHaveBeenCalledTimes(1)
+
+  mocks.verifiedConnection = { ...mocks.verifiedConnection, phase: "connected", isConnected: true }
+  view.rerender(<IndependentBuddyHost />)
+  await screen.findByRole("button", { name: "Open Duck — Research" })
+  const countAfterReconnect = mocks.listBuddies.mock.calls.length
+  await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  expect(mocks.listBuddies).toHaveBeenCalledTimes(countAfterReconnect + 1)
+  expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(countAfterReconnect + 1)
+  view.unmount()
+  vi.useRealTimers()
 })

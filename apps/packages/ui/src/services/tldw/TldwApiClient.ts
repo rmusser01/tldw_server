@@ -1,4 +1,5 @@
 import type { ChatScope } from "@/types/chat-scope"
+import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
   LlamacppSnapshotSlotsResponse,
@@ -32,6 +33,7 @@ import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -65,6 +67,8 @@ import type {
 import {
   clearManualCredentials,
   hasNewerCurrentAccessToken,
+  hasInvalidatedRefreshSession,
+  invalidateRefreshSessionIfCurrent,
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
   normalizeServerOrigin,
@@ -160,6 +164,17 @@ const RAG_QUERY_MAX_LENGTH = 20000
 // (e.g. long passages on local Kokoro), so give it a generous default that
 // callers can still override.
 const TTS_REQUEST_TIMEOUT_MS = 120000
+const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
+
+const hasManualSessionCredentialLock = (): boolean =>
+  typeof navigator !== "undefined" && Boolean(navigator.locks?.request)
+
+const withManualSessionCredentialLock = async <T>(
+  operation: () => Promise<T>
+): Promise<T> => {
+  if (!hasManualSessionCredentialLock()) return await operation()
+  return await navigator.locks.request(MANUAL_SESSION_CREDENTIAL_LOCK, operation)
+}
 
 const toRecordOrNull = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -428,7 +443,7 @@ const getQuickstartWebUiServerUrl = (
   }
 }
 
-const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
+export const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
   const quickstartUrl = getQuickstartWebUiServerUrl()
   if (!quickstartUrl) return false
   try {
@@ -441,7 +456,7 @@ const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
   }
 }
 
-const isActiveCookieSessionConfig = (
+export const isActiveCookieSessionConfig = (
   config: TldwConfig | null | undefined,
   quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
 ): boolean =>
@@ -1055,6 +1070,11 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+export type ScopedRequestOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
+
 export type ChatCompletionRequestOptions = {
   signal?: AbortSignal
   timeoutMs?: number
@@ -1215,6 +1235,7 @@ export type ConversationState =
   | "non-viable"
 
 export interface ServerChatMessage {
+  images?: string[]
   id: string
   role: "system" | "user" | "assistant"
   sender?: string
@@ -1468,6 +1489,13 @@ export interface AdminUserUpdateRequest {
   storage_quota_mb?: number
 }
 
+export interface AdminUserCreateRequest {
+  username: string
+  email: string
+  password: string
+  role: 'user' | 'admin'
+}
+
 export interface AdminRole {
   id: number
   name: string
@@ -1714,9 +1742,16 @@ export class TldwApiClientBase {
     }
   }
 
-  private publishConfigUpdated(): void {
+  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false): void {
+    const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
+    if (onlyIfAuthorityChanged && !authorityChanged) return
+    if (authorityChanged) {
+      void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers after the account or server changed."))
+    }
     if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+        detail: { authorityChanged }
+      }))
     }
   }
 
@@ -1818,8 +1853,10 @@ export class TldwApiClientBase {
       : null
     const cookieSession = isActiveCookieSessionConfig(cfg)
     if ((!cfg || !cfg.serverUrl) && !hostedMode && !runtimeApiKey) {
-      const msg =
-        "tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key."
+      const location = getCurrentBrowserSurface() === "extension"
+        ? "Settings → tldw server in the extension"
+        : "Settings → tldw server"
+      const msg = `tldw server is not configured. Open ${location} and set the server URL and API key.`
       // eslint-disable-next-line no-console
       console.warn(msg)
       throw new Error(msg)
@@ -1932,12 +1969,14 @@ export class TldwApiClientBase {
   async fetchWithAuth(
     path: PathOrUrl,
     init?: {
+      requestScope?: ServicePromptRequestScope
       method?: string
       headers?: Record<string, string>
       body?: any
       timeoutMs?: number
       signal?: AbortSignal
       responseType?: "json" | "text" | "arrayBuffer"
+      suppressBackendUnavailableEvent?: boolean
     }
   ): Promise<{
     ok: boolean
@@ -1948,14 +1987,17 @@ export class TldwApiClientBase {
     text: () => Promise<string>
   }> {
     await this.ensureConfigForRequest(true)
+    const scopeFields = requestScopeFields(init?.requestScope)
     const response = await bgRequest<any, PathOrUrl>({
+      ...scopeFields,
       path,
       method: (init?.method || "GET") as any,
-      headers: init?.headers,
+      headers: scopeFields.headers ? { ...init?.headers, ...scopeFields.headers } : init?.headers,
       body: init?.body,
       timeoutMs: init?.timeoutMs,
       abortSignal: init?.signal,
       responseType: init?.responseType,
+      suppressBackendUnavailableEvent: init?.suppressBackendUnavailableEvent,
       returnResponse: true
     })
     const data = response?.data
@@ -2083,10 +2125,22 @@ export class TldwApiClientBase {
       const manualApiKey = await resolveManualCredential(storedManual, {
         session: this.sessionStorage
       })
-      if (!manualApiKey) {
-        await this.sessionStorage
-          .remove(MANUAL_SESSION_KEY)
-          .catch(() => undefined)
+      if (!manualApiKey && hasManualSessionCredentialLock()) {
+        await withManualSessionCredentialLock(async () => {
+          const currentConfig = await this.storage
+            .get<TldwConfig>("tldwConfig")
+            .catch(() => null)
+          const currentManualApiKey = currentConfig
+            ? await resolveManualCredential(currentConfig, {
+                session: this.sessionStorage
+              })
+            : null
+          if (!currentManualApiKey) {
+            await this.sessionStorage
+              .remove(MANUAL_SESSION_KEY)
+              .catch(() => undefined)
+          }
+        })
       }
     }
     const stored = await resolveEffectiveTldwConfig(
@@ -2132,17 +2186,18 @@ export class TldwApiClientBase {
     this.applyConfigState()
   }
 
-  private async activateManualConfig(config: TldwConfig): Promise<void> {
+  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null): Promise<void> {
     this.config = config
-    await this.syncConnectionServerUrl(config.serverUrl)
     this.applyConfigState()
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(previousConfig, true)
+    await this.syncConnectionServerUrl(config.serverUrl)
+    this.publishConfigUpdated(config)
   }
 
-  private async writeSessionOrMemory(
+  private async writeSessionOrMemoryUnlocked(
     input: { serverUrl: string; apiKey: string },
     serverOrigin: string
-  ): Promise<"session" | "memory"> {
+  ): Promise<{ persistence: "session" | "memory"; config: TldwConfig }> {
     const persisted: TldwConfig = {
       authMode: "single-user",
       authSource: "manual",
@@ -2162,8 +2217,7 @@ export class TldwApiClientBase {
     try {
       await this.storage.set("tldwConfig", persisted)
       await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
-      await this.activateManualConfig(hydrated)
-      return "session"
+      return { persistence: "session", config: hydrated }
     } catch {
       await clearManualCredentials(this.storage, this.sessionStorage).catch(
         async () => {
@@ -2172,9 +2226,16 @@ export class TldwApiClientBase {
             .catch(() => undefined)
         }
       )
-      await this.activateManualConfig(hydrated)
-      return "memory"
+      return { persistence: "memory", config: hydrated }
     }
+  }
+
+  private async clearManualSingleUserCredentialsUnlocked(): Promise<TldwConfig | null> {
+    await clearManualCredentials(this.storage, this.sessionStorage)
+    return (
+      (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
+      null
+    )
   }
 
   async saveManualSingleUserCredential(input: {
@@ -2188,8 +2249,16 @@ export class TldwApiClientBase {
     if (!serverOrigin) throw new Error("Invalid server URL")
     if (!apiKey) throw new Error("API key is required")
 
-    await this.clearManualSingleUserCredentials()
-    if (input.persistence === "device") {
+    const previousConfig = await this.getConfig()
+    const saved = await withManualSessionCredentialLock(async () => {
+      await this.clearManualSingleUserCredentialsUnlocked()
+      if (input.persistence !== "device") {
+        return await this.writeSessionOrMemoryUnlocked(
+          { serverUrl, apiKey },
+          serverOrigin
+        )
+      }
+
       const deviceConfig: TldwConfig = {
         authMode: "single-user",
         authSource: "manual",
@@ -2204,20 +2273,16 @@ export class TldwApiClientBase {
         await this.sessionStorage
           .remove(MANUAL_SESSION_KEY)
           .catch(() => undefined)
-        await this.activateManualConfig(deviceConfig)
-        return "device"
+        return { persistence: "device" as const, config: deviceConfig }
       } catch {
-        return await this.writeSessionOrMemory(
+        return await this.writeSessionOrMemoryUnlocked(
           { serverUrl, apiKey },
           serverOrigin
         )
       }
-    }
-
-    return await this.writeSessionOrMemory(
-      { serverUrl, apiKey },
-      serverOrigin
-    )
+    })
+    await this.activateManualConfig(saved.config, previousConfig)
+    return saved.persistence
   }
 
   async hydrateManualSingleUserCredential(): Promise<TldwConfig | null> {
@@ -2226,16 +2291,17 @@ export class TldwApiClientBase {
   }
 
   async clearManualSingleUserCredentials(): Promise<void> {
-    await clearManualCredentials(this.storage, this.sessionStorage)
+    const stored = await withManualSessionCredentialLock(async () =>
+      await this.clearManualSingleUserCredentialsUnlocked()
+    )
     if (this.config?.authSource !== "cookie-session") {
-      this.config =
-        (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
-        null
+      this.config = stored
       this.applyConfigState()
     }
   }
 
   async clearCookieSingleUserSession(): Promise<void> {
+    const previousConfig = this.config
     let failure: unknown
     try {
       await this.storage.remove(COOKIE_SESSION_CONFIG_KEY)
@@ -2244,12 +2310,14 @@ export class TldwApiClientBase {
     }
     invalidateCookieSessionConfig()
     this.config = null
+    this.applyConfigState()
+    this.publishConfigUpdated(previousConfig, true)
     try {
       await this.initialize()
     } catch (error) {
       failure ??= error
     }
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(null)
     if (failure) throw failure
   }
 
@@ -2270,10 +2338,18 @@ export class TldwApiClientBase {
         cachedConfig.accessToken
       ).catch(() => false)
     )
-    if (this.config === null || hasNewerAccessToken) {
+    const sessionInvalidated = Boolean(cachedConfig &&
+      await hasInvalidatedRefreshSession(this.storage, cachedConfig).catch(() => false))
+    if (this.config === null || hasNewerAccessToken || sessionInvalidated) {
       await this.initialize().catch(() => null)
     }
     return this.config
+  }
+
+  async invalidateRefreshSession(checked: TldwConfig): Promise<boolean> {
+    const invalidated = await invalidateRefreshSessionIfCurrent(this.storage, checked)
+    await this.getConfig()
+    return invalidated
   }
 
   async commitTokenRefresh(
@@ -2303,6 +2379,7 @@ export class TldwApiClientBase {
   async updateConfig(config: Partial<TldwConfig>): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    const previousConfig = currentConfig
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
       ? String(config.apiKey || "").trim()
@@ -2341,11 +2418,13 @@ export class TldwApiClientBase {
     const persisted = toPersistedTldwConfig(newConfig)
     await this.storage.set("tldwConfig", persisted)
     this.config = persisted
+    this.applyConfigState()
+    this.publishConfigUpdated(previousConfig, true)
     if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
       await this.syncConnectionServerUrl(config.serverUrl)
     }
     await this.initialize().catch(() => null)
-    this.publishConfigUpdated()
+    this.publishConfigUpdated(persisted)
   }
 
   async healthCheck(): Promise<boolean> {
@@ -3470,7 +3549,9 @@ export class TldwApiClientBase {
     return await bgUpload<any>({ path: '/api/v1/media/add', method: 'POST', fields: normalized })
   }
 
-  async uploadMedia(file: File, fields?: Record<string, any>): Promise<any> {
+  async uploadMedia(file: File, fields?: Record<string, any>, options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; assertCurrent?: () => void }): Promise<any> {
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     const data = await file.arrayBuffer()
     const name = file.name || 'upload'
     const type = file.type || 'application/octet-stream'
@@ -3489,7 +3570,11 @@ export class TldwApiClientBase {
       }
     }
     uploadTimeoutMs = Math.max(uploadTimeoutMs, 5000)
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     return await bgUpload<any>({
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       path: '/api/v1/media/add',
       method: 'POST',
       fields: normalized,
@@ -3505,10 +3590,11 @@ export class TldwApiClientBase {
       results_per_page?: number
       include_keywords?: boolean
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/media${query}`,
       method: "GET",
       abortSignal: options?.signal
@@ -3528,7 +3614,7 @@ export class TldwApiClientBase {
       boost_fields?: Record<string, number>
     },
     params?: { page?: number; results_per_page?: number },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = this.buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
@@ -3536,6 +3622,7 @@ export class TldwApiClientBase {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3742,6 +3829,7 @@ export class TldwApiClientBase {
       include_content?: boolean
       include_versions?: boolean
       include_version_content?: boolean
+      requestScope?: ServicePromptRequestScope
       signal?: AbortSignal
       suppressBackendUnavailableEvent?: boolean
     }
@@ -3755,6 +3843,7 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
@@ -4267,8 +4356,16 @@ export class TldwApiClientBase {
   }
 
   // Notes Methods
-  async createNote(content: string, metadata?: any): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/notes/', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { content, ...metadata } })
+  async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
+    return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
+      path: '/api/v1/notes/',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
+      body: { content, ...metadata }
+    })
   }
 
   async listNoteFolders(): Promise<{
@@ -4441,13 +4538,16 @@ export class TldwApiClientBase {
     return []
   }
 
-  async listCharacters(params?: Record<string, any>): Promise<any[]> {
+  async listCharacters(params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery(params)
-    const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
+    const listPathCandidates = ["/api/v1/characters/", "/api/v1/characters"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(
         await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: appendPathQuery(path as AllowedPath, query),
           method: "GET"
         })
@@ -4781,13 +4881,16 @@ export class TldwApiClientBase {
     return characters
   }
 
-   async searchCharacters(query: string, params?: Record<string, any>): Promise<any[]> {
+   async searchCharacters(query: string, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const qp = this.buildQuery({ query, ...(params || {}) })
     const base = await this.resolveApiPath("characters.search", [
       "/api/v1/characters/search",
       "/api/v1/characters/search/"
     ])
     return await bgRequest<any[]>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(base, qp),
       method: 'GET'
     })
@@ -4811,8 +4914,15 @@ export class TldwApiClientBase {
     })
   }
 
-  async getCharacter(id: string | number, options?: { forceRefresh?: boolean }): Promise<any> {
+  async getCharacter(id: string | number, options?: ScopedRequestOptions & { forceRefresh?: boolean }): Promise<any> {
     const cid = String(id)
+    if (options?.requestScope) {
+      const template = await this.resolveApiPath("characters.get", ["/api/v1/characters/{id}", "/api/v1/characters/{id}/"])
+      return bgRequest({
+        path: this.fillPathParams(template, cid), method: "GET",
+        ...requestScopeFields(options.requestScope), abortSignal: options.signal
+      })
+    }
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -5563,11 +5673,14 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
@@ -5664,13 +5777,14 @@ export class TldwApiClientBase {
   async updateChat(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { expectedVersion?: number }
+    options?: { expectedVersion?: number } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     let expectedVersion = options?.expectedVersion
     if (expectedVersion == null) {
       try {
-        const current = await this.getChat(cid)
+        const current = await this.getChat(cid, options)
         if (typeof current?.version === "number") {
           expectedVersion = current.version
         }
@@ -5683,9 +5797,11 @@ export class TldwApiClientBase {
         ? `?expected_version=${encodeURIComponent(String(expectedVersion))}`
         : ""
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chats/${cid}${qp}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...scopeFields.headers, "Content-Type": "application/json" },
       body: payload
     })
     return this.normalizeChatSummary(res)
@@ -5694,10 +5810,13 @@ export class TldwApiClientBase {
   async deleteChat(
     chat_id: string | number,
     options?: {
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
       expectedVersion?: number
       hardDelete?: boolean
     }
   ): Promise<void> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery({
       ...(typeof options?.expectedVersion === "number"
@@ -5706,6 +5825,8 @@ export class TldwApiClientBase {
       ...(options?.hardDelete ? { hard_delete: true } : {})
     })
     await bgRequest<void>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chats/${cid}${query}`,
       method: "DELETE"
     })
@@ -5735,17 +5856,20 @@ export class TldwApiClientBase {
       ttl_seconds?: number
       label?: string
     },
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ConversationShareLinkCreateResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
         query
       ),
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload || {},
     })
   }
@@ -5768,12 +5892,15 @@ export class TldwApiClientBase {
   async revokeConversationShareLink(
     chat_id: string | number,
     shareId: string,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope } & ScopedRequestOptions
   ): Promise<{ success: boolean; share_id: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = encodeURIComponent(String(chat_id))
     const sid = encodeURIComponent(String(shareId))
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<{ success: boolean; share_id: string }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(
         `/api/v1/chat/conversations/${cid}/share-links/${sid}`,
         query
@@ -5796,7 +5923,7 @@ export class TldwApiClientBase {
   async listChatMessages(
     chat_id: string | number,
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal; scope?: ChatScope }
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope; fresh?: boolean }
   ): Promise<ServerChatMessage[]> {
     const cid = String(chat_id)
     const query = this.buildQuery({
@@ -5804,7 +5931,8 @@ export class TldwApiClientBase {
       ...(params || {})
     })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
-    const cached = this.chatMessagesCache.get(cacheKey)
+    const useSharedCache = !options?.fresh && !options?.requestScope
+    const cached = useSharedCache ? this.chatMessagesCache.get(cacheKey) : undefined
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
     }
@@ -5812,16 +5940,21 @@ export class TldwApiClientBase {
       this.chatMessagesCache.delete(cacheKey)
     }
 
-    const inFlight = this.chatMessagesInFlight.get(cacheKey)
+    const inFlight = useSharedCache ? this.chatMessagesInFlight.get(cacheKey) : undefined
     if (inFlight) {
       return inFlight
     }
 
     const request = (async () => {
+      const scopeFields = requestScopeFields(options?.requestScope)
       const data = await bgRequest<any>({
         path: `/api/v1/chats/${cid}/messages${query}`,
         method: "GET",
-        abortSignal: options?.signal
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig ? {
+          headers: scopeFields.headers,
+          servicePromptConfig: scopeFields.servicePromptConfig
+        } : {})
       })
 
       let list: any[] = []
@@ -5926,18 +6059,18 @@ export class TldwApiClientBase {
           pinned
         } as ServerChatMessage
       })
-      this.chatMessagesCache.set(cacheKey, {
+      if (useSharedCache) this.chatMessagesCache.set(cacheKey, {
         value: normalized,
         expiresAt: Date.now() + CHAT_MESSAGES_CACHE_TTL_MS
       })
       return normalized
     })()
 
-    this.chatMessagesInFlight.set(cacheKey, request)
+    if (useSharedCache) this.chatMessagesInFlight.set(cacheKey, request)
     try {
       return await request
     } finally {
-      this.chatMessagesInFlight.delete(cacheKey)
+      if (useSharedCache) this.chatMessagesInFlight.delete(cacheKey)
     }
   }
 
@@ -6003,16 +6136,25 @@ export class TldwApiClientBase {
   async persistCharacterCompletion(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope?: ServicePromptRequestScope
+    }
   ): Promise<any> {
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
+    const scopeFields = requestScopeFields(options?.requestScope)
     try {
       const res = await bgRequest<any>({
         path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
+        headers: { "Content-Type": "application/json", ...scopeFields.headers },
+        body: payload,
+        abortSignal: options?.signal,
+        ...(scopeFields.servicePromptConfig
+          ? { servicePromptConfig: scopeFields.servicePromptConfig }
+          : {})
       })
       this.invalidateChatMessagesCache(cid)
       return res
@@ -6141,6 +6283,8 @@ export class TldwApiClientBase {
     snippet: string
     tags?: string[]
     make_flashcard?: boolean
+    flashcard_front?: string
+    flashcard_back?: string
   }, options?: { scope?: ChatScope }): Promise<any> {
     const body = {
       ...payload,
@@ -6254,9 +6398,10 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books/${wid}`, method: 'DELETE' })
   }
 
-  async listCharacterWorldBooks(character_id: number | string): Promise<any> {
+  async listCharacterWorldBooks(character_id: number | string, includeDisabled = false): Promise<any> {
     const cid = String(character_id)
-    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books`, method: 'GET' })
+    const query = includeDisabled ? '?enabled_only=false' : ''
+    return await bgRequest<any>({ path: `/api/v1/characters/${cid}/world-books${query}`, method: 'GET' })
   }
 
   async processWorldBookContext(payload: {
@@ -6747,11 +6892,14 @@ export class TldwApiClientBase {
     tags?: string[]
     categories?: string[]
     async_mode?: boolean
-  }): Promise<any> {
+  }, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/chatbooks/export",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload
     })
   }
@@ -6930,7 +7078,8 @@ export class TldwApiClientBase {
     })
   }
 
-  async downloadChatbookExport(job_id: string): Promise<{ blob: Blob; filename: string }> {
+  async downloadChatbookExport(job_id: string, options?: ScopedRequestOptions): Promise<{ blob: Blob; filename: string }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     await this.ensureConfigForRequest(true)
     const response = await this.request<{
       ok: boolean
@@ -6939,9 +7088,11 @@ export class TldwApiClientBase {
       error?: string
       headers?: Record<string, string>
     }>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: `/api/v1/chatbooks/download/${encodeURIComponent(job_id)}`,
       method: "GET",
-      headers: { Accept: "application/octet-stream" },
+      headers: { Accept: "application/octet-stream", ...scopeFields.headers },
       responseType: "arrayBuffer",
       returnResponse: true
     })

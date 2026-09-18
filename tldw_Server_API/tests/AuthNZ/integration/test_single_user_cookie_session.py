@@ -500,3 +500,36 @@ def test_legacy_user_cookie_is_not_accepted_in_multi_user_mode(
 
     for path in LEGACY_USER_PATHS:
         assert client.get(path).status_code == 401
+
+
+@pytest.mark.parametrize("principal_first", [False, True])
+def test_real_cookie_session_activates_content_scope(single_user_cookie_client, principal_first, monkeypatch):
+    """A minted cookie establishes content authority in either dependency order."""
+    from dataclasses import asdict
+
+    from fastapi import Depends
+
+    from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
+
+    client, api_key = single_user_cookie_client
+    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "true")
+    dependencies = [get_auth_principal, get_request_user] if principal_first else [get_request_user]
+
+    @client.app.get("/api/v1/authnz/cookie-content-scope", dependencies=[Depends(dep) for dep in dependencies])
+    async def content_scope():
+        return asdict(get_scope())
+
+    assert get_scope() is None
+    assert _mint(client, api_key).status_code == 200
+    response = client.get("/api/v1/authnz/cookie-content-scope")
+    assert response.status_code == 200
+    assert response.json() == {
+        "user_id": get_settings().SINGLE_USER_FIXED_ID,
+        "org_ids": [], "team_ids": [], "active_org_id": None,
+        "active_team_id": None, "is_admin": True, "session_role": None,
+    }
+    # A cookie cannot rescue an explicitly invalid header on this path.
+    assert client.get("/api/v1/authnz/cookie-content-scope", headers={"X-API-KEY": ""}).status_code == 401
+    assert get_scope() is None

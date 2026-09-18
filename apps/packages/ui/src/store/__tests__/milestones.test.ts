@@ -12,19 +12,48 @@ describe("milestone store", () => {
     expect(useMilestoneStore.getState().getCompletedCount()).toBe(0)
   })
 
+  it("keeps account and server milestones separate across reload", async () => {
+    useMilestoneStore
+      .getState()
+      .markScopedMilestone("server-a:alice", "first_ingest")
+    expect(
+      useMilestoneStore.getState().scopedMilestones["server-a:bob"]
+    ).toBeUndefined()
+    expect(
+      useMilestoneStore.getState().scopedMilestones["server-b:alice"]
+    ).toBeUndefined()
+    expect(
+      useMilestoneStore.getState().completedMilestones.first_ingest
+    ).toBeUndefined()
+    const saved = JSON.parse(
+      localStorage.getItem("tldw:milestones:scoped") || "{}"
+    )
+    expect(saved["server-a:alice"].first_ingest).toBeTypeOf("number")
+    vi.resetModules()
+    const reloaded = (
+      await import("../milestones")
+    ).useMilestoneStore.getState()
+    expect(reloaded.scopedMilestones).toEqual(saved)
+  })
+
   it("marks a milestone with timestamp", () => {
     const before = Date.now()
     useMilestoneStore.getState().markMilestone("first_connection")
     const state = useMilestoneStore.getState()
     expect(state.isMilestoneCompleted("first_connection")).toBe(true)
-    expect(state.completedMilestones.first_connection).toBeGreaterThanOrEqual(before)
+    expect(state.completedMilestones.first_connection).toBeGreaterThanOrEqual(
+      before
+    )
   })
 
   it("does not overwrite existing milestone timestamp", () => {
     useMilestoneStore.getState().markMilestone("first_ingest")
-    const firstTs = useMilestoneStore.getState().completedMilestones.first_ingest
+    const firstTs =
+      useMilestoneStore.getState().completedMilestones.first_ingest
     useMilestoneStore.getState().markMilestone("first_ingest")
-    expect(useMilestoneStore.getState().completedMilestones.first_ingest).toBe(firstTs)
+    expect(useMilestoneStore.getState().completedMilestones.first_ingest).toBe(
+      firstTs
+    )
   })
 
   it("persists to localStorage", () => {
@@ -48,7 +77,9 @@ describe("milestone store", () => {
   it("bootstraps first_connection from first-run flag", () => {
     localStorage.setItem("__tldw_first_run_complete", "true")
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(useMilestoneStore.getState().isMilestoneCompleted("first_connection")).toBe(true)
+    expect(
+      useMilestoneStore.getState().isMilestoneCompleted("first_connection")
+    ).toBe(true)
   })
 
   it("bootstraps first_ingest from telemetry session state", () => {
@@ -71,8 +102,12 @@ describe("milestone store", () => {
       JSON.stringify(telemetry)
     )
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(useMilestoneStore.getState().isMilestoneCompleted("first_ingest")).toBe(true)
-    expect(useMilestoneStore.getState().completedMilestones.first_ingest).toBe(2000)
+    expect(
+      useMilestoneStore.getState().isMilestoneCompleted("first_ingest")
+    ).toBe(true)
+    expect(useMilestoneStore.getState().completedMilestones.first_ingest).toBe(
+      2000
+    )
   })
 
   it("bootstraps first_chat from telemetry session state", () => {
@@ -95,8 +130,12 @@ describe("milestone store", () => {
       JSON.stringify(telemetry)
     )
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(useMilestoneStore.getState().isMilestoneCompleted("first_chat")).toBe(true)
-    expect(useMilestoneStore.getState().completedMilestones.first_chat).toBe(3000)
+    expect(
+      useMilestoneStore.getState().isMilestoneCompleted("first_chat")
+    ).toBe(true)
+    expect(useMilestoneStore.getState().completedMilestones.first_chat).toBe(
+      3000
+    )
   })
 
   it("bootstraps first_ingest from counter fallback when session was reset", () => {
@@ -120,7 +159,9 @@ describe("milestone store", () => {
     )
     const before = Date.now()
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(useMilestoneStore.getState().isMilestoneCompleted("first_ingest")).toBe(true)
+    expect(
+      useMilestoneStore.getState().isMilestoneCompleted("first_ingest")
+    ).toBe(true)
     expect(
       useMilestoneStore.getState().completedMilestones.first_ingest
     ).toBeGreaterThanOrEqual(before)
@@ -129,7 +170,9 @@ describe("milestone store", () => {
   it("bootstraps first_quiz_taken from quiz-attempt keys", () => {
     localStorage.setItem("quiz-attempt-abc123", JSON.stringify({ score: 8 }))
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(useMilestoneStore.getState().isMilestoneCompleted("first_quiz_taken")).toBe(true)
+    expect(
+      useMilestoneStore.getState().isMilestoneCompleted("first_quiz_taken")
+    ).toBe(true)
   })
 
   it("bootstraps family_profiles_created from family wizard telemetry", () => {
@@ -167,7 +210,11 @@ describe("milestone store", () => {
 
     useMilestoneStore.getState().bootstrapFromExistingUsage()
 
-    expect(useMilestoneStore.getState().isMilestoneCompleted("family_profiles_created")).toBe(true)
+    expect(
+      useMilestoneStore
+        .getState()
+        .isMilestoneCompleted("family_profiles_created")
+    ).toBe(true)
   })
 
   it("bootstraps content_rules_reviewed from moderation onboarding state", () => {
@@ -175,14 +222,20 @@ describe("milestone store", () => {
 
     useMilestoneStore.getState().bootstrapFromExistingUsage()
 
-    expect(useMilestoneStore.getState().isMilestoneCompleted("content_rules_reviewed")).toBe(true)
+    expect(
+      useMilestoneStore
+        .getState()
+        .isMilestoneCompleted("content_rules_reviewed")
+    ).toBe(true)
   })
 
   it("caches the quiz-attempt bootstrap scan after the first run", () => {
     const keySpy = vi.spyOn(Storage.prototype, "key")
 
     useMilestoneStore.getState().bootstrapFromExistingUsage()
-    expect(localStorage.getItem("tldw:milestones:quiz-attempt-scan-done")).toBe("1")
+    expect(localStorage.getItem("tldw:milestones:quiz-attempt-scan-done")).toBe(
+      "1"
+    )
 
     keySpy.mockClear()
     useMilestoneStore.getState().bootstrapFromExistingUsage()
@@ -192,12 +245,15 @@ describe("milestone store", () => {
 
   it("bootstrap does not overwrite already-completed milestones", () => {
     useMilestoneStore.getState().markMilestone("first_connection")
-    const originalTs = useMilestoneStore.getState().completedMilestones.first_connection
+    const originalTs =
+      useMilestoneStore.getState().completedMilestones.first_connection
 
     localStorage.setItem("__tldw_first_run_complete", "true")
     useMilestoneStore.getState().bootstrapFromExistingUsage()
 
-    expect(useMilestoneStore.getState().completedMilestones.first_connection).toBe(originalTs)
+    expect(
+      useMilestoneStore.getState().completedMilestones.first_connection
+    ).toBe(originalTs)
   })
 
   it("bootstrap is a no-op when no evidence exists", () => {

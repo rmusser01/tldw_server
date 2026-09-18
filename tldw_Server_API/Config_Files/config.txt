@@ -689,8 +689,10 @@ include_sibling_chunks = false
 sibling_window = 1
 include_parent_document = false
 parent_max_tokens = 1200
-default_llm_provider = openai
-default_llm_model = gpt-4o-mini
+# Leave blank to use the configured Chat provider and its model for QA.
+# Set both values to use a separate provider/model for RAG generation.
+default_llm_provider =
+default_llm_model =
 hyde_provider = openai
 
 hyde_model = gpt-4o-mini

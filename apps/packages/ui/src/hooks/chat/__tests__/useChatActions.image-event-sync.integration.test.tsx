@@ -43,6 +43,13 @@ const {
   }
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+    scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+    scopeSignal: signal, scopeInvalidatedSignal: signal, definitions: {}, capability: "unchecked", release: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
 }))
@@ -244,6 +251,9 @@ const createHookOptions = (
     serverChatId: "server-chat-1",
     serverChatTitle: "Image Sync Chat",
     serverChatCharacterId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatPersonaMemoryMode: null,
     serverChatState: "in-progress",
     serverChatTopic: null,
     serverChatClusterId: null,
@@ -252,6 +262,9 @@ const createHookOptions = (
     setServerChatId: vi.fn(),
     setServerChatTitle: vi.fn(),
     setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatPersonaMemoryMode: vi.fn(),
     setServerChatMetaLoaded: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -542,20 +555,26 @@ describe("useChatActions image event sync integration", () => {
         id: 7,
         name: "Guide"
       },
+      selectedAssistant: {
+        kind: "character", id: "7", name: "Guide",
+        metadata: { selectionMode: "tracked" }
+      },
       serverChatCharacterId: 7
     })
     const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
-      await result.current.onSubmit({
+      const outcome = await result.current.onSubmit({
         message: "Stay in character",
         image: "",
         requestOverrides: {
           selectedModel: "anthropic/claude-4.5-sonnet"
         }
       })
+      expect(outcome).toEqual({ status: "submitted" })
     })
 
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(streamCharacterChatCompletionMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
@@ -615,6 +634,10 @@ describe("useChatActions character stream throttling integration", () => {
       name: "Stream Character",
       avatar_url: ""
     }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
+    }
     options.selectedModel = "openrouter/openai/gpt-4.1-mini"
     options.currentChatModelSettings.apiProvider = "openrouter"
 
@@ -670,6 +693,10 @@ describe("useChatActions character stream throttling integration", () => {
       name: "Stream Character",
       avatar_url: ""
     }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
+    }
 
     const { result } = renderHook(() => useChatActions(options))
 
@@ -685,6 +712,16 @@ describe("useChatActions character stream throttling integration", () => {
       expect.any(String),
       expect.objectContaining({
         assistant_message_id: expect.any(String)
+      }),
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: expect.objectContaining({
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user"
+          }),
+          userId: null
+        }),
+        signal: expect.any(AbortSignal)
       })
     )
     expect(
@@ -722,6 +759,10 @@ describe("useChatActions character stream throttling integration", () => {
       id: 101,
       name: "Stream Character",
       avatar_url: ""
+    }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
     }
 
     const { result } = renderHook(() => useChatActions(options))

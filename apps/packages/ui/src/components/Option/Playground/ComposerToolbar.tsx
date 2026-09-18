@@ -956,11 +956,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       className="flex flex-col gap-2">
       <div
         data-playground-toolbar-row="actions"
-        className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:overflow-x-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
+        className="flex flex-wrap items-center gap-2">
         <div
           role="group"
           aria-label={casualModeContextGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted lg:flex-nowrap">
+          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted [&>*]:shrink-0">
           {modeLauncherButton}
           {mcpControl}
           {searchContextButton}
@@ -975,7 +975,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         <div
           role="group"
           aria-label={runInputGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:flex-nowrap">
+          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto [&>*]:shrink-0">
           {compareControl}
           {openUIRequestButton}
           {dictationButton}

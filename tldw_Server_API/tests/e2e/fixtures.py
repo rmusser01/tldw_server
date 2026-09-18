@@ -415,8 +415,9 @@ class APIClient:
         title: str,
         media_type: str = "document",
         generate_embeddings: bool = False,
+        perform_analysis: bool = True,
     ) -> Dict[str, Any]:
-        """Upload a media file."""
+        """Upload a media file, optionally without provider-backed analysis."""
         with open(file_path, "rb") as f:
             # The endpoint expects 'files' (plural) not 'file'
             files = {"files": (os.path.basename(file_path), f, "application/octet-stream")}
@@ -425,7 +426,8 @@ class APIClient:
                 "media_type": media_type,
                 "overwrite_existing": "true",  # Allow overwrite for test re-runs
                 "keep_original_file": "false",
-                "generate_embeddings": str(generate_embeddings).lower()  # Convert bool to string
+                "generate_embeddings": str(generate_embeddings).lower(),
+                "perform_analysis": str(perform_analysis).lower(),
             }
             response = self.client.post(
                 f"{API_PREFIX}/media/add",

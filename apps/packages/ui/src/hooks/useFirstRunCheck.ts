@@ -17,32 +17,55 @@ type UseFirstRunCheckResult = {
  * Fetches `GET /api/v1/persona/profiles`. If no profiles exist AND the
  * user has not previously dismissed the wizard (tracked via localStorage
  * key `assistant_setup_dismissed`), `shouldShowSetup` is `true`.
+ * Source destinations can opt in to continuing without optional personalization.
  *
  * If any profile has `setup.status === "in_progress"`, `resumeStep`
  * returns that profile's `current_step` so the wizard can resume where
  * the user left off.
  */
-export function useFirstRunCheck(): UseFirstRunCheckResult {
+export function useFirstRunCheck({
+  allowCompletedSetup = false,
+  enabled = true
+}: { allowCompletedSetup?: boolean; enabled?: boolean } = {}): UseFirstRunCheckResult {
   const [shouldShowSetup, setShouldShowSetup] = React.useState(false)
   const [resumeStep, setResumeStep] = React.useState<PersonaSetupStep | null>(
     null
   )
-  const [loading, setLoading] = React.useState(true)
+  const [loading, setLoading] = React.useState(enabled)
 
   React.useEffect(() => {
     let cancelled = false
+
+    if (!enabled) {
+      setShouldShowSetup(false)
+      setResumeStep(null)
+      setLoading(false)
+      return
+    }
 
     const check = async () => {
       setLoading(true)
       try {
         const path = "/api/v1/persona/profiles" as const
-        const res = await apiSend<any[]>({
+        const res = await apiSend<
+          Array<{
+            setup?: { status?: string; current_step?: string }
+          }>
+        >({
           path,
           method: "GET"
+        }, {
+          // A new authenticated owner must not join the prior owner's GET.
+          coalesce: false
         })
         if (cancelled) return
 
-        const profiles = res.ok && Array.isArray(res.data) ? res.data : []
+        if (!res.ok || !Array.isArray(res.data)) {
+          setShouldShowSetup(false)
+          setResumeStep(null)
+          return
+        }
+        const profiles = res.data
 
         // Look for an in-progress setup to allow resuming
         let foundResumeStep: PersonaSetupStep | null = null
@@ -62,6 +85,12 @@ export function useFirstRunCheck(): UseFirstRunCheckResult {
 
         // Show setup if zero profiles and not previously dismissed
         if (profiles.length === 0) {
+          // Unified server setup owns its own gate. Optional personalization
+          // must not interrupt source destinations or probe admin-only setup.
+          if (allowCompletedSetup) {
+            setShouldShowSetup(false)
+            return
+          }
           let dismissed = false
           try {
             dismissed = localStorage.getItem(DISMISSED_KEY) === "true"
@@ -90,7 +119,7 @@ export function useFirstRunCheck(): UseFirstRunCheckResult {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [allowCompletedSetup, enabled])
 
   return { shouldShowSetup, resumeStep, loading }
 }

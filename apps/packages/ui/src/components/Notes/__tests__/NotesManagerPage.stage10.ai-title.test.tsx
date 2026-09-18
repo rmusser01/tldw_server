@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -14,7 +14,9 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockGetCurrentUser,
+  authority
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -26,7 +28,9 @@ const {
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
     mockSetSetting: vi.fn(),
-    mockClearSetting: vi.fn()
+    mockClearSetting: vi.fn(),
+    mockGetCurrentUser: vi.fn(),
+    authority: { scope: "admin-scope" as string | null }
   }
 })
 
@@ -54,6 +58,14 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
+}))
+
+vi.mock("../hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => authority.scope
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -133,23 +145,28 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: () => <div data-testid="notes-list-panel" />
 }))
 
-const renderPage = () => {
-  const queryClient = new QueryClient({
+const createQueryClient = () => new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false }
     }
   })
-  return render(
+
+const renderPage = (queryClient = createQueryClient()) => {
+  const page = () => (
     <QueryClientProvider client={queryClient}>
       <NotesManagerPage />
     </QueryClientProvider>
   )
+  const view = render(page())
+  return { ...view, rerenderPage: () => view.rerender(page()) }
 }
 
 describe("NotesManagerPage stage 10 AI title generation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authority.scope = "admin-scope"
+    mockGetCurrentUser.mockResolvedValue({ id: 1, role: "admin", is_active: true })
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
@@ -176,6 +193,98 @@ describe("NotesManagerPage stage 10 AI title generation", () => {
       }
       return {}
     })
+  })
+
+  it("does not request or use title policy while authority is unresolved", async () => {
+    authority.scope = null
+    const queryClient = createQueryClient()
+    queryClient.setQueryData(["notes-title-settings", null], {
+      llm_enabled: true,
+      strategies: ["heuristic", "llm"]
+    })
+    renderPage(queryClient)
+    await act(async () => {})
+    expect(mockGetCurrentUser).not.toHaveBeenCalled()
+    expect(mockBgRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/admin/notes/title-settings"
+    }))
+    expect(screen.queryByTestId("notes-title-strategy-select")).toBeNull()
+  })
+
+  it("does not dispatch admin settings after identity changes during the user lookup", async () => {
+    let resolveAdmin!: (user: unknown) => void
+    mockGetCurrentUser.mockImplementationOnce(() => new Promise((resolve) => { resolveAdmin = resolve }))
+    const view = renderPage()
+    await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalledOnce())
+    mockGetCurrentUser.mockResolvedValue({ id: 2, role: "user", is_active: true })
+    authority.scope = "ordinary-scope"
+    view.rerenderPage()
+    await act(async () => { resolveAdmin({ id: 1, role: "admin", is_active: true }) })
+    expect(mockBgRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/admin/notes/title-settings"
+    }))
+    expect(screen.queryByTestId("notes-title-strategy-select")).toBeNull()
+  })
+
+  it("discards an admin policy response completed after an identity change", async () => {
+    let resolveSettings!: (settings: unknown) => void
+    const requests = mockBgRequest.getMockImplementation()!
+    mockBgRequest.mockImplementation((request) => {
+      if (request.path === "/api/v1/admin/notes/title-settings") {
+        return new Promise((resolve) => { resolveSettings = resolve })
+      }
+      return requests(request)
+    })
+    const queryClient = createQueryClient()
+    const view = renderPage(queryClient)
+    await waitFor(() => expect(resolveSettings).toBeDefined())
+    mockGetCurrentUser.mockResolvedValue({ id: 2, role: "user", is_active: true })
+    authority.scope = "ordinary-scope"
+    view.rerenderPage()
+    await act(async () => {
+      resolveSettings({ llm_enabled: true, strategies: ["heuristic", "llm"] })
+    })
+    await waitFor(() => expect(queryClient.getQueryData(["notes-title-settings", "admin-scope"])).toBeNull())
+    expect(screen.queryByTestId("notes-title-strategy-select")).toBeNull()
+  })
+
+  it("keeps ordinary-user editing and title suggestions without requesting admin settings", async () => {
+    mockGetCurrentUser.mockResolvedValue({ id: 2, role: "user", is_active: true })
+    mockConfirmDanger.mockResolvedValue(false)
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "Manual Title" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
+      target: { value: "Some content for title generation." }
+    })
+    fireEvent.click(screen.getByTestId("notes-generate-title-button"))
+    await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalled())
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Manual Title")
+    expect(screen.queryByTestId("notes-title-strategy-select")).toBeNull()
+    expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/notes/title/suggest",
+      body: expect.objectContaining({ title_strategy: "heuristic" })
+    }))
+    expect(mockBgRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/admin/notes/title-settings"
+    }))
+  })
+
+  it.each([
+    { id: 2, is_active: true },
+    { id: 2, role: "admin", is_active: false }
+  ])("does not request admin settings without an active administrator: %j", async (user) => {
+    mockGetCurrentUser.mockResolvedValue(user)
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
+      target: { value: "Some content for title generation." }
+    })
+    fireEvent.click(screen.getByTestId("notes-generate-title-button"))
+    await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalled())
+    expect(mockBgRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/admin/notes/title-settings"
+    }))
   })
 
   it("generates title suggestion and applies it after confirmation", async () => {

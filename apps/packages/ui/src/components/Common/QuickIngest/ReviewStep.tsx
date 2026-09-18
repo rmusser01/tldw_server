@@ -15,14 +15,12 @@ import {
 } from "lucide-react"
 import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
 import { useIngestWizard } from "./IngestWizardContext"
-import { estimateTotalSeconds, formatEstimate } from "./timeEstimation"
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024 // 50 MB
-const LONG_TIME_THRESHOLD = 15 * 60 // 15 minutes in seconds
 const LARGE_BATCH_THRESHOLD = 5
 
 /**
@@ -113,17 +111,6 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
     [queueItems]
   )
 
-  // Compute total estimated time
-  const totalEstimatedSeconds = useMemo(
-    () => estimateTotalSeconds(selectedQueueItems, selectedPreset),
-    [selectedQueueItems, selectedPreset]
-  )
-
-  const estimatedTimeLabel = useMemo(
-    () => formatEstimate(totalEstimatedSeconds),
-    [totalEstimatedSeconds]
-  )
-
   // Preset display name
   const presetLabel = useMemo(
     () => selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1),
@@ -163,15 +150,6 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
       }
     })
 
-    // Long estimated time
-    if (totalEstimatedSeconds > LONG_TIME_THRESHOLD) {
-      result.push(
-        qi("review.warnLongTime", "Processing may take a while ({{time}})", {
-          time: estimatedTimeLabel,
-        })
-      )
-    }
-
     // Large batch
     if (selectedQueueItems.length > LARGE_BATCH_THRESHOLD) {
       result.push(
@@ -184,7 +162,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
     }
 
     return result
-  }, [selectedQueueItems, totalEstimatedSeconds, estimatedTimeLabel, qi])
+  }, [selectedQueueItems, qi])
 
   // Item display name
   const getItemLabel = useCallback((item: WizardQueueItem): string => {
@@ -206,13 +184,16 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           {qi("review.title", "Ready to Process")}
         </h2>
         <p className="mt-1 text-sm text-text-muted">
-          {qi("review.summary", "{{count}} items | {{preset}} preset | {{time}} estimated", {
+          {qi("review.summaryWithoutEstimate", "{{count}} items | {{preset}} preset", {
             count: selectedQueueItems.length,
             preset: presetLabel,
-            time: estimatedTimeLabel,
           })}
         </p>
       </div>
+
+      <p className="px-4 pt-3 text-sm text-text-muted sm:px-6">
+        {qi("review.durationVaries", "Processing time depends on the content, selected options, and server.")}
+      </p>
 
       {/* Scrollable item list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-6">

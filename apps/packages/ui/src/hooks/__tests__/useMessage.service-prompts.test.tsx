@@ -189,6 +189,8 @@ const mocks = vi.hoisted(() => {
   })
 
   return {
+    deleteMessage: vi.fn(),
+    removeMessageById: vi.fn(),
     addMedia: vi.fn(),
     answerDefinition,
     chatBaseState,
@@ -349,6 +351,7 @@ vi.mock("@/libs/get-html", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    deleteMessage: mocks.deleteMessage,
     addMedia: (...args: unknown[]) => mocks.addMedia(...args),
     ragSearch: (...args: unknown[]) => mocks.ragSearch(...args)
   }
@@ -388,7 +391,7 @@ vi.mock("@/db/dexie/helpers", () => {
     generateID: () => `generated-${++id}`,
     getPromptById: vi.fn(),
     removeMessageByIndex: vi.fn(),
-    removeMessageById: vi.fn(),
+    removeMessageById: mocks.removeMessageById,
     updateMessageByIndex: vi.fn(),
     updateMessageById: vi.fn()
   }
@@ -462,6 +465,23 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
           Object.prototype.hasOwnProperty.call(values, key) ? values[key] : _match
         )
     )
+  })
+
+  it.each(["local", "server"])("deletes a qualified sidepanel row and clears the %s reply target", async replyKind => {
+    const previous = { ...mocks.storeState }
+    const localId = "history-A:server:answer"
+    const canonicalId = "canonical-answer"
+    try {
+      Object.assign(mocks.storeState, { serverChatId: "cedar", replyTarget: { id: replyKind === "local" ? localId : canonicalId }, messages: [{ id: localId, serverMessageId: canonicalId, serverMessageVersion: 2, isBot: true, name: "Cedar", message: "Cedar reply" }] })
+      const { result } = renderHook(() => useMessage())
+      await act(async () => { await result.current.deleteMessage(0) })
+      expect(mocks.deleteMessage).toHaveBeenCalledWith(canonicalId, 2, "cedar")
+      expect(mocks.removeMessageById).toHaveBeenCalledWith("history-1", localId)
+      expect(mocks.setMessages).toHaveBeenCalledWith([])
+      expect(mocks.storeState.clearReplyTarget).toHaveBeenCalledOnce()
+    } finally {
+      Object.assign(mocks.storeState, previous)
+    }
   })
 
   it("loads one immutable RAG snapshot before the first message mutation", async () => {

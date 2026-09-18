@@ -74,8 +74,14 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import FLASHCARDS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
-    ArtifactVerificationUnit,
     verify_generated_artifact_against_sources,
 )
 from tldw_Server_API.app.core.config import loaded_config_data
@@ -117,6 +123,7 @@ from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_flashcard_assistant_context,
     generate_study_assistant_reply,
 )
+from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.StudyPacks.jobs import (
@@ -172,51 +179,6 @@ def _parse_scheduler_settings_envelope(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def _build_flashcard_verification_units(cards: list[dict[str, Any]]) -> list[ArtifactVerificationUnit]:
-    units: list[ArtifactVerificationUnit] = []
-    for index, card in enumerate(cards, start=1):
-        model_type = str(card.get("model_type") or "basic").lower()
-        front = str(card.get("front") or "").strip()
-        back = str(card.get("back") or "").strip()
-        notes = str(card.get("notes") or "").strip()
-        extra = str(card.get("extra") or "").strip()
-
-        # Questions are prompts, not claims. Cloze fronts are factual statements.
-        if front and (model_type == "cloze" or not front.endswith("?")):
-            units.append(
-                ArtifactVerificationUnit(
-                    unit_id=f"flashcard:{index}:front",
-                    text=front,
-                    claims=[front],
-                )
-            )
-        if back:
-            units.append(
-                ArtifactVerificationUnit(
-                    unit_id=f"flashcard:{index}:back",
-                    text=back,
-                    claims=[back],
-                )
-            )
-        if notes:
-            units.append(
-                ArtifactVerificationUnit(
-                    unit_id=f"flashcard:{index}:notes",
-                    text=notes,
-                    claims=[notes],
-                )
-            )
-        if extra:
-            units.append(
-                ArtifactVerificationUnit(
-                    unit_id=f"flashcard:{index}:extra",
-                    text=extra,
-                    claims=[extra],
-                )
-            )
-    return units
-
-
 def _should_return_test_mode_flashcards(error: object) -> bool:
     normalized = str(error or "").lower()
     if not normalized:
@@ -242,12 +204,6 @@ def _attach_scheduler_preview(card: dict[str, Any], deck: dict[str, Any] | None)
     return card
 
 
-def _build_review_scope_key(*, review_mode: str, deck_id: int | None, tag_filter: str | None = None) -> str:
-    scope_parts = [str(review_mode or "due").strip().lower() or "due"]
-    scope_parts.append(f"deck:{deck_id}" if deck_id is not None else "global")
-    if tag_filter:
-        scope_parts.append(f"tag:{tag_filter}")
-    return ":".join(scope_parts)
 _FLASHCARDS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     CharactersRAGDBError,
@@ -265,6 +221,7 @@ _STUDY_PACK_JOB_STATUS_MAP = {
     "processing": "running",
     "completed": "completed",
     "failed": "failed",
+    "quarantined": "failed",
     "cancelled": "cancelled",
 }
 
@@ -454,7 +411,7 @@ def _public_study_pack_job_error(job: dict[str, Any]) -> str | None:
     if raw_status == "cancelled":
         reason = str(job.get("cancellation_reason") or "").strip()
         return reason or "Study pack generation was cancelled."
-    if raw_status != "failed":
+    if raw_status not in {"failed", "quarantined"}:
         return None
 
     raw_error = str(job.get("last_error") or job.get("error_message") or "").strip()
@@ -1287,6 +1244,7 @@ def list_flashcards(
     deck_id: Optional[int] = None,
     workspace_id: Optional[str] = None,
     include_workspace_items: bool = False,
+    include_scheduler_preview: bool = False,
     tag: Optional[str] = None,
     due_status: Optional[str] = Query('all', pattern="^(new|learning|due|all)$"),
     q: Optional[str] = None,
@@ -1317,6 +1275,17 @@ def list_flashcards(
             q=q,
             include_deleted=False,
         )
+        if include_scheduler_preview:
+            decks: dict[int, dict[str, Any] | None] = {}
+            for card in items:
+                card_deck_id = card.get("deck_id")
+                deck = None
+                if card_deck_id is not None:
+                    card_deck_id = int(card_deck_id)
+                    if card_deck_id not in decks:
+                        decks[card_deck_id] = db.get_deck(card_deck_id)
+                    deck = decks[card_deck_id]
+                _attach_scheduler_preview(card, deck)
         total_int = int(total)
         return {
             "items": items,
@@ -1329,6 +1298,8 @@ def list_flashcards(
                 count=len(items),
             ),
         }
+    except (SchedulerSettingsError, FsrsSettingsError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CharactersRAGDBError as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to list flashcards") from exc
 
@@ -2022,18 +1993,15 @@ def review_flashcard(payload: FlashcardReviewRequest, db: CharactersRAGDB = Depe
         card = db.get_flashcard(payload.card_uuid)
         if not card:
             raise HTTPException(status_code=404, detail=f"Flashcard not found ({payload.card_uuid})")
-        deck_id = int(card["deck_id"]) if card.get("deck_id") is not None else None
-        session = db.get_or_create_flashcard_review_session(
-            deck_id=deck_id,
-            review_mode="due",
-            tag_filter=None,
-            scope_key=_build_review_scope_key(review_mode="due", deck_id=deck_id),
-        )
+        context = payload.review_context
         updated = db.review_flashcard(
             payload.card_uuid,
             payload.rating,
             payload.answer_time_ms,
-            review_session_id=session["id"],
+            review_session_id=payload.review_session_id,
+            review_mode=context.review_mode if context is not None else None,
+            review_deck_id=context.deck_id if context is not None else None,
+            review_tag_filter=context.tag_filter if context is not None else None,
         )
         return updated
     except (SchedulerSettingsError, FsrsSettingsError) as e:
@@ -2549,6 +2517,31 @@ async def respond_flashcard_assistant(
         }
     except HTTPException:
         raise
+    except ChatConfigurationError:
+        raise HTTPException(
+            status_code=400,
+            detail="No usable chat provider and model are configured. Configure them or ask your server administrator.",
+        ) from None
+    except ChatAuthenticationError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected its credentials. Check provider settings or ask your server administrator.",
+        ) from None
+    except ChatBadRequestError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected the request. Check the selected provider and model.",
+        ) from None
+    except ChatRateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="The chat provider is rate limited. Try again shortly.",
+        ) from None
+    except ChatAPIError:
+        raise HTTPException(
+            status_code=502,
+            detail="The chat provider could not complete the study response. Try again shortly.",
+        ) from None
     except ConflictError as exc:
         raise map_db_error_to_http(
             exc,
@@ -2607,7 +2600,7 @@ async def generate_flashcards(payload: FlashcardGenerateRequest):
 
         claim_verification = await verify_generated_artifact_against_sources(
             artifact_type="flashcards",
-            units=_build_flashcard_verification_units(generated_cards),
+            units=build_flashcard_verification_units(generated_cards),
             source_documents=[
                 Document(
                     id="flashcards-source",

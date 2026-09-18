@@ -217,7 +217,7 @@ export const MediaSectionNavigator: React.FC<Props> = ({
 
   return (
     <aside
-      className={`w-full md:w-72 md:min-w-72 border-b md:border-b-0 md:border-r border-border bg-surface flex flex-col ${className}`}
+      className={`w-full min-w-0 max-w-full md:w-72 md:min-w-72 border-b md:border-b-0 md:border-r border-border bg-surface flex flex-col ${className}`}
       aria-label="Chapters and sections"
     >
       <div className="px-3 py-2 border-b border-border">

@@ -210,6 +210,7 @@ export function useReadingProgress(deps: UseReadingProgressDeps) {
     mediaDetail,
     contentLength: content.length,
     scrollContainerRef: contentScrollContainerRef,
+    isContentReady: !isDetailLoading,
     hasNavigationTarget: Boolean(navigationTarget)
   })
   const progressPercent = mediaReadingProgress?.progressPercent

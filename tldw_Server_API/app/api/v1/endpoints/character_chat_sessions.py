@@ -6122,6 +6122,10 @@ async def character_chat_completion(
             if body.repetition_penalty is not None
             else character_generation_settings.get("repetition_penalty")
         )
+        # Creation snapshots include 1.0 even for adapters without this optional
+        # sampler. Neutral repetition must not turn a valid completion into 400.
+        if resolved_repetition_penalty == 1.0:
+            resolved_repetition_penalty = None
         resolved_stop = (
             body.stop
             if body.stop is not None
@@ -6707,6 +6711,9 @@ async def character_chat_completion(
                 return []
             return [text[i : i + size] for i in range(0, len(text), size)]
 
+        # Intermediaries must deliver SSE frames without compression buffering.
+        sse_headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+
         def _stream_text_as_sse(text: str) -> StreamingResponse:
             async def _stream_text():
                 try:
@@ -6752,10 +6759,7 @@ async def character_chat_completion(
                     yield f"data: {json.dumps({'error': str(e)})}\n\n"
                     yield "data: [DONE]\n\n"
 
-            headers = {}
-            if streams_unified:
-                headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-            return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=headers)
+            return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=sse_headers)
 
         # Initialize assistant_text to avoid potential UnboundLocalError in edge cases
         assistant_text = ""
@@ -6914,14 +6918,10 @@ async def character_chat_completion(
                             await producer
                         await stream_cleanup()
 
-                headers = {
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                }
                 response = StreamingResponse(
                     _generator(),
                     media_type="text/event-stream",
-                    headers=headers,
+                    headers=sse_headers,
                     background=BackgroundTask(stream_cleanup),
                 )
                 credential_runtime_owned_by_stream = True
@@ -7002,6 +7002,7 @@ async def character_chat_completion(
             response = StreamingResponse(
                 _sse_provider(),
                 media_type="text/event-stream",
+                headers=sse_headers,
                 background=BackgroundTask(stream_cleanup),
             )
             credential_runtime_owned_by_stream = True

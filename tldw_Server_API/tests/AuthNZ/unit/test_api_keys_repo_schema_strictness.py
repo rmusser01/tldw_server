@@ -1,11 +1,67 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
-
 pytestmark = pytest.mark.unit
+
+
+class _GuardedPostgresConnection:
+    """Run repository SQL through the managed Postgres guard without I/O."""
+
+    def __init__(self, column_type: str):
+        self.column_type = column_type
+
+    async def fetchval(self, query: str, *args):  # noqa: ANN001, ANN002
+        _guard_sql(
+            query,
+            backend="postgres",
+            connection_identity=self,
+            operation="fetchval",
+        )
+        if "information_schema.columns" in query:
+            return self.column_type
+        return 101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("column_type", ["text", "jsonb"])
+async def test_create_virtual_key_row_passes_managed_postgres_guard(column_type: str):
+    """Adjacent bind placeholders must not make virtual-key writes look protected."""
+    repo = AuthnzApiKeysRepo(SimpleNamespace(pool=object()))
+    conn = _GuardedPostgresConnection(column_type)
+
+    key_id = await repo.create_virtual_key_row(
+        user_id=1,
+        key_hash="virtual-key-hash",
+        key_identifier="virtual-key-id",
+        key_prefix="vk_test...",
+        name="guarded virtual key",
+        description=None,
+        expires_at=None,
+        org_id=None,
+        team_id=None,
+        scope="read",
+        allowed_endpoints=["chat.completions"],
+        allowed_providers=["openai"],
+        allowed_models=["gpt-test"],
+        budget_day_tokens=100,
+        budget_month_tokens=200,
+        budget_day_usd=1.5,
+        budget_month_usd=2.5,
+        parent_key_id=None,
+        allowed_methods=["post"],
+        allowed_paths=["/api/v1/chat/completions"],
+        max_calls=3,
+        max_runs=4,
+        conn=conn,
+    )
+
+    assert key_id == 101
 
 
 class _StrictSqlitePool:

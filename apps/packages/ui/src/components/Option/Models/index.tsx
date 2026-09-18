@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { browser } from "wxt/browser"
-import { AvailableModelsList } from "./AvailableModelsList"
+import { ModelsCatalog, modelsCatalogQueryOptions } from "./AvailableModelsList"
 import {
   buildConfiguredFirstModelOptions,
   formatModelsLastRefreshedTime,
@@ -21,6 +21,7 @@ import {
 } from "@/utils/provider-registry"
 import { isAutoModelId } from "@/utils/resolve-api-provider"
 import { isConfiguredUsableModel } from "@/hooks/playground/modelSelectorUtils"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 interface RefreshResponse {
@@ -105,10 +106,7 @@ export const ModelsBody = () => {
   const { t } = useTranslation(["settings", "common"])
   const notification = useAntdNotification()
   const queryClient = useQueryClient()
-  const [selectedModel, setSelectedModel] = useStorage<string | null>(
-    "selectedModel",
-    null
-  )
+  const { selectedModel, setSelectedModel } = useSelectedModel()
   const [defaultApiProvider, setDefaultApiProvider] = useStorage<
     string | null
   >("defaultApiProvider", null)
@@ -121,6 +119,9 @@ export const ModelsBody = () => {
     queryFn: async () => fetchChatModels({ returnEmpty: true }),
     staleTime: 5 * 60 * 1000
   })
+  // Chat-model discovery can return an empty cached fallback after a failed request.
+  // Use the existing catalog request to distinguish that failure from readiness.
+  const catalog = useQuery(modelsCatalogQueryOptions)
 
   const {
     data: openaiOauthStatus,
@@ -362,27 +363,14 @@ export const ModelsBody = () => {
         queryClient.refetchQueries({ queryKey: ["tldw-models"] }),
         queryClient.refetchQueries({ queryKey: ["tldw-chat-models"] })
       ])
-      const providers = queryClient.getQueryData<Record<string, unknown[]>>([
-        "tldw-providers-models"
-      ])
+      const catalogError = queryClient.getQueryState(["tldw-providers-models"])?.error
+      if (catalogError) throw catalogError
       setLastRefreshedAt(Date.now())
-      if (!providers || Object.keys(providers).length === 0) {
-        notification.error({
-          message: t("settings:models.refreshEmpty", {
-            defaultValue: "No providers available after refresh"
-          }),
-          description: t("settings:models.refreshEmptyHint", {
-            defaultValue:
-              "Check your server URL and API key, ensure your tldw_server is running, then try refreshing again."
-          })
+      notification.success({
+        message: t("settings:models.refreshSuccess", {
+          defaultValue: "Model list refreshed"
         })
-      } else {
-        notification.success({
-          message: t("settings:models.refreshSuccess", {
-            defaultValue: "Model list refreshed"
-          })
-        })
-      }
+      })
     } catch (e: unknown) {
       const safeMessage = formatModelActionError(e)
       console.error("[tldw] Failed to refresh models", safeMessage)
@@ -561,28 +549,37 @@ export const ModelsBody = () => {
                 )}
               </p>
             </div>
-            {modelsLoading ? (
+            {modelsLoading || catalog.isPending ? (
               <div className="flex items-center gap-2 text-xs text-text-subtle">
                 <Spin size="small" />
                 {t("settings:onboarding.defaults.loading", "Loading models...")}
               </div>
+            ) : catalog.isError ? (
+              <ModelsCatalog catalog={catalog} />
             ) : availableModels.length === 0 ? (
               <div className="text-xs text-text-subtle">
                 <div className="font-medium text-text">
                   {t(
-                    "settings:models.noProvidersTitle",
-                    "No providers available."
+                    "settings:models.noReadyChatModelsTitle",
+                    "No chat models are ready on this server."
                   )}
                 </div>
                 <div className="mt-1">
                   {t(
-                    "settings:models.noProvidersBody",
-                    "The extension could not load providers from your tldw_server. Check your server URL and API key in Settings, ensure the server is running, then use Retry (or Refresh) to try again."
+                    "settings:models.noReadyChatModelsBody",
+                    "Configure a chat provider on the server, or ask your administrator, then refresh."
                   )}
                 </div>
+                <a
+                  className="mt-2 inline-block text-primary hover:underline"
+                  href="https://github.com/rmusser01/tldw_server/blob/main/Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md"
+                  target="_blank"
+                  rel="noopener noreferrer">
+                  {t("settings:models.providerSetupGuide", "Provider setup guide")}
+                </a>
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-text">
                     {t(
@@ -682,7 +679,7 @@ export const ModelsBody = () => {
                 <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
                   {t("settings:models.readiness.defaultModel", "Default model")}
                 </div>
-                <div className="mt-1 text-sm font-medium text-text">
+                <div className="mt-1 break-all text-sm font-medium text-text">
                   {defaultModelLabel}
                 </div>
               </div>
@@ -875,7 +872,17 @@ export const ModelsBody = () => {
               </>
             )}
           </div>
-          <AvailableModelsList />
+          {!catalog.isError && (
+            <section>
+              <h2 className="text-sm font-semibold text-text">
+                {t("settings:models.catalogReferenceTitle", "Model catalog reference")}
+              </h2>
+              <p className="mb-3 mt-1 text-xs text-text-subtle">
+                {t("settings:models.catalogReferenceBody", "Includes unconfigured and unavailable models. Catalog entries are not necessarily ready for chat.")}
+              </p>
+              <ModelsCatalog catalog={catalog} />
+            </section>
+          )}
         </div>
       </div>
     </div>

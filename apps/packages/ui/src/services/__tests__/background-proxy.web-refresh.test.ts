@@ -61,6 +61,224 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  it.each([false, true])("invalidates a revoked rotated session without replaying its stale raw JWT (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      accessToken: jwtForUser(42), refreshToken: "original-refresh"
+    }
+    mocks.store.tldwConfig = config
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    const { storeRefreshRotationIfCurrent } = await import("@/services/tldw/single-user-credential")
+    const storage = createSafeStorage({ area: "local" })
+    await storeRefreshRotationIfCurrent(storage, config, config.refreshToken, {
+      accessToken: `${jwtForUser(42)}-rotated`, refreshToken: "rotated-refresh"
+    })
+    const fetchSpy = vi.fn(async () => new Response("unauthorized", { status: 401 }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/private-note", method: "GET",
+      ...(scoped ? { servicePromptConfig: { serverUrl: config.serverUrl, authMode: config.authMode, expectedUserId: 42 } } : {})
+    })).rejects.toMatchObject({ status: 401 })
+    const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+    expect(await resolveDirectBrowserConfig(storage)).not.toHaveProperty("accessToken")
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
+  it.each([false, true])("invalidates only the current session after an actual refresh401 (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      accessToken: jwtForUser(42), refreshToken: "expired-refresh"
+    }
+    mocks.store.tldwConfig = config
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/private-note", method: "GET",
+      ...(scoped ? { servicePromptConfig: { serverUrl: config.serverUrl, authMode: config.authMode, expectedUserId: 42 } } : {})
+    })).rejects.toMatchObject({ status: 401 })
+    const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    expect(await resolveDirectBrowserConfig(createSafeStorage({ area: "local" }))).not.toHaveProperty("accessToken")
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
+  it("keeps cancellation during refresh out of the backend-unreachable modal", async () => {
+    let started!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const events: Event[] = []
+    const listener = (event: Event) => { events.push(event) }
+    window.addEventListener("tldw:backend-unreachable", listener)
+    const abort = new AbortController()
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        started()
+        await gate
+        return new Response(JSON.stringify({ access_token: "fresh-access", refresh_token: "fresh-refresh" }), {
+          status: 200, headers: { "content-type": "application/json" }
+        })
+      }
+      return new Response("unauthorized", { status: 401 })
+    }))
+    try {
+      const { bgRequest } = await importProxy()
+      const rejected = expect(bgRequest({
+        path: "/api/v1/notes/", method: "GET", abortSignal: abort.signal
+      })).rejects.toMatchObject({ status: 0, code: "REQUEST_ABORTED" })
+      await entered
+      abort.abort()
+      release()
+      await rejected
+      expect(events).toHaveLength(0)
+    } finally {
+      release()
+      window.removeEventListener("tldw:backend-unreachable", listener)
+    }
+  })
+
+  it("still reports an actual request deadline as a connection failure", async () => {
+    const { bgRequest } = await importProxy()
+    const events: Event[] = []
+    const listener = (event: Event) => { events.push(event) }
+    window.addEventListener("tldw:backend-unreachable", listener)
+    vi.useFakeTimers()
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
+      })))
+    try {
+      const result = bgRequest({
+        path: "/api/v1/notes/", method: "GET", timeoutMs: 10
+      }).then(value => value, error => error)
+      await vi.advanceTimersByTimeAsync(20)
+      expect(await result).toMatchObject({ status: 0, code: "REQUEST_TIMEOUT" })
+      expect(events).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+      window.removeEventListener("tldw:backend-unreachable", listener)
+    }
+  })
+
+  it.each([false, true])("retains retryable refresh failure details and does not replay a write (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.com", authMode: "multi-user",
+      accessToken: jwtForUser(42), refreshToken: "valid-refresh"
+    }
+    mocks.store.tldwConfig = config
+    const writes: RequestInit[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        return new Response(JSON.stringify({ detail: "Authentication service is busy" }), {
+          status: 503, headers: { "content-type": "application/json", "retry-after": "2" }
+        })
+      }
+      writes.push(init ?? {})
+      return new Response("unauthorized", { status: 401 })
+    }))
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Private draft" },
+      ...(scoped ? { servicePromptConfig: {
+        serverUrl: config.serverUrl, authMode: "multi-user" as const, expectedUserId: 42
+      } } : {})
+    })).rejects.toMatchObject({ status: 503, retryAfterMs: 2000 })
+    expect(writes).toHaveLength(1)
+    expect(mocks.store.tldwConfig).toEqual(config)
+  })
+
+  it.each(["POST", "PUT"] as const)("does not dispatch a scoped Notes %s after credential loading switches accounts", async (method) => {
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const entered = new Promise<void>((resolve) => { started = resolve })
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") { started(); await gate }
+      return mocks.store[key] ?? null
+    })
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    const pending = expect(bgRequest({
+      path: method === "POST" ? "/api/v1/notes/" : "/api/v1/notes/private",
+      method, body: { content: "Alice private draft" },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "multi-user", expectedUserId: 42
+      }
+    })).rejects.toMatchObject({ status: 412 })
+    // An unrecognized scoped route fails before storage; avoid hanging the red run.
+    await Promise.race([entered, pending])
+    mocks.store.tldwConfig = {
+      serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(84)
+    }
+    release()
+    await pending
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("never retries a scoped Notes write as the account selected during refresh", async () => {
+    const original = { serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(42), refreshToken: "alice-refresh" }
+    const replacement = { ...original, accessToken: jwtForUser(84), refreshToken: "bob-refresh" }
+    mocks.store.tldwConfig = original
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        mocks.store.tldwConfig = replacement
+        return new Response(JSON.stringify({ access_token: `${jwtForUser(42)}-new`, refresh_token: "alice-rotated" }), {
+          status: 200, headers: { "content-type": "application/json" }
+        })
+      }
+      return new Response("unauthorized", { status: 401 })
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      servicePromptConfig: { serverUrl: original.serverUrl, authMode: "multi-user", expectedUserId: 42 }
+    })).rejects.toMatchObject({ status: 412 })
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/notes/"))).toHaveLength(1)
+    expect(mocks.store.tldwConfig).toEqual(replacement)
+  })
+
+  it("retries a scoped Notes write with refreshed credentials for the same principal", async () => {
+    const original = { serverUrl: "https://api.example.com", authMode: "multi-user", accessToken: jwtForUser(42), refreshToken: "alice-refresh" }
+    mocks.store.tldwConfig = original
+    const rotated = `${jwtForUser(42)}-new`
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/auth/refresh")) return new Response(JSON.stringify({ access_token: rotated, refresh_token: "alice-rotated" }), { status: 200, headers: { "content-type": "application/json" } })
+      return new Headers(init?.headers).get("Authorization") === `Bearer ${rotated}`
+        ? new Response(JSON.stringify({ id: "saved" }), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response("unauthorized", { status: 401 })
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: { serverUrl: original.serverUrl, authMode: "multi-user", expectedUserId: 42 }
+    })).resolves.toEqual({ id: "saved" })
+    const writes = fetchSpy.mock.calls.filter(([url]) => String(url).endsWith("/notes/"))
+    expect(writes).toHaveLength(2)
+    expect(writes.every(([, init]) => new Headers(init?.headers).get("X-TLDW-Expected-User-ID") === "42")).toBe(true)
+  })
+
+  it("rejects a changed runtime key before a scoped Notes write", async () => {
+    mocks.store.tldwConfig = { serverUrl: "https://api.example.com", authMode: "single-user", apiKey: "alice-key" }
+    mocks.runtimeApiKey = "bob-key"
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgRequest } = await importProxy()
+    await expect(bgRequest({
+      path: "/api/v1/notes/", method: "POST", body: { content: "Alice private draft" },
+      servicePromptConfig: {
+        serverUrl: "https://api.example.com", authMode: "single-user",
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "alice-key")
+      }
+    })).rejects.toMatchObject({ status: 412 })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it.each([
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
@@ -481,7 +699,7 @@ describe("background proxy web token refresh", () => {
     ["/api/v1/chats/chat%2fid/messages", "POST"],
     ["/api/v1/chats/chat%5cid/messages", "POST"],
     ["/api/v1/chats/chat-123/messages/search", "POST"],
-    ["/api/v1/chats/chat-123/messages", "GET"]
+    ["/api/v1/chats/chat-123/messages/extra", "GET"]
   ] as const)("rejects a checked target on non-allowlisted route %s %s", async (path, method) => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)
@@ -1238,9 +1456,7 @@ describe("background proxy web token refresh", () => {
 
     const { bgRequest } = await importProxy()
 
-    // Because refreshAuthDirect signals failure, request-core marks the refresh
-    // as failed and the still-401 retry surfaces "Session expired" rather than
-    // resolving as if the (stale-token) retry had succeeded.
+    // A malformed success is a service failure, not proof of an expired session.
     await expect(
       bgRequest<{ ok: boolean }>({
         path: "/api/v1/notes/search/" as unknown as `/${string}`,
@@ -1248,12 +1464,10 @@ describe("background proxy web token refresh", () => {
         headers: { "Content-Type": "application/json" },
         body: { q: "hello" }
       })
-    ).rejects.toThrow(/session expired/i)
+    ).rejects.toMatchObject({ status: 502 })
 
     expect(refreshHits).toBe(1)
-    // The retry ran with the stale token and 401'd; it must NOT have been
-    // treated as a success, and no bogus token was persisted.
-    expect(staleRetryHits).toBeGreaterThanOrEqual(1)
+    expect(staleRetryHits).toBe(1)
     expect((mocks.store.tldwConfig as Record<string, unknown>).accessToken).toBe(
       "stale-access"
     )

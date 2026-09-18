@@ -50,6 +50,18 @@ def ensure_sqlite_visibility_columns(db: Any, conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_media_owner_user_id ON Media(owner_user_id);"
         )
 
+    if "client_id" in columns:
+        # Older ingest workers wrote a provenance label instead of the user ID.
+        # Recover only canonical positive IDs, preserving every explicit owner.
+        statements.append(
+            "UPDATE Media SET owner_user_id = CAST(SUBSTR(client_id, 21) AS INTEGER), "
+            "version = version + 1, last_modified = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
+            "WHERE owner_user_id IS NULL "
+            "AND CAST(SUBSTR(client_id, 21) AS INTEGER) > 0 "
+            "AND client_id = 'media_ingest_worker:' || "
+            "CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT);"
+        )
+
     if not statements:
         return
 

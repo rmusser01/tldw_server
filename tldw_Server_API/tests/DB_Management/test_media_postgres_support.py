@@ -199,6 +199,33 @@ def test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness(
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = MediaDatabase(db_path=":memory:", client_id="pg-bootstrap-v23", backend=backend)
+    constraint_errors: list[tuple[str | None, str | None]] = []
+
+    class ObservedCursor:
+        """Retain safe driver diagnostics before the backend redacts the error."""
+
+        def __init__(self, cursor: Any) -> None:
+            self.cursor = cursor
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.cursor, name)
+
+        def execute(self, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return self.cursor.execute(*args, **kwargs)
+            except Exception as error:
+                constraint_errors.append((
+                    getattr(error, "sqlstate", None) or getattr(error, "pgcode", None),
+                    getattr(getattr(error, "diag", None), "constraint_name", None),
+                ))
+                raise
+
+    class ObservedConnection:
+        def __init__(self, connection: Any) -> None:
+            self.connection = connection
+
+        def cursor(self) -> ObservedCursor:
+            return ObservedCursor(self.connection.cursor())
 
     try:
         media_uuid = str(uuid.uuid4())
@@ -298,7 +325,7 @@ def test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness(
                 connection=conn,
             )
 
-        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+        with pytest.raises(BackendDatabaseError, match="^PostgreSQL query execution failed$"):
             with backend.transaction() as conn:
                 backend.execute(
                     """
@@ -321,10 +348,12 @@ def test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness(
                         db.client_id,
                         False,
                     ),
-                    connection=conn,
+                    connection=ObservedConnection(conn),
                 )
 
-        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+        assert constraint_errors == [("23505", "idx_transcripts_media_run_id")]
+
+        with pytest.raises(BackendDatabaseError, match="^PostgreSQL query execution failed$"):
             with backend.transaction() as conn:
                 backend.execute(
                     """
@@ -347,8 +376,21 @@ def test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness(
                         db.client_id,
                         False,
                     ),
-                    connection=conn,
+                    connection=ObservedConnection(conn),
                 )
+        assert constraint_errors == [
+            ("23505", "idx_transcripts_media_run_id"),
+            ("23505", "idx_transcripts_media_idempotency_key"),
+        ]
+        # Both rejected transactions rolled back; nullable keys remain valid and
+        # the pooled backend can still read the three committed baseline rows.
+        remaining = backend.execute(
+            "SELECT transcription_run_id, idempotency_key FROM Transcripts WHERE media_id = %s "
+            "ORDER BY transcription_run_id", (media_id,),
+        ).rows
+        assert [(row["transcription_run_id"], row["idempotency_key"]) for row in remaining] == [
+            (1, "job-1"), (2, None), (3, None),
+        ]
     finally:
         db.close_connection()
 

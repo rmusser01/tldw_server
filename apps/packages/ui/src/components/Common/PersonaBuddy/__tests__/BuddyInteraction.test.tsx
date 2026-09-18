@@ -93,6 +93,15 @@ beforeEach(() => {
   })
 })
 afterEach(cleanup)
+it("keeps hidden Buddy activity and turn polling failures local", async () => {
+  render(<BuddyInteraction {...props} visible={false} />)
+  const quiet = { suppressBackendUnavailableEvent: true }
+  await waitFor(() => expect(mocks.listBuddyActivity).toHaveBeenCalledWith({ conversationPages: 1 }, quiet))
+  expect(mocks.getBuddyAttachment).toHaveBeenCalledWith(quiet)
+  expect(mocks.listBuddyTurns).toHaveBeenCalledWith({ pages: 1 }, quiet)
+  expect(mocks.listBuddyTurns).toHaveBeenCalledWith({ status: "active" }, quiet)
+  expect(mocks.readBuddyConversation).not.toHaveBeenCalled()
+})
 it("distinguishes duplicate result titles while replies and acknowledgements retain exact IDs", async () => {
   const duplicateOne = { ...first, title: "Research", created_at: "" }
   const duplicateTwo = { ...second, title: "Research", created_at: "" }

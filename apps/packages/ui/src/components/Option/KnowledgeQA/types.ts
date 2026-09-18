@@ -93,6 +93,8 @@ export type RagResult = {
     [key: string]: unknown
   }
   score?: number
+  // Untyped retrieval scores are ranking values, not measured relevance.
+  score_kind?: "ranking" | "relevance_probability"
   excerpt?: string
 }
 
@@ -116,6 +118,7 @@ export type RagContextData = {
     source_type?: string
     title?: string
     score?: number
+    score_kind?: RagResult["score_kind"]
     chunk_id?: string
     excerpt?: string
     evidence_origin?: EvidenceOrigin
@@ -295,6 +298,8 @@ export type KnowledgeQAState = {
   answerTrustReasonCodes: KnowledgeTrustReasonCode[]
   answerEvidenceOrigin: EvidenceOrigin | null
   extensionFailureState: ExtensionKnowledgeFailureState | null
+  // Captured request setting for the displayed completed result; null for legacy results.
+  completedGenerationEnabled: boolean | null
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null
@@ -376,6 +381,9 @@ export type KnowledgeQAActions = {
 export type KnowledgeQAContextValue = KnowledgeQAState &
   KnowledgeQAActions & {
     historyHydrated: boolean
+    client: import("./knowledgeQaClient").KnowledgeQaClient
+    isAuthorityCurrent: () => boolean
+    storageScopeKey: string | null
   }
 
 // Export format options

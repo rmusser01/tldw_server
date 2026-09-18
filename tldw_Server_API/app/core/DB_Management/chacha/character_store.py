@@ -55,6 +55,43 @@ class CharacterStore:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
 
+    def _owner_filter(self, *, aliased: bool = False) -> tuple[str, tuple[str, ...]]:
+        """Scope shared PostgreSQL rows; SQLite client IDs remain sync-device IDs."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        clause = " AND cc.client_id = ?" if aliased else " AND client_id = ?"
+        return clause, (self._db.client_id,)
+
+    def _exemplar_owner_filter(self, *, aliased: bool = False) -> tuple[str, tuple[str, ...]]:
+        """Derive exemplar ownership from its character without duplicating it."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        if aliased:
+            clause = (
+                " AND EXISTS (SELECT 1 FROM character_cards owner_card "
+                "WHERE owner_card.id = ce.character_id AND owner_card.client_id = ?)"
+            )
+        else:
+            clause = (
+                " AND EXISTS (SELECT 1 FROM character_cards owner_card "
+                "WHERE owner_card.id = character_exemplars.character_id AND owner_card.client_id = ?)"
+            )
+        return clause, (self._db.client_id,)
+
+    def _current_character_version(self, conn: Any, character_id: int) -> int:
+        """Check the version without exposing a foreign PostgreSQL character."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return self._db._get_current_db_version(conn, "character_cards", "id", character_id)
+        row = conn.execute(
+            "SELECT version, deleted FROM character_cards WHERE id = ? AND client_id = ?",
+            (character_id, self._db.client_id),
+        ).fetchone()
+        if not row:
+            raise ConflictError("Record not found in character_cards.", entity="character_cards", entity_id=character_id)
+        if row["deleted"]:
+            raise ConflictError("Record is soft-deleted in character_cards.", entity="character_cards", entity_id=character_id)
+        return row["version"]
+
     # ------------------------------------------------------------------
     # Character card creation
     # ------------------------------------------------------------------
@@ -220,6 +257,9 @@ class CharacterStore:
         else:
             query += f" AND deleted = {self._deleted_literal(False)}"
             params = (character_id,)
+        owner_filter, owner_params = self._owner_filter()
+        query += owner_filter
+        params += owner_params
         try:
             cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
@@ -269,6 +309,10 @@ class CharacterStore:
         if not include_deleted:
             query += f" AND deleted = {self._deleted_literal(False)}"
 
+        owner_filter, owner_params = self._owner_filter()
+        query += owner_filter
+        params.extend(owner_params)
+
         try:
             cursor = self._db.execute_query(query, tuple(params))
             characters: dict[int, dict[str, Any]] = {}
@@ -314,8 +358,11 @@ class CharacterStore:
         if not include_deleted:
             query += " AND deleted = ?"
             params += (self._deleted_value(False),)
+        owner_filter, owner_params = self._owner_filter()
+        query += owner_filter
+        params += owner_params
         try:
-            cursor = self._db.execute_query(query, params)
+            cursor = self._db.execute_query(query, params, read_only=True)
             row = cursor.fetchone()
             return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
         except CharactersRAGDBError as e:
@@ -325,7 +372,7 @@ class CharacterStore:
                 )
                 try:
                     self._db.ensure_character_tables_ready()
-                    cursor = self._db.execute_query(query, params)
+                    cursor = self._db.execute_query(query, params, read_only=True)
                     row = cursor.fetchone()
                     return self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
                 except (CharactersRAGDBError, SchemaError):
@@ -361,9 +408,10 @@ class CharacterStore:
         Raises:
             CharactersRAGDBError: For database errors during listing.
         """
-        query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
+        owner_filter, owner_params = self._owner_filter()
+        query = "SELECT * FROM character_cards WHERE deleted = ?" + owner_filter + " ORDER BY name LIMIT ? OFFSET ?"  # nosec B608 # Fixed owner predicate; all values remain bound
         try:
-            cursor = self._db.execute_query(query, (self._deleted_value(False), limit, offset))
+            cursor = self._db.execute_query(query, (self._deleted_value(False), *owner_params, limit, offset))
             rows = cursor.fetchall()
             return [self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
         except CharactersRAGDBError as e:
@@ -406,14 +454,19 @@ class CharacterStore:
         deleted_false = "FALSE" if self._db.backend_type == BackendType.POSTGRESQL else "0"
         deleted_true = "TRUE" if self._db.backend_type == BackendType.POSTGRESQL else "1"
         updated_expr = "COALESCE(cc.last_modified, cc.created_at)"
+        conversation_owner_filter = (
+            " AND conv.client_id = cc.client_id" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        )
         conversation_count_expr = (
             "SELECT COUNT(1) FROM conversations conv "  # nosec B608
             f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
+            + conversation_owner_filter
         )
         last_used_expr = (
             "COALESCE(("  # nosec B608
             "SELECT MAX(conv.last_modified) FROM conversations conv "
             f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
+            f"{conversation_owner_filter}"
             "), cc.created_at)"
         )
 
@@ -471,6 +524,7 @@ class CharacterStore:
                 "EXISTS ("  # nosec B608
                 "SELECT 1 FROM conversations conv "
                 f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
+                f"{conversation_owner_filter}"
                 ")"
             )
         elif has_conversations is False:
@@ -478,6 +532,7 @@ class CharacterStore:
                 "NOT EXISTS ("  # nosec B608
                 "SELECT 1 FROM conversations conv "
                 f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
+                f"{conversation_owner_filter}"
                 ")"
             )
 
@@ -537,6 +592,9 @@ class CharacterStore:
             deleted_filter = f"cc.deleted = {deleted_false}"
 
         base_query = f"FROM character_cards cc WHERE {deleted_filter}"
+        owner_filter, owner_params = self._owner_filter(aliased=True)
+        base_query += owner_filter
+        params = [*owner_params, *params]
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
@@ -611,6 +669,9 @@ class CharacterStore:
 
         deleted_filter = "1=1" if include_deleted else f"cc.deleted = {deleted_false}"
         base_query = f"FROM character_cards cc WHERE {deleted_filter}"  # nosec B608
+        owner_filter, owner_params = self._owner_filter(aliased=True)
+        base_query += owner_filter
+        params = [*owner_params, *params]
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
@@ -671,6 +732,9 @@ class CharacterStore:
         params: tuple[Any, ...] = (character_id,)
         if not include_deleted:
             query += f" AND deleted = {self._deleted_literal(False)}"
+        owner_filter, owner_params = self._owner_filter()
+        query += owner_filter
+        params += owner_params
         try:
             cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
@@ -685,9 +749,10 @@ class CharacterStore:
 
     def _get_raw_character_tags(self, character_id: int) -> Any:
         """Return the stored tags value without JSON deserialization."""
+        owner_filter, owner_params = self._owner_filter()
         cursor = self._db.execute_query(
-            "SELECT tags FROM character_cards WHERE id = ?",
-            (character_id,),
+            "SELECT tags FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+            (character_id, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row).get("tags") if row else None
@@ -879,19 +944,22 @@ class CharacterStore:
         # If card_data is empty, treat as a no-op as per original behavior.
         # No version check, no transaction, no version bump.
         if not card_data:
+            if self._db.backend_type == BackendType.POSTGRESQL and not self.get_character_card_by_id(character_id):
+                raise ConflictError(
+                    "Record not found in character_cards.", entity="character_cards", entity_id=character_id,
+                )
             logger.info(f"No data provided in card_data for character card update ID {character_id}. No-op.")
             return True
 
         now = self._db._get_current_utc_timestamp_iso()
+        owner_filter, owner_params = self._owner_filter()
 
         try:
             with self._db.transaction() as conn:
                 logger.debug(f"Transaction started. Connection object: {id(conn)}")
 
                 # Initial version check. This also confirms the record exists and is not deleted.
-                current_db_version_initial_check = self._db._get_current_db_version(
-                    conn, "character_cards", "id", character_id,
-                )
+                current_db_version_initial_check = self._current_character_version(conn, character_id)
                 logger.debug(
                     f"Initial DB version: {current_db_version_initial_check}, Client expected: {expected_version}")
 
@@ -945,10 +1013,11 @@ class CharacterStore:
                 final_update_query = (
                     f"UPDATE character_cards SET {', '.join(set_clauses_sql)} "  # nosec B608
                     f"WHERE id = ? AND version = ? AND deleted = {self._deleted_literal(False)}"
+                    f"{owner_filter}"
                 )
 
                 # WHERE clause parameters
-                where_params: list[Any] = [character_id, expected_version]
+                where_params: list[Any] = [character_id, expected_version, *owner_params]
                 final_params = tuple(params_for_set_clause + where_params)
 
                 logger.debug("Executing SINGLE character update query: {}", final_update_query)
@@ -960,8 +1029,8 @@ class CharacterStore:
                 if cursor.rowcount == 0:
                     # Re-check the record's state to provide a more specific error.
                     check_again_cursor = conn.execute(
-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
-                        (character_id,),
+                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                        (character_id, *owner_params),
                     )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for character_cards ID {character_id} (expected v{expected_version}) affected 0 rows."
@@ -1100,11 +1169,13 @@ class CharacterStore:
         """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
+        owner_filter, owner_params = self._owner_filter()
 
         query = (
             "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
             "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
         )
+        query += owner_filter
         params = (
             self._deleted_value(True),
             now,
@@ -1113,20 +1184,19 @@ class CharacterStore:
             character_id,
             expected_version,
             self._deleted_value(False),
+            *owner_params,
         )
 
         try:
             with self._db.transaction() as conn:
                 try:
-                    current_db_version = self._db._get_current_db_version(
-                        conn, "character_cards", "id", character_id,
-                    )
+                    current_db_version = self._current_character_version(conn, character_id)
                     # If here, record is active.
                 except ConflictError:
                     # Check if ConflictError was because it's ALREADY soft-deleted.
                     check_status_cursor = conn.execute(
-                        "SELECT deleted, version FROM character_cards WHERE id = ?",
-                        (character_id,),
+                        "SELECT deleted, version FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                        (character_id, *owner_params),
                     )
                     record_status = check_status_cursor.fetchone()
                     if record_status and record_status['deleted']:
@@ -1150,8 +1220,8 @@ class CharacterStore:
                 if cursor.rowcount == 0:
                     # Race condition: Record changed between pre-check and UPDATE.
                     check_again_cursor = conn.execute(
-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
-                        (character_id,),
+                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                        (character_id, *owner_params),
                     )
                     final_state = check_again_cursor.fetchone()
                     msg = (
@@ -1244,11 +1314,13 @@ class CharacterStore:
         """
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
+        owner_filter, owner_params = self._owner_filter()
 
         query = (
             "UPDATE character_cards SET deleted = ?, last_modified = ?, version = ?, "
             "client_id = ? WHERE id = ? AND version = ? AND deleted = ?"
         )
+        query += owner_filter
         params = (
             self._deleted_value(False),
             now,
@@ -1257,14 +1329,15 @@ class CharacterStore:
             character_id,
             expected_version,
             self._deleted_value(True),
+            *owner_params,
         )
 
         try:
             with self._db.transaction() as conn:
                 # First check if record exists at all
                 check_cursor = conn.execute(
-                    "SELECT deleted, version, last_modified FROM character_cards WHERE id = ?",
-                    (character_id,),
+                    "SELECT deleted, version, last_modified FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                    (character_id, *owner_params),
                 )
                 record_status = check_cursor.fetchone()
 
@@ -1348,8 +1421,8 @@ class CharacterStore:
                 if cursor.rowcount == 0:
                     # Race condition: Record changed between pre-check and UPDATE.
                     check_again_cursor = conn.execute(
-                        "SELECT version, deleted FROM character_cards WHERE id = ?",
-                        (character_id,),
+                        "SELECT version, deleted FROM character_cards WHERE id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                        (character_id, *owner_params),
                     )
                     final_state = check_again_cursor.fetchone()
                     msg = (
@@ -1443,11 +1516,12 @@ class CharacterStore:
                 FROM character_cards cc
                 WHERE cc.deleted = FALSE
                   AND cc.character_cards_fts_tsv @@ to_tsquery('english', ?)
+                  AND cc.client_id = ?
                 ORDER BY rank DESC, cc.last_modified DESC
                 LIMIT ?
             """
             try:
-                cursor = self._db.execute_query(query, (tsquery, tsquery, limit))
+                cursor = self._db.execute_query(query, (tsquery, tsquery, self._db.client_id, limit))
                 rows = cursor.fetchall()
                 return [
                     self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
@@ -1620,8 +1694,11 @@ class CharacterStore:
 
             while len(results) < limit:
                 # Load cards in batches
-                query = "SELECT * FROM character_cards WHERE deleted = ? ORDER BY name LIMIT ? OFFSET ?"
-                cursor = self._db.execute_query(query, (self._deleted_value(False), batch_size, offset))
+                owner_filter, owner_params = self._owner_filter()
+                query = "SELECT * FROM character_cards WHERE deleted = ?" + owner_filter + " ORDER BY name LIMIT ? OFFSET ?"  # nosec B608 # Fixed owner predicate; all values remain bound
+                cursor = self._db.execute_query(
+                    query, (self._deleted_value(False), *owner_params, batch_size, offset),
+                )
                 batch_rows = cursor.fetchall()
 
                 if not batch_rows:
@@ -1773,11 +1850,16 @@ class CharacterStore:
                 novelty_hint, emotion, scenario, rhetorical, register, safety_allowed,
                 safety_blocked, rights_public_figure, rights_notes, length_tokens,
                 created_at, updated_at, is_deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            )
         """
         if self._db.backend_type == BackendType.POSTGRESQL:
+            query += (
+                " SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+                " WHERE EXISTS (SELECT 1 FROM character_cards WHERE id = ? AND client_id = ? AND deleted = FALSE)"
+            )
             rights_public_figure = bool(exemplar_data.get('rights_public_figure', True))
         else:
+            query += " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             rights_public_figure = 1 if exemplar_data.get('rights_public_figure', True) else 0
         is_deleted = self._deleted_value(False)
 
@@ -1802,11 +1884,15 @@ class CharacterStore:
             now,
             is_deleted,
         )
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            params += (character_id, self._db.client_id)
 
         try:
             with self._db.transaction() as conn:
                 prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
-                conn.execute(prepared_query, prepared_params)
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise InputError(f"Character ID {character_id} not found.")
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
             if "unique constraint failed: character_exemplars.id" in msg:
@@ -1847,6 +1933,9 @@ class CharacterStore:
         if not include_deleted:
             query += " AND is_deleted = ?"
             params.append(self._deleted_value(False))
+        owner_filter, owner_params = self._exemplar_owner_filter()
+        query += owner_filter
+        params.extend(owner_params)
         query += " LIMIT 1"
         try:
             cursor = self._db.execute_query(query, tuple(params))
@@ -1857,17 +1946,21 @@ class CharacterStore:
 
     def list_character_exemplars(self, character_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """List non-deleted exemplars for a character."""
+        owner_filter, owner_params = self._exemplar_owner_filter()
         query = """
             SELECT *
             FROM character_exemplars
             WHERE character_id = ? AND is_deleted = ?
+        """
+        query += owner_filter
+        query += """
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ? OFFSET ?
         """
         try:
             cursor = self._db.execute_query(
                 query,
-                (character_id, self._deleted_value(False), limit, offset),
+                (character_id, self._deleted_value(False), *owner_params, limit, offset),
             )
             rows = cursor.fetchall()
             return [self._normalize_character_exemplar_row(row) for row in rows if row]
@@ -2009,6 +2102,9 @@ class CharacterStore:
                 self._deleted_value(False),
             ]
         )
+        owner_filter, owner_params = self._exemplar_owner_filter()
+        query += owner_filter
+        params.extend(owner_params)
         try:
             with self._db.transaction() as conn:
                 prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
@@ -2023,11 +2119,12 @@ class CharacterStore:
 
     def soft_delete_character_exemplar(self, character_id: int, exemplar_id: str) -> bool:
         """Soft-delete a character exemplar (idempotent)."""
+        owner_filter, owner_params = self._exemplar_owner_filter()
         query = """
             UPDATE character_exemplars
             SET is_deleted = ?, updated_at = ?
             WHERE id = ? AND character_id = ? AND is_deleted = ?
-        """
+        """ + owner_filter  # nosec B608 # Fixed owner predicate; all values remain bound
         now = self._db._get_current_utc_timestamp_iso()
         set_deleted = self._deleted_value(True)
         active_flag = self._deleted_value(False)
@@ -2036,7 +2133,7 @@ class CharacterStore:
             with self._db.transaction() as conn:
                 prepared_query, prepared_params = self._db._prepare_backend_statement(
                     query,
-                    (set_deleted, now, exemplar_id, character_id, active_flag),
+                    (set_deleted, now, exemplar_id, character_id, active_flag, *owner_params),
                 )
                 cursor = conn.cursor()
                 cursor.execute(prepared_query, prepared_params)
@@ -2044,8 +2141,8 @@ class CharacterStore:
                     return True
 
                 check_query, check_params = self._db._prepare_backend_statement(
-                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?",
-                    (exemplar_id, character_id),
+                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?" + owner_filter,  # nosec B608 # Fixed owner predicate; all values remain bound
+                    (exemplar_id, character_id, *owner_params),
                 )
                 check_row = conn.execute(check_query, check_params).fetchone()
                 return bool(check_row and bool(check_row['is_deleted']))  # noqa: TRY300
@@ -2097,6 +2194,7 @@ class CharacterStore:
             scenario_filter,
         ]
         normalized_query = (query or "").strip()
+        owner_filter, owner_params = self._exemplar_owner_filter(aliased=True)
 
         if normalized_query and self._db.backend_type == BackendType.POSTGRESQL:
             tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
@@ -2106,9 +2204,12 @@ class CharacterStore:
                     FROM character_exemplars ce
                     WHERE ce.character_id = ?
                       AND ce.is_deleted = ?
-                      AND (? IS NULL OR ce.emotion = ?)
-                      AND (? IS NULL OR ce.scenario = ?)
+                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
+                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
                       AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
+                """
+                sql += owner_filter
+                sql += """
                     ORDER BY rank DESC, ce.updated_at DESC
                 """
                 query_params = [tsquery] + filter_params + [tsquery]
@@ -2118,9 +2219,12 @@ class CharacterStore:
                     FROM character_exemplars ce
                     WHERE ce.character_id = ?
                       AND ce.is_deleted = ?
-                      AND (? IS NULL OR ce.emotion = ?)
-                      AND (? IS NULL OR ce.scenario = ?)
+                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
+                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
                       AND ce.text ILIKE ?
+                """
+                sql += owner_filter
+                sql += """
                     ORDER BY ce.updated_at DESC
                 """
                 query_params = filter_params + [f"%{normalized_query}%"]
@@ -2134,8 +2238,11 @@ class CharacterStore:
                 WHERE character_exemplars_fts MATCH ?
                   AND ce.character_id = ?
                   AND ce.is_deleted = ?
-                  AND (? IS NULL OR ce.emotion = ?)
-                  AND (? IS NULL OR ce.scenario = ?)
+                  AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
+                  AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
+            """
+            sql += owner_filter
+            sql += """
                 ORDER BY bm25_score, ce.updated_at DESC
             """
             query_params = [safe_fts] + filter_params
@@ -2145,14 +2252,17 @@ class CharacterStore:
                 FROM character_exemplars ce
                 WHERE ce.character_id = ?
                   AND ce.is_deleted = ?
-                  AND (? IS NULL OR ce.emotion = ?)
-                  AND (? IS NULL OR ce.scenario = ?)
+                  AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
+                  AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
+            """
+            sql += owner_filter
+            sql += """
                 ORDER BY ce.updated_at DESC
             """
             query_params = filter_params
 
         try:
-            cursor = self._db.execute_query(sql, tuple(query_params))
+            cursor = self._db.execute_query(sql, (*query_params, *owner_params))
             rows = cursor.fetchall()
         except CharactersRAGDBError as exc:
             logger.error(

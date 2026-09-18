@@ -638,7 +638,8 @@ class AuthNZScheduler:
             threshold = 10  # Alert if more than 10 failures in 5 minutes
             time_window = datetime.now(timezone.utc) - timedelta(minutes=5)
             is_postgres = getattr(db_pool, "pool", None) is not None
-            cutoff = time_window if is_postgres else time_window.isoformat()
+            # audit_logs.created_at is PostgreSQL TIMESTAMP storing naive UTC.
+            cutoff = time_window.replace(tzinfo=None) if is_postgres else time_window.isoformat()
 
             if is_postgres:
                 result = await db_pool.fetchone(

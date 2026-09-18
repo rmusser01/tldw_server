@@ -4,6 +4,7 @@ import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
+import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
@@ -40,6 +41,7 @@ const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
 const API_KEY_VALIDATION_TIMEOUT_MS = 30000
 
 const emitLogoutPrincipalBoundary = (): void => {
+  void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers during sign-out."))
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent("tldw:auth-principal-changed", {
@@ -236,8 +238,8 @@ export class TldwAuthService {
         path: this.isHostedMode() ? '/api/auth/logout' : '/api/v1/auth/logout',
         method: 'POST'
       })
-    } catch (error) {
-      console.error('Server logout failed:', error)
+    } catch {
+      console.warn('Server logout unavailable; continuing local sign-out without confirmed remote revocation.')
     }
 
     clearSourceReviewHandoffs()
@@ -276,6 +278,7 @@ export class TldwAuthService {
   }
 
   private async performTokenRefresh(): Promise<TokenResponse> {
+    const refreshTimer = this.refreshTimer
     await tldwClient.initialize()
     const config = await tldwClient.getConfig()
     if (!config || !config.refreshToken) {
@@ -291,20 +294,34 @@ export class TldwAuthService {
       ? null
       : scopedUserId.slice("user:".length)
 
-    const tokens = await bgRequest<TokenResponse>({
-      path: '/api/v1/auth/refresh',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { refresh_token: config.refreshToken },
-      servicePromptConfig: {
-        serverUrl: config.serverUrl,
-        authMode: config.authMode,
-        authSource: config.authSource,
-        orgId: config.orgId,
-        expectedUserId,
-        expectedRefreshToken: config.refreshToken
+    let tokens: TokenResponse
+    try {
+      tokens = await bgRequest<TokenResponse>({
+        path: '/api/v1/auth/refresh',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { refresh_token: config.refreshToken },
+        servicePromptConfig: {
+          serverUrl: config.serverUrl,
+          authMode: config.authMode,
+          authSource: config.authSource,
+          orgId: config.orgId,
+          expectedUserId,
+          expectedRefreshToken: config.refreshToken
+        }
+      })
+    } catch (error) {
+      if ((error as { status?: number } | null)?.status === 401) {
+        if (!await tldwClient.invalidateRefreshSession(config)) {
+          throw createServicePromptScopeChangedError()
+        }
+        if (this.refreshTimer && this.refreshTimer === refreshTimer) {
+          clearTimeout(this.refreshTimer)
+          this.refreshTimer = null
+        }
       }
-    })
+      throw error
+    }
 
     const committed = await tldwClient.commitTokenRefresh(
       config,

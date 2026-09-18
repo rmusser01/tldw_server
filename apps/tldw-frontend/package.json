@@ -64,6 +64,7 @@
     "test:extension": "vitest -c vitest.extension.config.ts",
     "test:characters-harness": "vitest run ../packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx ../packages/ui/src/components/Option/Characters/__tests__/CharacterGalleryCard.test.tsx ../packages/ui/src/components/Option/Characters/__tests__/search-utils.test.ts",
     "test:run": "vitest run",
+    "test:quickstart-proxy": "node --test scripts/__tests__/quickstart-proxy-timeout.test.mjs",
     "test:coverage": "vitest run --coverage",
     "test:integration": "bash ../../Helper_Scripts/run-frontend-integration.sh",
     "e2e:tier1": "playwright test --project=tier-1",

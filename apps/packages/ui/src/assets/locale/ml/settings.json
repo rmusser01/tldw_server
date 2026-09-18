@@ -1006,7 +1006,7 @@
     "title": "സ്വാഗതം — നിങ്ങൾക്ക് കണക്റ്റ് ആകാം",
     "description": "നിങ്ങളുടെ സർവറും ഓതന്റിക്കേഷനും സജ്ജമാക്കുക. കണക്ഷനും Knowledge/RAG നിലയും നാം ഇവിടെ തന്നെ പരിശോധിക്കും.",
     "learnMoreTldw": "tldw സർവർ എങ്ങനെ പ്രവർത്തിക്കുന്നു എന്ന് അറിയുക",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "http://127.0.0.1:8000",
       "help": "ഉദാഹരണം: http://127.0.0.1:8000",

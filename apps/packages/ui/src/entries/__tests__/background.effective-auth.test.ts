@@ -210,6 +210,62 @@ describe("background effective extension auth", () => {
     })
   })
 
+  it.each([false, true])("preserves a transient worker refresh failure without replaying a write (scoped=%s)", async (scoped) => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken: jwtForUser(42), refreshToken: "valid-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    if (!scoped) {
+      vi.spyOn(tldwAuth, "refreshToken").mockRejectedValue(Object.assign(
+        new Error("Authentication service is busy"), { status: 503, retryAfterMs: 2000 }
+      ))
+    }
+    const writes: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ detail: "Authentication service is busy" }), {
+        status: 503, headers: { "content-type": "application/json", "retry-after": "2" }
+      })
+      writes.push(url)
+      return new Response("unauthorized", { status: 401 })
+    }))
+    await expect(sendRuntimeMessage({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/notes/", method: "POST", body: { content: "Private draft" },
+        ...(scoped ? { servicePromptConfig: {
+          serverUrl: config.serverUrl, authMode: "multi-user", authSource: "manual", expectedUserId: 42
+        } } : {})
+      }
+    })).resolves.toMatchObject({ ok: false, status: 503, retryAfterMs: 2000 })
+    expect(writes).toHaveLength(1)
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+  })
+
+  it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
+      accessToken: jwtForUser(42), refreshToken: "expired-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })))
+    await expect(sendRuntimeMessage({
+      type: "tldw:request", payload: {
+        path: "/api/v1/notes/private-note", method: "GET",
+        servicePromptConfig: { serverUrl: config.serverUrl, authMode: "multi-user", authSource: "manual", expectedUserId: 42 }
+      }
+    })).resolves.toMatchObject({ ok: false, status: 401 })
+    const { resolveEffectiveTldwConfig } = await import("@/services/tldw/single-user-credential")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    expect(await resolveEffectiveTldwConfig({
+      persistent: createSafeStorage({ area: "local" }), session: createSafeStorage({ area: "session" })
+    })).not.toHaveProperty("refreshToken")
+    expect(storageState.persistent.get("tldwConfig")).toEqual(config)
+  })
+
   it("authenticates ordinary worker requests with session credentials", async () => {
     const fetchSpy = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {
@@ -883,7 +939,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/chats/chat%2fid/messages", "POST"],
     ["/api/v1/chats/chat%5cid/messages", "POST"],
     ["/api/v1/chats/chat-123/messages/search", "POST"],
-    ["/api/v1/chats/chat-123/messages", "GET"]
+    ["/api/v1/chats/chat-123/messages/search", "GET"]
   ] as const)("rejects a checked target on non-allowlisted worker route %s %s", async (path, method) => {
     const fetchSpy = vi.fn()
     vi.stubGlobal("fetch", fetchSpy)

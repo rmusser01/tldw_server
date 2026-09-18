@@ -555,5 +555,11 @@
     "minutesAgoShort": "vor {{count}}m",
     "hoursAgoShort": "vor {{count}}h",
     "daysAgoShort": "vor {{count}}d"
+  },
+  "help": {
+    "loadFailed": "Die Hilfe konnte nicht geladen werden. Stelle die Verbindung wieder her, speichere deine Änderungen und lade die Seite neu.",
+    "loading": "Hilfe wird geladen…",
+    "confirmReload": "Diese Seite neu laden? Nicht gespeicherte Änderungen können verloren gehen.",
+    "reload": "Seite neu laden"
   }
 }

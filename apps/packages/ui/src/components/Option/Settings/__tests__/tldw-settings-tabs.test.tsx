@@ -129,10 +129,15 @@ describe("TldwSettingsTabs", () => {
   })
 
   it("keeps the navigation sticky and shows billing only for logged-in multi-user mode", () => {
-    render(<TldwSettingsTabs authMode="multi-user" isLoggedIn />)
+    render(<TldwSettingsTabs authMode="multi-user" isLoggedIn billingAvailable />)
 
     expect(screen.getByTestId("tabs-root")).toHaveClass("sticky", "top-0")
     expect(screen.getByTestId("tab-billing")).toBeInTheDocument()
+  })
+
+  it("hides billing when a logged-in server does not advertise billing", () => {
+    render(<TldwSettingsTabs authMode="multi-user" isLoggedIn />)
+    expect(screen.queryByTestId("tab-billing")).not.toBeInTheDocument()
   })
 
   it("scrolls to the target section every time a tab is clicked, even if it is already active", () => {

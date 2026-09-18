@@ -1,4 +1,7 @@
 import React from "react"
+import { Storage } from "@plasmohq/storage"
+import { useConnectionState } from "@/hooks/useConnectionState"
+import { ConnectionPhase } from "@/types/connection"
 
 import {
   buildNotificationScopeKey,
@@ -6,7 +9,16 @@ import {
   reduceNotificationLifecycle,
   type NotificationLifecycleState
 } from "@/services/notification-lifecycle"
-import { getApiBearer, getApiKey } from "@web/lib/authStorage"
+import {
+  getApiBearer,
+  getApiKey,
+  getEffectiveStoredTldwConfig,
+  getSessionAccessToken
+} from "@web/lib/authStorage"
+import {
+  REFRESH_ROTATION_KEY,
+  REFRESH_SESSION_INVALIDATION_PREFIX
+} from "@/services/tldw/single-user-credential"
 import { getApiBaseUrl } from "@web/lib/api"
 import {
   AUTH_CREDENTIALS_CHANGED_EVENT,
@@ -28,6 +40,7 @@ export type SequencedNotificationEvent = {
 }
 
 export type NotificationLifecycleContextValue = {
+  connectionVerified: boolean
   scopeKey: string
   lifecycleEpoch: number
   state: ExposedNotificationState
@@ -37,6 +50,7 @@ export type NotificationLifecycleContextValue = {
   eventSequence: number
   events: SequencedNotificationEvent[]
   mutationError: unknown | null
+  captureAuthority: () => () => boolean
   tryAgain: () => Promise<void>
   refreshPermissions: () => Promise<void>
   reportRequestError: (error: unknown) => void
@@ -45,7 +59,7 @@ export type NotificationLifecycleContextValue = {
 
 type NotificationRuntimeSnapshot = Omit<
   NotificationLifecycleContextValue,
-  "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
+  "connectionVerified" | "captureAuthority" | "tryAgain" | "refreshPermissions" | "reportRequestError" | "reportMutationError"
 >
 
 type NotificationLifecycleProviderProps = {
@@ -81,32 +95,30 @@ const unreadIncrementForEvent = (event: NotificationStreamEvent): number => {
 }
 
 const readStoredOrgId = (): string | number | null => {
-  if (typeof window === "undefined") return null
-  try {
-    const raw = window.localStorage.getItem("tldwConfig")
-    if (!raw) return null
-    const config = JSON.parse(raw) as { orgId?: unknown }
-    return typeof config.orgId === "string" || typeof config.orgId === "number"
-      ? config.orgId
-      : null
-  } catch {
-    return null
-  }
+  const config = getEffectiveStoredTldwConfig()
+  return typeof config?.orgId === "string" || typeof config?.orgId === "number"
+    ? config.orgId
+    : null
 }
 
 export const buildWebNotificationScopeKey = (): string => {
-  const jwt =
-    typeof window !== "undefined" ? window.localStorage.getItem("access_token") : null
+  const jwt = getSessionAccessToken()
   const bearer = jwt || getApiBearer()
   const apiKey = getApiKey()
   return buildNotificationScopeKey({
-    serverUrl: getApiBaseUrl(),
+    serverUrl: getEffectiveStoredTldwConfig()?.serverUrl || getApiBaseUrl(),
     authMode: bearer ? "multi-user" : "single-user",
     orgId: readStoredOrgId(),
     userId: null,
     accessToken: bearer,
     apiKey
   })
+}
+
+const hasMissingConfiguredAuth = (): boolean => {
+  const config = getEffectiveStoredTldwConfig()
+  return config?.authMode === "multi-user" &&
+    config.authSource !== "cookie-session" && !getApiBearer()
 }
 
 export const useOptionalNotificationLifecycle = (): NotificationLifecycleContextValue | null =>
@@ -126,6 +138,14 @@ export function NotificationLifecycleProvider({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   scopeKey: suppliedScopeKey
 }: NotificationLifecycleProviderProps) {
+  const connection = useConnectionState()
+  const connectionVerified = connection.isConnected &&
+    connection.phase === ConnectionPhase.CONNECTED &&
+    connection.mode !== "demo" && !connection.offlineBypass
+  const missingConfiguredAuth = hasMissingConfiguredAuth()
+  const unverifiedState: ExposedNotificationState = connection.errorKind === "unreachable"
+    ? "degraded"
+    : "auth-required"
   const [liveScopeKey, setLiveScopeKey] = React.useState(() =>
     suppliedScopeKey ?? buildWebNotificationScopeKey()
   )
@@ -135,6 +155,7 @@ export function NotificationLifecycleProvider({
   )
   const lifecycleEpochRef = React.useRef(0)
   const generationRef = React.useRef(0)
+  const authorityRevisionRef = React.useRef(0)
   const streamOpenRef = React.useRef(false)
   const unreadCurrentRef = React.useRef(false)
   const cursorCurrentRef = React.useRef(false)
@@ -144,6 +165,15 @@ export function NotificationLifecycleProvider({
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const requestAbortRef = React.useRef<AbortController | null>(null)
   const effectSetupSeenRef = React.useRef(false)
+  const observedCredentialsRef = React.useRef({
+    bearer: getSessionAccessToken() || getApiBearer(),
+    apiKey: getApiKey(),
+    scope: buildWebNotificationScopeKey()
+  })
+  const captureAuthority = React.useCallback(() => {
+    const revision = authorityRevisionRef.current
+    return () => authorityRevisionRef.current === revision
+  }, [])
 
   const stopWork = React.useCallback(() => {
     streamOpenRef.current = false
@@ -208,8 +238,15 @@ export function NotificationLifecycleProvider({
     cursorCurrentRef.current = false
     terminalGenerationRef.current = null
     terminalStateRef.current = null
-    setSnapshot(initialSnapshot(scopeKey, lifecycleEpoch))
-    if (!enabled) return
+    const missingCredentials = hasMissingConfiguredAuth()
+    setSnapshot({
+      ...initialSnapshot(scopeKey, lifecycleEpoch),
+      ...(missingCredentials
+        ? { state: "auth-required" as const }
+        : !connectionVerified ? { state: unverifiedState } : {})
+    })
+    if (!enabled || !connectionVerified || missingCredentials ||
+      (typeof document !== "undefined" && document.visibilityState === "hidden")) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
 
@@ -354,7 +391,7 @@ export function NotificationLifecycleProvider({
     if (terminalGenerationRef.current !== generation) {
       pollTimerRef.current = setInterval(() => void pollNotificationState(), pollIntervalMs)
     }
-  }, [applyFailure, enabled, pollIntervalMs, scopeKey, stopWork, updateCurrent])
+  }, [applyFailure, connectionVerified, enabled, pollIntervalMs, scopeKey, stopWork, unverifiedState, updateCurrent])
 
   React.useEffect(() => {
     let cancelled = false
@@ -374,9 +411,25 @@ export function NotificationLifecycleProvider({
   }, [startWork, stopWork])
 
   React.useEffect(() => {
+    if (typeof document === "undefined") return
+    const onVisibilityChanged = () => {
+      if (document.visibilityState === "hidden") {
+        // Invalidate continuations before aborting their reads and stream.
+        generationRef.current += 1
+        stopWork()
+      } else if (!terminalStateRef.current) {
+        void startWork()
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChanged)
+    return () => document.removeEventListener("visibilitychange", onVisibilityChanged)
+  }, [startWork, stopWork])
+
+  React.useEffect(() => {
     if (typeof window === "undefined") return
 
     const stopForRemovedCredentials = () => {
+      authorityRevisionRef.current += 1
       generationRef.current += 1
       stopWork()
       terminalGenerationRef.current = generationRef.current
@@ -391,6 +444,12 @@ export function NotificationLifecycleProvider({
     const resetForChangedScope = (): boolean => {
       if (suppliedScopeKey !== undefined) return false
       const nextScopeKey = buildWebNotificationScopeKey()
+      if (nextScopeKey !== observedCredentialsRef.current.scope) {
+        authorityRevisionRef.current += 1
+        observedCredentialsRef.current.scope = nextScopeKey
+      }
+      // Replace pending scope changes even when storage returns to the rendered scope.
+      setLiveScopeKey(nextScopeKey)
       if (nextScopeKey === scopeKey) return false
       generationRef.current += 1
       stopWork()
@@ -399,7 +458,6 @@ export function NotificationLifecycleProvider({
       unreadCurrentRef.current = false
       cursorCurrentRef.current = false
       setSnapshot(initialSnapshot(nextScopeKey, ++lifecycleEpochRef.current))
-      setLiveScopeKey(nextScopeKey)
       return true
     }
     const onCredentialsChanged = (event: Event) => {
@@ -413,11 +471,16 @@ export function NotificationLifecycleProvider({
       }
     }
     const onStorage = (event: StorageEvent) => {
-      if (event.key === "tldwConfig") {
-        resetForChangedScope()
+      if (
+        event.key === "tldwConfig" || event.key === REFRESH_ROTATION_KEY ||
+        event.key?.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
+      ) {
+        onConfigUpdated()
         return
       }
       if (event.key !== "access_token") return
+      const config = getEffectiveStoredTldwConfig()
+      if (config?.authMode === "multi-user" || config?.authMode === "single-user") return
       if (event.newValue) {
         if (resetForChangedScope()) return
         if (terminalStateRef.current === "unavailable") return
@@ -427,13 +490,38 @@ export function NotificationLifecycleProvider({
       }
     }
     const onConfigUpdated = () => {
-      resetForChangedScope()
+      const next = {
+        bearer: getSessionAccessToken() || getApiBearer(),
+        apiKey: getApiKey(),
+        scope: buildWebNotificationScopeKey()
+      }
+      const previous = observedCredentialsRef.current
+      // Observe every authority transition synchronously, including A→B→A
+      // events React may batch into one rendered scope. Same-owner refresh is valid.
+      if (next.scope !== previous.scope) authorityRevisionRef.current += 1
+      observedCredentialsRef.current = next
+      if (hasMissingConfiguredAuth()) {
+        stopForRemovedCredentials()
+        return
+      }
+      if (resetForChangedScope()) return
+      if (next.bearer === previous.bearer && next.apiKey === previous.apiKey &&
+        next.scope === previous.scope) return
+      if (terminalStateRef.current === "unavailable") return
+      void startWork()
     }
+
+    const storage = new Storage({ area: "local" })
+    const unwatch = storage.watch({
+      tldwConfig: onConfigUpdated,
+      [REFRESH_ROTATION_KEY]: onConfigUpdated
+    })
 
     window.addEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
     window.addEventListener("tldw:config-updated", onConfigUpdated)
     window.addEventListener("storage", onStorage)
     return () => {
+      unwatch()
       window.removeEventListener(AUTH_CREDENTIALS_CHANGED_EVENT, onCredentialsChanged)
       window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("storage", onStorage)
@@ -461,27 +549,32 @@ export function NotificationLifecycleProvider({
     [applyFailure, updateCurrent]
   )
 
-  const projected =
-    snapshot.scopeKey === scopeKey
-      ? snapshot
-      : initialSnapshot(scopeKey, lifecycleEpochRef.current)
   const value = React.useMemo<NotificationLifecycleContextValue>(
-    () => ({
-      scopeKey: projected.scopeKey,
-      lifecycleEpoch: projected.lifecycleEpoch,
-      state: projected.state,
-      unreadCount: projected.unreadCount,
-      updatedAt: projected.updatedAt,
-      latestEvent: projected.latestEvent,
-      eventSequence: projected.eventSequence,
-      events: projected.events,
-      mutationError: projected.mutationError,
-      tryAgain: startWork,
-      refreshPermissions: startWork,
-      reportRequestError,
-      reportMutationError
-    }),
-    [projected, reportMutationError, reportRequestError, startWork]
+    () => {
+      const projected = !connectionVerified || missingConfiguredAuth
+        ? { ...initialSnapshot(scopeKey, lifecycleEpochRef.current), state: missingConfiguredAuth ? "auth-required" as const : unverifiedState }
+        : snapshot.scopeKey === scopeKey
+          ? snapshot
+          : initialSnapshot(scopeKey, lifecycleEpochRef.current)
+      return {
+        connectionVerified,
+        scopeKey: projected.scopeKey,
+        lifecycleEpoch: projected.lifecycleEpoch,
+        state: projected.state,
+        unreadCount: projected.unreadCount,
+        updatedAt: projected.updatedAt,
+        latestEvent: projected.latestEvent,
+        eventSequence: projected.eventSequence,
+        events: projected.events,
+        mutationError: projected.mutationError,
+        captureAuthority,
+        tryAgain: startWork,
+        refreshPermissions: startWork,
+        reportRequestError,
+        reportMutationError
+      }
+    },
+    [captureAuthority, connectionVerified, missingConfiguredAuth, scopeKey, snapshot, reportMutationError, reportRequestError, startWork, unverifiedState]
   )
 
   return (

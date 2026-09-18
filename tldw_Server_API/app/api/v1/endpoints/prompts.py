@@ -369,12 +369,9 @@ def _generate_unique_prompt_name(base_name: str, used_names: set, name_counts: d
     raise InputError(f"Could not generate unique name for '{base_name}' after {_MAX_DUPLICATE_NAME_ITERATIONS} attempts.")
 
 def _is_single_user_auth_mode() -> bool:
-    if settings.get("SINGLE_USER_MODE") is True:
-        return True
-    try:
-        return get_auth_settings().AUTH_MODE == "single_user"
-    except _PROMPTS_LOOKUP_EXCEPTIONS:
-        return bool(settings.get("SINGLE_USER_MODE"))
+    # Legacy APP_MODE defaults must not override canonical authentication or
+    # authorize a single-user identity when canonical settings fail to load.
+    return get_auth_settings().AUTH_MODE == "single_user"
 
 
 def _get_single_user_api_key() -> Optional[str]:

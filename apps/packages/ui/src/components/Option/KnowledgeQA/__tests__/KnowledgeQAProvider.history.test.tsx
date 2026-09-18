@@ -1,3 +1,4 @@
+import { TEST_HISTORY_STORAGE_KEY } from "./knowledgeQaAuthorityFixture"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -95,7 +96,7 @@ describe("KnowledgeQAProvider history hydration", () => {
   })
 
   it("hydrates persisted local history on mount without wiping storage first", async () => {
-    localStorage.setItem("knowledge_qa_history", JSON.stringify([baseHistoryItem]))
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
 
     render(
       <KnowledgeQAProvider>
@@ -116,7 +117,7 @@ describe("KnowledgeQAProvider history hydration", () => {
       )
     })
 
-    expect(localStorage.getItem("knowledge_qa_history")).not.toBeNull()
+    expect(localStorage.getItem(TEST_HISTORY_STORAGE_KEY)).not.toBeNull()
   })
 
   it("does not crash when clearing empty history and storage removal is blocked", async () => {
@@ -144,7 +145,7 @@ describe("KnowledgeQAProvider history hydration", () => {
 
   it("still hydrates server history when local history storage is malformed", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-    localStorage.setItem("knowledge_qa_history", "{not-valid-json")
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, "{not-valid-json")
     fetchWithAuthMock.mockImplementation(async (path: string) => {
       if (path.includes("/api/v1/chat/conversations?")) {
         return {
@@ -206,7 +207,7 @@ describe("KnowledgeQAProvider history hydration", () => {
   })
 
   it("restores query, answer, sources, and citations when selecting history", async () => {
-    localStorage.setItem("knowledge_qa_history", JSON.stringify([baseHistoryItem]))
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
     fetchWithAuthMock.mockImplementation(async (path: string) => {
       if (path.includes("/messages-with-context")) {
         return {
@@ -286,7 +287,7 @@ describe("KnowledgeQAProvider history hydration", () => {
   })
 
   it("hydrates partial payloads without failing and clears stale results", async () => {
-    localStorage.setItem("knowledge_qa_history", JSON.stringify([baseHistoryItem]))
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
     fetchWithAuthMock.mockImplementation(async (path: string) => {
       if (path.includes("/messages-with-context")) {
         return {
@@ -553,7 +554,7 @@ describe("KnowledgeQAProvider history hydration", () => {
     )
 
     await waitFor(() => expect(latestContext).not.toBeNull())
-    localStorage.setItem("knowledge_qa_history", JSON.stringify([baseHistoryItem]))
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
     await act(async () => {
       await latestContext!.loadSearchHistory()
     })
@@ -565,7 +566,7 @@ describe("KnowledgeQAProvider history hydration", () => {
 
     await waitFor(() => {
       expect(latestContext!.searchHistory[0]?.pinned).toBe(true)
-      const persisted = JSON.parse(localStorage.getItem("knowledge_qa_history") || "[]")
+      const persisted = JSON.parse(localStorage.getItem(TEST_HISTORY_STORAGE_KEY) || "[]")
       expect(persisted[0]?.pinned).toBe(true)
     })
   })
@@ -582,7 +583,7 @@ describe("KnowledgeQAProvider history hydration", () => {
         ) => void)
       | null = null
 
-    localStorage.setItem("knowledge_qa_history", JSON.stringify([baseHistoryItem]))
+    localStorage.setItem(TEST_HISTORY_STORAGE_KEY, JSON.stringify([baseHistoryItem]))
     fetchWithAuthMock.mockImplementation((path: string) => {
       if (path.includes("/api/v1/chat/conversations?")) {
         return new Promise((resolve) => {

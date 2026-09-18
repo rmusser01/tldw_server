@@ -390,18 +390,28 @@ def _activate_scope_context(
 
 
 async def get_login_db_connection() -> AsyncGenerator[Any, None]:
-    """Yield a statement-autocommit connection for the login lifecycle.
+    """Yield a statement-autocommit connection for login and token refresh.
 
-    Login's lockout and session services use separate database connections. A
+    Lockout and session services use separate database connections. A
     SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
     security checks against the same database, while a normal deferred
     connection could retain a rehash write lock. SQLite therefore uses a true
     autocommit connection; asyncpg statements are already autocommit outside an
     explicit transaction.
     """
-    db_pool = await get_db_pool()
-    async with db_pool.acquire_statement_autocommit() as conn:
-        yield conn
+    connection_entered = False
+    try:
+        db_pool = await get_db_pool()
+        async with db_pool.acquire_statement_autocommit() as conn:
+            connection_entered = True
+            yield conn
+    except (DatabaseLockError, ConnectionPoolExhaustedError) as exc:
+        # Only acquisition failure guarantees that the request has not written.
+        if connection_entered:
+            raise
+        raise _authnz_busy_http_exception(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ) from exc
 
 
 async def get_db_transaction() -> AsyncGenerator[Any, None]:

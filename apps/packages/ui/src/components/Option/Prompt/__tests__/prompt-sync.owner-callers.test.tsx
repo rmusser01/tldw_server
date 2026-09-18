@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, renderHook, waitFor } from "@testing-library/react"
-import { notification } from "antd"
+import { act, renderHook, screen, waitFor } from "@testing-library/react"
+import { App, ConfigProvider } from "antd"
 import React from "react"
 import { beforeEach, expect, it, vi } from "vitest"
 
@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   unlink: vi.fn(),
   info: vi.fn(),
   all: vi.fn()
+}))
+const staticFeedback = vi.hoisted(() => ({
+  success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(),
 }))
 vi.mock("@/services/recipe-persistence-uncertainty", () => ({
   resolveRecipePersistenceOwnerView: mocks.owner
@@ -36,12 +39,10 @@ vi.mock("@/db/dexie/helpers", () => ({
   restorePrompt: vi.fn(),
   exportPrompts: vi.fn()
 }))
-vi.mock("antd", () => ({
+vi.mock("antd", async importOriginal => ({
+  ...await importOriginal<typeof import("antd")>(),
   notification: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn()
+    ...staticFeedback,
   }
 }))
 const ownerA = "recipe-owner:sha256:" + "a".repeat(64)
@@ -89,6 +90,23 @@ function setup() {
   const deps = { queryClient, isOnline: true, t: (key: string) => key }
   return { queryClient, wrapper, deps }
 }
+it("uses application-context feedback when a locally saved prompt cannot sync", async () => {
+  const { queryClient, deps } = setup()
+  mocks.auto.mockResolvedValue({ success: false, localId: "recipe", error: "Sync unavailable" })
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <App><QueryClientProvider client={queryClient}>{children}</QueryClientProvider></App>
+    </ConfigProvider>
+  )
+  const { result } = renderHook(() => usePromptSync(deps), { wrapper })
+  await act(async () => {
+    expect(await result.current.syncPromptAfterLocalSave("recipe")).toMatchObject({
+      attempted: true, success: false, error: "Sync unavailable",
+    })
+  })
+  await waitFor(() => expect(screen.getByText("managePrompts.sync.syncFailedWithLocalSave")).toBeVisible())
+  expect(staticFeedback.warning).not.toHaveBeenCalled()
+})
 it("keeps the project selector open and reports rejection instead of push success", async () => {
   const { wrapper, deps } = setup()
   const { result } = renderHook(() => usePromptSync(deps), { wrapper })
@@ -106,13 +124,13 @@ it("keeps the project selector open and reports rejection instead of push succes
     result.current.pushToStudioMutation({ localId: "recipe", projectId: 42 })
   )
   await waitFor(() =>
-    expect(notification.error).toHaveBeenCalledWith(
+    expect(staticFeedback.error).toHaveBeenCalledWith(
       expect.objectContaining({ description: "Unresolved recipe operation" })
     )
   )
   expect(result.current.projectSelectorOpen).toBe(true)
   expect(result.current.promptToSync).toBe("recipe")
-  expect(notification.success).not.toHaveBeenCalled()
+  expect(staticFeedback.success).not.toHaveBeenCalled()
 })
 it("captures current owner for user save and manual push without exposing authorization revision", async () => {
   const { wrapper, deps } = setup()
@@ -226,13 +244,13 @@ it.each([
     })
 
     await waitFor(() =>
-      expect(notification.error).toHaveBeenCalledWith(
+      expect(staticFeedback.error).toHaveBeenCalledWith(
         expect.objectContaining({
           description: "Recipe has an unresolved operation"
         })
       )
     )
-    expect(notification.success).not.toHaveBeenCalled()
+    expect(staticFeedback.success).not.toHaveBeenCalled()
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ["fetchAllPrompts"]
     })
@@ -255,14 +273,14 @@ it("keeps failed keep-server recovery visible and refreshes its copied error row
   act(() => result.current.handleResolveConflict("keep_server"))
 
   await waitFor(() =>
-    expect(notification.error).toHaveBeenCalledWith(
+    expect(staticFeedback.error).toHaveBeenCalledWith(
       expect.objectContaining({
         description: "Recipe has an unresolved operation"
       })
     )
   )
   expect(result.current.conflictModalOpen).toBe(true)
-  expect(notification.success).not.toHaveBeenCalled()
+  expect(staticFeedback.success).not.toHaveBeenCalled()
   expect(invalidate).toHaveBeenCalledWith({
     queryKey: ["fetchAllPrompts"]
   })
@@ -283,13 +301,13 @@ it("reports a false Prompt Studio import as an error and refreshes on settlement
   act(() => result.current.importFromStudioMutation({ serverId: 101 }))
 
   await waitFor(() =>
-    expect(notification.error).toHaveBeenCalledWith(
+    expect(staticFeedback.error).toHaveBeenCalledWith(
       expect.objectContaining({
         description: "Recipe has an unresolved operation"
       })
     )
   )
-  expect(notification.success).not.toHaveBeenCalled()
+  expect(staticFeedback.success).not.toHaveBeenCalled()
   expect(invalidate).toHaveBeenCalledWith({
     queryKey: ["fetchAllPrompts"]
   })

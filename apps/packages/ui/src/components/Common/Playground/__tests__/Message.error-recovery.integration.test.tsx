@@ -17,8 +17,8 @@ const antdMessageApi = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string, options?: Record<string, unknown>) => {
-      const template = fallback || key
+    t: (key: string, fallback?: string | { defaultValue?: string }, options?: Record<string, unknown>) => {
+      const template = typeof fallback === "string" ? fallback : fallback?.defaultValue || key
       if (!options) return template
       return template.replace(/\{\{(\w+)\}\}/g, (_match, token) => {
         const value = options[token]
@@ -207,10 +207,6 @@ vi.mock("@/hooks/useDiscoSkills", () => ({
   })
 }))
 
-vi.mock("@/libs/reasoning", () => ({
-  parseReasoning: (content: string) => [{ type: "message", content }]
-}))
-
 vi.mock("@/utils/chat-error-message", () => ({
   decodeChatErrorPayload: decodeChatErrorPayloadMock
 }))
@@ -288,6 +284,69 @@ describe("PlaygroundMessage error recovery integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("announces successful completion after %s ends", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.getByText("Response complete")).toHaveAttribute("aria-live", "polite")
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("announces the error without successful completion after %s fails", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Image support is not confirmed for this model.",
+      hint: "Choose a model that supports images.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Image support is not confirmed")
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it("removes a pending completion announcement when the message becomes an error", () => {
+    const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
+    view.rerender(<PlaygroundMessage {...baseProps} />)
+    expect(screen.getByText("Response complete")).toBeInTheDocument()
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Transport failed",
+      hint: "Retry the request.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it.each(["isStreaming", "isProcessing"] as const)("does not resurrect completion when a failed response restarts %s", activeFlag => {
+    const view = render(<PlaygroundMessage {...baseProps} {...{ [activeFlag]: true }} />)
+    decodeChatErrorPayloadMock.mockReturnValue({
+      summary: "Request failed",
+      hint: "Retry the request.",
+      detail: ""
+    })
+    view.rerender(<PlaygroundMessage {...baseProps} message="failed response" />)
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+    view.rerender(<PlaygroundMessage {...baseProps} message="Retrying" {...{ [activeFlag]: true }} />)
+    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+  })
+
+  it.each(["<think>Only reasoning</think>", "<think>Only reasoning"])("offers recovery for a settled restored reasoning-only row: %s", async message => {
+    const retry = vi.fn()
+    render(<PlaygroundMessage {...baseProps} message={message} onRegenerate={retry} />)
+    expect(screen.getByText(/No final answer/)).toBeInTheDocument()
+    expect(screen.getByText("Only reasoning")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /Retry/ }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { message: "<think>Working", isStreaming: true },
+    { message: "<think>Working</think>Final answer" },
+    { message: "<think>Working</think>", role: "user" as const, isBot: false },
+    { message: "<think>Working</think>", toolCalls: [{ id: "tool", name: "lookup", args: {} }] }
+  ])("does not label active or usable output as missing final: %j", overrides => {
+    render(<PlaygroundMessage {...baseProps} {...overrides} />)
+    expect(screen.queryByText(/No final answer/)).not.toBeInTheDocument()
   })
 
   it("wires retry/switch/fallback/continue actions for explicit provider errors", async () => {

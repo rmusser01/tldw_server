@@ -2755,5 +2755,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "El chat y las herramientas ya están disponibles en Opciones y en la barra lateral."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "El guardado sin conexión no está disponible hasta que se confirmen tu cuenta y el almacenamiento local. Tus cambios siguen sin guardarse."
   }
 }

@@ -1,6 +1,6 @@
 import { addRequestHistory, clearRequestHistory } from '@web/lib/history';
 import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
-import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
+import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import { isExplicitRequestCancellation } from '@/services/request-events';
@@ -161,7 +161,7 @@ export function shouldIncludeBrowserCredentials(): boolean {
     return true;
   }
 
-  const hasJwtToken = !!localStorage.getItem('access_token');
+  const hasJwtToken = !!getSessionAccessToken();
   if (hasJwtToken) {
     return true;
   }
@@ -314,7 +314,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
   }
 
   // Bearer token (multi-user JWT auth)
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -558,7 +558,7 @@ function handleUnauthorized(
   const requestToken = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : null;
-  const currentToken = localStorage.getItem('access_token');
+  const currentToken = getSessionAccessToken();
   if (
     !requestToken ||
     !sessionTokenAtStart ||
@@ -600,7 +600,7 @@ async function request<T = unknown>(
   const requestUrl = joinUrl(baseURL, url, config.params);
   const metadata = { start: Date.now() };
   const sessionTokenAtStart =
-    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    typeof window !== 'undefined' ? getSessionAccessToken() : null;
 
   applyBrowserHeaders(headers, method);
 
@@ -758,7 +758,7 @@ export function buildAuthHeaders(method: string = 'GET', contentType?: string): 
     const sessionId = getOrCreateSessionId();
     if (sessionId) headers[SESSION_HEADER_NAME] = sessionId;
 
-    const token = localStorage.getItem('access_token');
+    const token = getSessionAccessToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const apiBearer = getApiBearer();
@@ -790,7 +790,7 @@ export function hasExplicitAuthHeaders(): boolean {
     return false;
   }
 
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token) {
     return true;
   }

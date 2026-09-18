@@ -147,6 +147,10 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry 
     compute_persona_exemplar_telemetry,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.knowledge_save import (
+    KnowledgeFlashcardError,
+    resolve_knowledge_flashcard,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -3118,6 +3122,13 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["content_placeholder_reason"] = placeholder_reason
 
+    # This application-only correlation is written with the user, even if the provider fails.
+    client_message_id = message_obj.get("client_message_id")
+    if role == "user" and isinstance(client_message_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["client_message_id"] = client_message_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}
@@ -3141,6 +3152,9 @@ async def _save_message_turn_to_db(
 
     if not text_parts and normalized_images:
         text_parts = [f"<Image attachment x{len(normalized_images)}>"]
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["content_placeholder_reason"] = "image_attachment"
 
     # Store sender role in DB; preserve display name in metadata.
     sender = role or "assistant"
@@ -5314,6 +5328,7 @@ async def create_chat_completion(
                             chat_db=chat_db,
                             save_message_fn=_save_message_turn_to_db,
                             system_message_id=system_message_id,
+                            user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
                             audit_context=context,
                             client_id=user_id,
@@ -5602,6 +5617,7 @@ async def create_chat_completion(
                             chat_db=chat_db,
                             save_message_fn=_save_message_turn_to_db,
                             system_message_id=system_message_id,
+                            user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
                             audit_context=context,
                             client_id=user_id,
@@ -6705,6 +6721,7 @@ async def save_chat_knowledge(
             scope,
         )
 
+        message = None
         if payload.message_id:
             message = _verify_message_ownership(
                 db,
@@ -6714,6 +6731,28 @@ async def save_chat_knowledge(
             )
             if message.get("conversation_id") != payload.conversation_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is not in conversation")
+
+        flashcard_front = payload.flashcard_front
+        flashcard_back = payload.flashcard_back
+        if payload.make_flashcard:
+            parent = None
+            if flashcard_front is None and flashcard_back is None and message and message.get("parent_message_id"):
+                parent = _verify_message_ownership(
+                    db,
+                    str(message["parent_message_id"]),
+                    current_user,
+                    scope,
+                )
+            try:
+                flashcard_front, flashcard_back = resolve_knowledge_flashcard(
+                    snippet=payload.snippet,
+                    front=flashcard_front,
+                    back=flashcard_back,
+                    message=message,
+                    parent=parent,
+                )
+            except KnowledgeFlashcardError as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
         export_status = "not_requested"
         export_job_id: str | None = None
@@ -6754,8 +6793,8 @@ async def save_chat_knowledge(
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
-                        "front": payload.snippet,
-                        "back": "",
+                        "front": flashcard_front,
+                        "back": flashcard_back,
                         "notes": f"From {safe_title}",
                         "source_ref_type": "note",
                         "source_ref_id": note_id,
@@ -6789,8 +6828,8 @@ async def save_chat_knowledge(
                 if payload.make_flashcard:
                     flashcard_id = db.add_flashcard(
                         {
-                            "front": payload.snippet,
-                            "back": "",
+                            "front": flashcard_front,
+                            "back": flashcard_back,
                             "notes": f"From {safe_title}",
                             "source_ref_type": "note",
                             "source_ref_id": note_id,

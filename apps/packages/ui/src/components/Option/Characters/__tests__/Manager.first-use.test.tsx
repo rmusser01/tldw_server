@@ -38,9 +38,11 @@ const {
   notificationMock,
   storeSetters,
   tldwClientMock,
+  editorLoad,
   templateData
 } = vi.hoisted(() => ({
   useQueryMock: vi.fn(),
+  editorLoad: { pending: null as Promise<void> | null, attempted: false },
   useMutationMock: vi.fn(),
   useQueryClientMock: vi.fn(),
   useNavigateMock: vi.fn(),
@@ -69,6 +71,8 @@ const {
     setHistory: vi.fn(),
     setMessages: vi.fn(),
     setHistoryId: vi.fn(),
+    setSelectedSystemPrompt: vi.fn(),
+    setSelectedQuickPrompt: vi.fn(),
     setServerChatId: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatTopic: vi.fn(),
@@ -286,6 +290,13 @@ vi.mock("../GenerateCharacterPanel", () => ({
   GenerationPreviewModal: () => null
 }))
 
+// Delay the actual lazy module; AntD and CharacterEditorForm remain real.
+vi.mock("../CharacterEditorForm", async () => {
+  editorLoad.attempted = true
+  if (editorLoad.pending) await editorLoad.pending
+  return vi.importActual<typeof import("../CharacterEditorForm")>("../CharacterEditorForm")
+})
+
 const makeUseQueryResult = (value: Record<string, unknown>) => ({
   data: undefined,
   status: "success",
@@ -335,6 +346,8 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    editorLoad.pending = null
+    editorLoad.attempted = false
     ensureLocalStorageApi().clear()
     window.history.replaceState({}, "", "/")
     useNavigateMock.mockReturnValue(navigateMock)
@@ -458,6 +471,37 @@ describe("CharactersManager first-use onboarding", () => {
     expect(call).toBeDefined()
     return call?.[0] as any
   }
+
+  it("waits for the real form before making a cold Create drawer interactive, then cancels and reopens cleanly", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    let releaseEditor!: () => void
+    editorLoad.pending = new Promise<void>((resolve) => { releaseEditor = resolve })
+    try {
+      const user = userEvent.setup()
+      render(<CharactersManager />)
+      await user.click(screen.getByRole("button", { name: "New character" }))
+      await waitFor(() => expect(editorLoad.attempted).toBe(true), { timeout: 15000 })
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+      expect(document.querySelector("form")).toBeNull()
+      expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument()
+      await act(async () => {
+        editorLoad.pending = null
+        releaseEditor()
+      })
+      await waitFor(() => expect(document.querySelector("form")).not.toBeNull())
+      const close = await screen.findByRole("button", { name: "Close" })
+      await user.click(close)
+      await waitFor(() => expect(close).not.toBeInTheDocument())
+      await user.click(screen.getByRole("button", { name: "New character" }))
+      await waitFor(() => expect(document.querySelector("form")).not.toBeNull())
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+      expect(consoleError.mock.calls.filter((args) => args.some((value) => String(value).includes("not connected to any Form")))).toEqual([])
+    } finally {
+      editorLoad.pending = null
+      releaseEditor()
+      consoleError.mockRestore()
+    }
+  }, 60000)
 
   it("ensures aria labels include the current character name when localization is stale", () => {
     expect(
@@ -802,6 +846,58 @@ describe("CharactersManager first-use onboarding", () => {
     })
     expect(window.localStorage.getItem(TEMPLATE_CHOOSER_SEEN_KEY)).toBe("true")
   })
+
+  it("opens Create without writing to the disconnected Edit form", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const user = userEvent.setup()
+    render(<CharactersManager />)
+
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    expect(await screen.findByText("Choose a template")).toBeInTheDocument()
+    expect(
+      consoleError.mock.calls.filter((args) =>
+        args.some((value) => String(value).includes("not connected to any Form"))
+      )
+    ).toEqual([])
+  }, 60000)
+
+  it("keeps real create, cancel, reopen and submit forms connected", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    const user = userEvent.setup()
+    useMutationMock.mockImplementation((options: {
+      mutationFn: (values: unknown) => Promise<unknown>
+      onSuccess?: (result: unknown) => void
+    }) => ({
+      mutate: async (values: unknown) => {
+        const result = await options.mutationFn(values)
+        options.onSuccess?.(result)
+      },
+      isPending: false
+    }))
+    render(<CharactersManager />)
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    const findCreateSubmit = () => waitFor(() => {
+      const button = screen.getAllByRole("button", { name: "Create character" }).find((candidate) => candidate.getAttribute("type") === "submit")
+      expect(button).toBeDefined()
+      return button!
+    })
+    const firstForm = (await findCreateSubmit()).closest("form")!
+    expect(firstForm).not.toBeNull()
+    await user.click(screen.getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(firstForm).not.toBeInTheDocument())
+    await user.click(screen.getByRole("button", { name: "New character" }))
+    const submit = await findCreateSubmit()
+    const form = submit.closest("form")!
+    fireEvent.change(form.querySelector('input[id$="name"]')!, { target: { value: "Lifecycle character" } })
+    fireEvent.change(form.querySelector('textarea[id$="system_prompt"]')!, { target: { value: "Help the reader study." } })
+    await user.click(submit)
+    await waitFor(() => expect(tldwClientMock.createCharacter).toHaveBeenCalledWith(expect.objectContaining({ name: "Lifecycle character" })))
+    await waitFor(() => expect(form).not.toBeInTheDocument())
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(consoleError.mock.calls.filter((args) => args.some((value) => String(value).includes("not connected to any Form")))).toEqual([])
+    consoleError.mockRestore()
+  }, 60000)
+
 
   it("expands template chooser on first create-modal open and keeps it collapsed once seen", async () => {
     const user = userEvent.setup()
@@ -3343,9 +3439,13 @@ describe("CharactersManager first-use onboarding", () => {
         id: "char-1",
         name: "Writer Coach",
         system_prompt: expect.any(String),
-        greeting: expect.any(String)
+        greeting: expect.any(String),
+        metadata: { selectionMode: "tracked" }
       })
     )
+    expect(storeSetters.setHistory).toHaveBeenCalledWith([])
+    expect(storeSetters.setMessages).toHaveBeenCalledWith([])
+    expect(storeSetters.setServerChatId).toHaveBeenCalledWith(null)
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?mode=character&characterId=char-1"
     )
@@ -3412,7 +3512,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     await waitFor(() => {
       const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1) as unknown as
-        | [string, Record<string, unknown>]
+        | [string, Record<string, unknown>, number?]
         | undefined
       expect(latestCall?.[0]).toBe("char-edit-flow")
       expect(latestCall?.[1]).toEqual(
@@ -3420,6 +3520,8 @@ describe("CharactersManager first-use onboarding", () => {
           description: "Updated description from edit flow test."
         })
       )
+      expect(latestCall?.[2]).toBe(3)
+      expect(tldwClientMock.getCharacter).not.toHaveBeenCalled()
     })
   }, 30000)
 

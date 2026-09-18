@@ -34,12 +34,15 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 import aiofiles
+import httpx
 import trafilatura
 from bs4 import BeautifulSoup
 from loguru import logger
 from playwright.async_api import Browser, async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.http_client import afetch
 
 #
@@ -92,8 +95,26 @@ from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers, profile_to_impersonate
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
 
+
+class ArticleRetrievalError(ValueError):
+    """A terminal HTTP response that must not be retried using another transport."""
+
+
+_WEBSCRAPE_TIMEOUT_EXCEPTIONS = (TimeoutError, httpx.TimeoutException, PlaywrightTimeoutError)
+
+
+def _failed_scrape_result(url: str, error: Exception) -> dict[str, Any]:
+    """Preserve typed timeout metadata even when the transport message is empty."""
+    result = {"url": url, "error": str(error), "extraction_successful": False}
+    if isinstance(error, _WEBSCRAPE_TIMEOUT_EXCEPTIONS) or (
+        isinstance(error, NetworkError) and error.classification == "timeout"
+    ):
+        result["error_code"] = "extraction_timeout"
+    return result
+
+
 _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.TimeoutError,
+    *_WEBSCRAPE_TIMEOUT_EXCEPTIONS,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -102,10 +123,10 @@ _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
     IndexError,
     KeyError,
     LookupError,
+    NetworkError,
     OSError,
     PermissionError,
     RuntimeError,
-    TimeoutError,
     TypeError,
     ValueError,
     UnicodeDecodeError,
@@ -744,9 +765,9 @@ class ScrapingJobQueue:
                         job.status = JobStatus.CANCELLED
                         job.error = job.error or "Job cancelled"
                         job.result = None
-                    elif result.get("error"):
+                    elif result.get("error") or result.get("extraction_successful") is False:
                         job.status = JobStatus.FAILED
-                        job.error = result["error"]
+                        job.error = result.get("error") or "Source extraction failed"
 
                         # Retry if possible
                         if job.retries < job.max_retries:
@@ -757,6 +778,9 @@ class ScrapingJobQueue:
                             await self._queues[job.priority].put(job)
                             logger.info(f"Retrying job {job.job_id} ({job.retries}/{job.max_retries})")
                             continue
+                        # Keep the terminal extraction details for batch consumers
+                        # while preserving the queue's failed-future contract.
+                        job.result = result
                     else:
                         job.status = JobStatus.COMPLETED
                         job.result = result
@@ -1170,6 +1194,8 @@ class EnhancedWebScraper:
                 )
                 elapsed = max(0.0, time.time() - t0)
                 return html, "curl", elapsed
+            except ArticleRetrievalError:
+                raise
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"curl backend failed; falling back to httpx: {exc}")
         t0 = time.time()
@@ -1182,6 +1208,9 @@ class EnhancedWebScraper:
                 cookies=cookies,
                 proxies=proxies,
             )
+            response_status = int(getattr(resp, "status_code", getattr(resp, "status", 0)))
+            if not 200 <= response_status < 300:
+                raise ArticleRetrievalError(f"Article retrieval failed: HTTP {response_status} (expected terminal 2xx response)")
         finally:
             await self._close_response(resp)
         backend_used = "httpx"
@@ -1218,7 +1247,7 @@ class EnhancedWebScraper:
         status = int(resp.get("status", 0))
         if 200 <= status < 300:
             return resp["text"]
-        raise ValueError(f"curl fetch did not reach a terminal 2xx response (status={status})")
+        raise ArticleRetrievalError(f"curl fetch did not reach a terminal 2xx response (status={status})")
 
     @staticmethod
     async def _close_response(resp: Any) -> None:
@@ -1457,11 +1486,7 @@ class EnhancedWebScraper:
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to scrape {url}: {e}")
             return _attach_preflight(
-                {
-                    "url": url,
-                    "error": str(e),
-                    "extraction_successful": False,
-                }
+                _failed_scrape_result(url, e)
             )
 
     async def _scrape_with_trafilatura(
@@ -1508,7 +1533,7 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
         data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
@@ -1645,7 +1670,15 @@ class EnhancedWebScraper:
 
         try:
             # Navigate with timeout
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            response = await page.goto(url, wait_until="networkidle", timeout=30000)
+            if response is None:
+                raise ArticleRetrievalError(
+                    "Article retrieval failed: no navigation response (expected terminal 2xx response)"
+                )
+            if not 200 <= response.status < 300:
+                raise ArticleRetrievalError(
+                    f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)"
+                )
 
             # Wait for content to load
             await page.wait_for_load_state("domcontentloaded")
@@ -1737,7 +1770,7 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
         finally:
             await page.close()
@@ -1787,7 +1820,7 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
         data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
@@ -1921,6 +1954,7 @@ class EnhancedWebScraper:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 final_results.append({
+                    **(jobs[i].result or {}),
                     "url": urls[i],
                     "error": str(result),
                     "extraction_successful": False

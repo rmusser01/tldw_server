@@ -106,8 +106,8 @@ async def test_create_source_works_through_guarded_authnz_transaction(
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_ensure_sqlite_column_rejects_unsafe_identifiers(tmp_path):
-    from tldw_Server_API.app.core.Ingestion_Sources.service import _ensure_sqlite_column
     from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
+    from tldw_Server_API.app.core.Ingestion_Sources.service import _ensure_sqlite_column
 
     db_path = tmp_path / "ingestion_sources.sqlite3"
     async with aiosqlite.connect(str(db_path)) as db:
@@ -298,3 +298,115 @@ async def test_update_source_delegates_row_update_to_db_management(tmp_path, mon
         assert updated["schedule_enabled"] is True
         assert updated["schedule_config"] == {"interval_minutes": 15}
         assert updated["config"] == {"mode": "local_repo", "path": "/allowed/project/repo"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_sqlite_source_schema_and_generated_id_lifecycle_are_idempotent(tmp_path) -> None:
+    """SQLite retains schema, owner, JSON, flag, and generated-id service semantics."""
+    from tldw_Server_API.app.core.Ingestion_Sources.service import (
+        create_source,
+        create_source_artifact,
+        create_source_snapshot,
+        ensure_ingestion_sources_schema,
+        get_source_by_id,
+        list_source_items,
+        list_sources_by_user,
+        record_ingestion_item_event,
+        upsert_source_item,
+    )
+
+    db_path = tmp_path / "ingestion_sources.sqlite3"
+    async with aiosqlite.connect(str(db_path)) as db:
+        db.row_factory = aiosqlite.Row
+        await ensure_ingestion_sources_schema(db)
+        await ensure_ingestion_sources_schema(db)
+
+        tables = await db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ingestion_%'"
+        )
+        assert {
+            "ingestion_sources",
+            "ingestion_source_state",
+            "ingestion_source_snapshots",
+            "ingestion_source_items",
+            "ingestion_item_events",
+            "ingestion_source_artifacts",
+        }.issubset({row["name"] for row in await tables.fetchall()})
+
+        source_a = await create_source(
+            db,
+            user_id=101,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "policy": "canonical",
+                "config": {"path": "/allowed/a"},
+            },
+        )
+        source_b = await create_source(
+            db,
+            user_id=202,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "policy": "canonical",
+                "config": {"path": "/allowed/b"},
+            },
+        )
+        source_a_id = int(source_a["id"])
+        assert source_a_id > 0
+        assert int(source_b["id"]) > 0
+        assert await get_source_by_id(db, source_id=source_a_id, user_id=202) == {}
+        assert [row["id"] for row in await list_sources_by_user(db, user_id=101)] == [source_a_id]
+
+        snapshot = await create_source_snapshot(
+            db,
+            source_id=source_a_id,
+            snapshot_kind="initial",
+            status="success",
+            summary={"count": 1},
+        )
+        artifact = await create_source_artifact(
+            db,
+            source_id=source_a_id,
+            snapshot_id=int(snapshot["id"]),
+            artifact_kind="manifest",
+            status="ready",
+            storage_path="storage/manifest.json",
+            metadata={"format": "json"},
+        )
+        first_item = await upsert_source_item(
+            db,
+            source_id=source_a_id,
+            normalized_relative_path="notes/a.md",
+            content_hash="first",
+            sync_status="pending",
+            binding={"media_id": 1},
+            present_in_source=True,
+        )
+        updated_item = await upsert_source_item(
+            db,
+            source_id=source_a_id,
+            normalized_relative_path="notes/a.md",
+            content_hash="second",
+            sync_status="complete",
+            binding={"media_id": 2},
+            present_in_source=False,
+        )
+        event = await record_ingestion_item_event(
+            db,
+            source_id=source_a_id,
+            item_path="notes/a.md",
+            event_type="updated",
+            payload={"revision": 2},
+        )
+
+        assert int(snapshot["id"]) > 0
+        assert int(artifact["id"]) > 0
+        assert int(first_item["id"]) == int(updated_item["id"])
+        assert int(event["id"]) > 0
+        items = await list_source_items(db, source_id=source_a_id)
+        assert len(items) == 1
+        assert items[0]["binding"] == {"media_id": 2}
+        assert items[0]["present_in_source"] is False

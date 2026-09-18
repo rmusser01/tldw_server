@@ -98,6 +98,8 @@ def convert_sqlite_placeholders_to_postgres(query: str) -> str:
         }:
             return False
         if prev_token in {
+            "LIKE",
+            "ILIKE",
             "LIMIT",
             "OFFSET",
             "WHERE",

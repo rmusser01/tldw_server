@@ -28,6 +28,15 @@ vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    definitions: {}, scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" }, userId: null },
+    release: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
   continueChatMode: vi.fn()
 }))

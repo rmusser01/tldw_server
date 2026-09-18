@@ -58,6 +58,151 @@ def _retrieval_plan() -> RetrievalPlan:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("retained,excluded", [(0, 1), (1, 1), (0, 0)])
+async def test_stream_preserves_safe_security_filter_outcome(retained, excluded, with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    allowed = Document(id="public", content="Public release notice", source=DataSource.MEDIA_DB, metadata={})
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(
+            documents=[allowed] if retained else [],
+            query=kwargs["query"],
+            metadata={"security_filter": {
+                "excluded_count": excluded, "retained_count": retained,
+                "excluded_ids": ["secret-id"], "excluded_text": "secret-text",
+            }},
+        )
+
+    calls = []
+
+    async def generate(context, **kwargs):
+        calls.append(kwargs)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(),
+        standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": generate},
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["security_filter"] == {"excluded_count": excluded, "retained_count": retained}
+    assert "secret-id" not in str(events)
+    assert "secret-text" not in str(events)
+    assert bool(calls) is not (excluded > 0 and retained == 0)
+    assert events[-1]["output_emitted"] is bool(calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+async def test_stream_preserves_clarification_without_dispatching_provider(with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+
+    async def clarify(**kwargs):
+        return UnifiedSearchResult(
+            documents=[],
+            query=kwargs["query"],
+            generated_answer="Which document do you mean?",
+            metadata={"clarification": {"required": True, "stage": "pre_retrieval"}},
+        )
+
+    async def forbidden_generation(*args, **kwargs):
+        raise AssertionError("Clarification must not dispatch a provider")
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=request,
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=clarify,
+            extra_context={"generate_streaming_response": forbidden_generation},
+        )
+    ]
+    assert [event["type"] for event in events] == ["clarification", "delta", "complete"]
+    assert events[1]["text"] == "Which document do you mean?"
+    # The public stream contract conservatively marks any emitted text as
+    # dispatched, preventing retries after a visible clarification response.
+    assert events[-1]["allow_non_stream_fallback"] is False
+
+
+def test_stream_context_preserves_inspectable_evidence_without_internal_metadata():
+    document = Document(
+        id="chunk-1",
+        content="Project Juniper launches on 18 October 2026. " * 200,
+        source=DataSource.MEDIA_DB,
+        metadata={
+            "source_id": "1",
+            "chunk_id": "chunk-1",
+            "source_type": "media_db",
+            "evidence_origin": "retrieved",
+            "internal_secret": "must-not-leak",
+        },
+    )
+    event = streaming_executor._context_events(docs=[document], payload={}, request_defaults={})[0]
+    context = event["contexts"][0]
+    assert context["source_id"] == "1"
+    assert context["source"] == "media_db"
+    assert context["chunk_id"] == "chunk-1"
+    assert context["excerpt"] == document.content[:4000]
+    assert "must-not-leak" not in str(event)
+
+
+def test_stream_context_keeps_late_chunk_parent_identity():
+    document = Document(
+        id="late_chunk:2:0", content="Public release notice", source=DataSource.MEDIA_DB,
+        metadata={"media_id": 2, "chunk_id": "late_chunk:2:0"},
+    )
+    context = streaming_executor._context_events(docs=[document], payload={}, request_defaults={})[0]["contexts"][0]
+    assert context["source_id"] == "2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enable_citations", [True, False])
+async def test_stream_provider_prompt_matches_numbered_source_contract(monkeypatch, enable_citations):
+    from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
+
+    request = _resolved_request()
+    request.payload.update({
+        "enable_citations": enable_citations, "generation_prompt": "operator", "top_k": 1,
+        "claims_top_k": 3, "claims_max": 10, "claims_concurrency": 8,
+    })
+    monkeypatch.setattr(
+        generation_mod.PromptTemplates, "get_template",
+        lambda _name: "Operator instruction: answer briefly.\n{context}\nQuestion: {question}",
+    )
+    prompts = []
+
+    async def capture_prompt(self, prompt, **kwargs):
+        prompts.append(prompt)
+        return "The release is in November."
+
+    monkeypatch.setattr(generation_mod.LLMGenerator, "_call_llm", capture_prompt)
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(documents=[
+            Document(id="allowed", content="Cedar launches in November.", metadata={"title": "Cedar", "source": "media_db"}, source=DataSource.MEDIA_DB),
+            Document(id="over-limit", content="Additional source outside visible limit.", metadata={}, source=DataSource.MEDIA_DB),
+        ], query=kwargs["query"])
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    assert len(events[0]["contexts"]) == 1
+    assert "Operator instruction: answer briefly." in prompts[0]
+    if enable_citations:
+        assert "Additional source outside visible limit" not in prompts[0]
+        assert "[1] Cedar (media_db)" in prompts[0]
+        assert "inline numbered citations" in prompts[0]
+        assert "Only cite the provided source numbers" in prompts[0]
+    else:
+        assert "Additional source outside visible limit" in prompts[0]
+        assert "[Source 1: Cedar (media_db)]" in prompts[0]
+        assert "inline numbered citations" not in prompts[0]
+
+
 class _StreamingRuntime:
     def __init__(self) -> None:
         self.handle: Any = None

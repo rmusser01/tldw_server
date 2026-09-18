@@ -62,19 +62,22 @@ export default function NotificationsPage() {
   const router = useRouter();
   const {
     scopeKey,
+    connectionVerified,
     lifecycleEpoch,
     state: lifecycleState,
     unreadCount: lifecycleUnreadCount,
-    updatedAt: lifecycleUpdatedAt,
     events,
+    captureAuthority,
     reportRequestError,
     reportMutationError,
     tryAgain,
   } = useNotificationLifecycle();
   const isTerminal = lifecycleState === 'auth-required' || lifecycleState === 'unavailable';
+  const canRequest = connectionVerified && !isTerminal;
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [snoozedItems, setSnoozedItems] = useState<NotificationItem[]>([]);
   const [loadedScopeKey, setLoadedScopeKey] = useState(scopeKey);
+  const [inboxLoadedAt, setInboxLoadedAt] = useState<number | null>(null);
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [unreadCount, setUnreadCount] = useState(lifecycleUnreadCount);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,7 +121,7 @@ export default function NotificationsPage() {
 
   const refreshInbox = useCallback(async () => {
     clearInboxRetry();
-    if (isTerminal) return;
+    if (!canRequest) return;
     inboxAbortRef.current?.abort();
     const requestAbort = new AbortController();
     inboxAbortRef.current = requestAbort;
@@ -143,6 +146,7 @@ export default function NotificationsPage() {
       setItems(list.items);
       setSnoozedItems(snoozed.items);
       setLoadedScopeKey(scopeKey);
+      setInboxLoadedAt(Date.now());
       setError(null);
       inboxRetryAttemptRef.current = 0;
     } catch (refreshError) {
@@ -165,10 +169,11 @@ export default function NotificationsPage() {
     } finally {
       if (requestGeneration === pageGenerationRef.current) setIsLoading(false);
     }
-  }, [clearInboxRetry, isTerminal, reportRequestError, scopeKey]);
+  }, [canRequest, clearInboxRetry, reportRequestError, scopeKey]);
 
   const handleSnooze = useCallback(
     async (notificationId: number, minutes: number = DEFAULT_SNOOZE_MINUTES) => {
+      if (!canRequest) return;
       setFailedMutation(null);
       const requestGeneration = pageGenerationRef.current;
       try {
@@ -211,10 +216,11 @@ export default function NotificationsPage() {
         });
       }
     },
-    [items, recordFailedMutation, reportMutationError, show]
+    [canRequest, items, recordFailedMutation, reportMutationError, show]
   );
 
   const handleCancelSnooze = useCallback(async (notificationId: number) => {
+    if (!canRequest) return;
     setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
@@ -237,10 +243,10 @@ export default function NotificationsPage() {
       );
       show({ title: 'Cancel snooze failed', description: message, variant: 'danger' });
     }
-  }, [recordFailedMutation, reportMutationError, show]);
+  }, [canRequest, recordFailedMutation, reportMutationError, show]);
 
   const loadPrefs = useCallback(async () => {
-    if (prefsLoading || isTerminal) return;
+    if (prefsLoading || !canRequest) return;
     setPrefsLoading(true);
     setPrefsError(null);
     const requestGeneration = pageGenerationRef.current;
@@ -256,11 +262,11 @@ export default function NotificationsPage() {
     } finally {
       if (requestGeneration === pageGenerationRef.current) setPrefsLoading(false);
     }
-  }, [isTerminal, prefsLoading, reportRequestError]);
+  }, [canRequest, prefsLoading, reportRequestError]);
 
   const togglePref = useCallback(
     async (key: PreferenceKey) => {
-      if (!prefs || prefsSavingKey) return;
+      if (!canRequest || !prefs || prefsSavingKey) return;
       setFailedMutation(null);
       const nextValue = !prefs[key];
       const updated =
@@ -288,7 +294,7 @@ export default function NotificationsPage() {
         if (requestGeneration === pageGenerationRef.current) setPrefsSavingKey(null);
       }
     },
-    [prefs, prefsSavingKey, recordFailedMutation, reportMutationError, show]
+    [canRequest, prefs, prefsSavingKey, recordFailedMutation, reportMutationError, show]
   );
 
   const applyIncomingNotification = useCallback(
@@ -315,6 +321,7 @@ export default function NotificationsPage() {
     setItems([]);
     setSnoozedItems([]);
     setLoadedScopeKey(scopeKey);
+    setInboxLoadedAt(null);
     setPrefs(null);
     setPrefsError(null);
     setPrefsLoading(false);
@@ -335,15 +342,21 @@ export default function NotificationsPage() {
   }, [refreshInbox]);
 
   useEffect(() => {
-    if (isTerminal) {
+    if (!canRequest) {
+      pageGenerationRef.current += 1;
       clearInboxRetry();
+      inboxAbortRef.current?.abort();
       setIsLoading(false);
+      setPrefsLoading(false);
+      setPrefsSavingKey(null);
+      setRetryingMutation(null);
     }
     return () => {
+      pageGenerationRef.current += 1;
       clearInboxRetry();
       inboxAbortRef.current?.abort();
     };
-  }, [clearInboxRetry, isTerminal]);
+  }, [canRequest, clearInboxRetry]);
 
   useEffect(() => {
     setUnreadCount(lifecycleUnreadCount);
@@ -371,6 +384,7 @@ export default function NotificationsPage() {
   }, [applyIncomingNotification, events, refreshInbox]);
 
   const handleMarkRead = useCallback(async (notificationId: number) => {
+    if (!canRequest) return;
     setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
@@ -395,9 +409,10 @@ export default function NotificationsPage() {
       );
       show({ title: 'Mark read failed', description: message, variant: 'danger' });
     }
-  }, [recordFailedMutation, reportMutationError, show]);
+  }, [canRequest, recordFailedMutation, reportMutationError, show]);
 
   const handleDismiss = useCallback(async (notificationId: number) => {
+    if (!canRequest) return;
     setFailedMutation(null);
     const requestGeneration = pageGenerationRef.current;
     try {
@@ -421,13 +436,14 @@ export default function NotificationsPage() {
       );
       show({ title: 'Dismiss failed', description: message, variant: 'danger' });
     }
-  }, [recordFailedMutation, reportMutationError, show]);
+  }, [canRequest, recordFailedMutation, reportMutationError, show]);
 
   const retryFailedMutation = useCallback(async () => {
     const retryToken = failedMutation
       ? `${failedMutation.scopeKey}\u0000${failedMutation.generation}`
       : null;
     if (
+      !canRequest ||
       !failedMutation ||
       failedMutation.scopeKey !== scopeKey ||
       failedMutation.generation !== pageGenerationRef.current ||
@@ -466,6 +482,7 @@ export default function NotificationsPage() {
       );
     }
   }, [
+    canRequest,
     failedMutation,
     handleCancelSnooze,
     handleDismiss,
@@ -534,9 +551,9 @@ export default function NotificationsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-foreground">Notifications</h1>
             <p className="mt-1 text-sm text-muted-foreground">{unreadLabel}</p>
-            {lifecycleState === 'degraded' ? (
+            {connectionVerified && lifecycleState === 'degraded' && loadedScopeKey === scopeKey && inboxLoadedAt !== null ? (
               <p className="mt-1 text-xs text-muted-foreground">
-                Last updated before the connection was lost ({formatRelativeTime(new Date(lifecycleUpdatedAt).toISOString())}).
+                Last updated before the connection was lost ({formatRelativeTime(new Date(inboxLoadedAt).toISOString())}).
               </p>
             ) : null}
           </div>
@@ -544,7 +561,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               className="rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
-              disabled={isTerminal}
+              disabled={!canRequest}
               onClick={() => void refreshInbox()}
             >
               Refresh
@@ -552,7 +569,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               className="rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
-              disabled={isTerminal}
+              disabled={!canRequest}
               onClick={() => {
                 const nextShowPrefs = !showPrefs;
                 setShowPrefs(nextShowPrefs);
@@ -607,7 +624,7 @@ export default function NotificationsPage() {
                 <button
                   type="button"
                   className="rounded border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
-                  disabled={isTerminal}
+                  disabled={!canRequest}
                   onClick={() => void loadPrefs()}
                 >
                   Retry
@@ -628,7 +645,7 @@ export default function NotificationsPage() {
                     <input
                       type="checkbox"
                       checked={prefs[key]}
-                      disabled={isTerminal || isRetryingMutation || prefsSavingKey !== null}
+                      disabled={!canRequest || isRetryingMutation || prefsSavingKey !== null}
                       onChange={() => void togglePref(key)}
                       className="mt-1 h-4 w-4 rounded border-border disabled:cursor-not-allowed disabled:opacity-50"
                     />
@@ -661,7 +678,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               className="shrink-0 self-start rounded border border-border bg-background px-3 py-2 font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
-              disabled={isRetryingMutation || isTerminal}
+              disabled={isRetryingMutation || !canRequest}
               onClick={() => void retryFailedMutation()}
             >
               {isRetryingMutation ? 'Retrying...' : 'Retry action'}
@@ -691,11 +708,15 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20"
-                      disabled={isTerminal || isRetryingMutation}
+                      disabled={!canRequest || isRetryingMutation}
                       onClick={async () => {
+                        if (!canRequest) return;
+                        const actionGeneration = pageGenerationRef.current;
+                        const isCurrentAuthority = captureAuthority();
                         if (!item.read_at) {
                           try { await handleMarkRead(item.id) } catch {}
                         }
+                        if (actionGeneration !== pageGenerationRef.current || !isCurrentAuthority()) return;
                         if (item.link_url) {
                           try {
                             const url = new URL(item.link_url, window.location.origin)
@@ -716,7 +737,7 @@ export default function NotificationsPage() {
                     <button
                       type="button"
                       className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                      disabled={isTerminal || isRetryingMutation}
+                      disabled={!canRequest || isRetryingMutation}
                       onClick={() => void handleMarkRead(item.id)}
                     >
                       Mark read
@@ -725,7 +746,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                    disabled={isTerminal || isRetryingMutation}
+                    disabled={!canRequest || isRetryingMutation}
                     onClick={() => void handleSnooze(item.id, DEFAULT_SNOOZE_MINUTES)}
                   >
                     Snooze {DEFAULT_SNOOZE_MINUTES}m
@@ -733,7 +754,7 @@ export default function NotificationsPage() {
                   <button
                     type="button"
                     className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                    disabled={isTerminal || isRetryingMutation}
+                    disabled={!canRequest || isRetryingMutation}
                     onClick={() => void handleDismiss(item.id)}
                   >
                     Dismiss
@@ -771,7 +792,7 @@ export default function NotificationsPage() {
                       <button
                         type="button"
                         className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
-                        disabled={isTerminal || isRetryingMutation}
+                        disabled={!canRequest || isRetryingMutation}
                         onClick={() => void handleCancelSnooze(item.id)}
                       >
                         Cancel snooze

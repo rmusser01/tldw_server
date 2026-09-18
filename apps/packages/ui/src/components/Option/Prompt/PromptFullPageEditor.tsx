@@ -42,7 +42,7 @@ type PromptFullPageEditorProps = {
   onClose: () => void
   mode: "create" | "edit"
   initialValues?: Record<string, any> | null
-  onSubmit: (values: any) => void
+  onSubmit: (values: any) => boolean | void | Promise<boolean | void>
   isLoading: boolean
   allTags: string[]
   savedRecipes?: readonly SavedRecipeSource[]
@@ -111,6 +111,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm()
   const [dirty, setDirty] = useState(false)
+  const saveInFlightRef = React.useRef(false)
   const [showMobilePreview, setShowMobilePreview] = useState(false)
   const [promptFormat, setPromptFormat] = useState<PromptFormat>("legacy")
   const [structuredPromptDefinition, setStructuredPromptDefinition] =
@@ -245,7 +246,6 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     const currentSnapshot = normalizePromptDraftSnapshot(form.getFieldsValue(true))
     const hasDirtyValues =
       dirty ||
-      form.isFieldsTouched(true) ||
       stableSerializePromptSnapshot(currentSnapshot) !==
         stableSerializePromptSnapshot(initialSnapshot)
 
@@ -267,7 +267,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault()
-        form.submit()
+        if (!isLoading && !saveInFlightRef.current) form.submit()
       }
       if (e.key === "Escape") {
         e.preventDefault()
@@ -276,9 +276,11 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [open, form, handleRequestClose])
+  }, [open, form, handleRequestClose, isLoading])
 
-  const handleFinish = (values: any) => {
+  const handleFinish = async (values: any) => {
+    if (isLoading || saveInFlightRef.current) return
+    saveInFlightRef.current = true
     const keywords = Array.isArray(values.keywords)
       ? values.keywords
           .map((k: string) => (typeof k === "string" ? k.trim() : ""))
@@ -290,25 +292,33 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
         ? renderStructuredPromptLegacySnapshot(structuredPromptDefinition)
         : null
 
-    onSubmit({
-      ...values,
-      promptFormat,
-      promptSchemaVersion: promptFormat === "structured" ? 1 : null,
-      structuredPromptDefinition:
-        promptFormat === "structured" ? structuredPromptDefinition : null,
-      keywords,
-      name: (values.name || "").trim(),
-      author: (values.author || "").trim(),
-      details: (values.details || "").trim(),
-      system_prompt: (
-        structuredSnapshot?.systemPrompt ?? values.system_prompt ?? ""
-      ).trim(),
-      user_prompt: (
-        structuredSnapshot?.userPrompt ?? values.user_prompt ?? ""
-      ).trim(),
-    })
-    clearDraft()
-    setDirty(false)
+    try {
+      const accepted = await onSubmit({
+        ...values,
+        promptFormat,
+        promptSchemaVersion: promptFormat === "structured" ? 1 : null,
+        structuredPromptDefinition:
+          promptFormat === "structured" ? structuredPromptDefinition : null,
+        keywords,
+        name: (values.name || "").trim(),
+        author: (values.author || "").trim(),
+        details: (values.details || "").trim(),
+        system_prompt: (
+          structuredSnapshot?.systemPrompt ?? values.system_prompt ?? ""
+        ).trim(),
+        user_prompt: (
+          structuredSnapshot?.userPrompt ?? values.user_prompt ?? ""
+        ).trim(),
+      })
+      if (accepted === false) return
+      clearDraft()
+      setDirty(false)
+    } catch {
+      // The mutation reports the error; retain the draft and navigation guard.
+      setDirty(true)
+    } finally {
+      saveInFlightRef.current = false
+    }
   }
 
   const handleConvertToStructured = useCallback(() => {
@@ -400,7 +410,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   if (recipeClassification.kind === "quarantined_recipe") {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-background"
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
         data-testid="prompt-full-page-editor"
       >
         <div className="flex items-center border-b border-border px-4 py-2">
@@ -433,7 +443,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   if (recipeClassification.kind === "recipe" && initialRecipeSource) {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-background"
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
         data-testid="prompt-full-page-editor"
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -478,7 +488,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-background"
+      className="fixed inset-0 z-50 flex flex-col bg-bg"
       data-testid="prompt-full-page-editor"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -522,9 +532,10 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <div className="flex-[55] overflow-y-auto border-r border-border p-6">
+        <fieldset disabled={isLoading} className="min-w-0 flex-[55] overflow-y-auto border-r border-border p-6">
           <Form
             form={form}
+            disabled={isLoading}
             layout="vertical"
             onFinish={handleFinish}
             onValuesChange={() => setDirty(true)}
@@ -672,7 +683,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
               ]}
             />
           </Form>
-        </div>
+        </fieldset>
 
         <div className="hidden flex-[45] md:flex flex-col bg-surface">
           <PromptEditorPreview
@@ -691,7 +702,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
           {showMobilePreview ? "Editor" : "Preview"}
         </button>
         {showMobilePreview && (
-          <div className="fixed inset-0 z-40 bg-background pt-12">
+          <div className="fixed inset-0 z-40 bg-bg pt-12">
             <PromptEditorPreview
               systemPrompt={previewSystemPrompt}
               userPrompt={previewUserPrompt}

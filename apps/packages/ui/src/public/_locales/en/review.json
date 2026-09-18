@@ -1329,7 +1329,7 @@
     "message": "Delete item"
   },
   "mediaPage_deleteItemConfirm": {
-    "message": "Delete this item? This cannot be undone."
+    "message": "Move this item to Trash? You can restore it from Trash."
   },
   "mediaPage_deletingItem": {
     "message": "Deleting..."

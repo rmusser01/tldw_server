@@ -262,6 +262,50 @@ def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     assert body["study_pack"] is None  # nosec B101
 
 
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+@pytest.mark.parametrize("lookup", ["detail", "list"])
+def test_quarantined_study_pack_job_is_a_public_terminal_failure(
+    client: TestClient,
+    jobs_db_path: Path,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    lookup: str,
+):
+    """A real quarantined job must stop polling without exposing diagnostics."""
+    monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "1")
+    if backend == "postgresql":
+        pg = request.getfixturevalue("pg_temp_db")
+        jm = JobManager(backend="postgres", db_url=pg["dsn"])
+    else:
+        jm = JobManager(db_path=jobs_db_path, backend="sqlite")
+    client.app.dependency_overrides[flashcards_endpoints.get_job_manager] = lambda: jm
+    job = jm.create_job(
+        domain="study_packs", queue="default", job_type="study_pack_generate",
+        payload={"title": "Quarantine case"}, owner_user_id="1", max_retries=3,
+    )
+    acquired = _complete_job(jm, int(job["id"]))
+    assert jm.fail_job(
+        int(job["id"]), error="private backend diagnostic", retryable=True,
+        worker_id="study-pack-test", lease_id=str(acquired["lease_id"]),
+        error_code="worker_exception",
+    )
+    assert jm.get_job(int(job["id"]))["status"] == "quarantined"
+
+    suffix = f"/{job['id']}" if lookup == "detail" else ""
+    response = client.get(f"/api/v1/flashcards/study-packs/jobs{suffix}")
+    assert response.status_code == 200
+    body = response.json()
+    public_job = body["job"] if lookup == "detail" else body["jobs"][0]
+    assert public_job["status"] == "failed"
+    assert "private backend diagnostic" not in response.text
+    if lookup == "detail":
+        assert body["error"] == "Study pack generation failed."
+        assert body["study_pack"] is None
+    else:
+        assert body["total"] == 1
+
+
 def test_admin_job_status_reads_completed_pack_from_owner_database(
     jobs_db_path: Path,
     tmp_path: Path,

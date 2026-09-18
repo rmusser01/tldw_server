@@ -59,10 +59,12 @@ const renderWidget = ({
   processingStatus,
   itemStatus,
   lifecycle = "completed",
+  progressPercent = 100,
 }: {
   processingStatus: ProcessingStatus
   itemStatus: ItemProgressStatus
-  lifecycle?: "completed" | "partial_failure" | "cancelled" | "interrupted"
+  progressPercent?: number
+  lifecycle?: "processing" | "completed" | "partial_failure" | "cancelled" | "interrupted"
 }) => {
   useQuickIngestSessionStore.setState({
     session: {
@@ -82,7 +84,7 @@ const renderWidget = ({
             {
               id: "item-1",
               status: itemStatus,
-              progressPercent: 100,
+              progressPercent,
               currentStage: itemStatus,
               estimatedRemaining: 0,
             },
@@ -98,6 +100,14 @@ const renderWidget = ({
 }
 
 describe("FloatingProgressWidget", () => {
+  it("counts finished items instead of averaging an active percentage", () => {
+    renderWidget({ processingStatus: "running", itemStatus: "processing", lifecycle: "processing", progressPercent: 42 })
+    expect(screen.getByRole("progressbar", { name: "Finished items" })).toHaveAttribute("aria-valuenow", "0")
+    expect(screen.getByRole("status")).toHaveTextContent("Ingesting 0/1")
+    expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Waiting for server results/)).toBeInTheDocument()
+  })
+
   it("shows Done for complete minimized sessions", () => {
     renderWidget({ processingStatus: "complete", itemStatus: "complete" })
 

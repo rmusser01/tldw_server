@@ -4167,9 +4167,10 @@ def test_postgres_world_book_entry_budget_preserves_owner_linkage_before_expansi
     ]
     assert len(attachment_queries) == 2
     assert all("cc.client_id = ?" in query for query, _params in attachment_queries)
+    assert all("wb.client_id = ?" in query for query, _params in attachment_queries)
     assert [params for _query, params in attachment_queries] == [
-        (11, "alice"),
-        (12, "alice"),
+        (11, "alice", "alice"),
+        (12, "alice", "alice"),
     ]
 
 
@@ -5074,6 +5075,11 @@ def test_module_creator_uses_database_owner_for_postgres_custom_preset(
         section_templates={"system_prompt": "{{system_prompt}}"},
     )
     character_id = character_db.add_character_card({"name": "Owned Preset Creator"})
+    # This SQLite-backed dialect probe needs the shared PostgreSQL owner column.
+    # Actual cross-account storage is exercised by the official PostgreSQL suite.
+    WorldBookService(character_db)
+    with character_db.transaction() as conn:
+        conn.execute("ALTER TABLE world_books ADD COLUMN client_id TEXT")
     monkeypatch.setattr(
         character_conversation_factory,
         "resolve_character_prompt_preset",

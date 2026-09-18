@@ -265,6 +265,7 @@ export const setupOnboardingMethods = {
       method: "POST",
       headers: jsonHeaders,
       noAuth: true,
+      timeoutMs: 180_000,
       body: payload,
     });
   },

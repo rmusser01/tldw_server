@@ -15,6 +15,9 @@ import type {
 } from "@/services/tldw/recipe-request-snapshot"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { createSafeStorage } from "@/utils/safe-storage"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import { browser } from "wxt/browser"
 
 export interface ApiSendPayload<
@@ -36,6 +39,7 @@ export interface ApiSendResponse<T = any> {
   status: number
   data?: T
   error?: string
+  code?: string
   headers?: Record<string, string>
   retryAfterMs?: number | null
   /** Transport metadata, never supplied by the server response body. */
@@ -52,6 +56,12 @@ const isSafeFallbackMethod = (method?: string): boolean => {
 }
 
 const inFlightGetRequests = new Map<string, Promise<ApiSendResponse<unknown>>>()
+
+interface ApiSendOptions {
+  coalesce?: boolean
+  /** Captured connection owner; only the authenticated readiness GET may refresh. */
+  readiness?: { config: TldwConfig; isCurrent: () => boolean }
+}
 
 const normalizeHeaders = (
   headers?: Record<string, string>
@@ -94,15 +104,15 @@ export async function apiSend<
 >(
   payload: ApiSendPayload<P, M>,
   // Client-local scheduling policy: never forwarded to a transport or server.
-  options: { coalesce?: boolean } = {}
+  options: ApiSendOptions = {}
 ): Promise<ApiSendResponse<T>> {
   const coalescingKey =
-    options.coalesce === false ? null : getCoalescingKey(payload)
+    options.coalesce === false || options.readiness ? null : getCoalescingKey(payload)
   if (coalescingKey) {
     const existing = inFlightGetRequests.get(coalescingKey)
     if (existing) return existing as Promise<ApiSendResponse<T>>
 
-    const pending = apiSendImpl<T, P, M>(payload).finally(() => {
+    const pending = apiSendImpl<T, P, M>(payload, options).finally(() => {
       if (inFlightGetRequests.get(coalescingKey) === pending) {
         inFlightGetRequests.delete(coalescingKey)
       }
@@ -114,14 +124,14 @@ export async function apiSend<
     return pending
   }
 
-  return apiSendImpl(payload)
+  return apiSendImpl(payload, options)
 }
 
 async function apiSendImpl<
   T = any,
   P extends PathOrUrl = PathOrUrl,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
->(payload: ApiSendPayload<P, M>): Promise<ApiSendResponse<T>> {
+>(payload: ApiSendPayload<P, M>, options: ApiSendOptions): Promise<ApiSendResponse<T>> {
   const recipeExtension = Boolean(
     payload.recipePersistence && hasRecipeExtensionRuntime()
   )
@@ -192,6 +202,47 @@ async function apiSendImpl<
     // fall through to direct request
   }
   const storage = createSafeStorage({ area: "local" })
+  const readiness = options.readiness
+  if (readiness && String(payload.path) === "/api/v1/auth/sessions" &&
+    String(payload.method || "GET").toUpperCase() === "GET" &&
+    !payload.noAuth && !payload.recipePersistence &&
+    readiness.config.authMode === "multi-user" && readiness.config.refreshToken) {
+    const assertCurrent = () => {
+      if (!readiness.isCurrent()) throw createServicePromptScopeChangedError()
+    }
+    const guardedStorage = {
+      get: async <V,>(key: string): Promise<V> => {
+        assertCurrent()
+        const value = await storage.get<V>(key)
+        assertCurrent()
+        return value
+      },
+      set: async <V,>(key: string, value: V) => {
+        assertCurrent()
+        await storage.set(key, value)
+        assertCurrent()
+      },
+      remove: async (key: string) => {
+        assertCurrent()
+        await storage.remove(key)
+        assertCurrent()
+      }
+    }
+    const { createDirectRuntime } = await import("@/services/background-proxy")
+    const runtime = createDirectRuntime(guardedStorage, {
+      ...readiness.config,
+      expectedUserId: deriveScopedUserId(readiness.config).replace(/^user:/, "")
+    })
+    return await tldwRequest(payload, {
+      ...runtime,
+      getConfig: async () => {
+        assertCurrent()
+        const config = await runtime.getConfig()
+        assertCurrent()
+        return config
+      }
+    })
+  }
   return await tldwRequest(payload, {
     ...directRecipeRequestAuthority,
     // IMPORTANT: getConfig must fetch fresh config each time it's called

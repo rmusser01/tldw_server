@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "無法載入說明。請重新連線，儲存修改，然後重新載入頁面。"
+  },
+  "help_loading": {
+    "message": "正在載入說明…"
+  },
+  "help_confirmReload": {
+    "message": "重新載入此頁面？未儲存的修改可能會遺失。"
+  },
+  "help_reload": {
+    "message": "重新載入頁面"
   }
 }

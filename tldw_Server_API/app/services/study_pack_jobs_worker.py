@@ -11,6 +11,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_owner
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.StudyPacks.generation_service import StudyPackGenerationService
@@ -34,10 +35,7 @@ def _close_worker_database(db: Any) -> None:
 
 async def _get_databases_for_user(user_id: str) -> tuple[Any, Any]:
     normalized_user_id = int(str(user_id).strip())
-    note_db = await get_chacha_db_for_user_id(
-        normalized_user_id,
-        client_id=f"study-pack-worker-{normalized_user_id}",
-    )
+    note_db = await get_chacha_db_for_user_id(normalized_user_id)
     try:
         media_db = get_media_db_for_owner(normalized_user_id)
     except Exception:
@@ -63,33 +61,34 @@ async def handle_study_pack_job(job: dict[str, Any]) -> dict[str, Any]:
     if expected_version is not None:
         expected_version = int(expected_version)
 
-    note_db = None
-    media_db = None
-    try:
-        note_db, media_db = await _get_databases_for_user(owner_user_id)
-        service = StudyPackGenerationService(
-            note_db=note_db,
-            media_db=media_db,
-            provider=None,
-            model=None,
-        )
-        created = await service.create_from_request(
-            request,
-            regenerate_from_pack_id=regenerate_from_pack_id,
-            expected_regenerate_version=expected_version,
-        )
-        return build_study_pack_job_result(
-            pack_id=created.pack_id,
-            deck_id=created.deck_id,
-            deck_name=created.deck_name,
-            regenerated_from_pack_id=created.regenerated_from_pack_id,
-        )
-    finally:
-        for db in (media_db, note_db):
-            try:
-                _close_worker_database(db)
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                logger.debug("Study-pack worker cleanup skipped for {}.", type(db).__name__ if db is not None else "None")
+    with chacha_operation(independent=True):
+        note_db = None
+        media_db = None
+        try:
+            note_db, media_db = await _get_databases_for_user(owner_user_id)
+            service = StudyPackGenerationService(
+                note_db=note_db,
+                media_db=media_db,
+                provider=None,
+                model=None,
+            )
+            created = await service.create_from_request(
+                request,
+                regenerate_from_pack_id=regenerate_from_pack_id,
+                expected_regenerate_version=expected_version,
+            )
+            return build_study_pack_job_result(
+                pack_id=created.pack_id,
+                deck_id=created.deck_id,
+                deck_name=created.deck_name,
+                regenerated_from_pack_id=created.regenerated_from_pack_id,
+            )
+        finally:
+            for db in (media_db, note_db):
+                try:
+                    _close_worker_database(db)
+                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                    logger.debug("Study-pack worker cleanup skipped for {}.", type(db).__name__ if db is not None else "None")
 
 
 async def _should_cancel(

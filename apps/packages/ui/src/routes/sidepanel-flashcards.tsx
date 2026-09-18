@@ -26,7 +26,7 @@ import type { GeneratedCardDraft } from "@/components/Flashcards/tabs/ImportExpo
 import { normalizeGeneratedCards } from "@/components/Flashcards/tabs/ImportExport/shared"
 import { normalizeFlashcardTemplateFields } from "@/components/Flashcards/utils/template-helpers"
 import type { FlashcardCreate } from "@/services/flashcards"
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -71,6 +71,7 @@ export const readSelectedTextFromPage = () => {
 }
 
 export default function SidepanelFlashcards() {
+  const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation()
   const draftIdRef = React.useRef(0)
   const [captureError, setCaptureError] = React.useState<string | null>(null)
@@ -275,8 +276,8 @@ export default function SidepanelFlashcards() {
       target: { tabId },
       func: readSelectedTextFromPage
     })
-    const selectedText = String(results?.[0]?.result ?? "").trim()
-    if (!selectedText) {
+    const selectedText = String(results?.[0]?.result ?? "")
+    if (!selectedText.trim()) {
       throw new Error(captureMessages.noSelection)
     }
 
@@ -323,22 +324,23 @@ export default function SidepanelFlashcards() {
     setSaveStatus(null)
     setGenerateHandoffLoading(true)
     try {
-      const captured = await readActivePageSelection()
-      await openOptionsHashRoute(
-        buildFlashcardsGenerateRoute({
+      await transferFlashcards(async () => {
+        const captured = await readActivePageSelection()
+        return {
           text: captured.selectedText,
           sourceType: "manual",
           sourceId: captured.sourceId,
           sourceTitle: captured.sourceTitle
-        })
-      )
+        }
+      }, { newTab: true })
     } catch (error) {
-      setCaptureError(formatCaptureErrorMessage(error))
+      if (error instanceof Error && error.name === "AbortError") return
+      setCaptureError(error instanceof Error ? error.message : "The transfer could not be opened. Keep the source open and try again.")
     } finally {
       generationInFlightRef.current = false
       setGenerateHandoffLoading(false)
     }
-  }, [formatCaptureErrorMessage, openOptionsHashRoute, readActivePageSelection])
+  }, [transferFlashcards, readActivePageSelection])
 
   const buildGeneratedDrafts = React.useCallback(
     (

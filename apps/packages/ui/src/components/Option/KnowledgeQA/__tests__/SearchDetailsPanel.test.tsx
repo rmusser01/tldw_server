@@ -92,7 +92,7 @@ describe("SearchDetailsPanel", () => {
     expect(screen.getByText("Candidate source 1")).toBeInTheDocument()
     expect(screen.getByText("Threshold")).toBeInTheDocument()
     expect(
-      screen.getByText(/\(41% • -21 pts vs weakest included\) — Below threshold/i)
+      screen.getByText(/\(ranking score 0.41\) — Below threshold/i)
     ).toBeInTheDocument()
   })
 

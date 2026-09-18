@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { ImportExportTab } from "../ImportExportTab"
 import {
   useCreateDeckMutation,
@@ -209,6 +210,19 @@ describe("ImportExportTab LLM provider gating", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setupMutationMocks()
+  })
+
+  it("shows useful grounding guidance and retains the source after rejected generation", async () => {
+    useQueryMock.mockReturnValue({ data: { ok: true, data: { providers: [{ id: "llamacpp" }] } }, isLoading: false })
+    generateFlashcardsMock.mockRejectedValue(new Error(JSON.stringify({
+      detail: { code: "claim_verification_failed", claimVerification: { report: { report_id: "raw-report" } } }
+    })))
+    render(<MemoryRouter><ImportExportTab /></MemoryRouter>)
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), { target: { value: "Mitochondria produce energy in cells." } })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/source/i))
+    expect(screen.getByRole("alert")).not.toHaveTextContent("raw-report")
+    expect(screen.getByTestId("flashcards-generate-text")).toHaveValue("Mitochondria produce energy in cells.")
   })
 
   it("shows no-LLM banner when providers query returns empty list", () => {

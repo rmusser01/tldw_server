@@ -71,8 +71,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector(state.option)
+  useStoreMessageOption: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) => selector(state.option),
+    { getState: () => state.option }
+  )
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({

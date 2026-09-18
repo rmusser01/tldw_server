@@ -567,6 +567,7 @@ async def list_media_trash_endpoint(
                     "id": rid,
                     "title": str(title),
                     "type": str(rtype),
+                    "deleted_at": r.get("trash_date") if isinstance(r, dict) else (r[4] if len(r) > 4 else None),
                 }
             )
 
@@ -611,6 +612,8 @@ async def list_media_trash_endpoint(
                 "type": item["type"],
                 "url": f"/api/v1/media/{mid}",
             }
+            if item.get("deleted_at") is not None:
+                base_payload["deleted_at"] = item["deleted_at"]
             if include_keywords:
                 base_payload["keywords"] = keywords_map.get(mid, [])
             items.append(base_payload)

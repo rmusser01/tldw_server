@@ -559,7 +559,6 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
   React.useEffect(() => {
     if (!openEdit) {
       editWorldBooksInitializedRef.current = false
-      editForm.setFieldValue("world_book_ids", [])
       return
     }
     if (editCharacterNumericId == null) return

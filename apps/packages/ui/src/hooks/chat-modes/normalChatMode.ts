@@ -7,6 +7,7 @@ import {
 } from "~/store/option"
 import { getPromptById } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
+import { createImageDataUrl } from "@/utils/image-utils"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
 import type { ActorSettings } from "@/types/actor"
@@ -623,7 +624,10 @@ export const normalChatMode = async (
       getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
     }
     const resolvedImage =
-      image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
+      image.length > 0
+        ? (image.startsWith("data:") ? createImageDataUrl(image) : null) ??
+          `data:image/jpeg;base64,${image.includes(",") ? image.split(",")[1] : image}`
+        : ""
 
     return await runChatPipeline(
       normalChatModeDefinition,

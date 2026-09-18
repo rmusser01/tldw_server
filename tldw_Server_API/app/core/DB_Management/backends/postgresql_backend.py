@@ -33,6 +33,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 from .query_utils import (
@@ -1009,6 +1010,7 @@ class PostgreSQLBackend(DatabaseBackend):
         start_time = time.time()
         query, params = self._prepare_query(query, params)
         redacted_failure = False
+        unique_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1076,6 +1078,7 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
+            unique_failure = isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) and getattr(e, "sqlstate", None) == "23505"
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1092,6 +1095,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 self.get_pool().return_connection(conn)
 
         if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(

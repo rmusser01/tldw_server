@@ -5089,8 +5089,9 @@ async def unified_rag_pipeline(
                         from tldw_Server_API.app.core.config import load_and_log_configs
 
                         _cfg = load_and_log_configs() or {}
-                        _prov = (_cfg.get("RAG_DEFAULT_LLM_PROVIDER") or "openai").strip()
-                        _model = (_cfg.get("RAG_DEFAULT_LLM_MODEL") or "gpt-4o-mini").strip()
+                        from .generation_defaults import resolve_generation_defaults
+
+                        _prov, _model = resolve_generation_defaults(_cfg)
                     except (ImportError, AttributeError, OSError, TypeError, ValueError):
                         _prov, _model = "openai", "gpt-4o-mini"
                     prompt = (
@@ -5493,6 +5494,11 @@ async def unified_rag_pipeline(
                                 filtered_docs.append(doc_ref)
 
                     if filtered_docs is not None:
+                        # Expose only aggregate outcomes, never excluded evidence.
+                        result.metadata["security_filter"] = {
+                            "excluded_count": max(0, len(result.documents) - len(filtered_docs)),
+                            "retained_count": len(filtered_docs),
+                        }
                         result.documents = filtered_docs
                     result.timings["security_filter"] = time.time() - security_start
 
@@ -8879,13 +8885,9 @@ async def unified_rag_pipeline(
                             )
 
                             _f_cfg = _load_cfg() or {}
-                            _f_prov = (
-                                generation_provider
-                                or _f_cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-                                or _f_cfg.get("default_api")
-                                or "openai"
-                            ).strip()
-                            _f_model = generation_model or _f_cfg.get("RAG_DEFAULT_LLM_MODEL")
+                            from .generation_defaults import resolve_generation_defaults
+
+                            _f_prov, _f_model = resolve_generation_defaults(_f_cfg, generation_provider, generation_model)
                             _f_handle = None
                             if credential_runtime is not None:
                                 _f_handle = await credential_runtime.resolve(

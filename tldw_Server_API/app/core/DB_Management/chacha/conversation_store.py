@@ -228,10 +228,12 @@ class ConversationStore:
                     "FROM conversation_settings WHERE conversation_id = %s",
                     (conversation_id,),
                 )
-                row = result.fetchone()
+                row = result.first
                 if not row:
                     return None
-                settings_json, settings_version, last_modified = row
+                settings_json = row["settings_json"]
+                settings_version = row["settings_version"]
+                last_modified = row["last_modified"]
 
             settings = json.loads(settings_json) if settings_json else {}
             return {
@@ -503,7 +505,7 @@ class ConversationStore:
             "SELECT * FROM conversations WHERE id = ? AND deleted = 0"
         )
         try:
-            cursor = self._db.execute_query(query, (conversation_id,))
+            cursor = self._db.execute_query(query, (conversation_id,), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as exc:
@@ -870,7 +872,7 @@ class ConversationStore:
         try:
             cursor = self._db.execute_query(query, tuple(params))
             row = cursor.fetchone()
-            return int(row[0] if row else 0)
+            return int(row["cnt"] if row else 0)
         except CharactersRAGDBError as exc:
             logger.error(f"Database error counting conversations for client_id {client_id}: {exc}")
             raise
@@ -912,7 +914,7 @@ class ConversationStore:
         )
         params.extend([limit, offset])
         try:
-            cursor = self._db.execute_query(query, tuple(params))
+            cursor = self._db.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as exc:
             logger.error(f"Database error listing conversations for client_id {client_id}: {exc}")
@@ -1057,7 +1059,7 @@ class ConversationStore:
             with self._db.transaction() as conn:
                 current_state = conn.execute(
                     """
-                    SELECT rowid, title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
+                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
                     FROM conversations
                     WHERE id = ?
                     """,

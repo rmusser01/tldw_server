@@ -21,6 +21,10 @@ class DatabaseError(Exception):
     pass
 
 
+class UniqueConstraintError(DatabaseError):
+    """A uniqueness conflict, without driver diagnostics or identifying payload."""
+
+
 class NotSupportedError(DatabaseError):
     """Raised when a feature is not supported by the backend."""
     pass

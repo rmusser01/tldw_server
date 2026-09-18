@@ -1,3 +1,5 @@
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import React, { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
@@ -757,15 +759,17 @@ export const DocumentWorkspacePage: React.FC = () => {
   }, [])
 
   const openDocumentById = useCallback(
-    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null) => {
+    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null, operation?: QuickIngestOperation) => {
+      operation?.assertCurrent()
       const requestId = ++openDocumentRequestRef.current
       setLoadingDocumentId(mediaId)
       try {
         const details = await tldwClient.getMediaDetails(mediaId, {
           include_content: false,
-          include_versions: false
+          include_versions: false,
+          requestScope: operation?.requestScope, signal: operation?.signal,
         })
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
 
@@ -820,13 +824,15 @@ export const DocumentWorkspacePage: React.FC = () => {
         let data: ArrayBuffer | Blob
         try {
           data = await bgRequest<ArrayBuffer>({
+            ...requestScopeFields(operation?.requestScope),
+            abortSignal: operation?.signal,
             path: `/api/v1/media/${mediaId}/file`,
             method: "GET",
             responseType: "arrayBuffer",
             timeoutMs: DOCUMENT_FILE_TIMEOUT_MS
           })
         } catch (err: unknown) {
-          if (openDocumentRequestRef.current !== requestId) {
+          if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
             return
           }
           const status = isErrorWithStatus(err) ? err.status : undefined
@@ -859,7 +865,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           }
           throw err
         }
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
 
@@ -889,7 +895,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           url
         })
       } catch (err) {
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
         message.error(

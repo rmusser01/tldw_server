@@ -29,7 +29,19 @@ def _heuristic_decision(
     if not q:
         return ClarificationDecision(False, None, "empty_query", 1.0, "heuristic")
 
-    if any(p.search(q) for p in _AMBIGUOUS_PATTERNS) and not chat_history:
+    ambiguous_reference = _AMBIGUOUS_PATTERNS[0].search(q)
+    # A named subject earlier in the question can supply the pronoun's context
+    # ("Project Juniper ... who owns it?"). Question words alone cannot.
+    prefix = q[: ambiguous_reference.start()] if ambiguous_reference else ""
+    named_subject = any(
+        not any(
+            word.lower()
+            in {"can", "could", "would", "should", "you", "what", "when", "how", "this", "that", "tell", "me", "about"}
+            for word in match.group().split()
+        )
+        for match in re.finditer(r"\b[A-Z][\w'-]+(?:\s+[A-Z][\w'-]+)+\b", prefix)
+    )
+    if any(p.search(q) for p in _AMBIGUOUS_PATTERNS) and not chat_history and not named_subject:
         return ClarificationDecision(
             True,
             "Could you clarify what specific item or context you want me to focus on?",

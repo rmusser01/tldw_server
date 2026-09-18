@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Button, Input, Modal, Select, Space, Table, Tag, Tooltip, message } from "antd"
+import { Button, Input, Modal, Select, Table, Tag, Tooltip, message } from "antd"
 import { Key, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Alert } from "@/components/ui/primitives"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -43,6 +43,7 @@ export const ProviderKeysSettings = () => {
   const [loading, setLoading] = useState(true)
   const [byokUnavailable, setByokUnavailable] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const loadGenerationRef = useRef(0)
 
   // Add form state
   const [showAddForm, setShowAddForm] = useState(false)
@@ -51,26 +52,47 @@ export const ProviderKeysSettings = () => {
   const [saving, setSaving] = useState(false)
 
   const loadKeys = useCallback(async () => {
+    // Refreshes and locale changes can overlap; only the latest load owns state.
+    const generation = ++loadGenerationRef.current
     setLoading(true)
     setError(null)
+    setByokUnavailable(false)
     try {
       const res = await tldwClient.listUserProviderKeys()
+      if (generation !== loadGenerationRef.current) return
       setKeys(res.items ?? [])
       setByokUnavailable(false)
     } catch (err: unknown) {
-      const status = (err as { status?: number })?.status
-      if (status === 403) {
+      if (generation !== loadGenerationRef.current) return
+      const failure = err as {
+        status?: number
+        details?: { detail?: unknown }
+      } | null
+      if (
+        failure?.status === 403 &&
+        failure.details?.detail === "BYOK is disabled in this deployment"
+      ) {
         setByokUnavailable(true)
       } else {
-        setError(t("settings:providerKeys.fetchError", "Failed to load provider keys"))
+        setError(
+          failure?.status === 403
+            ? t(
+                "settings:providerKeys.accessDenied",
+                "Access to provider keys was denied. Contact your server administrator to check your permissions."
+              )
+            : t("settings:providerKeys.fetchError", "Failed to load provider keys")
+        )
       }
     } finally {
-      setLoading(false)
+      if (generation === loadGenerationRef.current) setLoading(false)
     }
   }, [t])
 
   useEffect(() => {
     void loadKeys()
+    return () => {
+      loadGenerationRef.current += 1
+    }
   }, [loadKeys])
 
   const handleSave = useCallback(async () => {
@@ -282,7 +304,7 @@ export const ProviderKeysSettings = () => {
         size="small"
         locale={{
           emptyText: loading
-            ? t("common:loading", "Loading...")
+            ? t("common:loading.title", "Loading...")
             : t("settings:providerKeys.emptyTable", "No provider keys configured. Add a key or configure providers in your server's .env file."),
         }}
       />

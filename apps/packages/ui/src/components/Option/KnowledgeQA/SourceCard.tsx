@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { openExternalUrl } from "@/utils/safe-external-url"
+import { getSourceOpenAction } from "./sourceOpenAction"
 import type { RagResult } from "./types"
 import {
   detectSourceContentFacet,
@@ -35,7 +36,9 @@ import {
   formatSourceDate,
   getFreshnessDescriptor,
   getRelevanceDescriptor,
+  getMeasuredRelevance,
   getSourceTypeLabel,
+  getResultSourceType,
   type CitationUsageAnchor,
   splitTextByHighlights,
 } from "./sourceListUtils"
@@ -151,10 +154,8 @@ export function SourceCard({
     [excerpt, highlightTerms]
   )
   const canExpand = displayExcerptText.length > excerptLength
-  const url = result.metadata?.url
-  const score = result.score
-  const sourceType =
-    result.sourceType || result.metadata?.source_type || "media_db"
+  const openAction = getSourceOpenAction(result)
+  const sourceType = getResultSourceType(result)
   const sourceTypeLabel = getSourceTypeLabel(sourceType)
   const sourceId = getResultSourceId(result)
   const chunkId = getResultChunkId(result)
@@ -167,7 +168,7 @@ export function SourceCard({
   const chunkPosition = formatChunkPosition(chunkId ?? result.metadata?.chunk_id)
   const sourceDate = formatSourceDate(result)
   const freshnessDescriptor = getFreshnessDescriptor(result)
-  const relevanceDescriptor = getRelevanceDescriptor(score)
+  const relevanceDescriptor = getRelevanceDescriptor(getMeasuredRelevance(result))
   const compactMetaItems = compactDensity
     ? [sourceKindLabel, chunkPosition, freshnessDescriptor?.label ?? sourceDate].filter(
         (value): value is string => Boolean(value)
@@ -276,10 +277,10 @@ export function SourceCard({
   }, [index, result, scheduleCopiedStateReset])
 
   const handleOpenExternal = useCallback(() => {
-    if (url) {
-      openExternalUrl(url, "_blank", "noopener,noreferrer")
+    if (openAction) {
+      openExternalUrl(openAction.href, "_blank", "noopener,noreferrer")
     }
-  }, [url])
+  }, [openAction])
 
   const jumpToCitationFromCard = useCallback(() => {
     if (!isCited) return
@@ -381,7 +382,9 @@ export function SourceCard({
                       >
                         {relevanceDescriptor.percent}% match
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="shrink-0 text-[10px] text-text-muted">Relevance not measured</span>
+                    )}
                     {evidenceOriginLabel ? (
                       <span className="shrink-0 truncate">{evidenceOriginLabel}</span>
                     ) : null}
@@ -434,7 +437,7 @@ export function SourceCard({
                     {title}
                   </h4>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted sm:gap-2 sm:text-xs">
-                    {relevanceDescriptor && (
+                    {relevanceDescriptor ? (
                       <span
                         className={cn(
                           "rounded px-1.5 py-0.5",
@@ -444,7 +447,7 @@ export function SourceCard({
                       >
                         {relevanceDescriptor.label} ({relevanceDescriptor.percent}%)
                       </span>
-                    )}
+                    ) : <span>Relevance not measured</span>}
                     <span className="inline-flex items-center gap-0.5">
                       {sourceType === "web" ? (
                         <Globe className="h-3 w-3" />
@@ -673,7 +676,7 @@ export function SourceCard({
                   )}
                   {copiedState === "excerpt" ? "Copied excerpt" : "Copy excerpt"}
                 </button>
-                {url && (
+                {openAction && (
                   <button
                     type="button"
                     role="menuitem"
@@ -684,7 +687,7 @@ export function SourceCard({
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    Open original
+                    {openAction.label}
                   </button>
                 )}
                 {canOpenInWorkspace && (

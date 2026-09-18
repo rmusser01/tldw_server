@@ -15,8 +15,10 @@ from tldw_Server_API.app.api.v1.API_Deps import Prompts_DB_Deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes, service_prompts
+from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Chat import chat_target_resolution
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.Flashcards import study_assistant
@@ -43,6 +45,12 @@ ACTIONS = {
 @pytest.fixture
 def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
     """Keep authorization identities, storage, prompt assembly and response writes real."""
+    # Supply healthy server settings while retaining actual target and policy resolution.
+    monkeypatch.setattr(llm_provider_overrides, "_get_healthy_override_snapshot", lambda _provider="": {})
+    monkeypatch.setattr(
+        chat_target_resolution, "load_and_log_configs", lambda: {"llm_api_settings": {"default_api": "openai"}}
+    )
+    monkeypatch.setenv("DEFAULT_MODEL_OPENAI", "test-model")
     state = SimpleNamespace(owner=1, calls=[], reads=[], databases={}, prompts={}, paths={}, during_model=None)
     for owner in (1, 2):
         db = CharactersRAGDB(str(tmp_path / f"study-{owner}.db"), client_id="study-prompts-test")

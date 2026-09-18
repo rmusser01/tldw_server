@@ -1097,6 +1097,31 @@ describe("Service Prompt migration and runtime snapshots", () => {
     snapshot.release()
   })
 
+  it("captures an empty request scope without probing or claiming prompt capability", async () => {
+    const controller = new AbortController()
+    const snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
+    expect(snapshot.capability).toBe("unchecked")
+    expect(snapshot.definitions).toEqual({})
+    expect(mocks.listServicePrompts).not.toHaveBeenCalled()
+    expect(mocks.getServicePrompt).not.toHaveBeenCalled()
+    expect(snapshot.scopeSignal.aborted).toBe(false)
+    controller.abort()
+    expect(snapshot.scopeSignal.aborted).toBe(true)
+    expect(snapshot.scopeInvalidatedSignal.aborted).toBe(false)
+    snapshot.release()
+    expect(mocks.localUnwatch).toHaveBeenCalledOnce()
+  })
+
+  it("invalidates a scope-only request across A to B to A without reviving it", async () => {
+    const snapshot = await loadServicePromptSnapshot([])
+    const watch = mocks.localWatch.mock.calls.at(-1)![0]
+    watch.tldwConfig({ newValue: { ...config, apiKey: "synthetic-other-key" } })
+    watch.tldwConfig({ newValue: config })
+    expect(snapshot.scopeSignal.aborted).toBe(true)
+    expect(snapshot.scopeInvalidatedSignal.aborted).toBe(true)
+    snapshot.release()
+  })
+
   it("loads requested details concurrently and freshly for every invocation", async () => {
     let resolveAnswer!: (value: ServicePromptDetail) => void
     let resolveRewrite!: (value: ServicePromptDetail) => void

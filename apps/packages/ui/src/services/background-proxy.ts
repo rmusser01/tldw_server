@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   isUnsafeMethod,
   parseRetryAfter,
@@ -8,6 +9,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { createTokenRefreshError } from "@/services/tldw/auth-refresh-error"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
   isCookieSessionBrowserTransport,
@@ -20,6 +22,7 @@ import {
 } from "@/services/tldw/direct-browser-config"
 import {
   hasNewerCurrentAccessToken,
+  invalidateRefreshSessionIfCurrent,
   storeRefreshRotationIfCurrent,
   waitForNewerCurrentAccessToken
 } from "@/services/tldw/single-user-credential"
@@ -233,14 +236,18 @@ const isSensitiveKey = (key: string): boolean => {
 // Redact known sensitive fields (stack/trace/sql/query/secret/headers/etc.) recursively.
 export const sanitizeResponseData = (
   value: unknown,
-  seen: WeakSet<object> = new WeakSet()
+  seen: WeakSet<object> = new WeakSet(),
+  sanitizeErrorStrings = false
 ): unknown => {
+  if (sanitizeErrorStrings && typeof value === "string") {
+    return sanitizeServerErrorMessage(value, "")
+  }
   if (value == null || typeof value !== "object") return value
   if (seen.has(value as object)) return REDACTED_VALUE
   seen.add(value as object)
 
   if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeResponseData(entry, seen))
+    return value.map((entry) => sanitizeResponseData(entry, seen, sanitizeErrorStrings))
   }
 
   const result: Record<string, unknown> = {}
@@ -249,7 +256,7 @@ export const sanitizeResponseData = (
       result[key] = REDACTED_VALUE
       return
     }
-    result[key] = sanitizeResponseData(entry, seen)
+    result[key] = sanitizeResponseData(entry, seen, sanitizeErrorStrings)
   })
   return result
 }
@@ -733,9 +740,7 @@ const refreshAuthDirect = async (
             | { access_token?: string; refresh_token?: string }
             | null
           if (!tokens?.access_token) {
-            throw new Error(
-              `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
-            )
+            throw createTokenRefreshError(resp)
           }
           const stored = await storeRefreshRotationIfCurrent(
             storage,
@@ -761,6 +766,10 @@ const refreshAuthDirect = async (
           ) {
             return
           }
+          if ((error as { status?: number } | null)?.status === 401 &&
+            !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+            throw createServicePromptScopeChangedError()
+          }
           throw error
         } finally {
           scopedWebRefreshes.delete(key)
@@ -778,10 +787,7 @@ const refreshAuthDirect = async (
         (await resolveDirectConfig(storage)) || null
       const refreshToken = String((cfg?.refreshToken as string) || "").trim()
       const capturedAccessToken = String(cfg?.accessToken || "").trim()
-      // Signal failure (throw) rather than resolving silently: request-core
-      // treats a resolved refreshAuth as success and would retry with the stale
-      // token. Throwing makes it mark the refresh as failed so a still-401 retry
-      // surfaces "Session expired" instead of masking the failure.
+      // A failed refresh must retain its status and stop the original request.
       if (!refreshToken) {
         throw new Error("Token refresh failed: no refresh token available")
       }
@@ -799,9 +805,13 @@ const refreshAuthDirect = async (
         | { access_token?: string; refresh_token?: string }
         | null
       if (!tokens?.access_token) {
-        throw new Error(
-          `Token refresh failed: ${resp?.error || `no access token in refresh response (status ${resp?.status ?? "unknown"})`}`
-        )
+        if (resp.status === 401 && cfg?.authMode === "multi-user") {
+          if (await waitForNewerCurrentAccessToken(storage, cfg, capturedAccessToken)) return
+          if (!await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+            throw createServicePromptScopeChangedError()
+          }
+        }
+        throw createTokenRefreshError(resp)
       }
       if (!cfg || cfg.authMode !== "multi-user") {
         throw new Error("Token refresh failed: account configuration changed")
@@ -826,7 +836,7 @@ const refreshAuthDirect = async (
 // Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
 // request-core's 401 refresh-and-retry runs in the browser (not just inside the
 // extension worker), and single-flights it across concurrent callers.
-const createDirectRuntime = (
+export const createDirectRuntime = (
   storage: DirectRuntimeStorage,
   servicePromptConfig?: ServicePromptTargetConfig,
   initialConfig?: DirectConfigSnapshot
@@ -988,6 +998,8 @@ async function bgRequestImpl<
     }
   }
   const path = normalizeKnownPathQuirks(rawPath)
+  const sanitizeChatCompletionError = String(method).toUpperCase() === "POST" &&
+    /^\/api\/v1\/chat\/completions\/?(?:[?#]|$)/.test(String(path))
   const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
   const isExpectedStatus = (status: unknown): boolean =>
     typeof status === "number" && expectedStatusSet.has(Math.trunc(status))
@@ -1075,6 +1087,7 @@ async function bgRequestImpl<
     status?: number
     data?: unknown
     headers?: Record<string, string>
+    retryAfterMs?: number | null
   }
   type NormalizedRequestFailure = {
     message: string
@@ -1129,10 +1142,16 @@ async function bgRequestImpl<
             data: resp?.data
           })
       : {
-          message: rawMessage,
+          message: sanitizeChatCompletionError
+            ? explicitCancellation
+              ? "Aborted"
+              : sanitizeServerErrorMessage(rawMessage, "Chat completion failed.")
+            : rawMessage,
           status: resp?.status,
           code: resp?.code,
-          details: resp?.data
+          details: sanitizeChatCompletionError
+            ? sanitizeResponseData(resp?.data, new WeakSet(), true)
+            : resp?.data
         }
     const diagnosticEntry = {
       method: String(method),
@@ -1178,13 +1197,13 @@ async function bgRequestImpl<
     }
 
     return {
-      error: buildRequestError(
+      error: Object.assign(buildRequestError(
         sanitized.message,
         sanitized.status,
         sanitized.details,
         sanitized.code
-      ),
-      response: sanitizeRagProviderError || scopedError
+      ), { headers: resp.headers, retryAfterMs: resp.retryAfterMs }),
+      response: sanitizeRagProviderError || sanitizeChatCompletionError || scopedError
         ? {
             ...resp,
             error: sanitized.message,
@@ -1814,7 +1833,8 @@ async function* bgStreamDirectUnsafe<
   } finally {
     if (idleTimer) clearTimeout(idleTimer)
     try {
-      reader.cancel()
+      // An errored response body rejects cancellation too; preserve the primary error.
+      await reader.cancel()
     } catch {}
     if (abortSignal) {
       try {

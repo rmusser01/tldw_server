@@ -32,6 +32,7 @@ export interface PlaygroundSessionData {
   compareSelectedModels: string[]
 
   // RAG settings (when chatMode === "rag")
+  fileRetrievalEnabled: boolean
   ragMediaIds: number[] | null
   ragSearchMode: "hybrid" | "vector" | "fts"
   ragTopK: number | null
@@ -45,10 +46,12 @@ export interface PlaygroundSessionData {
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
   restoreRevision: number
+  sourceSelectionRevision: number
   // Actions
   saveSession: (data: Partial<PlaygroundSessionData>) => void
   clearSession: () => void
   cancelPendingRestore: () => void
+  markSourceSelectionIntent: () => void
   isSessionStale: () => boolean
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
@@ -68,6 +71,7 @@ const initialState: PlaygroundSessionData = {
   webSearch: false,
   compareMode: false,
   compareSelectedModels: [],
+  fileRetrievalEnabled: false,
   ragMediaIds: null,
   ragSearchMode: "hybrid",
   ragTopK: null,
@@ -82,6 +86,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     (set, get) => ({
       ...initialState,
       restoreRevision: 0,
+      sourceSelectionRevision: 0,
 
       saveSession: (data) =>
         set((state) => ({
@@ -99,6 +104,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
 
       cancelPendingRestore: () =>
         set((state) => ({ restoreRevision: state.restoreRevision + 1 })),
+
+      markSourceSelectionIntent: () =>
+        set((state) => ({ sourceSelectionRevision: state.sourceSelectionRevision + 1 })),
 
       isSessionStale: () => {
         const { lastUpdated } = get()
@@ -151,6 +159,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         webSearch: state.webSearch,
         compareMode: state.compareMode,
         compareSelectedModels: state.compareSelectedModels,
+        fileRetrievalEnabled: state.fileRetrievalEnabled,
         ragMediaIds: state.ragMediaIds,
         ragSearchMode: state.ragSearchMode,
         ragTopK: state.ragTopK,

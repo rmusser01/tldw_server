@@ -358,12 +358,13 @@ class TokenBlacklist:
             logger.error(f"Failed to blacklist token: {e}")
             return False
 
-    async def is_blacklisted(self, jti: str) -> bool:
+    async def is_blacklisted(self, jti: str, *, strict: bool = False) -> bool:
         """
         Check if a token is blacklisted
 
         Args:
             jti: JWT ID to check
+            strict: Propagate database failures instead of treating the token as revoked.
 
         Returns:
             True if token is blacklisted
@@ -411,6 +412,8 @@ class TokenBlacklist:
             self._cache_remove(jti)
 
         except (DatabaseError, OSError, RuntimeError, TypeError, ValueError) as e:
+            if strict:
+                raise
             logger.error(f"Database error checking blacklist: {e}")
             # Fail closed - treat as blacklisted on error
             return True

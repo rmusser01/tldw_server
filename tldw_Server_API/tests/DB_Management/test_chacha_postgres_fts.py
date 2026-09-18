@@ -114,6 +114,7 @@ def test_rebuild_full_text_indexes_sqlite_executes_rebuild():
 
 def test_search_character_cards_postgres_uses_tsquery(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _make_postgres_db()
+    db.client_id = "character-owner"
     rows = [{"id": 1, "rank": 0.42}]
     db.execute_query = MagicMock(return_value=_CursorStub(rows))
     db._deserialize_row_fields = lambda row, _fields: row  # type: ignore[assignment]
@@ -124,7 +125,8 @@ def test_search_character_cards_postgres_uses_tsquery(monkeypatch: pytest.Monkey
     assert db.execute_query.call_count == 1
     sql, params = db.execute_query.call_args[0]
     assert "ts_rank" in sql and "to_tsquery('english', ?)" in sql
-    assert params == ("dragon & rider", "dragon & rider", 5)
+    assert "cc.client_id = ?" in sql
+    assert params == ("dragon & rider", "dragon & rider", "character-owner", 5)
 
 
 def test_list_flashcards_postgres_translates_fts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,7 +221,7 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
             self.calls.append(sql)
             sql_upper = sql.strip().upper()
             if sql_upper.startswith("SELECT ID FROM FLASHCARDS"):
-                return _Cursor(rows=[(1,)])
+                return _Cursor(rows=[{"id": 1}])
             if sql_upper.startswith("SELECT KEYWORD_ID FROM FLASHCARD_KEYWORDS"):
                 return _Cursor(rows=[])
             if "INSERT INTO FLASHCARD_KEYWORDS" in sql_upper:

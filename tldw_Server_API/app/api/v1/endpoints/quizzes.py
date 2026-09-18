@@ -46,7 +46,13 @@ from tldw_Server_API.app.api.v1.schemas.quizzes import (
     QuizUpdate,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -828,6 +834,31 @@ async def respond_quiz_attempt_question_assistant(
         }
     except HTTPException:
         raise
+    except ChatConfigurationError:
+        raise HTTPException(
+            status_code=400,
+            detail="No usable chat provider and model are configured. Configure them or ask your server administrator.",
+        ) from None
+    except ChatAuthenticationError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected its credentials. Check provider settings or ask your server administrator.",
+        ) from None
+    except ChatBadRequestError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected the request. Check the selected provider and model.",
+        ) from None
+    except ChatRateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="The chat provider is rate limited. Try again shortly.",
+        ) from None
+    except ChatAPIError:
+        raise HTTPException(
+            status_code=502,
+            detail="The chat provider could not complete the study response. Try again shortly.",
+        ) from None
     except ConflictError as exc:
         raise map_db_error_to_http(
             exc,

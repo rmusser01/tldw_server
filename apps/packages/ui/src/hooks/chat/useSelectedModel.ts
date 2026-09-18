@@ -9,7 +9,13 @@ export const normalizeSelectedModel = (
   value: string | null | undefined,
 ): string | null => {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
+  let trimmed = value.trim();
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === "string") trimmed = parsed.trim();
+  } catch {
+    // Plain model identifiers are the normal storage format.
+  }
   return trimmed.length > 0 ? trimmed : null;
 };
 
@@ -52,13 +58,19 @@ export const useSelectedModel = () => {
           : nextOrUpdater;
       const normalized = normalizeSelectedModel(resolved);
       setSelectedModelInStore(normalized);
-      void setStoredSelectedModel(normalized);
+      return setStoredSelectedModel(normalized);
     },
     [selectedModel, setSelectedModelInStore, setStoredSelectedModel],
   );
 
   // Sync effect: hydrate store from storage or push store to storage
   React.useEffect(() => {
+    if (selectedModelStorageMeta.isLoading) return;
+    // Another mounted owner may have committed since this render.
+    if (
+      useStoreMessageOption.getState().selectedModel !== selectedModelFromStore
+    )
+      return;
     const normalizedStoreModel = normalizeSelectedModel(selectedModelFromStore);
     const normalizedStoredModel = normalizeSelectedModel(storedSelectedModel);
 
@@ -68,13 +80,16 @@ export const useSelectedModel = () => {
     }
 
     if (normalizedStoreModel !== normalizedStoredModel) {
-      void setStoredSelectedModel(normalizedStoreModel);
+      // Explicit writes return their rejection to the caller. Hydration sync is
+      // best effort and must not create an unhandled background rejection.
+      void setStoredSelectedModel(normalizedStoreModel).catch(() => undefined);
     }
   }, [
     selectedModelFromStore,
     setSelectedModelInStore,
     setStoredSelectedModel,
     storedSelectedModel,
+    selectedModelStorageMeta.isLoading,
   ]);
 
   return {

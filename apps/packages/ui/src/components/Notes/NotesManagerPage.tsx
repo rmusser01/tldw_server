@@ -15,12 +15,16 @@ import { useDemoMode } from '@/context/demo-mode'
 import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
-import { useStoreMessageOption } from "@/store/option"
+import { useStoreMessageOption, type Message as ChatMessage } from "@/store/option"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useTutorialStore } from "@/store/tutorials"
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
-import { shallow } from "zustand/shallow"
-import { updatePageTitle } from "@/utils/update-page-title"
-import { normalizeChatRole } from "@/utils/normalize-chat-role"
+import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { watchServerChatLoadAuthority } from "@/services/server-chat-load-authority"
+import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages, resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 import NotesEditorPane from "@/components/Notes/NotesEditorPane"
 import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
@@ -37,7 +41,7 @@ import {
 } from "@/components/Notes/hooks"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
@@ -113,7 +117,17 @@ const shouldAutoResolveConversationLabel = (conversationId: string): boolean =>
 const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
 
-const NotesManagerPage: React.FC = () => {
+// Display-only failure bubbles are not unsaved conversation work.
+const hasUnsavedChatWork = (row: ChatMessage): boolean => {
+  if (row.serverMessageId || row.messageType === "character:greeting" || row.messageType === "greeting") return false
+  const hasImages = row.images?.some(image => Boolean(image?.trim()))
+  if (hasImages) return true
+  return Boolean(row.message?.trim() &&
+    !(row.isBot && (!row.role || row.role === "assistant") && decodeChatErrorPayload(row.message)))
+}
+
+const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
+  const transferFlashcards = useFlashcardsGenerateTransfer()
   const { t } = useTranslation(['option', 'common'])
   const isOnline = useServerOnline()
   const isMobileViewport = useMobile()
@@ -124,10 +138,11 @@ const NotesManagerPage: React.FC = () => {
   const {
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
+    authorityLoading: canonicalAuthorityLoading,
   } = useCanonicalConnectionConfig()
   const notesGraphAuthorityScope = useNotesGraphAuthorityScope({
     config: canonicalConnectionConfig,
-    loading: canonicalConnectionLoading,
+    loading: canonicalAuthorityLoading ?? canonicalConnectionLoading,
   })
   const message = useAntdMessage()
   const rawConfirmDanger = useConfirmDanger()
@@ -135,30 +150,8 @@ const NotesManagerPage: React.FC = () => {
     useTutorialStore.getState().endTutorial()
     return rawConfirmDanger(options)
   }, [rawConfirmDanger])
-  const {
-    setHistory,
-    setMessages,
-    setHistoryId,
-    setServerChatId,
-    setServerChatState,
-    setServerChatTopic,
-    setServerChatClusterId,
-    setServerChatSource,
-    setServerChatExternalRef
-  } = useStoreMessageOption(
-    (state) => ({
-      setHistory: state.setHistory,
-      setMessages: state.setMessages,
-      setHistoryId: state.setHistoryId,
-      setServerChatId: state.setServerChatId,
-      setServerChatState: state.setServerChatState,
-      setServerChatTopic: state.setServerChatTopic,
-      setServerChatClusterId: state.setServerChatClusterId,
-      setServerChatSource: state.setServerChatSource,
-      setServerChatExternalRef: state.setServerChatExternalRef
-    }),
-    shallow
-  )
+  const selectServerChat = useSelectServerChat()
+  const [, setSelectedAssistant] = useSelectedAssistant()
 
   const capabilityDisabled = !capsLoading && capabilities && !capabilities.hasNotes
   const editorDisabled = Boolean(capabilityDisabled)
@@ -250,6 +243,7 @@ const NotesManagerPage: React.FC = () => {
 
   // ---- Editor hook (use actual deps now that list and kw are available) ----
   const ed = useNotesEditorState({
+    connectionConfig: canonicalConnectionConfig,
     authorityScope: notesGraphAuthorityScope,
     isOnline,
     isMobileViewport,
@@ -441,10 +435,20 @@ const NotesManagerPage: React.FC = () => {
   }, [defaultStudioPaperSize, ed.selectedId])
 
   // ---- Note graph neighbors ----
+  const noteNeighborsOwner = JSON.stringify([notesGraphAuthorityScope, authoritySelectedId])
+  const noteNeighborsOwnerRef = React.useRef(noteNeighborsOwner)
+  noteNeighborsOwnerRef.current = noteNeighborsOwner
+  const [neighborsIntent, setNeighborsIntent] = React.useState({ owner: noteNeighborsOwner, requested: false, denied: false })
+  if (neighborsIntent.owner !== noteNeighborsOwner) {
+    setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
+  }
+  const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
   const {
-    data: noteNeighborsData,
+    data: requestedNoteNeighborsData,
+    error: noteNeighborsFailure,
     isLoading: noteNeighborsLoading,
     isError: noteNeighborsError,
+    isSuccess: noteNeighborsSuccess,
     refetch: refetchNoteNeighbors
   } = useQuery({
     queryKey: [
@@ -455,17 +459,38 @@ const NotesManagerPage: React.FC = () => {
     ],
     enabled:
       isOnline &&
+      noteNeighborsRequested &&
+      !neighborsIntent.denied &&
       notesGraphAuthorityScope != null &&
       authoritySelectedId != null,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
     queryFn: async () => {
       const noteId = encodeURIComponent(String(authoritySelectedId))
-      const graph = await bgRequest<any>({
-        path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
-        method: 'GET' as any
-      })
-      return graph
+      try {
+        const graph = await bgRequest<any>({
+          path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
+          method: 'GET' as any
+        })
+        return noteNeighborsOwnerRef.current === noteNeighborsOwner ? graph : null
+      } catch (error) {
+        if (Number((error as { status?: number } | null)?.status) === 403) {
+          setNeighborsIntent((current) => current.owner === noteNeighborsOwner
+            ? { ...current, denied: true }
+            : current)
+        }
+        throw error
+      }
     }
   })
+  const noteNeighborsData = noteNeighborsRequested && noteNeighborsSuccess ? requestedNoteNeighborsData : null
+  const noteNeighborsUnavailable = Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
+  const noteNeighborsState = noteNeighborsError ? 'error'
+    : noteNeighborsLoading ? 'loading'
+    : noteNeighborsSuccess && noteNeighborsData != null ? 'success'
+    : 'not_loaded'
 
   const unavailableStateLabel =
     getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
@@ -1875,82 +1900,108 @@ const NotesManagerPage: React.FC = () => {
   }, [ed, message, t])
 
   // Flashcards
-  const handleGenerateFlashcardsFromNote = React.useCallback(() => {
-    const sourceText = ed.content.trim()
-    if (!sourceText) {
+  const handleGenerateFlashcardsFromNote = React.useCallback(async () => {
+    const sourceText = ed.content
+    if (!sourceText.trim()) {
       message.warning(t("option:notesSearch.generateFlashcardsEmpty", {
         defaultValue: "Add note content before generating flashcards."
       }))
       return
     }
-    navigate(buildFlashcardsGenerateRoute({
-      text: sourceText,
-      sourceType: "note",
-      sourceId: ed.selectedId != null ? String(ed.selectedId) : undefined,
-      sourceTitle: ed.title.trim() || undefined,
-      conversationId: ed.backlinkConversationId || undefined,
-      messageId: ed.backlinkMessageId || undefined
-    }))
-  }, [ed, message, navigate, t])
+    try {
+      await transferFlashcards(() => ({
+        text: sourceText,
+        sourceType: "note",
+        sourceId: ed.selectedId != null ? String(ed.selectedId) : undefined,
+        sourceTitle: ed.title || undefined,
+        conversationId: ed.backlinkConversationId || undefined,
+        messageId: ed.backlinkMessageId || undefined
+      }), { navigate })
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) {
+        message.error(error instanceof Error ? error.message : "The transfer could not be opened. Your note is unchanged.")
+      }
+    }
+  }, [ed, message, navigate, t, transferFlashcards])
 
-  // Open linked conversation
+  // The source note and current authority own the entire handoff, including confirmation.
+  const linkedChatSourceKey = JSON.stringify([notesGraphAuthorityScope, ed.selectedId, ed.backlinkConversationId, ed.title, ed.content])
+  const linkedChatSourceRef = React.useRef(linkedChatSourceKey)
+  linkedChatSourceRef.current = linkedChatSourceKey
+  const linkedChatRequestRef = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => { linkedChatRequestRef.current?.abort() }, [linkedChatSourceKey])
+
   const openLinkedConversation = async () => {
-    const okToLeave = await ed.confirmDiscardIfDirty()
-    if (!okToLeave) return
-    if (!ed.backlinkConversationId) {
+    const conversationId = ed.backlinkConversationId
+    if (!conversationId) {
       message.warning(t("option:notesSearch.noLinkedConversation", { defaultValue: "No linked conversation to open." }))
       return
     }
+    const chatState = useStoreMessageOption.getState()
+    if (chatState.streaming || chatState.isProcessing || chatState.messages.some(hasUnsavedChatWork)) {
+      message.warning(t("option:notesSearch.finishChatBeforeOpening", { defaultValue: "Finish or save the current chat before opening the linked conversation." }))
+      return
+    }
+    linkedChatRequestRef.current?.abort()
+    const controller = new AbortController()
+    linkedChatRequestRef.current = controller
+    const sourceKey = linkedChatSourceKey
+    const isCurrent = () => !controller.signal.aborted && linkedChatRequestRef.current === controller && linkedChatSourceRef.current === sourceKey
+    const stopWatchingChat = useStoreMessageOption.subscribe((current, previous) => {
+      if (current.serverChatId !== previous.serverChatId || current.historyId !== previous.historyId ||
+        current.streaming || current.isProcessing ||
+        (current.messages !== previous.messages && current.messages.some(hasUnsavedChatWork))) controller.abort()
+    })
+    let snapshot: ServicePromptSnapshot | undefined
+    let stopWatchingAuthority: (() => void) | undefined
     try {
       ed.setOpeningLinkedChat(true)
-      await tldwClient.initialize().catch(() => null)
-      const chat = await tldwClient.getChat(ed.backlinkConversationId)
-      const resolvedLabel = toConversationLabel(chat)
-      if (resolvedLabel) {
-        setConversationLabelById((current) =>
-          current[ed.backlinkConversationId!] ? current : { ...current, [ed.backlinkConversationId!]: resolvedLabel }
-        )
-      }
-      setHistoryId(null)
-      setServerChatId(String(ed.backlinkConversationId))
-      setServerChatState((chat as any)?.state ?? (chat as any)?.conversation_state ?? "in-progress")
-      setServerChatTopic((chat as any)?.topic_label ?? null)
-      setServerChatClusterId((chat as any)?.cluster_id ?? null)
-      setServerChatSource((chat as any)?.source ?? null)
-      setServerChatExternalRef((chat as any)?.external_ref ?? null)
-      let assistantName = "Assistant"
-      if ((chat as any)?.character_id != null) {
-        try {
-          const c = await tldwClient.getCharacter((chat as any)?.character_id)
-          assistantName = c?.name || c?.title || c?.slug || assistantName
-        } catch {}
-      }
-      const messages = await tldwClient.listChatMessages(ed.backlinkConversationId, { include_deleted: "false" } as any)
-      const historyArr = messages.map((m) => ({ role: normalizeChatRole(m.role), content: m.content }))
-      const mappedMessages = messages.map((m) => {
-        const createdAt = Date.parse(m.created_at)
-        const normalizedRole = normalizeChatRole(m.role)
-        return {
-          createdAt: Number.isNaN(createdAt) ? undefined : createdAt,
-          isBot: normalizedRole === "assistant",
-          role: normalizedRole,
-          name: normalizedRole === "assistant" ? assistantName : normalizedRole === "system" ? "System" : "You",
-          message: m.content,
-          sources: [],
-          images: [],
-          serverMessageId: m.id,
-          serverMessageVersion: m.version
-        }
+      snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
+      snapshot.scopeInvalidatedSignal.addEventListener("abort", () => controller.abort(), { once: true })
+      if (!isCurrent() || snapshot.scopeSignal.aborted) return
+      stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)
+      const okToLeave = await ed.confirmDiscardIfDirty()
+      if (!okToLeave || !isCurrent()) return
+      const options = { signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
+      const chat = await tldwClient.getChat(conversationId, options)
+      if (!isCurrent()) return
+      const rows = await fetchAllServerChatMessages(params => tldwClient.listChatMessages(conversationId, { limit: params.limit, offset: params.offset, include_deleted: "false" }, options), { signal: snapshot.scopeSignal })
+      if (!isCurrent()) return
+      const identity = resolveServerChatAssistantIdentity(chat as unknown as Record<string, unknown>)
+      const assistantId = identity.assistantId || (identity.characterId == null ? null : String(identity.characterId))
+      const selection = identity.assistantKind && assistantId ? {
+        kind: identity.assistantKind, id: assistantId, name: identity.assistantKind === "persona" ? "Persona" : "Assistant",
+        metadata: { selectionMode: "tracked" }
+      } : null
+      const mappedMessages = mapServerChatMessagesToPlaygroundMessages({ serverMessages: rows, assistantName: selection?.name || "Assistant", characterId: identity.characterId })
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
+      await setSelectedAssistant(selection, { isCurrent })
+      if (!isCurrent()) return
+      stopWatchingChat()
+      usePlaygroundSessionStore.getState().saveSession({
+        historyId: null, serverChatId: String(chat.id), scopeKey: snapshot.scopeKey,
+        trackedAssistantSelection: selection, trackedAssistantKind: selection?.kind ?? null,
+        trackedAssistantId: selection?.id ?? null,
+        trackedCharacterId: identity.characterId == null ? null : String(identity.characterId),
+        trackedAssistantDisplayName: selection?.name ?? null, trackedAssistantAvatarUrl: null,
+        serverChatPersonaMemoryMode: identity.personaMemoryMode, queuedMessages: []
       })
-      setHistory(historyArr)
-      setMessages(mappedMessages)
-      updatePageTitle((chat as any)?.title || "")
-      navigate("/chat")
-      setTimeout(() => { try { window.dispatchEvent(new CustomEvent("tldw:focus-composer")) } catch {} }, 0)
-    } catch (e: any) {
-      message.error(e?.message || t("option:notesSearch.openConversationError", { defaultValue: "Failed to open linked conversation." }))
+      useStoreMessageOption.getState().setTemporaryChat(false)
+      selectServerChat(chat)
+      useStoreMessageOption.getState().setHistory(mappedMessages.map(row => ({ role: row.role, content: row.message })))
+      useStoreMessageOption.getState().setMessages(mappedMessages)
+      const resolvedLabel = toConversationLabel(chat)
+      if (resolvedLabel) setConversationLabelById(current => ({ ...current, [conversationId]: resolvedLabel }))
+    } catch (error) {
+      if (isCurrent()) message.error(error instanceof Error ? error.message : t("option:notesSearch.openConversationError", { defaultValue: "Failed to open linked conversation." }))
     } finally {
-      ed.setOpeningLinkedChat(false)
+      stopWatchingChat()
+      stopWatchingAuthority?.()
+      snapshot?.release()
+      if (linkedChatRequestRef.current === controller) {
+        linkedChatRequestRef.current = null
+        ed.setOpeningLinkedChat(false)
+      }
     }
   }
 
@@ -2092,18 +2143,37 @@ const NotesManagerPage: React.FC = () => {
 
   // Deep-link support
   const [pendingNoteId, setPendingNoteId] = React.useState<string | null>(null)
+  const [sourceRetry, setSourceRetry] = React.useState(0)
+  const [sourceResult, setSourceResult] = React.useState<{ id: string; scope: string | null; status: 'opened' | 'cancelled' | 'unavailable' } | null>(null)
+  const openSourceNoteRef = React.useRef(ed.openSourceNote)
+  openSourceNoteRef.current = ed.openSourceNote
 
   React.useEffect(() => {
+    if (sourceNoteId == null || !isOnline || !notesGraphAuthorityScope) return
+    const controller = new AbortController()
+    const id = sourceNoteId.trim()
+    setSourceResult(null)
+    void (async () => {
+      const status = await openSourceNoteRef.current(id, controller.signal)
+      if (!controller.signal.aborted) setSourceResult({ id: sourceNoteId, scope: notesGraphAuthorityScope, status })
+    })()
+    return () => controller.abort()
+  }, [sourceNoteId, isOnline, notesGraphAuthorityScope, sourceRetry])
+
+  const sourceUnavailable = sourceResult?.id === sourceNoteId && sourceResult.scope === notesGraphAuthorityScope && sourceResult.status === 'unavailable' && ed.selectedId == null
+
+  React.useEffect(() => {
+    if (sourceNoteId != null) return
     let cancelled = false
     void (async () => {
       const lastNoteId = await getSetting(LAST_NOTE_ID_SETTING)
       if (!cancelled && lastNoteId) setPendingNoteId(lastNoteId)
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [sourceNoteId])
 
   React.useEffect(() => {
-    if (!isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return
+    if (sourceNoteId != null || !isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return
     let cancelled = false
     ;(async () => {
       const opened = await ed.handleSelectNote(pendingNoteId)
@@ -2113,7 +2183,7 @@ const NotesManagerPage: React.FC = () => {
       void clearSetting(LAST_NOTE_ID_SETTING)
     })()
     return () => { cancelled = true }
-  }, [list.data, ed, isOnline, list.listMode, pendingNoteId])
+  }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
   // Sidebar layout
   React.useEffect(() => {
@@ -2408,7 +2478,14 @@ const NotesManagerPage: React.FC = () => {
           </div>
         </button>
       )}
-      {list.listMode === 'active' && list.listViewMode === 'graph' ? (
+      {sourceUnavailable ? (
+        <section className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center" aria-label="Linked note unavailable">
+          <div role="alert">This linked note is unavailable. It may have been deleted or may belong to another account.</div>
+          <p>Choose a note from the list, or retry opening this source.</p>
+          <Button onClick={() => setSourceRetry(value => value + 1)}>Retry source</Button>
+          <Button onClick={() => { setSourceResult(null); void handleNewNote() }}>Create note</Button>
+        </section>
+      ) : list.listMode === 'active' && list.listViewMode === 'graph' ? (
         <NotesGraphWorkspace
           authorityScope={notesGraphAuthorityScope}
           isOnline={isOnline}
@@ -2443,7 +2520,11 @@ const NotesManagerPage: React.FC = () => {
         noteRelations={noteRelations}
         noteNeighborsLoading={noteNeighborsLoading}
         noteNeighborsError={noteNeighborsError}
-        onRetryNeighbors={() => {
+        noteNeighborsUnavailable={noteNeighborsUnavailable}
+        noteNeighborsState={noteNeighborsState}
+        noteNeighborsRequestKey={noteNeighborsOwner}
+        onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}
+        onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}
         selectedNotePinned={ed.selectedNotePinned}

@@ -93,12 +93,13 @@ export function PrivacySecurityStep({
           </dt>
           <dd className="mt-1 text-sm font-medium text-text">
             {metadata?.bundled_single_user_auth_available
-              ? "Bundled auth available"
+              ? "Local single-user access eligible"
               : "Manual API key required"}
           </dd>
           <p className="mt-2 text-xs text-text-muted">
-            The backend decides whether the WebUI can use the bundled local
-            single-user key.
+            Local backend access does not confirm that this browser is signed in.
+            Automatic access also requires an enabled WebUI quickstart session.
+            Other deployments require your server&apos;s single-user API key.
           </p>
         </div>
         <div className="rounded-md border border-border bg-surface px-4 py-3">

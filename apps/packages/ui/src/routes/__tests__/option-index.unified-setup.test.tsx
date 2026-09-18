@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
-import { MemoryRouter } from "react-router-dom"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter, useLocation } from "react-router-dom"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -13,6 +13,9 @@ import {
   useQuickIngestSessionStore,
   type QuickIngestSessionRecord
 } from "@/store/quick-ingest-session"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { useMilestoneStore } from "@/store/milestones"
+import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 
 const routeMocks = vi.hoisted(() => ({
   firstRunState: {
@@ -38,12 +41,30 @@ const routeMocks = vi.hoisted(() => ({
   },
   getConfig: vi.fn(),
   listMedia: vi.fn(),
-  updateConfig: vi.fn()
+  updateConfig: vi.fn(),
+  setSetting: vi.fn()
 }))
+
+vi.mock("@/services/settings/registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/settings/registry")>()),
+  setSetting: routeMocks.setSetting
+}))
+
+function RouteProbe() {
+  return <span data-testid="route">{useLocation().pathname}</span>
+}
 
 vi.mock("~/components/Layouts/Layout", () => ({
   __esModule: true,
-  default: ({ children, hideHeader, hideSidebar }: any) => (
+  default: ({
+    children,
+    hideHeader,
+    hideSidebar
+  }: {
+    children: React.ReactNode
+    hideHeader?: boolean
+    hideSidebar?: boolean
+  }) => (
     <main
       data-hide-header={String(Boolean(hideHeader))}
       data-hide-sidebar={String(Boolean(hideSidebar))}
@@ -87,11 +108,13 @@ vi.mock("@/components/Option/CompanionHome", () => ({
 }))
 
 vi.mock("@/utils/quick-ingest-open", () => ({
-  isFirstSourceOpenDetail: (detail: any) =>
+  isFirstSourceOpenDetail: (
+    detail?: { source?: string; firstSource?: boolean } | null
+  ) =>
     Boolean(
       detail &&
-        (detail.source === "first_source_milestone" ||
-          detail.firstSource === true)
+      (detail.source === "first_source_milestone" ||
+        detail.firstSource === true)
     ),
   isFirstSourceQuickIngestKind: (value: unknown) =>
     value === "web_url" || value === "file_upload" || value === "paste_text",
@@ -152,6 +175,11 @@ const createCompletedFirstRunState = () => ({
   first_chat: { completed: true }
 })
 
+const ownerScope = buildChatSurfaceScopeKeyFromConfig({
+  serverUrl: "http://localhost:3000",
+  authMode: "single-user"
+})
+
 const seedQuickIngestSession = (
   overrides: Partial<QuickIngestSessionRecord>
 ) => {
@@ -173,6 +201,8 @@ const seedQuickIngestSession = (
 describe("OptionIndex unified setup resolver", () => {
   beforeEach(() => {
     window.localStorage.clear()
+    useMilestoneStore.getState().resetMilestones()
+    routeMocks.setSetting.mockReset().mockResolvedValue(undefined)
     routeMocks.requestQuickIngestOpen.mockReset()
     routeMocks.firstRunState.current = {
       status: "not_started",
@@ -226,9 +256,7 @@ describe("OptionIndex unified setup resolver", () => {
       </MemoryRouter>
     )
 
-    expect(
-      await screen.findByTestId("resume-setup-banner")
-    ).toBeInTheDocument()
+    expect(await screen.findByTestId("resume-setup-banner")).toBeInTheDocument()
     expect(screen.getByRole("main")).toHaveAttribute(
       "data-hide-header",
       "false"
@@ -252,7 +280,8 @@ describe("OptionIndex unified setup resolver", () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByRole("heading", { name: /add your first source/i })
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
     ).toBeInTheDocument()
     await waitFor(() => {
       expect(routeMocks.listMedia).toHaveBeenCalledWith({
@@ -264,6 +293,7 @@ describe("OptionIndex unified setup resolver", () => {
     expect(routeMocks.requestQuickIngestOpen).toHaveBeenCalledWith(
       {
         source: "first_source_milestone",
+        ownerScope,
         preferredPreset: "quick",
         firstSource: true,
         firstSourceKind: "web_url"
@@ -345,7 +375,9 @@ describe("OptionIndex unified setup resolver", () => {
       await screen.findByRole("heading", { name: /add your first source/i })
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: /ask a question about this source/i })
+      screen.queryByRole("button", {
+        name: /ask a question about this source/i
+      })
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /summarize this source/i })
@@ -379,7 +411,9 @@ describe("OptionIndex unified setup resolver", () => {
       await screen.findByRole("heading", { name: /add your first source/i })
     ).toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: /ask a question about this source/i })
+      screen.queryByRole("button", {
+        name: /ask a question about this source/i
+      })
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /summarize this source/i })
@@ -388,10 +422,18 @@ describe("OptionIndex unified setup resolver", () => {
 
   it("uses persisted first-source session result summary after reload", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
+    let finishSaving!: () => void
+    routeMocks.setSetting.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSaving = resolve
+        })
+    )
     seedQuickIngestSession({
       lifecycle: "completed",
       openDetail: {
         source: "first_source_milestone",
+        ownerScope,
         preferredPreset: "quick",
         firstSource: true,
         firstSourceKind: "file_upload"
@@ -404,50 +446,97 @@ describe("OptionIndex unified setup resolver", () => {
         successCount: 1,
         failedCount: 0,
         cancelledCount: 0,
-        firstMediaId: "persisted-42",
+        firstMediaId: "42",
         primarySourceLabel: "Saved PDF",
         errorMessage: null
       }
     })
-    const discussEvents: Array<CustomEvent> = []
-    const listener = (event: Event) => {
-      discussEvents.push(event as CustomEvent)
-    }
-    window.addEventListener("tldw:discuss-media", listener)
     const { default: OptionIndex } = await import("../option-index")
 
-    try {
-      render(
-        <MemoryRouter>
-          <OptionIndex />
-        </MemoryRouter>
-      )
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+        <RouteProbe />
+      </MemoryRouter>
+    )
 
-      expect(
-        await screen.findByRole("heading", { name: /add your first source/i })
-      ).toBeInTheDocument()
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
 
-      expect(screen.getByText(/starter questions/i)).toBeInTheDocument()
-      expect(
-        screen.getByRole("button", { name: /list the key claims/i })
-      ).toBeInTheDocument()
+    expect(screen.getByText(/starter questions/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /list the key claims/i })
+    ).toBeInTheDocument()
 
-      fireEvent.click(
-        await screen.findByRole("button", {
-          name: /summarize this source/i
-        })
-      )
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /summarize this source/i
+      })
+    )
 
-      expect(discussEvents).toHaveLength(1)
-      expect(discussEvents[0]?.detail).toEqual({
-        mediaId: "persisted-42",
+    expect(screen.getByTestId("route")).toHaveTextContent(/^\/$/)
+    finishSaving()
+    await waitFor(() =>
+      expect(screen.getByTestId("route")).toHaveTextContent("/chat")
+    )
+    expect(routeMocks.setSetting).toHaveBeenCalledWith(
+      DISCUSS_MEDIA_PROMPT_SETTING,
+      {
+        mediaId: "42",
+        ownerScope,
         title: "Saved PDF",
         mode: "rag_media",
         content: "Summarize this source."
-      })
-    } finally {
-      window.removeEventListener("tldw:discuss-media", listener)
-    }
+      }
+    )
+    expect(
+      useMilestoneStore.getState().scopedMilestones[ownerScope]?.first_chat
+    ).toBeUndefined()
+    expect(
+      useMilestoneStore.getState().scopedMilestones[ownerScope]?.first_ingest
+    ).toBeTypeOf("number")
+  })
+
+  it("does not navigate a saved Home source handoff after the account changes", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    let finishSaving!: () => void
+    routeMocks.setSetting.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSaving = resolve
+        })
+    )
+    seedQuickIngestSession({
+      lifecycle: "completed",
+      openDetail: { source: "first_source_milestone", ownerScope },
+      resultSummary: {
+        ...createEmptyQuickIngestSession().resultSummary,
+        status: "success",
+        firstMediaId: "42"
+      }
+    })
+    const { default: OptionIndex } = await import("../option-index")
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+        <RouteProbe />
+      </MemoryRouter>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: /summarize this source/i })
+    )
+    await act(async () => {
+      routeMocks.tldwConfig.current = {
+        ...routeMocks.tldwConfig.current,
+        serverUrl: "http://another-server:8000"
+      }
+      window.dispatchEvent(new Event("tldw:config-updated"))
+    })
+    await act(async () => {
+      finishSaving()
+    })
+    expect(screen.getByTestId("route")).toHaveTextContent(/^\/$/)
   })
 
   it("retries first-source ingest with the persisted source kind after reload", async () => {
@@ -456,6 +545,7 @@ describe("OptionIndex unified setup resolver", () => {
       lifecycle: "completed",
       openDetail: {
         source: "first_source_milestone",
+        ownerScope,
         preferredPreset: "quick",
         firstSource: true,
         firstSourceKind: "paste_text"
@@ -492,6 +582,173 @@ describe("OptionIndex unified setup resolver", () => {
     )
   })
 
+  it("keeps the source on Home with an actionable error if handoff cannot be saved", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    routeMocks.setSetting.mockRejectedValue(new Error("Storage unavailable"))
+    seedQuickIngestSession({
+      lifecycle: "completed",
+      openDetail: {
+        source: "first_source_milestone",
+        ownerScope,
+        firstSource: true
+      },
+      resultSummary: {
+        status: "success",
+        firstMediaId: "42",
+        primarySourceLabel: "Notes",
+        attemptedAt: 1,
+        completedAt: 2,
+        totalCount: 1,
+        successCount: 1,
+        failedCount: 0,
+        cancelledCount: 0,
+        errorMessage: null
+      }
+    })
+    const { default: OptionIndex } = await import("../option-index")
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+        <RouteProbe />
+      </MemoryRouter>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: /summarize this source/i })
+    )
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Please try again"
+    )
+    expect(screen.getByTestId("route")).toHaveTextContent(/^\/$/)
+  })
+
+  it.each([
+    {
+      lifecycle: "processing",
+      status: "success",
+      source: "first_source_milestone"
+    },
+    {
+      lifecycle: "completed",
+      status: "error",
+      source: "first_source_milestone"
+    },
+    { lifecycle: "completed", status: "success", source: "manual" }
+  ] as const)(
+    "does not credit ingestion from $source with $lifecycle/$status",
+    async ({ lifecycle, status, source }) => {
+      routeMocks.firstRunState.current = createCompletedFirstRunState()
+      seedQuickIngestSession({
+        lifecycle,
+        openDetail: { source, ownerScope },
+        resultSummary: {
+          status,
+          firstMediaId: "42",
+          primarySourceLabel: "Notes",
+          attemptedAt: 1,
+          completedAt: 2,
+          totalCount: 1,
+          successCount: status === "success" ? 1 : 0,
+          failedCount: status === "error" ? 1 : 0,
+          cancelledCount: 0,
+          errorMessage: null
+        }
+      })
+      const { default: OptionIndex } = await import("../option-index")
+      render(
+        <MemoryRouter>
+          <OptionIndex />
+        </MemoryRouter>
+      )
+      await screen.findByRole("heading", { name: /add your first source/i })
+      expect(
+        useMilestoneStore.getState().scopedMilestones[ownerScope]?.first_ingest
+      ).toBeUndefined()
+    }
+  )
+
+  it.each([undefined, "another-account"])(
+    "does not offer or credit a source with owner %s",
+    async (sourceOwner) => {
+      routeMocks.firstRunState.current = createCompletedFirstRunState()
+      seedQuickIngestSession({
+        lifecycle: "completed",
+        openDetail: {
+          source: "first_source_milestone",
+          ownerScope: sourceOwner
+        },
+        resultSummary: {
+          ...createEmptyQuickIngestSession().resultSummary,
+          status: "success",
+          firstMediaId: "42",
+          primarySourceLabel: "Private source"
+        }
+      })
+      const { default: OptionIndex } = await import("../option-index")
+      render(
+        <MemoryRouter>
+          <OptionIndex />
+        </MemoryRouter>
+      )
+      await screen.findByRole("heading", { name: /add your first source/i })
+      expect(screen.queryByText("Private source")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: /summarize this source/i })
+      ).not.toBeInTheDocument()
+      expect(
+        useMilestoneStore.getState().scopedMilestones[ownerScope]?.first_ingest
+      ).toBeUndefined()
+      expect(
+        useMilestoneStore.getState().completedMilestones.first_chat
+      ).toBeUndefined()
+    }
+  )
+
+  it("removes a source offer on identity switch and restores it on same-account reload", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    seedQuickIngestSession({
+      lifecycle: "completed",
+      openDetail: { source: "first_source_milestone", ownerScope },
+      resultSummary: {
+        ...createEmptyQuickIngestSession().resultSummary,
+        status: "success",
+        firstMediaId: "42",
+        primarySourceLabel: "Private source"
+      }
+    })
+    const { default: OptionIndex } = await import("../option-index")
+    const view = render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+    await screen.findByRole("button", { name: /summarize this source/i })
+    const originalConfig = routeMocks.tldwConfig.current
+    routeMocks.tldwConfig.current = {
+      ...originalConfig,
+      serverUrl: "http://another-server:8000"
+    }
+    await act(async () => {
+      window.dispatchEvent(new Event("tldw:config-updated"))
+    })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /summarize this source/i })
+      ).not.toBeInTheDocument()
+    )
+    expect(screen.queryByText("Private source")).not.toBeInTheDocument()
+    view.unmount()
+    routeMocks.tldwConfig.current = originalConfig
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+    await screen.findByRole("button", { name: /summarize this source/i })
+    expect(
+      useMilestoneStore.getState().scopedMilestones[ownerScope]?.first_ingest
+    ).toBeTypeOf("number")
+  })
+
   it("does not show first-source processing for an unrelated processing session", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
     seedQuickIngestSession({
@@ -509,7 +766,9 @@ describe("OptionIndex unified setup resolver", () => {
     expect(
       await screen.findByRole("heading", { name: /add your first source/i })
     ).toBeInTheDocument()
-    expect(screen.queryByText(/processing your source/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/processing your source/i)
+    ).not.toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: /add source/i })
     ).toBeInTheDocument()

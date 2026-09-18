@@ -778,7 +778,8 @@
     "collapseSidebar": "收合側邊欄",
     "titlePlaceholder": "標題",
     "keywordsEditorPlaceholder": "關鍵字（標籤）",
-    "tagsHelp": "關鍵字能幫助你透過左側的關鍵字篩選器找到這則筆記。"
+    "tagsHelp": "關鍵字能幫助你透過左側的關鍵字篩選器找到這則筆記。",
+    "offlineSaveUnavailable": "在確認您的帳戶和本機儲存空間之前，離線儲存無法使用。您的變更仍未儲存。"
   },
   "tts": {
     "playground": "TTS 遊樂場"

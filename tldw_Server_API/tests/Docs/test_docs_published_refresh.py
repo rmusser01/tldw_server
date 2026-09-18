@@ -36,7 +36,7 @@ def _copy_docs_source(destination: Path) -> Path:
     shutil.copytree(
         REPO_ROOT / "Docs",
         destination,
-        ignore=shutil.ignore_patterns("Published", "site"),
+        ignore=shutil.ignore_patterns("Published", "_site"),
     )
     return destination
 

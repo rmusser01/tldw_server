@@ -74,6 +74,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -83,6 +84,7 @@ export function usePlaygroundSessionPersistence() {
     temporaryChat,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatCharacterId,
     setServerChatAssistantKind,
     setServerChatAssistantId,
@@ -92,6 +94,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,
@@ -113,6 +116,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch: state.webSearch,
       compareMode: state.compareMode,
       compareSelectedModels: state.compareSelectedModels,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
       ragMediaIds: state.ragMediaIds,
       ragSearchMode: state.ragSearchMode,
       ragTopK: state.ragTopK,
@@ -122,6 +126,7 @@ export function usePlaygroundSessionPersistence() {
       temporaryChat: state.temporaryChat,
       setHistoryId: state.setHistoryId,
       setServerChatId: state.setServerChatId,
+      setServerChatTitle: state.setServerChatTitle,
       setServerChatCharacterId: state.setServerChatCharacterId,
       setServerChatAssistantKind: state.setServerChatAssistantKind,
       setServerChatAssistantId: state.setServerChatAssistantId,
@@ -131,6 +136,7 @@ export function usePlaygroundSessionPersistence() {
       setWebSearch: state.setWebSearch,
       setCompareMode: state.setCompareMode,
       setCompareSelectedModels: state.setCompareSelectedModels,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
       setRagMediaIds: state.setRagMediaIds,
       setRagSearchMode: state.setRagSearchMode,
       setRagTopK: state.setRagTopK,
@@ -146,6 +152,15 @@ export function usePlaygroundSessionPersistence() {
 
   const { setSystemPrompt } = useStoreChatModelSettings()
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  // Form handoffs can arrive before initial hydration starts or while its DB
+  // read is pending, even with identical values. Observe accepted intent, not
+  // value equality; this baseline is used only for the initial saved target.
+  const initialSourceSelectionRef = useRef({
+    revision: sessionStore.sourceSelectionRevision,
+    scopeKey: sessionStore.scopeKey,
+    historyId: sessionStore.historyId,
+    serverChatId: sessionStore.serverChatId
+  })
 
   const resolveCurrentScopeKey = useCallback(async (): Promise<string> => {
     const config = await tldwClient.getConfig().catch(() => null)
@@ -252,6 +267,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch,
       compareMode,
       compareSelectedModels,
+      fileRetrievalEnabled,
       ragMediaIds,
       ragSearchMode,
       ragTopK,
@@ -270,6 +286,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -531,6 +548,14 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    const initialSelection = initialSourceSelectionRef.current
+    const selectionBeforeRestore =
+      !initialRestoreSettledRef.current &&
+      initialSelection.scopeKey === sessionStore.scopeKey &&
+      initialSelection.historyId === sessionStore.historyId &&
+      initialSelection.serverChatId === sessionStore.serverChatId
+        ? initialSelection.revision
+        : usePlaygroundSessionStore.getState().sourceSelectionRevision
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
     const isCurrentRestore = () =>
@@ -566,6 +591,7 @@ export function usePlaygroundSessionPersistence() {
     isRestoringRef.current = true
 
     try {
+      let cachedServerTitle: string | null = null
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
@@ -574,6 +600,9 @@ export function usePlaygroundSessionPersistence() {
           // History was deleted, clear session
           clearSession()
           return "not-restored"
+        }
+        if (chatData.historyInfo.server_chat_id === savedServerChatId) {
+          cachedServerTitle = chatData.historyInfo.title || null
         }
 
         // Restore messages and history
@@ -603,6 +632,25 @@ export function usePlaygroundSessionPersistence() {
           setMessages([])
         }
         setServerChatId(savedServerChatId)
+        setServerChatTitle(cachedServerTitle)
+        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
+          if (savedTrackedAssistantKind === "character") {
+            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
+            setServerChatAssistantKind("character")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(null)
+          } else {
+            setServerChatCharacterId(null)
+            setServerChatAssistantKind("persona")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(
+              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
+            )
+          }
+          // Cached assistant identity omits canonical title/version metadata.
+          // Publish it before awaiting storage so a server refresh stays authoritative.
+          setServerChatMetaLoaded(false)
+        }
         if (
           savedTrackedAssistantSelection &&
           getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
@@ -630,24 +678,17 @@ export function usePlaygroundSessionPersistence() {
             if (!isCurrentRestore()) return "cancelled"
           }
         }
-        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
-          if (savedTrackedAssistantKind === "character") {
-            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
-            setServerChatAssistantKind("character")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(null)
-          } else {
-            setServerChatCharacterId(null)
-            setServerChatAssistantKind("persona")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(
-              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
-            )
-          }
-          setServerChatMetaLoaded(true)
+      }
+      const sourceSelectionChanged =
+        usePlaygroundSessionStore.getState().sourceSelectionRevision !==
+        selectionBeforeRestore
+      if (!sourceSelectionChanged) {
+        setChatMode(sessionStore.chatMode)
+        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
+        if (sessionStore.ragMediaIds) {
+          setRagMediaIds(sessionStore.ragMediaIds)
         }
       }
-      setChatMode(sessionStore.chatMode)
       setWebSearch(sessionStore.webSearch)
       setCompareMode(sessionStore.compareMode)
       if (sessionStore.compareSelectedModels.length > 0) {
@@ -655,9 +696,6 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore RAG settings
-      if (sessionStore.ragMediaIds) {
-        setRagMediaIds(sessionStore.ragMediaIds)
-      }
       setRagSearchMode(sessionStore.ragSearchMode)
       if (sessionStore.ragTopK !== null) {
         setRagTopK(sessionStore.ragTopK)
@@ -682,6 +720,7 @@ export function usePlaygroundSessionPersistence() {
     resolveCurrentScopeKey,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,
@@ -696,6 +735,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,

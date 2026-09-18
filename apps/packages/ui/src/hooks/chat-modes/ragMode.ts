@@ -340,7 +340,8 @@ const buildSelectedSourceGroundingResponse = (
           ? error
           : undefined
   },
-  saveToDb: false
+  saveToDb: false,
+  skipHistoryAppend: true
 })
 
 const buildRagRewritePrompt = (ctx: ChatModeContext<RagModeParams>) => {

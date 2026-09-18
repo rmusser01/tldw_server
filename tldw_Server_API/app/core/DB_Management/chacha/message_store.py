@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+MAX_CHAT_ATTACHMENT_READ_BYTES = 32 * 1024 * 1024
+
 class MessageStore:
     """Focused persistence seam for message CRUD operations."""
 
@@ -1033,7 +1035,9 @@ class MessageStore:
     # ------------------------------------------------------------------
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0,
-                                      order_by_timestamp: str = "ASC", include_deleted: bool = False) -> list[dict[str, Any]]:
+                                      order_by_timestamp: str = "ASC", include_deleted: bool = False, *,
+                                      strict_images: bool = False,
+                                      image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES) -> list[dict[str, Any]]:
         """
         Lists messages for a specific conversation.
         Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
@@ -1059,6 +1063,64 @@ class MessageStore:
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
+            if strict_images:
+                # A single statement gives SQLite and PostgreSQL one snapshot.
+                # Over-budget pages expose their size but no attachment blobs.
+                strict_query = """
+                    WITH page AS (
+                        SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content,
+                               m.timestamp, m.ranking, m.last_modified, m.version, m.client_id, m.deleted,
+                               LENGTH(m.image_data) AS primary_bytes
+                        FROM messages m JOIN conversations c ON m.conversation_id = c.id
+                        WHERE m.conversation_id = ? {delete_clause} AND c.deleted = FALSE
+                        ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
+                        LIMIT ? OFFSET ?
+                    ), sizes AS (
+                        SELECT COALESCE(SUM(CASE WHEN EXISTS (
+                            SELECT 1 FROM message_images mi WHERE mi.message_id = page.id
+                        ) THEN (SELECT COALESCE(SUM(LENGTH(mi.image_data)), 0)
+                                FROM message_images mi WHERE mi.message_id = page.id)
+                        ELSE COALESCE(page.primary_bytes, 0) END), 0) AS image_bytes FROM page
+                    ), bounds AS (SELECT ? AS max_bytes)
+                    SELECT page.*,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes AND mi.position IS NULL
+                                THEN m.image_data ELSE NULL END AS image_data,
+                           m.image_mime_type,
+                           sizes.image_bytes AS page_image_bytes,
+                           mi.position AS image_position,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes
+                                THEN mi.image_data ELSE NULL END AS ordered_image_data,
+                           mi.image_mime_type AS ordered_image_mime_type
+                    FROM page JOIN messages m ON m.id = page.id CROSS JOIN sizes CROSS JOIN bounds
+                    LEFT JOIN message_images mi ON mi.message_id = page.id AND sizes.image_bytes <= bounds.max_bytes
+                    ORDER BY page.timestamp {order_direction}, page.last_modified {order_direction},
+                             page.id {order_direction}, mi.position ASC
+                """.format_map(locals())  # nosec B608
+                cursor = self._db.execute_query(strict_query, (conversation_id, limit, offset, image_byte_limit))
+                columns = [column[0] for column in cursor.description] if cursor.description else []
+                by_id: dict[str, dict[str, Any]] = {}
+                for row in cursor.fetchall():
+                    record = dict(row) if isinstance(row, dict) else dict(zip(columns, row))
+                    if record.pop("page_image_bytes") > image_byte_limit:
+                        raise InputError("Chat attachment page exceeds the image read limit")
+                    position = record.pop("image_position")
+                    image_data = record.pop("ordered_image_data")
+                    image_mime = record.pop("ordered_image_mime_type")
+                    record.pop("primary_bytes")
+                    if isinstance(record.get("image_data"), memoryview):
+                        record["image_data"] = record["image_data"].tobytes()
+                    message = by_id.setdefault(record["id"], {**record, "images": []})
+                    if position is not None:
+                        if position != len(message["images"]):
+                            raise CharactersRAGDBError("Saved chat attachment positions are incomplete or invalid")
+                        if isinstance(image_data, memoryview):
+                            image_data = image_data.tobytes()
+                        message["images"].append({"message_id": record["id"], "position": position,
+                                                  "image_data": image_data, "image_mime_type": image_mime})
+                        if position == 0:
+                            message["image_data"] = image_data
+                            message["image_mime_type"] = image_mime
+                return list(by_id.values())
             cursor = self._db.execute_query(query, (conversation_id, limit, offset))
             raw_rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []

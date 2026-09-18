@@ -63,6 +63,7 @@ describe("usePlaygroundSessionPersistence", () => {
       messages: [],
       historyId: null,
       serverChatId: null,
+      serverChatTitle: null,
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
       serverChatCharacterId: null,
@@ -72,6 +73,7 @@ describe("usePlaygroundSessionPersistence", () => {
       webSearch: false,
       compareMode: false,
       compareSelectedModels: [],
+      fileRetrievalEnabled: false,
       ragMediaIds: null,
       ragSearchMode: "hybrid",
       ragTopK: null,
@@ -145,7 +147,7 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(useStoreMessageOption.getState().serverChatCharacterId).toBe(
         "char-42"
       )
-      expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true)
+      expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
       expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
         {
           kind: "character",
@@ -164,10 +166,14 @@ describe("usePlaygroundSessionPersistence", () => {
     expect(mocks.getFullChatData).not.toHaveBeenCalled()
   })
 
-  it("restores a persisted server-backed chat alongside local history without dropping the server chat id", async () => {
+  it.each([
+    { cachedServerId: "persona-chat-7", expectedTitle: "Tracked persona chat" },
+    { cachedServerId: "different-chat", expectedTitle: null }
+  ])("restores matching cached title while leaving server metadata pending ($cachedServerId)", async ({ cachedServerId, expectedTitle }) => {
     mocks.getFullChatData.mockResolvedValue({
       historyInfo: {
-        title: "Tracked persona chat"
+        title: "Tracked persona chat",
+        server_chat_id: cachedServerId
       },
       messages: [
         {
@@ -228,6 +234,60 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(useStoreMessageOption.getState().serverChatPersonaMemoryMode).toBe(
         "read_only"
       )
+      expect(useStoreMessageOption.getState().serverChatTitle).toBe(expectedTitle)
+      expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+    })
+  })
+
+  it("preserves canonical metadata loaded while cached assistant persistence is pending", async () => {
+    let releaseAssistantWrite: () => void = () => undefined
+    mocks.setSelectedAssistant.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseAssistantWrite = resolve
+      })
+    )
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId: null,
+      serverChatId: "restored-chat",
+      trackedAssistantSelection: {
+        kind: "character",
+        id: "5",
+        name: "Cached character",
+        metadata: { selectionMode: "tracked" }
+      },
+      trackedAssistantKind: "character",
+      trackedAssistantId: "5",
+      trackedCharacterId: "5",
+      scopeKey: "global",
+      queuedMessages: []
+    })
+    const { result } = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(result.current.sessionScopeReady).toBe(true))
+    let restoring: ReturnType<typeof result.current.restoreSession> | undefined
+    act(() => {
+      restoring = result.current.restoreSession()
+    })
+    await waitFor(() => expect(mocks.setSelectedAssistant).toHaveBeenCalled())
+
+    // A canonical server response may finish before the cached storage write.
+    await act(async () => {
+      const state = useStoreMessageOption.getState()
+      state.setServerChatTitle("Canonical title")
+      state.setServerChatCharacterId("6")
+      state.setServerChatAssistantId("6")
+      state.setServerChatMetaLoaded(true)
+      releaseAssistantWrite()
+      await expect(restoring).resolves.toBe("restored")
+    })
+    const state = useStoreMessageOption.getState()
+    expect({
+      title: state.serverChatTitle,
+      assistantId: state.serverChatAssistantId,
+      metaLoaded: state.serverChatMetaLoaded
+    }).toEqual({
+      title: "Canonical title",
+      assistantId: "6",
+      metaLoaded: true
     })
   })
 
@@ -247,6 +307,9 @@ describe("usePlaygroundSessionPersistence", () => {
       historyId: "persisted-history",
       serverChatId: "persisted-chat",
       scopeKey: "global",
+      chatMode: "rag",
+      ragMediaIds: [42],
+      fileRetrievalEnabled: true,
       queuedMessages: []
     })
 
@@ -296,6 +359,9 @@ describe("usePlaygroundSessionPersistence", () => {
 
     expect(useStoreMessageOption.getState().serverChatId).toBe("selected-chat")
     expect(useStoreMessageOption.getState().historyId).toBeNull()
+    expect(useStoreMessageOption.getState().serverChatTitle).toBe("Selected from Chats")
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
   })
 
   it("reports cancellation when a server chat is selected during assistant persistence", async () => {
@@ -359,6 +425,7 @@ describe("usePlaygroundSessionPersistence", () => {
 
     await expect(restorePromise).resolves.toBe("cancelled")
     expect(useStoreMessageOption.getState().serverChatId).toBe("explicit-chat")
+    expect(useStoreMessageOption.getState().serverChatTitle).toBe("Explicit chat")
   })
 
   it("keeps the richer tracked persona snapshot when autosave only has generic metadata", async () => {

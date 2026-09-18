@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { App, message } from "antd"
 import ServerAdminPage from "../ServerAdminPage"
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
   getSystemStats: vi.fn(),
   listAdminUsers: vi.fn(),
+  createAdminUser: vi.fn(),
   listAdminRoles: vi.fn(),
   getMediaIngestionBudgetDiagnostics: vi.fn(),
   updateAdminUser: vi.fn(),
@@ -120,6 +122,7 @@ describe("ServerAdminPage design-system states", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    apiMock.getConfig.mockReset()
     mockMatchMedia()
     resolveBaseAdminCalls()
     vi.spyOn(window, "open").mockImplementation(() => null)
@@ -127,6 +130,67 @@ describe("ServerAdminPage design-system states", () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it("loads multi-user creation controls under Strict Mode", async () => {
+    apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    render(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    expect(await screen.findByRole("button", { name: "Create user" })).toBeVisible()
+    expect(apiMock.getSystemStats).toHaveBeenCalledOnce()
+  })
+
+  it("does not start dashboard requests when a config lookup resolves after unmount", async () => {
+    let resolveConfig!: (value: unknown) => void
+    apiMock.getConfig.mockImplementation(() => new Promise((resolve) => { resolveConfig = resolve }))
+    const view = render(<ServerAdminPage />)
+    view.unmount()
+    const callsBeforeResolution = apiMock.getSystemStats.mock.calls.length
+    await act(async () => {
+      resolveConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    })
+    expect(apiMock.getSystemStats).toHaveBeenCalledTimes(callsBeforeResolution)
+  })
+
+  it("creates an ordinary user from the admin modal and refreshes the list", async () => {
+    let resolveConfig!: (value: { serverUrl: string; authMode: "multi-user" }) => void
+    apiMock.getConfig.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveConfig = resolve })
+    )
+    apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
+    const staticSuccess = vi.spyOn(message, "success")
+    render(<App><ServerAdminPage /></App>)
+    await waitFor(() => expect(apiMock.getConfig).toHaveBeenCalledOnce())
+    await act(async () => {
+      resolveConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    })
+    fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
+    // Test setup supplies identical useId values; find the sole open dialog.
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.change(within(dialog).getByLabelText("Username"), { target: { value: "alice" } })
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "alice@example.com" } })
+    fireEvent.change(within(dialog).getByLabelText("Password"), { target: { value: "A-strong-password-21!" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create user" }))
+    await waitFor(() => expect(apiMock.createAdminUser).toHaveBeenCalledWith({
+      username: "alice", email: "alice@example.com", password: "A-strong-password-21!", role: "user"
+    }))
+    await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText("User created")).toBeVisible()
+    expect(staticSuccess).not.toHaveBeenCalled()
+  })
+
+  it("keeps create-user errors inside the modal without losing the form", async () => {
+    apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    apiMock.createAdminUser.mockRejectedValue(new Error("Username already exists"))
+    render(<ServerAdminPage />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.change(within(dialog).getByLabelText("Username"), { target: { value: "alice" } })
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "alice@example.com" } })
+    fireEvent.change(within(dialog).getByLabelText("Password"), { target: { value: "A-strong-password-21!" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create user" }))
+    expect(await within(dialog).findByText("Username already exists")).toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Username")).toHaveValue("alice")
+    expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(1)
   })
 
   it("uses PermissionNotice with an actionable recovery path for forbidden admin APIs", async () => {

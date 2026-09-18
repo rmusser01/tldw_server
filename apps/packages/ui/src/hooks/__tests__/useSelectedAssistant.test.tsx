@@ -318,6 +318,23 @@ describe("useSelectedAssistant", () => {
     })
   })
 
+  it("does not let an already stale hydration cancel a queued explicit selection", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+    await act(async () => {
+      await result.current[1]({ kind: "character", id: "4", name: "Cedar" })
+    })
+    await act(async () => {
+      const selection = result.current[1]({ kind: "character", id: "5", name: "Robot" })
+      const staleHydration = result.current[1](
+        { kind: "character", id: "4", name: "Cedar" },
+        { isCurrent: () => false }
+      )
+      await Promise.all([selection, staleHydration])
+    })
+    expect(result.current[0]).toMatchObject({ id: "5", name: "Robot" })
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({ id: "5" })
+  })
+
   it("updates the legacy character mirror before broadcasting character selections", async () => {
     const first = renderHook(() => useSelectedAssistant())
     const second = renderHook(() => useSelectedAssistant())

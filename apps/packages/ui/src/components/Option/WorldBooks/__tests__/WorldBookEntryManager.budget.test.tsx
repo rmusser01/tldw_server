@@ -1,9 +1,15 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { Form } from "antd"
 import { WorldBookEntryManager } from "../WorldBookEntryManager"
+
+type WorldBookEntriesResponse = {
+  entries: unknown[]
+  total?: number
+  world_book_id?: number
+}
 
 const {
   useQueryMock,
@@ -28,7 +34,7 @@ const {
   confirmDangerMock: vi.fn(async () => true),
   tldwClientMock: {
     initialize: vi.fn(async () => undefined),
-    listWorldBookEntries: vi.fn(async () => ({ entries: [] })),
+    listWorldBookEntries: vi.fn(async (): Promise<WorldBookEntriesResponse> => ({ entries: [] })),
     addWorldBookEntry: vi.fn(async () => ({})),
     updateWorldBookEntry: vi.fn(async () => ({})),
     deleteWorldBookEntry: vi.fn(async () => ({})),
@@ -227,5 +233,52 @@ describe("WorldBookEntryManager budget feedback", () => {
 
     const addButton = screen.getByRole("button", { name: /Add Entry/i })
     expect(addButton).not.toBeDisabled()
+  }, 15000)
+
+  it("uses a canonical API id for entry edit, delete, and selected bulk actions", async () => {
+    const user = userEvent.setup()
+    const { entry_id: _legacyEntryId, ...canonicalEntry } = sampleEntries[0]
+    tldwClientMock.listWorldBookEntries.mockResolvedValue({
+      entries: [{ ...canonicalEntry, id: 91, world_book_id: 1 }],
+      total: 1,
+      world_book_id: 1
+    })
+    useQueryMock.mockImplementation((options: { queryFn: () => Promise<WorldBookEntriesResponse> }) => {
+      const [data, setData] = React.useState<WorldBookEntriesResponse>()
+      const queryFnRef = React.useRef(options.queryFn)
+      React.useEffect(() => {
+        void queryFnRef.current().then(setData)
+      }, [])
+      return makeUseQueryResult({ data, status: data ? "success" : "pending" })
+    })
+
+    render(<TestWrapper tokenBudget={500} />)
+
+    const editButton = await screen.findByRole("button", { name: "Edit entry" })
+    expect(tldwClientMock.listWorldBookEntries).toHaveBeenCalledWith(1, false)
+    await user.click(editButton)
+    await user.click(screen.getByRole("button", { name: "Save Changes" }))
+    await waitFor(() => {
+      expect(tldwClientMock.updateWorldBookEntry).toHaveBeenCalledWith(
+        91,
+        expect.objectContaining({ content: sampleEntries[0].content })
+      )
+    })
+
+    await user.click(screen.getByRole("button", { name: "Delete entry" }))
+    await waitFor(() => {
+      expect(tldwClientMock.deleteWorldBookEntry).toHaveBeenCalledWith(91)
+    })
+
+    const rowCheckbox = screen.getAllByRole("checkbox").at(-1)
+    expect(rowCheckbox).toBeDefined()
+    await user.click(rowCheckbox!)
+    await user.click(screen.getByRole("button", { name: /^Delete$/ }))
+    await waitFor(() => {
+      expect(tldwClientMock.bulkWorldBookEntries).toHaveBeenCalledWith({
+        entry_ids: [91],
+        operation: "delete"
+      })
+    })
   }, 15000)
 })

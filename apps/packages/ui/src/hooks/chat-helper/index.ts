@@ -3,6 +3,7 @@ import {
   saveHistory,
   saveMessage,
   updateMessage,
+  acknowledgeSavedUserMessage,
   addFileToSession,
   updateLastUsedModel as setLastUsedChatModel,
   updateLastUsedPrompt as setLastUsedChatSystemPrompt,
@@ -88,7 +89,10 @@ export const saveMessageOnError = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -126,6 +130,9 @@ export const saveMessageOnError = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
+  retryFailedTurn?: boolean
+  assistantServerMessageId?: string
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
@@ -205,9 +212,14 @@ export const saveMessageOnError = async ({
           !historyId || !isAbort || !isContinue
         )
 
+        if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
+          await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
+        }
+
         if (shouldSaveUser) {
           await saveMessage({
             id: userMessageId,
+            serverMessageId: userServerMessageId,
             history_id: targetHistoryId,
             name: selectedModel,
             role: "user",
@@ -231,6 +243,7 @@ export const saveMessageOnError = async ({
         } else {
           await saveMessage({
             id: assistantMessageId,
+            serverMessageId: assistantServerMessageId,
             history_id: targetHistoryId,
             name: selectedModel,
             role: "assistant",
@@ -269,6 +282,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating && !isContinue) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -293,6 +307,7 @@ export const saveMessageOnError = async ({
       } else {
         await saveMessage({
           id: assistantMessageId,
+          serverMessageId: assistantServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "assistant",
@@ -319,6 +334,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -338,6 +354,7 @@ export const saveMessageOnError = async ({
 
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",
@@ -369,6 +386,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -388,6 +406,7 @@ export const saveMessageOnError = async ({
       // Save assistant error message
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: historyId,
         name: selectedModel,
         role: "assistant",
@@ -415,6 +434,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -433,6 +453,7 @@ export const saveMessageOnError = async ({
       }
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",
@@ -473,7 +494,10 @@ export const saveMessageOnSuccess = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -510,7 +534,10 @@ export const saveMessageOnSuccess = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
+  retryFailedTurn?: boolean
   assistantMessageId?: string
+  assistantServerMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
@@ -551,9 +578,14 @@ export const saveMessageOnSuccess = async ({
         await saveHistory(title!, false, message_source)
       ).id
 
+      if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
+        await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)
+      }
+
       if (!historyId || (!isRegenerate && !isContinue)) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: targetHistoryId,
           name: selectedModel,
           role: "user",
@@ -577,6 +609,7 @@ export const saveMessageOnSuccess = async ({
       } else {
         await saveMessage({
           id: assistantMessageId,
+          serverMessageId: assistantServerMessageId,
           history_id: targetHistoryId,
           name: selectedModel,
           role: "assistant",

@@ -5,6 +5,8 @@ import { SourceList } from "../SourceList"
 const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
 const trackMetricMock = vi.fn()
+const isAuthorityCurrent = () => true
+const qaClient = { submitSourceFeedback: (...args: unknown[]) => submitExplicitFeedbackMock(...args) }
 
 const state = {
   results: [
@@ -33,6 +35,9 @@ const state = {
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    storageScopeKey: "test-owner",
+    isAuthorityCurrent,
+    client: qaClient,
     results: state.results,
     citations: state.citations,
     focusedSourceIndex: state.focusedSourceIndex,
