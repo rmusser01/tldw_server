@@ -12,13 +12,17 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 
 ## Mandatory entry gate for another full UAT
 
+**Current gate: HELD (2026-09-18 UTC).** The [running tracker](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md) is authoritative:277 findings,276 verified and UAT261 still open. Its bounded two-call diagnosis retained one nonexact and one exact TestBot final with matching captured input projections; no actionable application defect is established. The owner decision about continuing with261 explicitly open is pending. Do not treat the historical preparation release below as a current release or a passed model-output criterion. The next fresh SQLite/PostgreSQL single-user/multi-user48-outcome matrix has not started. Current repair details are in [the follow-up plan](IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md).
+
+The checkpoints below are historical and do not override that current gate.
+
 Latest character-reviewed ledger:182verified/15targeted acceptance pending/0unresolved implementations across197. Commitsdf0fbbd73a/48f89447fc integrate reviewed character/schema/search and test-only183 fixes; independent247pass0skip. Bob account-switch read500 on oldPID63046 blocks151 acceptance until reviewed runtime reload. Restricted-role harness independent review remains pending; Stage4 not started.
 
 Latest197-worker-reviewed ledger:181 verified/12 awaitingnative/4 unresolved183,193,194,195.196 nativeaccepted;181HTTP+worker and197count repairs committed07e0abf1c4/11c9b0a933/053ff74116.183 additionalhistorical21fixture andcharacter/schema/search independentreview remain. No full matrix started.
 
 Latest197-finding checkpoint2026-09-17:181 verified,10 awaiting native acceptance,6 unresolved181/193–197. Native166/172/167/174/175 accepted; HTTP checkout ownership committed07e0abf1c4 with independent77/0skip, author164/0skip. Remaining worker lifetime, character ownership/name migration, exemplar parameter typing, duplicate copy and StudyPack count fixes stay in Stage3. Harness125 is reopened for actual direct non-bypass PostgreSQL runtime-role cold-init proof. Stage4 remains Not Started; no final matrix profile has been launched. See the current tracker/197-row ledger rather than historical counts below.
 
-**Gate: RELEASED FOR FRESH MATRIX PREPARATION (2026-09-17).** All230 known findings have reviewed repairs and required bounded acceptance. Fresh archives, environment preflights and actual48-row execution remain. Earlier blocked checkpoints below are historical.
+**Historical preparation release (2026-09-17; superseded).** At that checkpoint, all230 then-known findings had reviewed repairs and required bounded acceptance. Subsequent findings and their acceptance are recorded in the running tracker and follow-up plan. This checkpoint does not release the current matrix.
 
 - At23:04UTC,172 findings reconcile to163verified/7awaiting/2unresolved171/172.169 natural PostgreSQL scheduler and170 native layout/picker acceptance pass.166–168 are reviewed and committed but require native acceptance alongside024/031/137/151. Actual restart exposed171 retained Notes read transactions; preserved-draft Retry exposed172 failed deck-query recovery. Repair both before another full matrix; no full UAT restart.
 

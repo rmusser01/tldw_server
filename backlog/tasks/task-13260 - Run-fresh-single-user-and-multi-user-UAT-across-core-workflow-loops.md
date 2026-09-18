@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-18 05:25'
+updated_date: '2026-09-18 05:27'
 labels:
   - uat
   - testing
@@ -216,6 +216,8 @@ Completed all48frozenmatrixoutcomes; finalPGmulti packet186payloads pending inde
 Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads / 1,524,044 bytes, all 83 distinct row references and 15 frozen harness hashes verified. Manifest 1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593; review 4cab6a7cc70de0a2c63e0f2192bbed62f3e72b057c952f14fbbcad5ef73e9254; 191-file auxiliary index d36de0b89bb1c60c79ad501d9f37f9bab2e683c31de7c183def0bc1db4d437f6. All 48 outcomes accounted for with failures; 16 new findings 231-246 remain open. Owned apps/browser stopped; official PostgreSQL holders/data retained. Evidence-only commit: no product source changes, Bandit not applicable. Repairs follow Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no new full UAT before reviewed repairs/dispositions and original native acceptance.
 
 2026-09-18 targeted checkpoint:277 findings,276verified and one open261 model-output failure. Original PostgreSQL multi-user catalogue containment276 and truthful deletion wording277 accepted on committedc137 after26checks54inputs and89rootretention comparisons; tasks217/218Done. Packet14b1ccd4f63717037542fb83839bd7f327dd47ca72cf74ff8c752d5dd325088d. Original single-user PostgreSQL261 bounded diagnosis captured one nonexact and one exact final with matching current message/allowlisted-settings fingerprints; both persisted,25checks56inputs pass, ordinarybackend restored. No actionable application defect established; original exact criterion and failure remain. Owner asked whether to continue fullUAT with261 open or retain the full-run gate. No answer assumed; next fresh SQLite/PostgreSQL single/multi48-outcome matrix has not started.
+
+2026-09-18 continuation reconciliation: previous turn completed276/277 acceptance and commits. Current tracked worktree clean at8f3b861a82;203 remains InProgress, native/review agents terminal. The original cycle5 plan still displayed the older230-finding preparation release, so its current gate is now explicitly HELD and the release labelled historical/superseded, pointing to the authoritative277-finding tracker/follow-up plan. Full48-outcome scope unchanged; owner261 run-gate decision remains pending. No new inference or full-matrix execution.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
