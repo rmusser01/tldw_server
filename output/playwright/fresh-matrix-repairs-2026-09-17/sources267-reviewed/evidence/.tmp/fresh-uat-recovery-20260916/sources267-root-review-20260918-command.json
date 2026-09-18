@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-18T02:19:28.282Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/Ingestion_Sources/test_service_postgres.py",
+    "tldw_Server_API/tests/Ingestion_Sources/test_service_sqlite_state.py",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "fixtureDatabase": "tldw_uat_8a1f4cc6a624",
+  "fixtureProvisioning": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}

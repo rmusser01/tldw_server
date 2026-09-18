@@ -1,0 +1,70 @@
+{
+  "at": "2026-09-18T02:22:31.591Z",
+  "task": "TASK13260.209",
+  "finding": 267,
+  "verdict": "CLEAR reviewed implementation; native acceptance pending",
+  "checks": {
+    "officialPostgresAndSQLite": {
+      "passed": 9,
+      "skipped": 0,
+      "exitCode": 0
+    },
+    "workerApiCleanup": {
+      "passed": 29,
+      "exitCode": 0
+    },
+    "productionBanditFindings": 0,
+    "testBandit": {
+      "count": 55,
+      "type": "B101 assertions"
+    },
+    "frozenSourceHashesMatch": true,
+    "rawConnectionGuardPreserved": true,
+    "placeholderConversionReusesExistingImplementation": true,
+    "sixTableSchemaIntentPreserved": true,
+    "ownerPredicatesPreserved": true,
+    "transactionOwnershipPreserved": true
+  },
+  "inputs": [
+    {
+      "path": "tldw_Server_API/app/core/Ingestion_Sources/service.py",
+      "sha256": "ccdb74c7ec45e0bba7a76b08cb9c832b55ce337c0ba67599b364067a709b5a82",
+      "bytes": 47091
+    },
+    {
+      "path": "tldw_Server_API/tests/Ingestion_Sources/test_service_sqlite_state.py",
+      "sha256": "6ea6ff66d7ca80430e27523733647b68a2b6c68e8c99b555caa77c976d1be34d",
+      "bytes": 14349
+    },
+    {
+      "path": "tldw_Server_API/tests/Ingestion_Sources/test_service_postgres.py",
+      "sha256": "cdfe3767953ca183931455a6eede56659dceea08ce8c7a54906e44e546827b42",
+      "bytes": 8241
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/sources267-root-review-20260918-command.json",
+      "sha256": "0f95d4f790506822902cda9cf4278a7b0edabfdf4c3697c68e2b829f03c47055",
+      "bytes": 502
+    },
+    {
+      "path": ".tmp/fresh-uat-recovery-20260916/sources267-root-review-20260918.redacted.log",
+      "sha256": "12134ab45babb1adb4226ddccf18634ae1aa4c69eed63551efc8a723180cfe8c",
+      "bytes": 3383
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/sources267/root-adjacent.log",
+      "sha256": "822ac4bd2e37de033f92d6972af949dc6d089f40864fbeba07c162a1f5ed96a7",
+      "bytes": 6448
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/sources267/root-bandit.json",
+      "sha256": "b72cba2b3e772dba44218e48b5869e846a362b3544cf46d346518e5d80b063ee",
+      "bytes": 50138
+    },
+    {
+      "path": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-267-report.md",
+      "sha256": "76fbe3a52dbbd24a921b2a7b8c5e93d29178b53cd29d9f6a6bf39df43188bdd4",
+      "bytes": 4690
+    }
+  ]
+}
