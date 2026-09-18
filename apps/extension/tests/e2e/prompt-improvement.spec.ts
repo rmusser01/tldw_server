@@ -1136,6 +1136,11 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await expect(candidate).toHaveValue(
         "Improved user request for {{topic}}."
       )
+      await expect(
+        dialog.getByRole("group", { name: "Edit", exact: true }).getByRole("textbox", {
+          name: "Improved prompt candidate"
+        })
+      ).toHaveValue("Improved user request for {{topic}}.")
 
       const readLayout = () =>
         dialog.evaluate((element) => {

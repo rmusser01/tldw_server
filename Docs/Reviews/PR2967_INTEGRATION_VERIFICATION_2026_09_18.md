@@ -17,12 +17,15 @@ local archive. This summary and the running tracker retain reviewable outcomes.
 | --- | --- | --- |
 | Chat rejected Retry | 110 tests passed, zero skipped; independent review clear | Actual PostgreSQL HTTP 409, checkout release, lock availability and unchanged history; operation, image and provider-order controls. Full HTTP cancellation is not newly tested. |
 | Frontend fixtures | 294 UI tests plus 7 character-selection tests passed, zero skipped | Real ownership/storage/query contracts retained. Local Node 26 differs from CI Node 20; hosted final-head CI remains required. |
-| Further frontend readiness fixtures | 46 passed, four local timeouts on exact CI Node 20.20.2 | Study Pack 12/12 and Companion Home 17/17 pass; Admin 11/12 and Settings 6/9. Three Settings cases and an unchanged Admin password case exceeded their original five-second budgets during severe unrelated worktree CPU load. The failures remain unresolved pending hosted CI; no local timeout increase or further retry. |
+| Further frontend readiness fixtures | 46 passed, four local timeouts on exact CI Node 20.20.2; subsequent hosted results qualified below | Study Pack 12/12 and Companion Home 17/17 pass locally; Admin 11/12 and Settings 6/9. Three Settings cases and an unchanged Admin password case exceeded their original five-second budgets during severe unrelated worktree CPU load. No timeout increase or blind local retry. |
 | Notes remediation | All 32 tests passed, zero skipped | A further Stage4 fixture now supplies the verified owner required for saving; revision and attachment assertions are unchanged. |
 | World Book consumers | 50 tests passed, zero skipped; bounded source review clear | Official PostgreSQL and SQLite; foreign/unassigned lore excluded from RAG, conversation materialization and Chatbook scope/name reads; original transaction and catalogue assertions retained. |
 | World Book attachment UI | All 10 tests passed, zero skipped, unchanged time limits | Retry uses the rendered error/button and invalidates both original queries. Named-panel queries reduce unrelated DOM work; the final local retry case took 2504 ms against a 5000 ms limit. Hosted CI remains required. |
 | World Book secondary operations | 111 focused tests passed, zero skipped | Real backend operations, rollback, literal LIKE search and PostgreSQL JSONB placeholder controls. Adjacent results are qualified below. |
 | Onboarding | Both desktop and mobile tests passed, zero skipped | Fixture preserves the verified session owner while changing lifecycle state. |
+| Approved extension replay | One passed, zero skipped/retried/flaky outcomes | Fresh build 29.1 seconds, scenario 6.927 seconds; privacy, edit/apply, focus and narrow layout assertions pass. Tested fixture cd8ed1452a50cb518be9fcdeb7126ca7e21711fc577f849aa252cd9797f92b27. Subsequent first-seed ordering refinement needs hosted CI. Axe has zero violations but one incomplete observation, now UAT281. |
+| Settings radio repair | 24 tests passed on CI Node20.20.2, zero skipped | A causal regression reproduces AntD's test-mode native radio-name collision. Three explicit group names preserve independent selections. Auth-mode and timeout accessibility controls pass. Final test-only typing cleanup is source-reviewed; the separate Server URL assertion passes unchanged locally, with no claimed hydration cause. |
+| Prompt-review semantics (UAT281) | All 10 component tests passed, zero skipped; independent source review clear | Removing the new group role causes the named-content regression to fail. The existing control relationships and pressed-button behavior remain intact. Final hosted extension validation remains required. |
 | OpenAPI | Canonical fingerprint check passed | Isolated Python 3.12.11, FastAPI 0.136.3, Pydantic 2.13.5; 2097 paths/3207 schemas. |
 | Published docs | All 52 docs tests passed in a clean checkout; three macOS controls passed locally | Canonical mirrors have real Git revision dates; fixtures preserve `Site` and exclude `_site`. CI dependency versions remain unchanged; strict warnings are not suppressed. |
 | Backend shard coverage | No newly uncovered tests | 805 shards, 4729 test files, 130 pre-existing baseline exclusions. |
@@ -45,15 +48,17 @@ certification.
 
 ## Remaining merge gates
 
-- Verify the reviewed extension Prompt Improvement fixture correction after
-  explicit approval for one isolated, trace-enabled replay. Automatic approval
-  review rejected another full reproduction under the stop-and-reassess rule;
-  static reassessment is complete, but the correction remains untested and uncommitted.
-- Run final candidate CI after pushing the reviewed repairs.
-- Confirm the reviewed frontend readiness fixtures in hosted CI. The four
-  local timing failures above are not passes, and the affected cases must
-  complete under CI's unchanged time limits. Original failures and every
-  intermediate attempt remain in the local archive.
+- Confirm Settings and UAT281 prompt-review repairs in hosted CI. Causal local
+  regressions and independent source review pass; the separate transient
+  Server URL assertion still has no established cause.
+- Run final candidate CI after pushing the reviewed repairs, including the
+  extension fixture's final first-seed ordering and named-content assertion.
+  The one explicitly approved local extension replay is complete.
+- At pushed1c4ff92226, Notes, World Books, onboarding docs, backend-required,
+  coverage-required, e2e-required, security-required and seven frontend shards
+  pass. Only the original extension fixture and two Settings assertions fail,
+  plus the frontend aggregate. Conditional jobs do not imply broader coverage;
+  historical local failures and every intermediate attempt remain retained.
 - Obtain the requester's own human-written Change summary explaining what
   changed and why, as required by the repository merge policy.
 - Merge normally, verify the remote result, and resume UAT with UAT-261 first.
