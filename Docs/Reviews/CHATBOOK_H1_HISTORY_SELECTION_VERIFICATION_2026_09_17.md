@@ -1,6 +1,6 @@
 # H1 selected history and fork ownership: verification record
 
-Status: **In progress. H1 is not qualified for release.** This record separates reviewed implementation evidence from the real-browser and owner checks that remain. Counts from different runs overlap and must not be added together.
+Status: **In progress. H1 is not qualified for release.** Task5.1 passed its scoped review through `d6129ace01`. The [whole-branch review](CHATBOOK_H1_WHOLE_BRANCH_REVIEW_2026_09_17.md) of `f00e12a5aa..34f737d3c8` returned Needs fixes: F1/P2 recovery-owner isolation, F2/P2 editor identity, and M1/P3 saved-copy notification. A combined fix and independent re-review are required. Counts from different runs overlap and must not be added together.
 
 ## Scope and source
 
@@ -221,33 +221,33 @@ NODE_OPTIONS=--no-experimental-webstorage node_modules/.bin/vitest run \
 
 </details>
 
-## Remaining qualification
+## Current qualification and remaining gates
 
 - Native selected-message edit/delete require an owner-safe mutation adapter and remain capability-gated in this H1 control repair. Local scoped edits and leaf deletion are required; deletion must not orphan hidden descendants or cascade through alternatives.
 - Adjacent regeneration and edit-and-resend remain capability-gated in H1. Task 4 must reject them before any copy/write/display truncation. Same-parent assistant admission and a read-only edited-input boundary override remain broader parity work; plain scoped edits/deletes are required here.
-- Task 4.1 code/review is complete: exact allowlisted local copies, scoped stable mutation IDs, independent child files/parents, required-state exclusions and comparison materialization. Real browser isolation and source file-removal evidence remain Task5.
-- Task 4.2 code/review is complete: atomic client dispatch claims, honest unknown/partial outcomes and no automatic retry or owner fallback. Real database migration, cross-view claims and native fork/send/reopen qualification remain Task 5.
-- Task 5.1: actual WebUI, extension full page, compact sidepanel and extension expansion; real IndexedDB copy abort/reopen and concurrent bookmark/recovery updates; required native SQLite/PostgreSQL checks; consumer type checks, API generation and security checks.
-- Final whole-branch review and fixes. No skipped required mode counts as parity or successful qualification.
+- Task 4.1 code/review is complete: exact allowlisted local copies, scoped stable mutation IDs, independent child files/parents, required-state exclusions and comparison materialization. Task5.1 and its scoped fix review cover real browser isolation and source file removal; their evidence and limits are recorded below.
+- Task 4.2 code/review is complete: atomic client dispatch claims, honest unknown/partial outcomes and no automatic retry or owner fallback. Task5.1 and its scoped fix review cover real database migration, cross-view claims and native fork/send/reopen. The earlier saved-copy notification finding still requires final disposition.
+- Task 5.1 scoped qualification is complete for the actual WebUI, extension full page, compact sidepanel and extension expansion, real IndexedDB transactions, native SQLite/PostgreSQL checks, API generation and security scope. Consumer type checks retain the disclosed baseline failures; builds retain trace-copy warnings and do not qualify a standalone deployment artifact.
+- Final whole-branch review, all prior dispositions and required fixes remain open. Published and late-read send recoveries survive native owner invalidation, and a stale Dismiss callback can reach the old record. A positional inner message key also remounts a retained editor after preceding-row changes. These are reproduced review findings, not closed by the earlier scoped passes. No skipped required mode counts as parity or successful qualification.
 
 ## Acceptance status
 
 | Criterion | Status |
 |---|---|
-| H1-A — independent views, exact selected path and late completion | Mounted/owner evidence exists; full-shell qualification pending. |
-| H1-B — before-first, empty, stale bookmarks and reopen | Unit/mounted evidence exists; browser qualification pending. |
-| H1-C — complete legacy review, CAS and independent interpretations | Reviewed native owner and local adapter evidence; real IndexedDB and full-shell review/reopen pending. |
-| H1-D — accepted-parent admission and settlement with the existing composer | Ordinary/overlay and supported native tracked-character tasks reviewed; final regression and browser qualification pending. |
-| H1-E — independent local child, files and supported context | Task 4.1 implementation and scoped reviews complete; real IndexedDB evidence pending. |
-| H1-F — unknown/partial fork outcome and no automatic fallback/replay | Task 4.2 reviewed; real database/reload/browser evidence pending. |
-| H1-G — model-qualified comparison child, shared controls and account/workspace scope | Local comparison and native outcome/controller tasks reviewed; full-shell qualification pending. |
-| H1-H — capability rejection, unversioned compatibility and internal-field isolation | Existing API/adapter evidence; final client/native regression qualification pending. |
+| H1-A — independent views, exact selected path and late completion | Scoped owner and full-shell evidence includes original-view A/B sends and independent cursors; whole-branch acceptance remains open. |
+| H1-B — before-first, empty, stale bookmarks and reopen | Scoped unit, mounted and browser cases passed; whole-branch acceptance remains open. |
+| H1-C — complete legacy review, CAS and independent interpretations | Reviewed owner, actual IndexedDB and full-shell review/reopen evidence exists, including repeated 20,001-row navigation; retained-editor identity still needs the whole-branch fix. |
+| H1-D — accepted-parent admission and settlement with the existing composer | Ordinary/overlay and supported native tracked-character admission/settlement are qualified in their recorded scopes; send-recovery owner invalidation remains defective. |
+| H1-E — independent local child, files and supported context | Scoped real IndexedDB and both-shell source/file isolation passed for supported ordinary/comparison children; whole-branch acceptance remains open. |
+| H1-F — unknown/partial fork outcome and no automatic fallback/replay | Scoped durable storage/reload/browser cases passed; application no-replay is distinct from native transport deduplication. Saved-copy notification disposition remains open. |
+| H1-G — model-qualified comparison child, shared controls and account/workspace scope | Scoped comparison, shared full-page/sidepanel controls and owner/workspace fences are recorded; recovery invalidation remains defective and WorkspaceChatPanel parity is not claimed. |
+| H1-H — capability rejection, unversioned compatibility and internal-field isolation | Scoped API/adapter, native regression and actual browser unsupported-context cases passed; whole-branch acceptance remains open. |
 
 No passing release verdict, complete parity verdict, push or merge is recorded here.
 
 ## Task 5.1 browser and storage qualification
 
-Execution date: September17–18,2026; Task5 base `7b9bfed636a71b60e066b30d1776e64d38f1b440`, prior reviewed integration `c884e6ba25`. Task5 changes are pending independent task and whole-branch review; the successful checks below are not a release verdict. Root owns that disposition. No live provider, main/UAT database, dependency reconciliation, push or merge was used.
+Execution date: September17–18,2026; Task5 base `7b9bfed636a71b60e066b30d1776e64d38f1b440`, prior reviewed integration `c884e6ba25`. This section preserves the initial Task5 checkpoint before its independent task review; the later fix and scoped acceptance sections supersede that checkpoint. Whole-branch review remains open, and the successful checks below are not a release verdict. No live provider, main/UAT database, dependency reconciliation, push or merge was used.
 
 ### Runtime and reproducible commands
 
@@ -391,7 +391,7 @@ Build warnings retained: final WebUI Turbopack reports two broad documentation t
 Source freshness boundary: historical qualification uses reviewed Chatbook `d8fb4053f9a27a799d5cdb8ee58f7fd1de91efce`. Root observed remote dev `e89f28d751bc8a5b4f4545b8894b87437252c657` at03:01:59UTC and is independently auditing that component-pattern-library delta. This task does not claim tests against that unreviewed source or expand implementation into it.
 
 
-## Task5.1 independent-review fix round1 (implementation complete; re-review pending)
+## Task5.1 independent-review fix round1 (historical implementation receipt)
 
 Fix base `0da98afec56c830cdecf78d5fc3205b764132c62`; associated TASK-13261.1. The four P2 review findings and C1–C3 evidence gaps are addressed by the implementation and evidence below. Original browser counts remain historical and do not independently prove the newly required assertions. Root owns final acceptance.
 

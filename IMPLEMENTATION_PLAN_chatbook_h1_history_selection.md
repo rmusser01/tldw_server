@@ -512,7 +512,7 @@ Execution evidence: Task 4.2 implementation `ec5f19816c`, locale completion `ac6
 
 **Tests:** H1-A through H1-H, relevant baseline regressions, live IndexedDB rollback/reopen and real SQLite/PostgreSQL admission.
 
-**Status:** In Progress (Task5.1 implementation and fix1 passed scoped review through `d6129ace01`; final whole-branch review and its deferred findings remain open).
+**Status:** In Progress (Task5.1 implementation and fix1 passed scoped review through `d6129ace01`; whole-branch review of `f00e12a5aa..34f737d3c8` returned F1/P2 recovery-owner invalidation, F2/P2 retained-editor identity and M1/P3 saved-copy feedback. A combined fix and independent re-review are required).
 
 Qualification checkpoint: Task5 fix1 passed independent scoped review for all four original findings and three confirmed evidence gaps. Final affected verification is174unit tests/11files and4/4 repeated full-tip cases in each shell, with no skips/retries/unexpected/flaky outcomes. The29named-case/31actual-result union per shell explicitly reuses earlier unchanged passing cases. Both builds complete; the full frontend typecheck retains90byte-identical initial-base diagnostics, and final lint reports0errors/148warnings versus0/147base. The finalized WebUI artifact still has two traced-copy ENOENT warnings from old test profiles; standalone deployment completeness is unverified despite passing static-token and bundle checks. Whole-branch triage must assess the inner positional message key, saved-copy notification issue and all prior observations. See the [verification record](Docs/Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md) and [scoped review](Docs/Reviews/CHATBOOK_H1_TASK5_FIX1_REVIEW_2026_09_17.md).
 
