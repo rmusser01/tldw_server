@@ -1,0 +1,14 @@
+{
+  "frozen": true,
+  "hash_manifest_sha256": "4eab0fbb5fc6054b40363bec6e69ad59a12853f481a9492ae6ff962fd455a334",
+  "report_sha256": "b319664655a83344e54ddcb14e5e3d61fb788954fd74485b5e2146c59d53b619",
+  "review_round": 3,
+  "source_hashes": {
+    "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.budget.test.tsx": "9c2854c6735d95077db20a5307ca6c09122f7df25c5b78aa0ca084402551083e",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookEntryUtils.test.ts": "f5034032d094a6a1f78c17a5c9735213a9df60394159477f547a4f5c33c61b82",
+    "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts": "57eebc59045faf27825541f0b56785df8326ae39e70670dce29dff85be178e9e"
+  },
+  "task": "TASK13260.215 / UAT274",
+  "verification_sha256": "c47017b4a498905b8dc133145cf054ce12f45b2c39d7b02df483c0a1f9dabc55"
+}

@@ -1,0 +1,130 @@
+{
+  "at": "2026-09-18T04:08:38.450Z",
+  "reviewedImplementation": [],
+  "diagnosticFor": [
+    261
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    261
+  ],
+  "sourceBaseline": "81f88bcc84",
+  "fullMatrixAccepted": false,
+  "excludedLinks": [],
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/SCOPE.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/SCOPE.md",
+      "sourceBytes": 1038,
+      "sourceSha256": "81dd78ab91bf7a8e85efafeb4eaf81e7038e14a296d863522352fa18b21c25c5",
+      "bytes": 1038,
+      "sha256": "81dd78ab91bf7a8e85efafeb4eaf81e7038e14a296d863522352fa18b21c25c5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/REASSESSMENT.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/REASSESSMENT.md",
+      "sourceBytes": 1049,
+      "sourceSha256": "5ffc966d623fa72f3ce72b65db52e52319a891c91b01853c8f38c5365f4c6bd5",
+      "bytes": 1049,
+      "sha256": "5ffc966d623fa72f3ce72b65db52e52319a891c91b01853c8f38c5365f4c6bd5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/REPORT.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/REPORT.md",
+      "sourceBytes": 1913,
+      "sourceSha256": "96cc4783c6877545717c2ebeed5278199c895844e022d69d7b340dc130f78361",
+      "bytes": 1913,
+      "sha256": "96cc4783c6877545717c2ebeed5278199c895844e022d69d7b340dc130f78361",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/RUN.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/RUN.md",
+      "sourceBytes": 3313,
+      "sourceSha256": "6b2bae67d929b247569aabca40cd50b5837a788f1eb46c677e4a7e7c6cd1ac9a",
+      "bytes": 3313,
+      "sha256": "6b2bae67d929b247569aabca40cd50b5837a788f1eb46c677e4a7e7c6cd1ac9a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/ROOT-REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/ROOT-REVIEW.md",
+      "sourceBytes": 1413,
+      "sourceSha256": "736e3fe5ca9fac73bf1fb1eb8cb39a21b143d7d511f291bcb3b01c77f088bc73",
+      "bytes": 1413,
+      "sha256": "736e3fe5ca9fac73bf1fb1eb8cb39a21b143d7d511f291bcb3b01c77f088bc73",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/boundary_harness.py",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/boundary_harness.py",
+      "sourceBytes": 13127,
+      "sourceSha256": "ab5f5eaeb621ebe49f54d02ff9cfd29a975674aeed07e3d823ae69e6a691c5cc",
+      "bytes": 13127,
+      "sha256": "ab5f5eaeb621ebe49f54d02ff9cfd29a975674aeed07e3d823ae69e6a691c5cc",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/fixture_runner.py",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/fixture_runner.py",
+      "sourceBytes": 1178,
+      "sourceSha256": "540670c7f358893c890e9497d37fe6133336ea8f00e7e44675e509cad04eba46",
+      "bytes": 1178,
+      "sha256": "540670c7f358893c890e9497d37fe6133336ea8f00e7e44675e509cad04eba46",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/boundary-harness-evidence.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/boundary-harness-evidence.json",
+      "sourceBytes": 1727,
+      "sourceSha256": "ef52297002958a34e1e4b770b4f8c0073b479091a524aef290372f217512f66b",
+      "bytes": 1727,
+      "sha256": "ef52297002958a34e1e4b770b4f8c0073b479091a524aef290372f217512f66b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/author-boundary-harness-evidence.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/author-boundary-harness-evidence.json",
+      "sourceBytes": 1727,
+      "sourceSha256": "ef52297002958a34e1e4b770b4f8c0073b479091a524aef290372f217512f66b",
+      "bytes": 1727,
+      "sha256": "ef52297002958a34e1e4b770b4f8c0073b479091a524aef290372f217512f66b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/sha256.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/sha256.txt",
+      "sourceBytes": 1059,
+      "sourceSha256": "487d9fa7fe18c3264a9c199977ea3e5be6dcbaaf1b0aaacdf08dd00248ae43ac",
+      "bytes": 1059,
+      "sha256": "487d9fa7fe18c3264a9c199977ea3e5be6dcbaaf1b0aaacdf08dd00248ae43ac",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/bandit.json",
+      "sourceBytes": 787,
+      "sourceSha256": "a104e7fa7d112dd91d7a1565bcae5769ecba8d1a8d720c46d31385787452fab3",
+      "bytes": 787,
+      "sha256": "a104e7fa7d112dd91d7a1565bcae5769ecba8d1a8d720c46d31385787452fab3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-boundary-harness/root-replay-safe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-boundary-harness/root-replay-safe.json",
+      "sourceBytes": 675,
+      "sourceSha256": "6cb2b453c2e9797839caa4431a48bb39e87e3c8f18f097371a4a65298cd4224b",
+      "bytes": 675,
+      "sha256": "6cb2b453c2e9797839caa4431a48bb39e87e3c8f18f097371a4a65298cd4224b",
+      "encoding": "identity"
+    }
+  ]
+}

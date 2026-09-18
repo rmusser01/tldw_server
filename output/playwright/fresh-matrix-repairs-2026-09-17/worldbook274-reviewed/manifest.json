@@ -1,0 +1,793 @@
+{
+  "at": "2026-09-18T04:10:17.851Z",
+  "reviewedImplementation": [
+    274
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    274
+  ],
+  "sourceBaseline": "270682e98f2dd35c753fdf18cfb440ee80cb0ff1",
+  "fullMatrixAccepted": false,
+  "excludedLinks": [
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/WorldBookBudgetBar.tsx",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/entryParsers.ts",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/worldBookBulkActionUtils.ts",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/worldBookBulkUtils.ts",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/worldBookRelationshipUtils.ts",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/node_modules",
+      "reason": "test dependency link excluded; not dereferenced"
+    }
+  ],
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx.gz",
+      "sourceBytes": 75944,
+      "sourceSha256": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+      "bytes": 15705,
+      "sha256": "8aba2c155e0bc99b45908ca8430964e9bb8f2cae7bae28b151d8b3c5d92161b8",
+      "encoding": "gzip"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.budget.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.budget.test.tsx",
+      "sourceBytes": 8681,
+      "sourceSha256": "9c2854c6735d95077db20a5307ca6c09122f7df25c5b78aa0ca084402551083e",
+      "bytes": 8681,
+      "sha256": "9c2854c6735d95077db20a5307ca6c09122f7df25c5b78aa0ca084402551083e",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookEntryUtils.test.ts",
+      "path": "evidence/apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookEntryUtils.test.ts",
+      "sourceBytes": 2765,
+      "sourceSha256": "f5034032d094a6a1f78c17a5c9735213a9df60394159477f547a4f5c33c61b82",
+      "bytes": 2765,
+      "sha256": "f5034032d094a6a1f78c17a5c9735213a9df60394159477f547a4f5c33c61b82",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts",
+      "path": "evidence/apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts",
+      "sourceBytes": 2236,
+      "sourceSha256": "57eebc59045faf27825541f0b56785df8326ae39e70670dce29dff85be178e9e",
+      "bytes": 2236,
+      "sha256": "57eebc59045faf27825541f0b56785df8326ae39e70670dce29dff85be178e9e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-274-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-274-report.md",
+      "sourceBytes": 6346,
+      "sourceSha256": "b319664655a83344e54ddcb14e5e3d61fb788954fd74485b5e2146c59d53b619",
+      "bytes": 6346,
+      "sha256": "b319664655a83344e54ddcb14e5e3d61fb788954fd74485b5e2146c59d53b619",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/bandit-final.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/bandit-final.json",
+      "sourceBytes": 1058,
+      "sourceSha256": "59a67e98be5e8041e1d6fc642a15d32d8e00884b060e3592a0d8a64c9c0bb7a5",
+      "bytes": 1058,
+      "sha256": "59a67e98be5e8041e1d6fc642a15d32d8e00884b060e3592a0d8a64c9c0bb7a5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/baseline-causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/baseline-causal-red.log.gz",
+      "sourceBytes": 1297,
+      "sourceSha256": "a0a0f522974f5163421944d872e76b04eb80ecf0c2198a7d12bd8f17c83d0323",
+      "bytes": 656,
+      "sha256": "81bd9c586778dadd27521c23ce76e63f17e4b7589f74cf1afc0593b0d993def5",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/baseline-source/__tests__/worldBookEntryUtils.baseline.test.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/baseline-source/__tests__/worldBookEntryUtils.baseline.test.ts",
+      "sourceBytes": 2085,
+      "sourceSha256": "d474d9dd749f95b43b84ee4d82fdeedfe69f5fd30dea81dc5b6b713af811eaeb",
+      "bytes": 2085,
+      "sha256": "d474d9dd749f95b43b84ee4d82fdeedfe69f5fd30dea81dc5b6b713af811eaeb",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/baseline-source/worldBookEntryUtils.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/baseline-source/worldBookEntryUtils.ts",
+      "sourceBytes": 1590,
+      "sourceSha256": "79ddc5c0702b7f1828f6839adffc1e8ecdeecb44cf2f453ec618284fbfe955fd",
+      "bytes": 1590,
+      "sha256": "79ddc5c0702b7f1828f6839adffc1e8ecdeecb44cf2f453ec618284fbfe955fd",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/baseline-vitest.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/baseline-vitest.config.ts",
+      "sourceBytes": 731,
+      "sourceSha256": "de4b8d51bb5da2b68e184551444851d86fd7e5d56ed582eed547732921635878",
+      "bytes": 731,
+      "sha256": "de4b8d51bb5da2b68e184551444851d86fd7e5d56ed582eed547732921635878",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/eslint-delta.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/eslint-delta.json",
+      "sourceBytes": 191,
+      "sourceSha256": "80b8c3e9b4e6671a79e8359f785b6a9895b86c754fb7ea7b129569c6c0249db2",
+      "bytes": 191,
+      "sha256": "80b8c3e9b4e6671a79e8359f785b6a9895b86c754fb7ea7b129569c6c0249db2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/eslint-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/eslint-final.log.gz",
+      "sourceBytes": 6145,
+      "sourceSha256": "bcad27d3d9526b0ed4e0e40ab26231ee2b5f0a89a69f4e4422163753e064655a",
+      "bytes": 846,
+      "sha256": "879350c816423d3c84ebcd5a5ecf00270cacee0ddaca7dbe73fadff010847514",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/focused-final.log.gz",
+      "sourceBytes": 1033,
+      "sourceSha256": "e32df442e51ee54d2f79161d9075e19c759d228229d0005d777608d8f1a3b7e0",
+      "bytes": 371,
+      "sha256": "ced0b121f50cfbcb430d4f591c3bf248b59fc7d00d978241d5711e48592cae33",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/freeze-round2.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/freeze-round2.json",
+      "sourceBytes": 1012,
+      "sourceSha256": "d4b8e8dfeea8e0cae580607a88516ff64b44d4cf1301827e80a8bcbb44dde60a",
+      "bytes": 1012,
+      "sha256": "d4b8e8dfeea8e0cae580607a88516ff64b44d4cf1301827e80a8bcbb44dde60a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/freeze-round3.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/freeze-round3.json",
+      "sourceBytes": 1012,
+      "sourceSha256": "f75d5a58b89d7e0dbed1a802d88d74b4c7e283f983f514d924e378f7e57de274",
+      "bytes": 1012,
+      "sha256": "f75d5a58b89d7e0dbed1a802d88d74b4c7e283f983f514d924e378f7e57de274",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/freeze.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/freeze.json",
+      "sourceBytes": 1096,
+      "sourceSha256": "109ff7f5f67d1ac9cb9c36fe045011c1e0c3a85d6e95b28d299651c523a03a1a",
+      "bytes": 1096,
+      "sha256": "109ff7f5f67d1ac9cb9c36fe045011c1e0c3a85d6e95b28d299651c523a03a1a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/hashes-round2.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/hashes-round2.sha256",
+      "sourceBytes": 1797,
+      "sourceSha256": "aba5623a08799d229a914cdd331fde44e3e329045135c554b28853c34f8e4b85",
+      "bytes": 1797,
+      "sha256": "aba5623a08799d229a914cdd331fde44e3e329045135c554b28853c34f8e4b85",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/hashes-round3.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/hashes-round3.sha256",
+      "sourceBytes": 2063,
+      "sourceSha256": "4eab0fbb5fc6054b40363bec6e69ad59a12853f481a9492ae6ff962fd455a334",
+      "bytes": 2063,
+      "sha256": "4eab0fbb5fc6054b40363bec6e69ad59a12853f481a9492ae6ff962fd455a334",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/hashes.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/hashes.sha256",
+      "sourceBytes": 1894,
+      "sourceSha256": "2d9638685c54ce2a4250361e73ab50afcfdbf83f7470689686fb2dbe76dde484",
+      "bytes": 1894,
+      "sha256": "2d9638685c54ce2a4250361e73ab50afcfdbf83f7470689686fb2dbe76dde484",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/manager-baseline-causal-red.log.gz",
+      "sourceBytes": 13248,
+      "sourceSha256": "408898603f33b6bb07c512a93e1a9afc1744e66bacffddfa3accbd3f69435b95",
+      "bytes": 3063,
+      "sha256": "8f18459f4813c2410e8674aabf20e176ec4271936d4a2fccdd86deff3958e181",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/WorldBookEntryManager.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/WorldBookEntryManager.tsx.gz",
+      "sourceBytes": 75776,
+      "sourceSha256": "67072402e3c46d071a41a523847ea40bcf13b94ddd9bf3002155362ba3a02cd6",
+      "bytes": 15681,
+      "sha256": "aa765312c8b4f0e67ebde0572eec3b373ed7dd33f0a8c6fe21006896e0923181",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/__tests__/WorldBookEntryManager.baseline.test.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/__tests__/WorldBookEntryManager.baseline.test.tsx",
+      "sourceBytes": 8490,
+      "sourceSha256": "fc6dc626604ac3ffbe3fe88159bed0e8c444f0a345cf38b4ca6b2032a30658e3",
+      "bytes": 8490,
+      "sha256": "fc6dc626604ac3ffbe3fe88159bed0e8c444f0a345cf38b4ca6b2032a30658e3",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/worldBookEntryUtils.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/worldBookEntryUtils.ts",
+      "sourceBytes": 1590,
+      "sourceSha256": "79ddc5c0702b7f1828f6839adffc1e8ecdeecb44cf2f453ec618284fbfe955fd",
+      "bytes": 1590,
+      "sha256": "79ddc5c0702b7f1828f6839adffc1e8ecdeecb44cf2f453ec618284fbfe955fd",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-vitest.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/manager-baseline-vitest.config.ts",
+      "sourceBytes": 742,
+      "sourceSha256": "bf6fe33a2189b98780b84470399eb4a0b84dd49160b287d45a9a789088eb03a7",
+      "bytes": 742,
+      "sha256": "bf6fe33a2189b98780b84470399eb4a0b84dd49160b287d45a9a789088eb03a7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round2-bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round2-bandit.json",
+      "sourceBytes": 1058,
+      "sourceSha256": "799d4e121677b7cce9d087a0ff29d5f40fd311e1f3705ec41f5888c3aeb331c9",
+      "bytes": 1058,
+      "sha256": "799d4e121677b7cce9d087a0ff29d5f40fd311e1f3705ec41f5888c3aeb331c9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round2-eslint.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round2-eslint.log.gz",
+      "sourceBytes": 6145,
+      "sourceSha256": "04697de3b5ff8c648b782696050d0977d099f7ea616da42e3b9ef8f0fce68d24",
+      "bytes": 845,
+      "sha256": "c5877c1c6607e3314b0fa43a5aaf4eadcebdbb8143415167d621b0d67232229c",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round2-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round2-focused.log.gz",
+      "sourceBytes": 1033,
+      "sourceSha256": "df700cf5eb16029d7a3bc3a8ce5102c814c19ba42d84a136b4d2e306c9ef0fa7",
+      "bytes": 373,
+      "sha256": "bd21f018097e1b7fd03bc57b0e9b8b6cc37e0aac404c80deaeb1a687a9d3e093",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round2-green.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round2-green.log.gz",
+      "sourceBytes": 1217,
+      "sourceSha256": "127e5f07ebeb5d818471dffcfab617a4804f848025d06639b236551fff0983a2",
+      "bytes": 561,
+      "sha256": "292ae6200d641872d8d6ce6e381b8e08439c0b8ebb7b513745defd51fe427119",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round2-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round2-red.log.gz",
+      "sourceBytes": 2242,
+      "sourceSha256": "776456306fe0d16d33eeefea9dc2dc5ad503600045ea59d3571ead0d51defb8e",
+      "bytes": 813,
+      "sha256": "1d93a0bf571c8df07b5bccda24e2088626b70d371c269a11a75087d059b815f6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round3-bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round3-bandit.json",
+      "sourceBytes": 1058,
+      "sourceSha256": "391537c441373708286851345c59d77ca29ea4ea096a01a74c1706f889305d0a",
+      "bytes": 1058,
+      "sha256": "391537c441373708286851345c59d77ca29ea4ea096a01a74c1706f889305d0a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round3-eslint.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round3-eslint.log.gz",
+      "sourceBytes": 6145,
+      "sourceSha256": "04697de3b5ff8c648b782696050d0977d099f7ea616da42e3b9ef8f0fce68d24",
+      "bytes": 845,
+      "sha256": "c5877c1c6607e3314b0fa43a5aaf4eadcebdbb8143415167d621b0d67232229c",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round3-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round3-focused.log.gz",
+      "sourceBytes": 1033,
+      "sourceSha256": "386df2e0d8832acc48e533d9f1271abe2cf0a48634e2b8a4cfd6885fa675e0f7",
+      "bytes": 369,
+      "sha256": "2cadd1afb043d3493587f0ac3ed10555a300f3de7527b6b726688927506389c4",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round3-green.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round3-green.log.gz",
+      "sourceBytes": 271,
+      "sourceSha256": "5b86bd063ae06ddb7e7a875d19808b462c5d87d5be13341cc8aa19e3fb02a86e",
+      "bytes": 227,
+      "sha256": "221ebf69acd8b1819d70d931a7a014415e8a434e84e9f0e4288b8c80db92e059",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/review-round3-utility-tsc.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/review-round3-utility-tsc.log.gz",
+      "sourceBytes": 12,
+      "sourceSha256": "b13e0760b6d7c287c9403ed78dc1f46d39b71ef35935619797d930dea2ea8ffd",
+      "bytes": 32,
+      "sha256": "74862f2272b56287c7e1ebf73d6034ea02db00885027234ce61212e3c93e3e70",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/bandit-final.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/bandit-final.json",
+      "sourceBytes": 1058,
+      "sourceSha256": "59a67e98be5e8041e1d6fc642a15d32d8e00884b060e3592a0d8a64c9c0bb7a5",
+      "bytes": 1058,
+      "sha256": "59a67e98be5e8041e1d6fc642a15d32d8e00884b060e3592a0d8a64c9c0bb7a5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/baseline-causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/baseline-causal-red.log.gz",
+      "sourceBytes": 1297,
+      "sourceSha256": "a0a0f522974f5163421944d872e76b04eb80ecf0c2198a7d12bd8f17c83d0323",
+      "bytes": 656,
+      "sha256": "81bd9c586778dadd27521c23ce76e63f17e4b7589f74cf1afc0593b0d993def5",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/eslint-delta.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/eslint-delta.json",
+      "sourceBytes": 191,
+      "sourceSha256": "80b8c3e9b4e6671a79e8359f785b6a9895b86c754fb7ea7b129569c6c0249db2",
+      "bytes": 191,
+      "sha256": "80b8c3e9b4e6671a79e8359f785b6a9895b86c754fb7ea7b129569c6c0249db2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/eslint-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/eslint-final.log.gz",
+      "sourceBytes": 6145,
+      "sourceSha256": "bcad27d3d9526b0ed4e0e40ab26231ee2b5f0a89a69f4e4422163753e064655a",
+      "bytes": 846,
+      "sha256": "879350c816423d3c84ebcd5a5ecf00270cacee0ddaca7dbe73fadff010847514",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/focused-final.log.gz",
+      "sourceBytes": 1033,
+      "sourceSha256": "e32df442e51ee54d2f79161d9075e19c759d228229d0005d777608d8f1a3b7e0",
+      "bytes": 371,
+      "sha256": "ced0b121f50cfbcb430d4f591c3bf248b59fc7d00d978241d5711e48592cae33",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/freeze.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/freeze.json",
+      "sourceBytes": 1096,
+      "sourceSha256": "109ff7f5f67d1ac9cb9c36fe045011c1e0c3a85d6e95b28d299651c523a03a1a",
+      "bytes": 1096,
+      "sha256": "109ff7f5f67d1ac9cb9c36fe045011c1e0c3a85d6e95b28d299651c523a03a1a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/hashes.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/hashes.sha256",
+      "sourceBytes": 1303,
+      "sourceSha256": "9215304f869e694a5bc604698ff7adb65808b07b658ceeaf3b255fc6c7869185",
+      "bytes": 1303,
+      "sha256": "9215304f869e694a5bc604698ff7adb65808b07b658ceeaf3b255fc6c7869185",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/manager-baseline-causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/manager-baseline-causal-red.log.gz",
+      "sourceBytes": 13248,
+      "sourceSha256": "408898603f33b6bb07c512a93e1a9afc1744e66bacffddfa3accbd3f69435b95",
+      "bytes": 3063,
+      "sha256": "8f18459f4813c2410e8674aabf20e176ec4271936d4a2fccdd86deff3958e181",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/task-274-report.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/task-274-report.md",
+      "sourceBytes": 3585,
+      "sourceSha256": "e16bebee23d318128172415bf29851fd670cf1f5df8fec1fa62e402dd3e6fbd0",
+      "bytes": 3585,
+      "sha256": "e16bebee23d318128172415bf29851fd670cf1f5df8fec1fa62e402dd3e6fbd0",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/ui-tsc-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/ui-tsc-final.log.gz",
+      "sourceBytes": 171077,
+      "sourceSha256": "14b8f83e897c8c2045a1df5023743d5d53df317cd14db2e42dddc13cb5f1ab0d",
+      "bytes": 13248,
+      "sha256": "6d0bb506ec7cb1076ed2dab077609cb03e49ce80160ef028fff370f6d5d2f997",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round1/verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round1/verification.json",
+      "sourceBytes": 3231,
+      "sourceSha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b",
+      "bytes": 3231,
+      "sha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/freeze-round2.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/freeze-round2.json",
+      "sourceBytes": 1012,
+      "sourceSha256": "d4b8e8dfeea8e0cae580607a88516ff64b44d4cf1301827e80a8bcbb44dde60a",
+      "bytes": 1012,
+      "sha256": "d4b8e8dfeea8e0cae580607a88516ff64b44d4cf1301827e80a8bcbb44dde60a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/hashes-round2.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/hashes-round2.sha256",
+      "sourceBytes": 1797,
+      "sourceSha256": "aba5623a08799d229a914cdd331fde44e3e329045135c554b28853c34f8e4b85",
+      "bytes": 1797,
+      "sha256": "aba5623a08799d229a914cdd331fde44e3e329045135c554b28853c34f8e4b85",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/review-round2-bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/review-round2-bandit.json",
+      "sourceBytes": 1058,
+      "sourceSha256": "799d4e121677b7cce9d087a0ff29d5f40fd311e1f3705ec41f5888c3aeb331c9",
+      "bytes": 1058,
+      "sha256": "799d4e121677b7cce9d087a0ff29d5f40fd311e1f3705ec41f5888c3aeb331c9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/review-round2-eslint.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/review-round2-eslint.log.gz",
+      "sourceBytes": 6145,
+      "sourceSha256": "04697de3b5ff8c648b782696050d0977d099f7ea616da42e3b9ef8f0fce68d24",
+      "bytes": 845,
+      "sha256": "c5877c1c6607e3314b0fa43a5aaf4eadcebdbb8143415167d621b0d67232229c",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/review-round2-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/review-round2-focused.log.gz",
+      "sourceBytes": 1033,
+      "sourceSha256": "df700cf5eb16029d7a3bc3a8ce5102c814c19ba42d84a136b4d2e306c9ef0fa7",
+      "bytes": 373,
+      "sha256": "bd21f018097e1b7fd03bc57b0e9b8b6cc37e0aac404c80deaeb1a687a9d3e093",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/review-round2-green.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/review-round2-green.log.gz",
+      "sourceBytes": 1217,
+      "sourceSha256": "127e5f07ebeb5d818471dffcfab617a4804f848025d06639b236551fff0983a2",
+      "bytes": 561,
+      "sha256": "292ae6200d641872d8d6ce6e381b8e08439c0b8ebb7b513745defd51fe427119",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/review-round2-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/review-round2-red.log.gz",
+      "sourceBytes": 2242,
+      "sourceSha256": "776456306fe0d16d33eeefea9dc2dc5ad503600045ea59d3571ead0d51defb8e",
+      "bytes": 813,
+      "sha256": "1d93a0bf571c8df07b5bccda24e2088626b70d371c269a11a75087d059b815f6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/task-274-report.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/task-274-report.md",
+      "sourceBytes": 5196,
+      "sourceSha256": "1fd7b9afed693a78bddb69fd16e216113ab8984d9b71ce3dc3864ee385708a6c",
+      "bytes": 5196,
+      "sha256": "1fd7b9afed693a78bddb69fd16e216113ab8984d9b71ce3dc3864ee385708a6c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/round2/verification-round2.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/round2/verification-round2.json",
+      "sourceBytes": 2426,
+      "sourceSha256": "360d8a36412545e51c54bd20dd5485fef37a5d06cbe8cd26662e51446199399c",
+      "bytes": 2426,
+      "sha256": "360d8a36412545e51c54bd20dd5485fef37a5d06cbe8cd26662e51446199399c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/ui-tsc-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/ui-tsc-final.log.gz",
+      "sourceBytes": 171077,
+      "sourceSha256": "14b8f83e897c8c2045a1df5023743d5d53df317cd14db2e42dddc13cb5f1ab0d",
+      "bytes": 13248,
+      "sha256": "6d0bb506ec7cb1076ed2dab077609cb03e49ce80160ef028fff370f6d5d2f997",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/verification-round2.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/verification-round2.json",
+      "sourceBytes": 2426,
+      "sourceSha256": "360d8a36412545e51c54bd20dd5485fef37a5d06cbe8cd26662e51446199399c",
+      "bytes": 2426,
+      "sha256": "360d8a36412545e51c54bd20dd5485fef37a5d06cbe8cd26662e51446199399c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/verification-round3.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/verification-round3.json",
+      "sourceBytes": 2482,
+      "sourceSha256": "c47017b4a498905b8dc133145cf054ce12f45b2c39d7b02df483c0a1f9dabc55",
+      "bytes": 2482,
+      "sha256": "c47017b4a498905b8dc133145cf054ce12f45b2c39d7b02df483c0a1f9dabc55",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274/verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274/verification.json",
+      "sourceBytes": 3231,
+      "sourceSha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b",
+      "bytes": 3231,
+      "sha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/REVIEW.md",
+      "sourceBytes": 4469,
+      "sourceSha256": "7ef9ab41b22c045853c330b0e7d585c47b36da56fe28c990d8862d3022786760",
+      "bytes": 4469,
+      "sha256": "7ef9ab41b22c045853c330b0e7d585c47b36da56fe28c990d8862d3022786760",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/audit.json",
+      "sourceBytes": 12450,
+      "sourceSha256": "42fe0ce44e4d8d51a1e3cfa0145a6ab11a6f16a1817a8fa3f317e16b7fcbc9ef",
+      "bytes": 12450,
+      "sha256": "42fe0ce44e4d8d51a1e3cfa0145a6ab11a6f16a1817a8fa3f317e16b7fcbc9ef",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/audit.mjs",
+      "sourceBytes": 6210,
+      "sourceSha256": "7344c41dac4a94a4c72a62426a8e89a9171f44109c66b6bc122658b32f4e0b87",
+      "bytes": 6210,
+      "sha256": "7344c41dac4a94a4c72a62426a8e89a9171f44109c66b6bc122658b32f4e0b87",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/causal-evidence.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/causal-evidence.json",
+      "sourceBytes": 529,
+      "sourceSha256": "f637cb26ab5e72a9ef335788b0f4d56c32f145aced59075a9a02c606ac606b3a",
+      "bytes": 529,
+      "sha256": "f637cb26ab5e72a9ef335788b0f4d56c32f145aced59075a9a02c606ac606b3a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/eslint.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/eslint.json.gz",
+      "sourceBytes": 122488,
+      "sourceSha256": "96c04a61c11f49c47d17b6274b83226ded32d226f624ed800d918583befa3159",
+      "bytes": 21828,
+      "sha256": "fa242a43cfff229112655f472e4833f2fa765111fa100efbe4ba50d1d4cbafd8",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/eslint.stderr.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/eslint.stderr.txt",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/focused-canonical.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/focused-canonical.log.gz",
+      "sourceBytes": 1889,
+      "sourceSha256": "2636b5f48258dc78199d986156af5c4849074c6c13af037095342a424dcd74ae",
+      "bytes": 679,
+      "sha256": "946a5aab91bc35bc93a7aa40cd8bfa549fba61687d00372ba43ee989d090720d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/focused.log.gz",
+      "sourceBytes": 1856,
+      "sourceSha256": "07ae4c267639361db4dc7c37ac2d0fdb7272ddaae2a0e0995ae18ac135641d83",
+      "bytes": 488,
+      "sha256": "55e807bd99b49e359fa05b51a90bdb112ee67fa36d892d7cbee38f2bf7f17246",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.json",
+      "sourceBytes": 1716,
+      "sourceSha256": "0376242134b7ccd16c583510c06198665978a5584429f7723e7b6f1b7b3d4dee",
+      "bytes": 1716,
+      "sha256": "0376242134b7ccd16c583510c06198665978a5584429f7723e7b6f1b7b3d4dee",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.mjs",
+      "sourceBytes": 961,
+      "sourceSha256": "a0052f6d2e3c9ba4a97533c6424df447c42e0e82ad2238f426e715a3f59652be",
+      "bytes": 961,
+      "sha256": "a0052f6d2e3c9ba4a97533c6424df447c42e0e82ad2238f426e715a3f59652be",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/DISCLOSURE.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/DISCLOSURE.md",
+      "sourceBytes": 534,
+      "sourceSha256": "cd104c50ab5364cae7c5d09dbace9e913b1cf4e6b83f4a686a169c3c59816267",
+      "bytes": 534,
+      "sha256": "cd104c50ab5364cae7c5d09dbace9e913b1cf4e6b83f4a686a169c3c59816267",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/REVIEW.md",
+      "sourceBytes": 4201,
+      "sourceSha256": "5d7ba72ba759f59c12af2d76ca598d37939eea31adf19b54281b2e31aa16036f",
+      "bytes": 4201,
+      "sha256": "5d7ba72ba759f59c12af2d76ca598d37939eea31adf19b54281b2e31aa16036f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/audit.json",
+      "sourceBytes": 6852,
+      "sourceSha256": "3aa50b068ffb0b2faef81be9c66885dc02b7a2c60f52aaf11137e63b196296d2",
+      "bytes": 6852,
+      "sha256": "3aa50b068ffb0b2faef81be9c66885dc02b7a2c60f52aaf11137e63b196296d2",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/audit.mjs",
+      "sourceBytes": 4909,
+      "sourceSha256": "697a7cec25f5d5ae9ef1b3e44a6026db0bed3c227d60e7c25c485c3ea093af97",
+      "bytes": 4909,
+      "sha256": "697a7cec25f5d5ae9ef1b3e44a6026db0bed3c227d60e7c25c485c3ea093af97",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/causal-evidence.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/causal-evidence.json",
+      "sourceBytes": 529,
+      "sourceSha256": "f637cb26ab5e72a9ef335788b0f4d56c32f145aced59075a9a02c606ac606b3a",
+      "bytes": 529,
+      "sha256": "f637cb26ab5e72a9ef335788b0f4d56c32f145aced59075a9a02c606ac606b3a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/eslint.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/eslint.json.gz",
+      "sourceBytes": 122488,
+      "sourceSha256": "96c04a61c11f49c47d17b6274b83226ded32d226f624ed800d918583befa3159",
+      "bytes": 21828,
+      "sha256": "fa242a43cfff229112655f472e4833f2fa765111fa100efbe4ba50d1d4cbafd8",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/focused-canonical.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/focused-canonical.log.gz",
+      "sourceBytes": 1889,
+      "sourceSha256": "2636b5f48258dc78199d986156af5c4849074c6c13af037095342a424dcd74ae",
+      "bytes": 679,
+      "sha256": "946a5aab91bc35bc93a7aa40cd8bfa549fba61687d00372ba43ee989d090720d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/identifier-probe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/identifier-probe.json",
+      "sourceBytes": 1716,
+      "sourceSha256": "0376242134b7ccd16c583510c06198665978a5584429f7723e7b6f1b7b3d4dee",
+      "bytes": 1716,
+      "sha256": "0376242134b7ccd16c583510c06198665978a5584429f7723e7b6f1b7b3d4dee",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/identifier-probe.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/identifier-probe.mjs",
+      "sourceBytes": 961,
+      "sourceSha256": "a0052f6d2e3c9ba4a97533c6424df447c42e0e82ad2238f426e715a3f59652be",
+      "bytes": 961,
+      "sha256": "a0052f6d2e3c9ba4a97533c6424df447c42e0e82ad2238f426e715a3f59652be",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round0/reconstructed-worldBookEntryUtils.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round0/reconstructed-worldBookEntryUtils.ts",
+      "sourceBytes": 2005,
+      "sourceSha256": "81c2a2d504ddfd4a56319554a51fe643cebc7f5ae62a8e667a401ff2162d9f34",
+      "bytes": 2005,
+      "sha256": "81c2a2d504ddfd4a56319554a51fe643cebc7f5ae62a8e667a401ff2162d9f34",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round2-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round2-focused.log.gz",
+      "sourceBytes": 1333,
+      "sourceSha256": "fcdbd087c62c0b30710d30ad81783b48bee503742549c441cc8051a631f942e5",
+      "bytes": 641,
+      "sha256": "4786ff3a17f0ff055a75c630538a2a48808c39cdf7ad14f15320c47b55ed4b0d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round2-identifier-probe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round2-identifier-probe.json",
+      "sourceBytes": 1669,
+      "sourceSha256": "67940e2666379234743cea683e3f4b9c31e7a4df34bdbbdccde4f5e8d306305a",
+      "bytes": 1669,
+      "sha256": "67940e2666379234743cea683e3f4b9c31e7a4df34bdbbdccde4f5e8d306305a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round2-identifier-probe.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round2-identifier-probe.mjs",
+      "sourceBytes": 968,
+      "sourceSha256": "b17495531dcfe8ff752c2fb549276037c3119e09b953ca593e28ea5fbe04fadb",
+      "bytes": 968,
+      "sha256": "b17495531dcfe8ff752c2fb549276037c3119e09b953ca593e28ea5fbe04fadb",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round2-project-config-type-diagnostic.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round2-project-config-type-diagnostic.json",
+      "sourceBytes": 129,
+      "sourceSha256": "efb6d829e12d5fa39eb84d5b90d6d2130beebb320bd9f3249b4894513526fda4",
+      "bytes": 129,
+      "sha256": "efb6d829e12d5fa39eb84d5b90d6d2130beebb320bd9f3249b4894513526fda4",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/worldbook274-review/round2-type-diagnostic.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/worldbook274-review/round2-type-diagnostic.json",
+      "sourceBytes": 98,
+      "sourceSha256": "054933178f296df8a7c5fc2cb6b99552206ed89417e960e0874912dd4d006020",
+      "bytes": 98,
+      "sha256": "054933178f296df8a7c5fc2cb6b99552206ed89417e960e0874912dd4d006020",
+      "encoding": "identity"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "verdict": "NEEDS CHANGE",
+  "checks": [
+    {
+      "name": "All author frozen source/report/verification evidence hashes match",
+      "pass": false
+    },
+    {
+      "name": "Independent canonical focused run17passed4files",
+      "pass": true
+    },
+    {
+      "name": "Independent ESLint four actual files0errors52warnings",
+      "pass": true
+    },
+    {
+      "name": "Exact HEAD baseline plus type-erased-equivalent maintained regression reproducesundefined",
+      "pass": true
+    },
+    {
+      "name": "Native numeric91 and legacy0 controls pass",
+      "pass": true
+    },
+    {
+      "name": "Missing/null/zero/negative/fraction/non-numeric controls do not invent identifiers",
+      "pass": true
+    },
+    {
+      "name": "Malformed boolean/array canonical identifiers are rejected perbrief",
+      "pass": false
+    },
+    {
+      "name": "Static limitations disclosed accurately",
+      "pass": true
+    },
+    {
+      "name": "Manager normalizes both query shapes before action and relationship consumption",
+      "pass": true
+    }
+  ],
+  "finding": {
+    "priority": "P2",
+    "file": "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts",
+    "line": 20,
+    "title": "Reject malformed canonical identifier types before coercion",
+    "examples": [
+      {
+        "name": "boolean",
+        "input": {
+          "id": true
+        },
+        "output": {
+          "id": true,
+          "entry_id": 1
+        }
+      },
+      {
+        "name": "array",
+        "input": {
+          "id": [
+            91
+          ]
+        },
+        "output": {
+          "id": [
+            91
+          ],
+          "entry_id": 91
+        }
+      }
+    ],
+    "scope": "Malformed-data compatibility contract, not proven native/security failure",
+    "requested": "Guard canonical primitive type before Number conversion; maintain invalid/missing and permitted numeric-string controls without changing legacy entry_id precedence"
+  },
+  "validation": {
+    "focusedPassed": 17,
+    "filesPassed": 4,
+    "eslintErrors": 0,
+    "eslintWarnings": 52,
+    "authorCompilerDiagnostics": 382,
+    "authorCompilerTouchedDiagnostics": 0,
+    "banditParseErrors": 2
+  },
+  "limitations": [
+    "Component service/query/mutation mocks are not native acceptance. Canonical numeric native repair is confirmed only at component source/test level here.",
+    "Author causal test has annotation-only differences from final maintained test, verified identical emitted JS; no independent rerun of baseline manager needed to establish byte/probe correspondence.",
+    "Initial config-path runner startup failed before tests and is retained. No broad compiler or security certification.",
+    "UAT275 parent-count stale cache not modified; preserved native book3/entry1 await root-owned upgrade/repeat."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/hashes.sha256",
+      "sha256": "2d9638685c54ce2a4250361e73ab50afcfdbf83f7470689686fb2dbe76dde484",
+      "bytes": 1894
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx",
+      "sha256": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+      "bytes": 75944
+    },
+    {
+      "path": "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts",
+      "sha256": "456c91bd1c4df8ef984ac65666804b43223c3e19da876e7943b42806d024cace",
+      "bytes": 2212
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/verification.json",
+      "sha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b",
+      "bytes": 3231
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/causal-evidence.json",
+      "sha256": "f637cb26ab5e72a9ef335788b0f4d56c32f145aced59075a9a02c606ac606b3a",
+      "bytes": 529
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.json",
+      "sha256": "0376242134b7ccd16c583510c06198665978a5584429f7723e7b6f1b7b3d4dee",
+      "bytes": 1716
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/eslint.json",
+      "sha256": "96c04a61c11f49c47d17b6274b83226ded32d226f624ed800d918583befa3159",
+      "bytes": 122488
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/focused-canonical.log",
+      "sha256": "2636b5f48258dc78199d986156af5c4849074c6c13af037095342a424dcd74ae",
+      "bytes": 1889
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/chat-rag.ts",
+      "sha256": "703505640df837248622bc31a2f2bf0b26628b10fef0553146436824c6056ee4",
+      "bytes": 75013
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/TldwApiClient.ts",
+      "sha256": "2b40a3d2520ad42242a121a7da0fcd6e3378f6596b5a16125fcadc8d1c84b192",
+      "bytes": 266709
+    },
+    {
+      "path": "tldw_Server_API/app/api/v1/schemas/world_book_schemas.py",
+      "sha256": "9e5bc9026ecc15418bec011d1975c01d77f37dba175a46ef04e8e433ca9b770f",
+      "bytes": 14317
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-vitest.config.ts",
+      "sha256": "bf6fe33a2189b98780b84470399eb4a0b84dd49160b287d45a9a789088eb03a7",
+      "bytes": 742
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/WorldBookEntryManager.tsx",
+      "sha256": "67072402e3c46d071a41a523847ea40bcf13b94ddd9bf3002155362ba3a02cd6",
+      "bytes": 75776
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274/manager-baseline-source/__tests__/WorldBookEntryManager.baseline.test.tsx",
+      "sha256": "fc6dc626604ac3ffbe3fe88159bed0e8c444f0a345cf38b4ca6b2032a30658e3",
+      "bytes": 8490
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/identifier-probe.mjs",
+      "sha256": "a0052f6d2e3c9ba4a97533c6424df447c42e0e82ad2238f426e715a3f59652be",
+      "bytes": 961
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/focused.log",
+      "sha256": "07ae4c267639361db4dc7c37ac2d0fdb7272ddaae2a0e0995ae18ac135641d83",
+      "bytes": 1856
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/eslint.stderr.txt",
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-final-worldbook-sources-review/audit.json",
+      "sha256": "897b50774c5de1f86cd8e64ade9dd9dc8de05f42f79baaadb2f0508607f09979",
+      "bytes": 46444
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/REVIEW.md",
+      "sha256": "5d7ba72ba759f59c12af2d76ca598d37939eea31adf19b54281b2e31aa16036f",
+      "bytes": 4201
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/worldbook274-review/audit.mjs",
+      "sha256": "697a7cec25f5d5ae9ef1b3e44a6026db0bed3c227d60e7c25c485c3ea093af97",
+      "bytes": 4909
+    }
+  ]
+}

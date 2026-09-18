@@ -1,0 +1,14 @@
+{
+  "frozen": true,
+  "hash_manifest_sha256": "2d9638685c54ce2a4250361e73ab50afcfdbf83f7470689686fb2dbe76dde484",
+  "report_path": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-274-report.md",
+  "report_sha256": "e16bebee23d318128172415bf29851fd670cf1f5df8fec1fa62e402dd3e6fbd0",
+  "source_hashes": {
+    "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.budget.test.tsx": "9c2854c6735d95077db20a5307ca6c09122f7df25c5b78aa0ca084402551083e",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookEntryUtils.test.ts": "d474d9dd749f95b43b84ee4d82fdeedfe69f5fd30dea81dc5b6b713af811eaeb",
+    "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts": "81c2a2d504ddfd4a56319554a51fe643cebc7f5ae62a8e667a401ff2162d9f34"
+  },
+  "task": "TASK13260.215 / UAT274",
+  "verification_sha256": "de7a08cd4f69a269bf98ef6ff15ca2b37288771c76c2d0958f731204810b974b"
+}

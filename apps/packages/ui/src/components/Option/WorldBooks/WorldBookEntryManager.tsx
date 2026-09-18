@@ -12,6 +12,7 @@ import {
   getPriorityBand,
   getPriorityTagColor,
   normalizeKeywordList,
+  normalizeWorldBookEntryIdentifier,
   validateRegexKeywords
 } from "./worldBookEntryUtils"
 import {
@@ -331,10 +332,11 @@ export const WorldBookEntryManager: React.FC<{
   })
   const { entries, totalEntryCount } = React.useMemo(() => {
     if (Array.isArray(entryQueryData)) {
-      return { entries: entryQueryData, totalEntryCount: entryQueryData.length }
+      const normalizedEntries = entryQueryData.map(normalizeWorldBookEntryIdentifier)
+      return { entries: normalizedEntries, totalEntryCount: normalizedEntries.length }
     }
     const normalizedEntries = Array.isArray((entryQueryData as any)?.entries)
-      ? (entryQueryData as any).entries
+      ? (entryQueryData as any).entries.map(normalizeWorldBookEntryIdentifier)
       : []
     const parsedTotal = Number((entryQueryData as any)?.total)
     const normalizedTotal =

@@ -1,0 +1,58 @@
+{
+  "corrections": [
+    {
+      "problem": "arbitrary Number coercion accepted booleans and arrays",
+      "red_path": ".tmp/uat-repairs-231-246/worldbook274/review-round2-red.log",
+      "red_sha256": "776456306fe0d16d33eeefea9dc2dc5ad503600045ea59d3571ead0d51defb8e",
+      "round": 2
+    },
+    {
+      "green_path": ".tmp/uat-repairs-231-246/worldbook274/review-round3-green.log",
+      "green_sha256": "5b86bd063ae06ddb7e7a875d19808b462c5d87d5be13341cc8aa19e3fb02a86e",
+      "problem": "invalid identifier null boundary was implicit",
+      "round": 3,
+      "strict_utility_tsc_path": ".tmp/uat-repairs-231-246/worldbook274/review-round3-utility-tsc.log",
+      "strict_utility_tsc_sha256": "b13e0760b6d7c287c9403ed78dc1f46d39b71ef35935619797d930dea2ea8ffd"
+    }
+  ],
+  "focused": {
+    "exit_code": 0,
+    "passed": 17,
+    "path": ".tmp/uat-repairs-231-246/worldbook274/review-round3-focused.log",
+    "sha256": "386df2e0d8832acc48e533d9f1271abe2cf0a48634e2b8a4cfd6885fa675e0f7",
+    "skipped": 0
+  },
+  "frozen": true,
+  "prior_rounds": {
+    "round1": "round1/hashes.sha256",
+    "round2": "round2/hashes-round2.sha256"
+  },
+  "review_round": 3,
+  "source_hashes": {
+    "apps/packages/ui/src/components/Option/WorldBooks/WorldBookEntryManager.tsx": "7190ddd838700849629e1afda8a04f01f779c1c853cd448ddebcd9a29acd676c",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/WorldBookEntryManager.budget.test.tsx": "9c2854c6735d95077db20a5307ca6c09122f7df25c5b78aa0ca084402551083e",
+    "apps/packages/ui/src/components/Option/WorldBooks/__tests__/worldBookEntryUtils.test.ts": "f5034032d094a6a1f78c17a5c9735213a9df60394159477f547a4f5c33c61b82",
+    "apps/packages/ui/src/components/Option/WorldBooks/worldBookEntryUtils.ts": "57eebc59045faf27825541f0b56785df8326ae39e70670dce29dff85be178e9e"
+  },
+  "static": {
+    "bandit": {
+      "exit_code": 0,
+      "findings": 0,
+      "limitation": "Bandit does not parse TypeScript",
+      "parse_errors": 2,
+      "path": ".tmp/uat-repairs-231-246/worldbook274/review-round3-bandit.json",
+      "sha256": "391537c441373708286851345c59d77ca29ea4ea096a01a74c1706f889305d0a"
+    },
+    "diff_check": {
+      "exit_code": 0
+    },
+    "eslint": {
+      "errors": 0,
+      "exit_code": 0,
+      "path": ".tmp/uat-repairs-231-246/worldbook274/review-round3-eslint.log",
+      "sha256": "04697de3b5ff8c648b782696050d0977d099f7ea616da42e3b9ef8f0fce68d24",
+      "warnings": 52
+    }
+  },
+  "task": "TASK13260.215 / UAT274"
+}
