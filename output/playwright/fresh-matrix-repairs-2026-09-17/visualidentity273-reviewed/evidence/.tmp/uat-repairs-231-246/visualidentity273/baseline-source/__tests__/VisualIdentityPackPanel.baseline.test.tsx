@@ -4,10 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
 import { VisualIdentityPackPanel } from "../VisualIdentityPackPanel"
-import type {
-  VisualIdentityCapabilitiesResponse,
-  VisualIdentityDraftResponse
-} from "@/types/visual-identities"
+import type { VisualIdentityDraftResponse } from "@/types/visual-identities"
 
 vi.mock("@/hooks/useVisualIdentityResolver", () => ({
   clearVisualIdentityResolverCaches: vi.fn()
@@ -36,7 +33,7 @@ const readyDraft: VisualIdentityDraftResponse = {
 }
 
 const makeClient = () => ({
-  getVisualIdentityCapabilities: vi.fn(async (): Promise<VisualIdentityCapabilitiesResponse> => ({
+  getVisualIdentityCapabilities: vi.fn(async () => ({
     upload_max_bytes: 1024 * 1024,
     archive_max_bytes: 4 * 1024 * 1024,
     max_dimension: 2048,
@@ -137,7 +134,9 @@ describe("VisualIdentityPackPanel", () => {
       />
     )
 
-    await screen.findByText(/Expression-pack authoring is unavailable on this server/)
+    await waitFor(() => {
+      expect(client.listVisualIdentityPacks).not.toHaveBeenCalled()
+    })
     expect(client.listVisualIdentityExpressionSlots).toHaveBeenCalledTimes(1)
     expect(client.resolveVisualIdentityBinding).toHaveBeenCalledWith({
       actor_kind: "character",

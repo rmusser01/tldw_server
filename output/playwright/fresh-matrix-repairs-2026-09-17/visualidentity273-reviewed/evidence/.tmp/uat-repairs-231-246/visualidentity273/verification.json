@@ -1,0 +1,64 @@
+{
+  "task": "TASK13260.214 / UAT273",
+  "scope": [
+    "apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx",
+    "apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityPackPanel.test.tsx"
+  ],
+  "native_trigger": "The safe native issue supplement records PostgreSQL capabilities metadata_supported=false while the panel still requested active packs and received the known unsupported-authoring 501; slots and binding resolution returned 200.",
+  "causal_red": {
+    "command": "bunx vitest run --config .tmp/uat-repairs-231-246/visualidentity273/baseline-vitest.config.ts --reporter=dot -t \"keeps expression resolution available without requesting packs when metadata authoring is unsupported\"",
+    "cwd": "apps/packages/ui",
+    "exit_code": 1,
+    "result": "An isolated source overlay from HEAD called listVisualIdentityPacks once with {status: active} despite metadata_supported=false.",
+    "receipt": ".tmp/uat-repairs-231-246/visualidentity273/baseline-causal-red.log",
+    "receipt_sha256": "cbd7f891a23ed215320d0edc14e775fd223d587ffe83c7a5636df2ed060da30f",
+    "baseline_source_sha256": "b23d453219afc9a3d992f21e834c7281649c1665477a101e8d77d894bfa9d3f1",
+    "overlay_config_sha256": "76ab4b0d4c36976cd4e0ad811a15031d7658ec9dca2955eac895af3f1629e3c1"
+  },
+  "green": {
+    "command": "bunx vitest run src/components/Common/VisualIdentity/__tests__/VisualIdentityPackPanel.test.tsx --reporter=dot",
+    "cwd": "apps/packages/ui",
+    "exit_code": 0,
+    "result": "4 passed",
+    "receipt": ".tmp/uat-repairs-231-246/visualidentity273/focused-final-4.log",
+    "receipt_sha256": "f2270ceddca82fe12db9d8b535edaa8a3fb979fb8f9819275d2e79f2fefd2b27"
+  },
+  "behavioral_guards": [
+    "Capabilities are fetched before packs are conditionally requested.",
+    "metadata_supported=false skips active-pack loading and hides all visible draft authoring UI.",
+    "ZIP input and import button remain disabled until capabilities load and whenever authoring is explicitly unsupported.",
+    "Expression slots and neutral binding resolution continue on the unsupported path.",
+    "An explicit metadata_supported=true control retains active-pack loading and enabled ZIP controls.",
+    "A missing metadata_supported flag remains authoring-capable after capability loading; the two existing import/draft tests cover that legacy response shape."
+  ],
+  "test_type_correction": {
+    "cause": "The makeClient capability mock inferred a return type without optional metadata fields, so its two new mockResolvedValue literals produced TS2353 under the reviewer's exact AST projection.",
+    "fix": "The maintained test imports VisualIdentityCapabilitiesResponse and annotates the async capability mock return; no production file changed.",
+    "original_review_diagnostic": ".tmp/uat-repairs-231-246/visualidentity273-review/mock-type-diagnostics.json",
+    "final_projection": ".tmp/uat-repairs-231-246/visualidentity273/mock-type-diagnostics.json",
+    "final_result": "0 diagnostics"
+  },
+  "static": {
+    "git_diff_check": { "exit_code": 0 },
+    "frontend_typecheck": {
+      "command": "bun run typecheck",
+      "cwd": "apps/tldw-frontend",
+      "exit_code": 2,
+      "result": "90 existing diagnostics; no changed-panel or changed-test path occurrence",
+      "log": "/private/tmp/visualidentity273-frontend-typecheck-final.log"
+    },
+    "bandit": {
+      "exit_code": 0,
+      "artifact": ".tmp/uat-repairs-231-246/visualidentity273/bandit-final.json",
+      "artifact_sha256": "4b8d054c8f9eedd9ec3f8ee0831f2bcbe91671c275522bab63d11d425a14c911",
+      "limitation": "Python Bandit cannot parse TypeScript. Its JSON has one parse error and no findings, so it is not a TypeScript security result."
+    },
+    "eslint": {
+      "command": "apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs <two UAT273 files>",
+      "exit_code": 0,
+      "receipt": ".tmp/uat-repairs-231-246/visualidentity273/eslint-final.log",
+      "note": "ESLint emitted the existing frontend pages-directory configuration notice but no scoped lint violation."
+    },
+    "prettier": "Prettier --check warned on both existing files. They were not rewritten because whole-file formatting would add unrelated churn; this is not a clean formatting result."
+  }
+}

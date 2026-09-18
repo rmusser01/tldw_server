@@ -1,0 +1,516 @@
+{
+  "at": "2026-09-18T03:14:49.134Z",
+  "reviewedImplementation": [
+    273
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    273
+  ],
+  "sourceBaseline": "e8b7c81151f5e2d1f57665878f4ecd214a1ae224",
+  "fullMatrixAccepted": false,
+  "excludedLinks": [
+    {
+      "path": ".tmp/uat-repairs-231-246/visualidentity273/baseline-source/VisualIdentityDraftReview.tsx",
+      "reason": "test dependency link excluded; not dereferenced"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/visualidentity273/node_modules",
+      "reason": "test dependency link excluded; not dereferenced"
+    }
+  ],
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": "apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityPackPanel.tsx",
+      "sourceBytes": 15642,
+      "sourceSha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+      "bytes": 15642,
+      "sha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityPackPanel.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityPackPanel.test.tsx",
+      "sourceBytes": 7444,
+      "sourceSha256": "39cc5f9fa86a7bc96da973271e537c54c65c2d9c8c15263f87662dc2309c7522",
+      "bytes": 7444,
+      "sha256": "39cc5f9fa86a7bc96da973271e537c54c65c2d9c8c15263f87662dc2309c7522",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-273-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-273-report.md",
+      "sourceBytes": 2857,
+      "sourceSha256": "caa582f63c657b6672d5420782fe558035ea7b1b38f21c6fb2fc6d8e2bf1bc57",
+      "bytes": 2857,
+      "sha256": "caa582f63c657b6672d5420782fe558035ea7b1b38f21c6fb2fc6d8e2bf1bc57",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-273-review.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-273-review.md",
+      "sourceBytes": 4510,
+      "sourceSha256": "320a0e660a0b58347181b8ddd3f4c6e3c864c58e521e77bed2b70a38082c021f",
+      "bytes": 4510,
+      "sha256": "320a0e660a0b58347181b8ddd3f4c6e3c864c58e521e77bed2b70a38082c021f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/bandit-final.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/bandit-final.json",
+      "sourceBytes": 749,
+      "sourceSha256": "4b8d054c8f9eedd9ec3f8ee0831f2bcbe91671c275522bab63d11d425a14c911",
+      "bytes": 749,
+      "sha256": "4b8d054c8f9eedd9ec3f8ee0831f2bcbe91671c275522bab63d11d425a14c911",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/bandit.json",
+      "sourceBytes": 749,
+      "sourceSha256": "834dbc0c1f6b2c3c6eb1f9b19ac717759544c5a2a5b158d7e5d224d6fbab2074",
+      "bytes": 749,
+      "sha256": "834dbc0c1f6b2c3c6eb1f9b19ac717759544c5a2a5b158d7e5d224d6fbab2074",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/baseline-causal-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/baseline-causal-red.log.gz",
+      "sourceBytes": 8521,
+      "sourceSha256": "cbd7f891a23ed215320d0edc14e775fd223d587ffe83c7a5636df2ed060da30f",
+      "bytes": 2012,
+      "sha256": "a40a538c7c1776ca6ed673a08a0be577ae5994dce918f2e8402326ca12eab039",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/baseline-source/VisualIdentityPackPanel.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/baseline-source/VisualIdentityPackPanel.tsx",
+      "sourceBytes": 15156,
+      "sourceSha256": "b23d453219afc9a3d992f21e834c7281649c1665477a101e8d77d894bfa9d3f1",
+      "bytes": 15156,
+      "sha256": "b23d453219afc9a3d992f21e834c7281649c1665477a101e8d77d894bfa9d3f1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/baseline-source/__tests__/VisualIdentityPackPanel.baseline.test.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/baseline-source/__tests__/VisualIdentityPackPanel.baseline.test.tsx",
+      "sourceBytes": 7373,
+      "sourceSha256": "7fadc11a545fd2babe978af58b59ca1c1185cb462e4014c83f1fc1fba07ca700",
+      "bytes": 7373,
+      "sha256": "7fadc11a545fd2babe978af58b59ca1c1185cb462e4014c83f1fc1fba07ca700",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/baseline-vitest.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/baseline-vitest.config.ts",
+      "sourceBytes": 765,
+      "sourceSha256": "76ab4b0d4c36976cd4e0ad811a15031d7658ec9dca2955eac895af3f1629e3c1",
+      "bytes": 765,
+      "sha256": "76ab4b0d4c36976cd4e0ad811a15031d7658ec9dca2955eac895af3f1629e3c1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/eslint-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/eslint-final.log.gz",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 180,
+      "sha256": "81613718ff59c4d60630e8069ca17731b7cd98dd8b4628062c872de501db052c",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/eslint-typefix-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/eslint-typefix-final.log.gz",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 180,
+      "sha256": "81613718ff59c4d60630e8069ca17731b7cd98dd8b4628062c872de501db052c",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/focused-final-4.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/focused-final-4.log.gz",
+      "sourceBytes": 444,
+      "sourceSha256": "f2270ceddca82fe12db9d8b535edaa8a3fb979fb8f9819275d2e79f2fefd2b27",
+      "bytes": 327,
+      "sha256": "c2cf871599deae321bdff5b4eebcdf1e0d98efd276ddcc50f31808aedc9d4f1b",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/focused-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/focused-final.log.gz",
+      "sourceBytes": 442,
+      "sourceSha256": "52a400b11c780cc4200378c59a292048da1d6848ddd36523b0235ad97b00b0ad",
+      "bytes": 321,
+      "sha256": "063f227e799c899b1b9f331ad8de79905dc1257312ec5769a08b3604080a4fe9",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/focused-typefix-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/focused-typefix-final.log.gz",
+      "sourceBytes": 444,
+      "sourceSha256": "372060d1f0942fabc8ff5fc71b8e67db9902aae71d808e56b3904a7d7a0b7d58",
+      "bytes": 325,
+      "sha256": "fbcda24c16a8a2dd5a02cacb2d2b0e7350cdabcbf5b801d3d0f52cf9fd0a3329",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/hashes.sha256",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/hashes.sha256",
+      "sourceBytes": 2651,
+      "sourceSha256": "ffeb17d7b9edd084e07d3bacaa6c9884960a7c5e304ed1d9f0cf14bedc6433da",
+      "bytes": 2651,
+      "sha256": "ffeb17d7b9edd084e07d3bacaa6c9884960a7c5e304ed1d9f0cf14bedc6433da",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/mock-type-diagnostics.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/mock-type-diagnostics.json",
+      "sourceBytes": 190,
+      "sourceSha256": "6830587f06cb9fb54f32f2dfae6822627351f974223172d3d6a6731f8e02cd14",
+      "bytes": 190,
+      "sha256": "6830587f06cb9fb54f32f2dfae6822627351f974223172d3d6a6731f8e02cd14",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/mock-type-projection-final.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/mock-type-projection-final.log.gz",
+      "sourceBytes": 19,
+      "sourceSha256": "60326e4e048106d4366a2fd8fe472ccfdf06667fcd0f234977febfeaa38f31b8",
+      "bytes": 39,
+      "sha256": "24384f679b7a54d7fec3b36103ad4d00b9267cf8c3a75ba3e3c1948ec9c553ac",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/mock-type-projection.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/mock-type-projection.ts",
+      "sourceBytes": 1140,
+      "sourceSha256": "fa7eb23e49df290fd2a68ffb2ac40783745ee10559fcda69c121e5970a606c8d",
+      "bytes": 1140,
+      "sha256": "fa7eb23e49df290fd2a68ffb2ac40783745ee10559fcda69c121e5970a606c8d",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/typecheck-mock-projection.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/typecheck-mock-projection.mjs",
+      "sourceBytes": 2337,
+      "sourceSha256": "060c48bd3036cd1ee37d6f726c823fd1e1a4473def583777c1b2fff98d27ec7b",
+      "bytes": 2337,
+      "sha256": "060c48bd3036cd1ee37d6f726c823fd1e1a4473def583777c1b2fff98d27ec7b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273/verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273/verification.json",
+      "sourceBytes": 4331,
+      "sourceSha256": "c7220d0d229508fcd61ddb1b0b9a4fbff0dda6768c9e28f658deda4584ea3c5b",
+      "bytes": 4331,
+      "sha256": "c7220d0d229508fcd61ddb1b0b9a4fbff0dda6768c9e28f658deda4584ea3c5b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/REVIEW.md",
+      "sourceBytes": 4510,
+      "sourceSha256": "320a0e660a0b58347181b8ddd3f4c6e3c864c58e521e77bed2b70a38082c021f",
+      "bytes": 4510,
+      "sha256": "320a0e660a0b58347181b8ddd3f4c6e3c864c58e521e77bed2b70a38082c021f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/ROUND0-REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/ROUND0-REVIEW.md",
+      "sourceBytes": 3293,
+      "sourceSha256": "3faa57db4bb73d37a365e598280ff9ba0b22833085aa285c139a20cb12cf22df",
+      "bytes": 3293,
+      "sha256": "3faa57db4bb73d37a365e598280ff9ba0b22833085aa285c139a20cb12cf22df",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/ROUND0-SNAPSHOT-CORRECTION.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/ROUND0-SNAPSHOT-CORRECTION.md",
+      "sourceBytes": 878,
+      "sourceSha256": "63d64c63be152310594e03d4708a3e95f08375a16cbe7d588e85b45ce6aee24b",
+      "bytes": 878,
+      "sha256": "63d64c63be152310594e03d4708a3e95f08375a16cbe7d588e85b45ce6aee24b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/audit.json",
+      "sourceBytes": 17058,
+      "sourceSha256": "10f6c2e7a53cdfe647d31f76a126cd54bed36c28544afe30e75e4d66d0d0bb78",
+      "bytes": 17058,
+      "sha256": "10f6c2e7a53cdfe647d31f76a126cd54bed36c28544afe30e75e4d66d0d0bb78",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/audit.mjs",
+      "sourceBytes": 8553,
+      "sourceSha256": "2798c92066374f03b71c510cfd12aa7fa46574c6ec95ee4aee3a1ce48cf3ce45",
+      "bytes": 8553,
+      "sha256": "2798c92066374f03b71c510cfd12aa7fa46574c6ec95ee4aee3a1ce48cf3ce45",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/baseline-alias-replay-failure.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/baseline-alias-replay-failure.log.gz",
+      "sourceBytes": 1011,
+      "sourceSha256": "c28339c8a3898cb3bc788650bb34a849dffaa65b145f3ac8de6330a6a4168b20",
+      "bytes": 478,
+      "sha256": "8a70498ea78cc577935c1058ec13de1b4b70d92409a3a99d4ff21f83633eb331",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/baseline-independent-red.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/baseline-independent-red.log.gz",
+      "sourceBytes": 8516,
+      "sourceSha256": "d9187c3ac722f10a0aa8167674ca32819081ff421c902f3a4654cd5587e9b2df",
+      "bytes": 2025,
+      "sha256": "2300d758506219a7d82a8941b542529dcd88088e7b865f1d21becaab16606ae0",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/baseline-initial-replay.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/baseline-initial-replay.log.gz",
+      "sourceBytes": 8521,
+      "sourceSha256": "0fc047f85d5717dd17fc00d38f737bdf7aa853e2a0e078b012654d0a8053f231",
+      "bytes": 2012,
+      "sha256": "57388650722939cb4c15901b53e3fe7757400b6631e84d71c16d8df45076b455",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/baseline.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/baseline.config.ts",
+      "sourceBytes": 879,
+      "sourceSha256": "a65c61736e6f841839d68e358ea1d894bf0a5ef26ddb5ff5985392d0043d885e",
+      "bytes": 879,
+      "sha256": "a65c61736e6f841839d68e358ea1d894bf0a5ef26ddb5ff5985392d0043d885e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/controls-alias-config-failure.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/controls-alias-config-failure.log.gz",
+      "sourceBytes": 2182,
+      "sourceSha256": "8d06fedc102385a58f406332de2228bed61ec55b105ebac047af07bbbd9b33f2",
+      "bytes": 784,
+      "sha256": "58be54e5a8433f77bae195bd8a6f39ea1b2a82c15ae7221864eb71ff56c8aab6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/controls-initial-config-failure.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/controls-initial-config-failure.log.gz",
+      "sourceBytes": 2329,
+      "sourceSha256": "86660ed5f3c581a7230bccc5ea3f11f501dc0bc23fd609e0c9eba3804e7dcc74",
+      "bytes": 797,
+      "sha256": "df835621ec5fc2cc079b3dddde36a4937dcd9f927ad6cd02d8a2e21d305a5b9d",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/controls.config.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/controls.config.ts",
+      "sourceBytes": 521,
+      "sourceSha256": "cedacecdc8085d855c3f4ffdfab2a80e5d6661b02fdfefef01f6c4f52f3c640b",
+      "bytes": 521,
+      "sha256": "cedacecdc8085d855c3f4ffdfab2a80e5d6661b02fdfefef01f6c4f52f3c640b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/controls.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/controls.log.gz",
+      "sourceBytes": 1851,
+      "sourceSha256": "b6d50729411f5bcd1f51e6c412ad8678a78d344381278f25c3a2e82eb1a6d463",
+      "bytes": 688,
+      "sha256": "1e4f620e5ce312e5756ee0edb7643bde6795ae7c7bb66bc7b4bda6c9be14d59e",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/controls.review.test.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/controls.review.test.tsx",
+      "sourceBytes": 9573,
+      "sourceSha256": "97efeccb24ad3eb2513dcdc8fab7f0f3ccc13da080ef8b963a9622e3da461e61",
+      "bytes": 9573,
+      "sha256": "97efeccb24ad3eb2513dcdc8fab7f0f3ccc13da080ef8b963a9622e3da461e61",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/eslint-stderr.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/eslint-stderr.txt",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/eslint.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/eslint.json",
+      "sourceBytes": 631,
+      "sourceSha256": "b377d2b041d2e6304d07ac5ec70575058b536c3f25d0a2f7cbd5e1ac19f93d43",
+      "bytes": 631,
+      "sha256": "b377d2b041d2e6304d07ac5ec70575058b536c3f25d0a2f7cbd5e1ac19f93d43",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/focused.log.gz",
+      "sourceBytes": 1219,
+      "sourceSha256": "713963b6f660733fc47246af55dd8c4e61b47eb26871b89262c759e3bbd223df",
+      "bytes": 558,
+      "sha256": "ab23a139e375de67ca9f0a5c842757a1a8b71f0f0de623baf2e86f9a4fb281a6",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/mock-type-diagnostics.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/mock-type-diagnostics.json",
+      "sourceBytes": 854,
+      "sourceSha256": "16008235f1a89ae5038166ad1be8afb5d4ef5dc15781591a00c5e6e1751d7456",
+      "bytes": 854,
+      "sha256": "16008235f1a89ae5038166ad1be8afb5d4ef5dc15781591a00c5e6e1751d7456",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/mock-type-projection.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/mock-type-projection.ts",
+      "sourceBytes": 1012,
+      "sourceSha256": "cabf032002f1db6d291edf3ef0b13376a416c4ea851fc758f61184567974212b",
+      "bytes": 1012,
+      "sha256": "cabf032002f1db6d291edf3ef0b13376a416c4ea851fc758f61184567974212b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-VisualIdentityPackPanel.test.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-VisualIdentityPackPanel.test.tsx",
+      "sourceBytes": 7444,
+      "sourceSha256": "39cc5f9fa86a7bc96da973271e537c54c65c2d9c8c15263f87662dc2309c7522",
+      "bytes": 7444,
+      "sha256": "39cc5f9fa86a7bc96da973271e537c54c65c2d9c8c15263f87662dc2309c7522",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-VisualIdentityPackPanel.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-VisualIdentityPackPanel.tsx",
+      "sourceBytes": 15642,
+      "sourceSha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+      "bytes": 15642,
+      "sha256": "7681306b80e25317a3481891b1a973423a431464ea69f0c58e336e251347a401",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-audit.json",
+      "sourceBytes": 4285,
+      "sourceSha256": "0f32d093a45fc82a2e45884c129238b701793a074d8617c446b3599564498904",
+      "bytes": 4285,
+      "sha256": "0f32d093a45fc82a2e45884c129238b701793a074d8617c446b3599564498904",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-frozen-test-reconstructed.tsx",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-frozen-test-reconstructed.tsx",
+      "sourceBytes": 7359,
+      "sourceSha256": "cbfbd96797cc5a4edfafd80c482bca2bcd6f85d7de219eb9ecc74c2c31fa41ea",
+      "bytes": 7359,
+      "sha256": "cbfbd96797cc5a4edfafd80c482bca2bcd6f85d7de219eb9ecc74c2c31fa41ea",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-mock-type-diagnostics.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-mock-type-diagnostics.json",
+      "sourceBytes": 854,
+      "sourceSha256": "16008235f1a89ae5038166ad1be8afb5d4ef5dc15781591a00c5e6e1751d7456",
+      "bytes": 854,
+      "sha256": "16008235f1a89ae5038166ad1be8afb5d4ef5dc15781591a00c5e6e1751d7456",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round0-mock-type-projection.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round0-mock-type-projection.ts",
+      "sourceBytes": 1012,
+      "sourceSha256": "cabf032002f1db6d291edf3ef0b13376a416c4ea851fc758f61184567974212b",
+      "bytes": 1012,
+      "sha256": "cabf032002f1db6d291edf3ef0b13376a416c4ea851fc758f61184567974212b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-eslint-stderr.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-eslint-stderr.txt",
+      "sourceBytes": 261,
+      "sourceSha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "bytes": 261,
+      "sha256": "3cc173fea1e1996f6db29fda602c85c8557fa169977a31508290036ce2f4bf17",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-eslint.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-eslint.json",
+      "sourceBytes": 631,
+      "sourceSha256": "b377d2b041d2e6304d07ac5ec70575058b536c3f25d0a2f7cbd5e1ac19f93d43",
+      "bytes": 631,
+      "sha256": "b377d2b041d2e6304d07ac5ec70575058b536c3f25d0a2f7cbd5e1ac19f93d43",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-focused.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-focused.log.gz",
+      "sourceBytes": 1219,
+      "sourceSha256": "e7db90707f5b3031af6e5e084bdf0e5466bb3d9818b28f33022e13a0cbec02bf",
+      "bytes": 558,
+      "sha256": "9e01e691469215ed5626309cc88ee6a6982cbd7c4c0fd0a83c43a8582810d8a1",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-mock-type-diagnostics.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-mock-type-diagnostics.json",
+      "sourceBytes": 190,
+      "sourceSha256": "6830587f06cb9fb54f32f2dfae6822627351f974223172d3d6a6731f8e02cd14",
+      "bytes": 190,
+      "sha256": "6830587f06cb9fb54f32f2dfae6822627351f974223172d3d6a6731f8e02cd14",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-mock-type-projection.ts",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-mock-type-projection.ts",
+      "sourceBytes": 1174,
+      "sourceSha256": "2ca2528059932d954de0974f7fbb75eb94dd53b40dd1616b8b0317b9267b722a",
+      "bytes": 1174,
+      "sha256": "2ca2528059932d954de0974f7fbb75eb94dd53b40dd1616b8b0317b9267b722a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-reviewed.diff",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-reviewed.diff.gz",
+      "sourceBytes": 6806,
+      "sourceSha256": "d38cbb25a2b66cfeda51af2f95e1deb5b76dce2f7ee5ab4316c68a6a87d7f86e",
+      "bytes": 1826,
+      "sha256": "5cd1a60f638a0dfa91d864939477ed959d2a826d349136d9a010237c9e3b2288",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/round1-typecheck-mock-projection.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/round1-typecheck-mock-projection.mjs",
+      "sourceBytes": 2463,
+      "sourceSha256": "90eea80b77f5835b47abe08cfaa79f6045fecb3062c4d6a55a2bd5f02c9999c7",
+      "bytes": 2463,
+      "sha256": "90eea80b77f5835b47abe08cfaa79f6045fecb3062c4d6a55a2bd5f02c9999c7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/visualidentity273-review/typecheck-mock-projection.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/visualidentity273-review/typecheck-mock-projection.mjs",
+      "sourceBytes": 2260,
+      "sourceSha256": "3bd9477b5b614bdd4fa2d83911cf13bd2839c8e489555a76a2f23eb8b5966e7d",
+      "bytes": 2260,
+      "sha256": "3bd9477b5b614bdd4fa2d83911cf13bd2839c8e489555a76a2f23eb8b5966e7d",
+      "encoding": "identity"
+    }
+  ]
+}

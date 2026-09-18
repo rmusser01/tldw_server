@@ -3,11 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
-import { VisualIdentityPackPanel } from "../VisualIdentityPackPanel"
-import type {
-  VisualIdentityCapabilitiesResponse,
-  VisualIdentityDraftResponse
-} from "@/types/visual-identities"
+import { VisualIdentityPackPanel } from "@/components/Common/VisualIdentity/VisualIdentityPackPanel"
+import type { VisualIdentityDraftResponse } from "@/types/visual-identities"
 
 vi.mock("@/hooks/useVisualIdentityResolver", () => ({
   clearVisualIdentityResolverCaches: vi.fn()
@@ -36,7 +33,7 @@ const readyDraft: VisualIdentityDraftResponse = {
 }
 
 const makeClient = () => ({
-  getVisualIdentityCapabilities: vi.fn(async (): Promise<VisualIdentityCapabilitiesResponse> => ({
+  getVisualIdentityCapabilities: vi.fn(async () => ({
     upload_max_bytes: 1024 * 1024,
     archive_max_bytes: 4 * 1024 * 1024,
     max_dimension: 2048,
@@ -229,5 +226,38 @@ describe("VisualIdentityPackPanel", () => {
         expect.objectContaining({ asset_id: 77, expression_key: "neutral" })
       )
     })
+  })
+})
+
+
+describe("independent capability sequencing and failure controls", () => {
+  it("keeps authoring disabled and packs undispatched until capabilities resolve", async () => {
+    const client = makeClient()
+    let resolveCapabilities!: (value: Awaited<ReturnType<typeof client.getVisualIdentityCapabilities>>) => void
+    client.getVisualIdentityCapabilities.mockImplementation(() => new Promise(resolve => {resolveCapabilities = resolve}))
+    render(<VisualIdentityPackPanel actorKind="character" actorId={7} client={client} />)
+    expect(client.listVisualIdentityPacks).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", {name: "Import ZIP"})).toBeDisabled()
+    resolveCapabilities({upload_max_bytes: 1, archive_max_bytes: 1, max_dimension: 1, max_frame_count: 1, supported_mime_types: ["image/png"], avif_enabled: false})
+    await waitFor(() => expect(screen.getByRole("button", {name: "Import ZIP"})).not.toBeDisabled())
+    expect(client.listVisualIdentityPacks).toHaveBeenCalledOnce()
+  })
+  it("keeps pack writes disabled when capability lookup fails", async () => {
+    const client = makeClient()
+    client.getVisualIdentityCapabilities.mockRejectedValue(new Error("Capabilities unavailable"))
+    render(<VisualIdentityPackPanel actorKind="character" actorId={7} client={client} />)
+    await screen.findByText("Capabilities unavailable")
+    expect(client.listVisualIdentityPacks).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", {name: "Import ZIP"})).toBeDisabled()
+  })
+  it("preserves resolver error without dispatching unsupported packs", async () => {
+    const client = makeClient()
+    const capabilities = await client.getVisualIdentityCapabilities()
+    client.getVisualIdentityCapabilities.mockResolvedValue({...capabilities, metadata_supported: false})
+    client.resolveVisualIdentityBinding.mockRejectedValue(new Error("Actor unavailable"))
+    render(<VisualIdentityPackPanel actorKind="character" actorId={7} client={client} />)
+    await screen.findByText("Actor unavailable")
+    expect(client.listVisualIdentityPacks).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", {name: "Import ZIP"})).toBeDisabled()
   })
 })
