@@ -1,6 +1,0 @@
-### Result
-{"timestamp":"2026-09-16T08:17:51.578Z","progress":"5 cards remaining, 0 reviewed, Available now: 5, new: 5, learning: 0, due: 0\nStudy queue\n5\ncards remaining\n0 reviewed\nAvailable now: 5\nnew: 5\nlearning: 0\ndue: 0\n~2 min left\nCycle5 Single Biology Cards","card":"Standard\nNew\nSM-2+\nNote #5923db59-da1d-4977-a2db-876884cd91f5\nEdit\nFront\n\nWhat is the powerhouse of the cell?\n\nNeed help?\nShow Answer\nSpace Flip\nE Edit\nCompact hints"}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByTestId("flashcards-review-show-answer").waitFor({state:"visible",timeout:15000}); return {timestamp:new Date().toISOString(),progress:await page.getByTestId("flashcards-review-progress").innerText(),card:await page.getByTestId("flashcards-review-active-card").innerText()}; })(page);
-```

@@ -1,8 +1,0 @@
-{
-  "checkedAt": "2026-09-16T00:21:34.691Z",
-  "knownRuntimeValuesChecked": 14,
-  "credentialMatches": 0,
-  "jwtPatternMatches": 0,
-  "privateKeyPatternMatches": 0,
-  "scope": "Every retained payload plus SHA256SUMS; PNGs byte-scanned and visually inspected, no OCR claim."
-}

@@ -1,9 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('button', { name: 'Open source scope and saved' }).click();
-```
-### Page
-- Page URL: http://127.0.0.1:18580/knowledge
-- Page Title: Knowledge | tldw
-### Snapshot
-- [Snapshot](.playwright-cli/page-2026-09-16T08-46-36-893Z.yml)

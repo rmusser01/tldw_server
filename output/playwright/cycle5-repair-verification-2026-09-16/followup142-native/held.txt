@@ -1,6 +1,0 @@
-### Result
-{"stage":"backend-response-held","status":200,"body":"{\"updated\":1}","requestBody":"{\"ids\":[1]}","originalUrl":"http://127.0.0.1:18580/notifications"}
-### Ran Playwright code
-```js
-await (async page=>page.__uat142)(page);
-```

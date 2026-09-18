@@ -1,7 +1,0 @@
-{
-  "original_sha256": "eb5e0337ccd625f08ff68c88717eaf34ce19d31930d7f648864d7e81b876eb5a",
-  "corrected_sha256": "88d1572aeb2f7623733974fbe64efd2aec8de27a7257938cf40c54894a4591f7",
-  "only_difference": "delete env.JOBS_DB_URL;",
-  "required_pg_preserved": true,
-  "no_config_or_runtime_mutation": true
-}

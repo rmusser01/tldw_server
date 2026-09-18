@@ -1,6 +1,0 @@
-### Error
-TimeoutError: locator.waitFor: Timeout 15000ms exceeded.
-Call log:
-  - waiting for getByText('Notifications are active', { exact: true }) to be visible
-
-

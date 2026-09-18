@@ -1,5 +1,0 @@
-### Ran Playwright code
-```js
-// Press 3
-await page.keyboard.press('3');
-```

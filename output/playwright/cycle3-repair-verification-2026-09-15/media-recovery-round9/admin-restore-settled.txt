@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T22:04:12.445Z","url":"http://127.0.0.1:18281/media-trash","title":"","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nTrash\n\nItems moved to trash stay here until you restore or permanently delete them.\n\nAuto-purge policy is not configured or not reported by this server.\n\nRefresh\nEmpty trash\nTrash is empty\n\nDeleted media items show up here until you restore them or delete them permanently.\n\n0 of 0 results\n\n/media-trash"}
-### Ran Playwright code
-```js
-await (async(page)=>{await page.getByRole("button",{name:"Restoring...",exact:true}).waitFor({state:"hidden",timeout:20000});return {checkedAt:new Date().toISOString(),url:page.url(),title:await page.title(),body:await page.locator("body").innerText()};})(page);
-```

@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18381/notes","pages":["chrome-error://chromewebdata/","http://127.0.0.1:18301/setup","chrome-error://chromewebdata/","chrome-error://chromewebdata/","chrome-error://chromewebdata/","http://127.0.0.1:18381/notes"]}
-### Ran Playwright code
-```js
-await (async page => ({url:page.url(),pages:page.context().pages().map(p=>p.url())}))(page);
-```

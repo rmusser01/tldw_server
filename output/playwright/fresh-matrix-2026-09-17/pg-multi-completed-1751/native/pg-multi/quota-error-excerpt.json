@@ -1,9 +1,0 @@
-{
-  "at": "2026-09-17T17:10:16.193Z",
-  "cell": "pg-multi",
-  "selectedPatterns": "Quota/undefined table or column/permission exception classes only",
-  "lines": [
-    "2026-09-17 10:07:59.473 | ERROR    | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo:get_org_quota:83 - AuthnzStorageQuotasRepo.get_org_quota failed: relation \"storage_quotas\" does not exist",
-    "2026-09-17 10:07:59.473 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.core.Storage.quota_enforcement:check_storage_quota:74 - Storage quota check failed for user_id=2: UndefinedTableError"
-  ]
-}

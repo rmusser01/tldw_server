@@ -1,6 +1,0 @@
-### Result
-{"at":"2026-09-17T01:40:37.026Z","observerPresent":true,"url":"http://127.0.0.1:18583/flashcards?tab=cards"}
-### Ran Playwright code
-```js
-await (async page => {page.__uatStudyAcceptanceStart=new Date().toISOString();return {at:page.__uatStudyAcceptanceStart,observerPresent:Array.isArray(page.__uatStudyEvents),url:page.url()};})(page);
-```

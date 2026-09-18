@@ -1,6 +1,0 @@
-### Result
-Total messages: 15 (Errors: 0, Warnings: 2)
-Returning 2 messages for level "warning"
-
-[WARNING] tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing. @ http://127.0.0.1:18380/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[WARNING] tldw server API key is missing. Open Settings → tldw server and configure an API key before continuing. @ http://127.0.0.1:18380/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

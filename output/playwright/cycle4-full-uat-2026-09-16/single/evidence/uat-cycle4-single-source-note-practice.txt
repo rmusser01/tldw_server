@@ -1,6 +1,0 @@
-### Result
-"Standard\nReview\nProject Aster\nNote #4377bd3b-6d92-4c1c-a7d2-430ea3efedc0\nEdit\nFront\nWhen does Project Aster open?\nNeed help?\nShow Answer\nSpace Flip\nE Edit\nCompact hints"
-### Ran Playwright code
-```js
-await (async page => {await page.getByRole("button",{name:"Practice again",exact:true}).click({timeout:5000});return await page.getByTestId("flashcards-review-active-card").innerText();})(page);
-```

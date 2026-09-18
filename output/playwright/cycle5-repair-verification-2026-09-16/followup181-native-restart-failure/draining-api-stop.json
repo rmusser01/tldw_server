@@ -1,6 +1,0 @@
-{
-  "at": "2026-09-17T00:06:25.879Z",
-  "pid": 740,
-  "signal": "SIGINT",
-  "reason": "Owned old API has remained in graceful shutdown over five minutes; native failure/blocker evidence retained. No database sessions directly terminated."
-}

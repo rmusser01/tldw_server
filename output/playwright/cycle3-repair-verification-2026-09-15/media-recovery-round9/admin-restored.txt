@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T22:00:00.574Z","url":"http://127.0.0.1:18281/media-trash","title":"","requests":[],"body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nTrash\n\nItems moved to trash stay here until you restore or permanently delete them.\n\nAuto-purge policy is not configured or not reported by this server.\n\nRefresh\nEmpty trash\nSelect all visible\n0 selected\nRestore selected\nDelete selected\nuat-cycle3-multi-bob-admin-source\ndocument\n#1\nDeleted: Sep 15, 2026, 2:55 PM\nRestoring...\nDelete permanently\n1 of 1 results\n\n/media-trash"}
-### Ran Playwright code
-```js
-await (async(page)=>{const requests=[];const observer=r=>{if(r.url().startsWith("http://127.0.0.1:18201/api/v1/media/1")&&r.request().method()==="POST")requests.push({url:r.url(),method:"POST",status:r.status()});};page.on("response",observer);try{await page.getByRole("button",{name:"Restore",exact:true}).click();await page.getByRole("button",{name:"Restore",exact:true}).waitFor({state:"hidden",timeout:15000});return {checkedAt:new Date().toISOString(),url:page.url(),title:await page.title(),requests,body:await page.locator("body").innerText()};}finally{page.off("response",observer);}})(page);
-```

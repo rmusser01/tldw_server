@@ -1,6 +1,0 @@
-### Result
-[{"index":0,"url":"about:blank","visibility":"hidden"},{"index":1,"url":"about:blank","visibility":"visible"}]
-### Ran Playwright code
-```js
-await (async page => await Promise.all(page.context().pages().map(async (p,i)=>({index:i,url:p.url(),visibility:await p.evaluate(()=>document.visibilityState)}))))(page);
-```

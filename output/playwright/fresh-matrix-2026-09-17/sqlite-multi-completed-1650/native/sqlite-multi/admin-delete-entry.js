@@ -1,1 +1,0 @@
-async page=>{const close=page.getByRole('button',{name:'Close the ingest wizard',exact:true});if(await close.isVisible())await close.click();const before=await page.locator('body').ariaSnapshot();await page.getByRole('button',{name:'Delete item',exact:true}).click();return {at:new Date().toISOString(),before,dialog:await page.locator('body').ariaSnapshot()};}

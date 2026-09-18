@@ -1,9 +1,0 @@
-# UAT168 / TASK13260.105 — PostgreSQL Flashcards result rows
-
-Actual PostgreSQL UAT exposed GET /flashcards KeyError0. Named cnt access matches the existing skill-count implementation. Adjacent actual-router required-PG tests independently reproduced the same assumption in deck update, card update and bulk-save asset reconciliation. Eight positional reads now use the exact named SELECT columns, confined to these four methods; SQL, filtering, transactions, version guards and asset ownership are unchanged.
-
-Test-first evidence: count RED3 PostgreSQL failures versus3SQLitepasses; asset valid RED1PG/1SQLitepass. Initial asset control incorrectly expected internal card_id in the public asset DTO; corrected to its existing card_uuid contract before production changes. The initial harness failure is preserved separately. Independent review found the same no-op card-update branch; added real PG/SQLite no-op/version-conflict control, RED1PG/1SQLitepass, then corrected its named version access.
-
-Final combined required PostgreSQL and SQLite checks:38passed,0skipped,4existing warnings; log uat167-168-final-green.redacted.log. Earlier36pass is superseded for the final eight-line correction. Tests cover empty/total/deck counts, real asset attach/foreign-card rejection/detach, version-only no-op/conflict with unchanged saved record, and actual endpoint create/list/read/update/bulk-save timestamp contracts. The endpoint tests are owned by167; counts are not additive between overlapping runs.
-
-Bandit current full touched DB module and timestamp schema:0findings/0parseerrors. Ruff new testfiles:clean. Native recovery requires restarting only the owned API and repeating real save/list/read on the preserved draft; not yet claimed here. Source review is independent and retained separately.

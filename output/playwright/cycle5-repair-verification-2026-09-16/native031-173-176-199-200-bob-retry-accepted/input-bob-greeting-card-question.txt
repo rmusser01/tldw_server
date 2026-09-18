@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('textbox', { name: 'Question' }).fill('Bob UAT031: What did the original Helpful greeting say?');
-```

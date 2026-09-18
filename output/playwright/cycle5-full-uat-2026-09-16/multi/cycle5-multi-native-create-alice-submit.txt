@@ -1,9 +1,0 @@
-### Ran Playwright code
-```js
-await page.locator('#tldw-portal-root').getByRole('button', { name: 'Create user' }).click();
-```
-### Page
-- Page URL: http://127.0.0.1:18581/admin/server
-- Page Title: Server Admin · Admin · tldw
-### Snapshot
-- [Snapshot](.playwright-cli/page-2026-09-16T08-04-54-393Z.yml)

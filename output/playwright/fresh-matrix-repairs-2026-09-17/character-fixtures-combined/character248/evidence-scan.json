@@ -1,5 +1,0 @@
-{
-  "scope": "Pattern scan of author evidence only. No runtime/private secret files accessed; not an exhaustive known-value scan.",
-  "files": 59,
-  "detections": []
-}

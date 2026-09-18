@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByTestId('chat-input').fill('Using only the selected Rowan source, who is the coordinator, when does the library open, where is the book return box, and when does the book club meet?');
-```

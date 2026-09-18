@@ -1,6 +1,0 @@
-### Result
-{"opened":false,"url":"http://127.0.0.1:18281/notes?source_ref_id=9ae43c6a-2458-4910-97fd-013d888914f7","title":"","contentLength":0}
-### Ran Playwright code
-```js
-await (async (page) => { try { await page.getByRole("textbox", { name: "Note title", exact: true }).filter({visible:true}).inputValue({timeout:30000}); await page.waitForFunction(() => document.querySelector("input[placeholder=Title]")?.value === "Cycle3 Bob Biology study note", {timeout:30000}); return {opened:true,url:page.url()}; } catch { return {opened:false,url:page.url(),title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(),contentLength:(await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue()).length}; } })(page);
-```

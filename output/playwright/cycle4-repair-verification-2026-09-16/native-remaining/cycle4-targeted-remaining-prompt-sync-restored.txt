@@ -1,6 +1,0 @@
-### Result
-{"alerts":["Prompt UpdatedPrompt has been updated successfully","Prompts | tldw"],"rows":["TitlePromptTagsUpdatedSyncActions","Cycle4 Prompt sync recovery 0527SystemReply with one concise sentence. Retain WILLOW. Offline recovery revision 0528.2m agoLast used: UnknownSynced#2"]}
-### Ran Playwright code
-```js
-await (async (page) => { for (const close of await page.getByRole("button", {name:"Close", exact:true}).all()) { await close.click(); } await page.getByRole("button", {name:"Save", exact:true}).click(); await page.getByRole("alert").filter({hasText:"Prompt Updated"}).waitFor({state:"visible"}); return {alerts: await page.getByRole("alert").allTextContents(), rows: await page.getByRole("row").allTextContents()}; })(page);
-```

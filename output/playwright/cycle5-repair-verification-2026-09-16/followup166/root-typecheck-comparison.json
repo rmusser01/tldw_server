@@ -1,8 +1,0 @@
-{
-  "baselineFile": ".tmp/uat164-repair-20260916/typecheck-final.log",
-  "currentFile": ".tmp/uat166-repair-20260916/root-typecheck.log",
-  "baseline": 90,
-  "current": 90,
-  "added": [],
-  "removed": []
-}

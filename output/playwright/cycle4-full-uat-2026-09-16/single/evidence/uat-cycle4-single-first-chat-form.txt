@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-16T00:37:51.354Z","text":"SOLO ONBOARDING\n\nFirst-time setup\n\nConfigure the minimum needed to reach a successful first chat.\n\nSkip for now\nSetup readiness\n\nChat must be ready. RAG and speech can be configured later.\n\nRetry\n\nChat\n\nFirst-chat lane\n\nready with warnings\nChat details\n\nEmbeddings/RAG\n\nOptional lane\n\nready with warnings\nEmbeddings/RAG details\n\nSpeech\n\nOptional lane\n\nready with warnings\nSpeech details\nFirst chat\n\nCompletion requires an actual successful response from custom_openai.\n\nDefault chat target\ncustom_openai / ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf\nFirst prompt\nBack to MCP tools\nSend test chat"}
-### Ran Playwright code
-```js
-await (async page => {await page.getByRole("heading",{name:"MCP tools",exact:true}).waitFor({state:"hidden",timeout:15000});return {checkedAt:new Date().toISOString(),text:await page.locator("main").first().innerText()};})(page);
-```

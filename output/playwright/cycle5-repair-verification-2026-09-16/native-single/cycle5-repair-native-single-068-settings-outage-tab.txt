@@ -1,6 +1,0 @@
-### Result
-- 0: [Media | tldw](http://127.0.0.1:18580/media?id=1)
-- 1: (current) [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
-- 2: [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
-### Events
-- New console entries: .playwright-cli/console-2026-09-16T14-20-56-463Z.log#L4-L67

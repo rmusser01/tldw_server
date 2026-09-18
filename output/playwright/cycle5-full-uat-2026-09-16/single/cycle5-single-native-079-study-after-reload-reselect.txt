@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18580/flashcards?tab=importExport","sessions":"Cycle5 Single Biology Cards\nView completed session\nCompleted\nDue review\n5 cards reviewed\nCompleted 2026-09-16 01:19","progress":"1 cards remaining, 0 reviewed, Available now: 1, new: 1, learning: 0, due: 0\nStudy queue\n1\ncards remaining\n0 reviewed\nAvailable now: 1\nnew: 1\nlearning: 0\ndue: 0\n~1 min left"}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("tab",{name:"Study",exact:true}).click(); await page.getByRole("list",{name:"Recent study sessions"}).waitFor({timeout:15000}); return {url:page.url(),sessions:await page.getByRole("list",{name:"Recent study sessions"}).innerText(),progress:await page.getByTestId("flashcards-review-progress").innerText()}; })(page);
-```

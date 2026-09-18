@@ -1,6 +1,0 @@
-### Result
-{"capturedAt":"2026-09-16T01:09:03.576Z","buttons":["","or create a new deck","Apply template","Save as template","Tips for effective flashcards","","Insert image","","Insert image","Show preview","Advanced options (tags, extra, notes)","Cancel","Create & Add Another","Create"],"createButtons":[{"text":"Create & Add Another","disabled":false,"ariaDisabled":null,"loading":false},{"text":"Create","disabled":false,"ariaDisabled":null,"loading":false}],"fab":{"tag":"BUTTON","ariaLabel":null,"title":null,"text":""}}
-### Ran Playwright code
-```js
-await (async (page) => { const d=page.getByRole("dialog",{name:"Create Flashcard",exact:true}); return {capturedAt:new Date().toISOString(), buttons:await d.getByRole("button").allTextContents(), createButtons:await d.locator("button").evaluateAll(nodes=>nodes.filter(x=>x.textContent.includes("Create")).map(x=>({text:x.textContent,disabled:x.disabled,ariaDisabled:x.getAttribute("aria-disabled"),loading:x.className.includes("loading")}))), fab:await page.getByTestId("flashcards-fab-create").evaluate(x=>({tag:x.tagName,ariaLabel:x.getAttribute("aria-label"),title:x.getAttribute("title"),text:x.textContent}))}; })(page);
-```

@@ -1,1 +1,0 @@
-{"batch_id":"77b6e224-0dee-442f-ad2b-ec4fab37d01e","jobs":[{"id":4,"uuid":"899db447-04cd-4d49-b7f9-914a6ae1ff27","source":"/private/tmp/tldw-onboarding-uat-cycle3-multi-20260915/tmp/media_ingest_job__70ougs2/uat-cycle3-single-confidential-source.txt","source_kind":"file","status":"queued","collection_id":null,"planned_item_id":null,"idempotency_key":null}],"errors":[]}

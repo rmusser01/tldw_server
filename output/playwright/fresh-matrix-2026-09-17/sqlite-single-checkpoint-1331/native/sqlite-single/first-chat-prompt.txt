@@ -1,5 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('textbox', { name: 'First prompt' }).fill('Say "fresh SQLite single-user ready" in one short sentence.');
-```
-

@@ -1,9 +1,0 @@
-### Error
-Error: locator.click: Error: strict mode violation: getByRole('button', { name: 'Next', exact: true }) resolved to 2 elements:
-    1) <button disabled title="Next" aria-label="Next" class="p-1.5 text-text-muted hover:bg-surface2 rounded disabled:opacity-50 disabled:cursor-not-allowed">…</button> aka getByRole('button', { name: 'Next', description: 'Next' })
-    2) <button type="button" class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid">…</button> aka getByRole('dialog').getByRole('button', { name: 'Next' })
-
-Call log:
-  - waiting for getByRole('button', { name: 'Next', exact: true })
-
-

@@ -1,9 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByTestId('flashcards-generate-save-button').click();
-```
-### Page
-- Page URL: http://127.0.0.1:18580/flashcards?tab=importExport
-- Page Title: Flashcards | tldw
-### Snapshot
-- [Snapshot](.playwright-cli/page-2026-09-16T08-15-20-446Z.yml)

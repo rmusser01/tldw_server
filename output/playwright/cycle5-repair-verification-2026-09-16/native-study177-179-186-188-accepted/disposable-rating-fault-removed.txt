@@ -1,7 +1,0 @@
-### Result
-{"at":"2026-09-17T02:09:53.436Z","removed":true,"applied":1}
-### Ran Playwright code
-```js
-await (async page=>{const state=page.__uat186RatingFault;if(!state)throw Error('not installed');await page.unroute(state.pattern,state.handler);delete page.__uat186RatingFault;return {at:new Date().toISOString(),removed:true,applied:state.applied};}
-)(page);
-```

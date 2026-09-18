@@ -1,3 +1,0 @@
-# Combined backend regressions and proxy stream diagnosis
-
-Combined committed backend repairs:616passed,0skips,66warnings on required PostgreSQL/SQLite. Independently reviewed installed-Next fixture:5passed,0skips. A controlled early-role SSE stream using the original proxy default receives headers at3ms, closes upstream at30003ms and leaves the client reader waiting until40003ms. Current proxy setting preserves the full stream after31505ms. This establishes a proxy failure mechanism, not the original native TestBot cause; UAT246 remains open pending live acceptance. Initial headers-only fixture assumption and all controls are retained.

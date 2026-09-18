@@ -1,2 +1,0 @@
-Created task TASK-13260.186
-File: /Users/macbook-dev/Documents/GitHub/tldw_server2/backlog/tasks/task-13260.186 - Refresh-the-Media-catalogue-after-native-Quick-Ingest-handoff.md

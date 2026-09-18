@@ -1,6 +1,0 @@
-### Result
-{"time":"2026-09-16T08:36:53.461Z","dialog":["GenerateGenerating analysis...Elapsed: 0sAnalysisModel../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.ggufPrompt presetsShow presetsSystem promptSummarize only the supplied source as three concise bullets: coordinator, opening date, and book return location.User prompt prefix(prepended before content)Save as defaultCancelCancel generationGenerate"]}
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("textbox",{name:"System prompt",exact:true}).fill("Summarize only the supplied source as three concise bullets: coordinator, opening date, and book return location."); await page.getByRole("dialog",{name:"Generate",exact:true}).getByRole("button",{name:"Generate",exact:true}).click(); return {time:new Date().toISOString(),dialog:await page.getByRole("dialog").allTextContents()}; })(page);
-```

@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18300/api/v1/chats/ce67520e-883b-42ff-b565-c2872616c048/complete-v2?scope_type=global","body":{"include_character_context":true,"model":"custom_openai_api:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","provider":"custom-openai-api","save_to_db":true,"continue_as_user":false,"impersonate_user":false,"force_narrate":false,"message_steering_prompts":{"continue_as_user":"Continue the user's current thought in the same voice and perspective.","impersonate_user":"Write this reply as if it is authored by the user, in first person, while preserving the user's intent.","force_narrate":"Use narrative prose style for this reply."},"stream":true}}
-### Ran Playwright code
-```js
-await (async page => {const composer=page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true});const source=await composer.inputValue();await composer.fill(source+"\n\nUsing only that media, when do volunteers meet and where is the tool shed? Answer in one short sentence.");const request=page.waitForRequest(r=>r.method()==="POST"&&r.url().includes("/complete-v2"),{timeout:10000});await page.getByRole("button",{name:"Send message",exact:true}).click();const r=await request;return {url:r.url(),body:r.postDataJSON()};})(page);
-```

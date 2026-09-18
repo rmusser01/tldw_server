@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T21:47:36.533Z","progress":null,"readIndicator":"0% read"}
-### Ran Playwright code
-```js
-await (async(page)=>{const response=page.waitForResponse(r=>r.url()==="http://127.0.0.1:18201/api/v1/media/1/progress"&&r.request().method()==="PUT",{timeout:6000}).then(async r=>({status:r.status(),request:r.request().postDataJSON(),response:await r.json()})).catch(()=>null);await page.getByText("Volunteer Meetings",{exact:true}).scrollIntoViewIfNeeded();const progress=await response;await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:"/private/tmp/uat017-native-analysis-scroll.png"});return {checkedAt:new Date().toISOString(),progress,readIndicator:await page.getByTestId("media-reading-progress").textContent()};})(page);
-```

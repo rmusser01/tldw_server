@@ -1,6 +1,0 @@
-Project Cedar is a fictional community library used for acceptance testing.
-The library opens on 22 November 2026.
-Jonah Patel coordinates the library.
-The library has nine reading tables.
-Volunteers meet every Tuesday at 18:15.
-The book return is beside the north entrance.

@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("button",{name:"More actions",exact:true}).click(); })(page);
-```

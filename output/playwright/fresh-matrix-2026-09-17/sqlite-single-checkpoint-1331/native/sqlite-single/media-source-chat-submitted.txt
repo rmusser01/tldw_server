@@ -1,3 +1,0 @@
-### Error
-Error: Source handoff missing expected public fact
-

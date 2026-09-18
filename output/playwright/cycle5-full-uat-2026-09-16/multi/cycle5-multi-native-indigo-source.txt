@@ -1,1 +1,0 @@
-Indigo Station synthetic confidentiality control. The fictional token is INDIGO-CYCLE5-SYNTHETIC-NOT-A-CREDENTIAL. Indigo Station stores 31 violet keys in a glass cabinet. This is invented test content and contains no real credentials.

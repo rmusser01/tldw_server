@@ -1,3 +1,0 @@
-import base from "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config"
-import {readFileSync} from 'node:fs'
-export default {...base, plugins:[{name:'baseline-form',enforce:'pre', transform(code,id){if(id==='/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx')return {code:readFileSync('/private/tmp/uat093-action-baseline-form.tsx','utf8'),map:null}}}],test:{...base.test,setupFiles:['/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.setup.ts'],include:['/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx']}}

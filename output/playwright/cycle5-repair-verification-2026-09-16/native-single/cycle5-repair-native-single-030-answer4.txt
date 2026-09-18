@@ -1,5 +1,0 @@
-### Ran Playwright code
-```js
-// Press Space
-await page.keyboard.press('Space');
-```

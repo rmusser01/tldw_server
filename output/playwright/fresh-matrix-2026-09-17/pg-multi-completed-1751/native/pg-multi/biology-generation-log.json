@@ -1,7 +1,0 @@
-{
-  "at": "2026-09-17T17:16:12.541Z",
-  "localTimezone": "America/Los_Angeles",
-  "lines": [
-    "2026-09-17 10:14:43.511 | INFO     | trace= span= tp= req=f4e1b0de-fa5e-4583-94f0-57af2332ca88 job= ps=: | tldw_Server_API.app.core.Logging.access_log_middleware:dispatch:70 - HTTP POST /api/v1/flashcards/generate -> 200 in 36045ms"
-  ]
-}

@@ -1,6 +1,0 @@
-### Result
-{"minimized":false,"dialog":"Quick Ingest\nAdd\n1 items\nConfigure\nCustom\nReview\nReviewed\nProcessing\nResults\nReview failed items\nExport failed list\nFAILED DURING PROCESSING (1)\nhttps://en.wikipedia.org/wiki/Playwright_(software)\n\nThe website or the server's outbound access policy blocked this source. Use an accessible source or upload a copy you are permitted to use.\n\nAccess blocked\n\nTotal: 0 succeeded, 1 failed · 1s elapsed\n\nIngest More\nDone"}
-### Ran Playwright code
-```js
-await (async page => { const minimize=page.getByRole("button",{name:"Minimize to Background",exact:true}); if(await minimize.isVisible()) {await minimize.click(); return {minimized:true,main:await page.getByRole("main").innerText()};} return {minimized:false,dialog:await page.getByRole("dialog").innerText()}; })(page);
-```

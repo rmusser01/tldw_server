@@ -1,8 +1,0 @@
-{
-  "at": "2026-09-17T14:02:04.992Z",
-  "action": "SIGTERM owned backend for native outage UAT",
-  "pid": 17289,
-  "command": "17289 /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 18600",
-  "expectedPort": 18600,
-  "runId": "fresh-final-20260917"
-}

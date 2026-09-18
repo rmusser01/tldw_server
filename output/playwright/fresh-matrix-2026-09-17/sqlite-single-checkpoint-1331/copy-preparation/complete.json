@@ -1,8 +1,0 @@
-{
-  "at": "2026-09-17T12:22:03.017Z",
-  "revision": "8f8774e6c868b304a96d95ab82e28389c129a78b",
-  "gate": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/release-gate.json",
-  "archive": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/copy-preparation/8f8774e6c868b304a96d95ab82e28389c129a78b.tar",
-  "archiveSha256": "8b76fd0b8c3b2a858821bfad9976be5602dd139e8a827dfba4a02f2b3d96873a",
-  "noRuntimeOrProfileStarted": true
-}

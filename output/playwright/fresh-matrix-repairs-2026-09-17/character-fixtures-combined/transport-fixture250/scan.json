@@ -1,9 +1,0 @@
-{
-  "files": 18,
-  "rules": [
-    "jwt",
-    "privateKey",
-    "credentialUrl"
-  ],
-  "hits": []
-}

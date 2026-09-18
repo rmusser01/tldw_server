@@ -1,3 +1,0 @@
-### Error
-SyntaxError: Invalid regular expression flags
-

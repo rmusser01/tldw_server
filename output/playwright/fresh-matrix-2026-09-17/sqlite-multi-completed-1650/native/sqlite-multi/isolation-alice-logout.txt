@@ -1,6 +1,0 @@
-### Error
-TimeoutError: locator.click: Timeout 30000ms exceeded.
-Call log:
-  - waiting for getByRole('button', { name: 'Logout', exact: true })
-
-

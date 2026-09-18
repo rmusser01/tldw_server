@@ -1,7 +1,0 @@
-{
-  "at": "2026-09-17T11:36:08.514Z",
-  "initialAttempt": "Settings login helper invoked while Flashcards was still open; expected Username field absent and helper timed out before entering credentials.",
-  "recovery": "Used visible Settings, Edit server, Logout, then verified Username/Password form and invoked the same private normal-UI helper successfully.",
-  "productFinding": false,
-  "authenticationExtractionOrSeeding": false
-}

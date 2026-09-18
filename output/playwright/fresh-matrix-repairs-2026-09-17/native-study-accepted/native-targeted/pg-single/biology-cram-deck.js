@@ -1,1 +1,0 @@
-async page=>{await page.getByRole('button',{name:'Cram',exact:true}).click();await page.getByRole('button',{name:'Show answer (Space)',exact:true}).waitFor({timeout:15000});return {at:new Date().toISOString(),body:await page.getByRole('tabpanel',{name:'Study',exact:true}).ariaSnapshot()};}

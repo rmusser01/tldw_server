@@ -1,6 +1,0 @@
-### Result
-"Quick Ingest\nAdd\n1 items\nConfigure\nCustom\nReview\nReviewed\nProcessing\n0/1 finished\nResults\nProcessing\n0/1 finished\nJob tracking\n\nWaiting for server results\n\nElapsed time is shown below. Completion time depends on the content and server.\n\nhttps://en.wikipedia.org/wiki/Playwright_(software)\nProcessing\nCancel\nCompleted: 0\n|\nProcessing: 1\n|\nQueued: 0\nElapsed: 0:00\nCancel All\nMinimize to Background"
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("button",{name:"Start processing",exact:true}).click(); return await page.getByRole("dialog").innerText(); })(page);
-```

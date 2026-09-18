@@ -1,8 +1,0 @@
-[      77ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:18482/_next/static/chunks/bdf27_react-dom_cjs_react-dom_development_018fd5a3.js:25055
-[      92ms] [LOG] [HMR] connected @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[     518ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[     674ms] [LOG] [Fast Refresh] done in 262ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[    1954ms] [WARNING] Search failed: Error @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[   66045ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) @ http://127.0.0.1:18482/settings/tldw:0
-[   90169ms] [LOG] [Fast Refresh] rebuilding @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206
-[   90275ms] [LOG] [Fast Refresh] done in 207ms @ http://127.0.0.1:18482/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1206

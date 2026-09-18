@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T19:39:23.942Z","selectedDeck":"Cycle3 Bob Biology","clearCount":0,"newDeckNameVisible":false,"schedulerSummary":"1m,10m -> 1d / easy 4d / leech 8 / fuzz off"}
-### Ran Playwright code
-```js
-await (async(page)=>{const deck=page.getByTestId("flashcards-generate-deck");await page.waitForFunction(()=>document.querySelector("[data-testid=\"flashcards-generate-deck\"]")?.textContent.includes("Cycle3 Bob Biology"),null,{timeout:10000});return{checkedAt:new Date().toISOString(),selectedDeck:await deck.innerText(),clearCount:await deck.getByRole("img",{name:"close-circle",exact:true}).count(),newDeckNameVisible:await page.getByTestId("flashcards-generate-new-deck-name").isVisible(),schedulerSummary:await page.getByTestId("flashcards-generate-selected-deck-summary").innerText()};})(page);
-```

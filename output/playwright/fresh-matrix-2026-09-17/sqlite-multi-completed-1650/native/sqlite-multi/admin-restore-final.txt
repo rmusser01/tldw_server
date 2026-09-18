@@ -1,9 +1,0 @@
-### Error
-Error: locator.waitFor: Error: strict mode violation: getByRole('region', { name: 'Media content', exact: true }).getByText(/Dr. Mira Vale/) resolved to 2 elements:
-    1) <p class="mb-2 last:mb-0" node="[object Object]">This is fictional public test material, created f…</p> aka getByTestId('content-scroll-container').getByText('This is fictional public test')
-    2) <p class="mb-2 last:mb-0" node="[object Object]">The observatory library keeps a printed observing…</p> aka getByText('The observatory library keeps')
-
-Call log:
-  - waiting for getByRole('region', { name: 'Media content', exact: true }).getByText(/Dr. Mira Vale/) to be visible
-
-

@@ -1,9 +1,0 @@
-
-  it("releases terminal completion when its result is no longer available", async () => {
-    const { client } = mount();
-    await submit(client);
-    vi.mocked(getStudyPackJob).mockResolvedValue({ ...response("completed"), study_pack: null });
-    await act(async () => { await client.refetchQueries({ queryKey: jobKey }); });
-    await waitFor(() => expect(button()).toBeEnabled());
-    expect(screen.queryByText(/waiting for a status update/i)).not.toBeInTheDocument();
-  });

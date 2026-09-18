@@ -1,4 +1,0 @@
-# Bounded native Study Pack persistence and serialization acceptance
-
-UAT197/204/216/219/220 native gates accepted: original job5 persists pack2/deck10/three owner2 cards with citations; repaired same-job and assistant readbacks200; actual Review3ready and quote display. Separate UAT222 foreign pack metadata200 and UAT223 source-navigation404 remain proven failures. Original passed:false15-record receipt retained beside explicitly bounded19-record continuation. No UAT205 fullUIcompletion, full ownership matrix or successful Deep dive claim. See audit-ACCEPTANCE197-204-216-219-220.md and audit-receipt.json.17 safe inputs plus independent audit artifacts; no credentials, private logs or browser profiles.
-Known runtime credentials and JWT/PEM patterns scanned, zero matches. Original evidence remains unchanged.

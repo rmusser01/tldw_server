@@ -12,7 +12,7 @@ Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-re
 
 ## Mandatory entry gate for another full UAT
 
-**Current gate: HELD (2026-09-18 UTC).** The [running tracker](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md) is authoritative:277 findings,276 verified and UAT261 still open. Its bounded two-call diagnosis retained one nonexact and one exact TestBot final with matching captured input projections; no actionable application defect is established. The owner decision about continuing with261 explicitly open is pending. Do not treat the historical preparation release below as a current release or a passed model-output criterion. The next fresh SQLite/PostgreSQL single-user/multi-user48-outcome matrix has not started. Current repair details are in [the follow-up plan](IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md).
+**Current sequence (2026-09-18 UTC): merge PR2967, then resume from261.** The user explicitly requested this order. The [running tracker](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md) remains authoritative:277 findings,276 verified and UAT261 open. Its exact-output criterion is unchanged. Complete CI, review and repository merge requirements under [TASK13260.219's integration plan](IMPLEMENTATION_PLAN_pr2967_merge_and_uat_resume.md), then begin the resumed UAT with261 before continuing the full fresh SQLite/PostgreSQL single-user/multi-user48-outcome scope. Historical preparation releases below do not constitute current test acceptance. The next full matrix has not started.
 
 The checkpoints below are historical and do not override that current gate.
 

@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('searchbox', { name: 'Search' }).fill('volunteers');
-```

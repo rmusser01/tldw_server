@@ -1,4 +1,0 @@
-### Result
-228. [POST] http://127.0.0.1:18500/api/v1/chat/completions => [502] Bad Gateway
-
-Note: 154 static requests not shown, run with --static option to see them.

@@ -1,7 +1,0 @@
-### Result
-140. [GET] http://127.0.0.1:18500/api/v1/rag/health => [200] OK
-333. [POST] http://127.0.0.1:18500/api/v1/rag/feedback/implicit => [200] OK
-401. [GET] http://127.0.0.1:18500/api/v1/rag/health => [200] OK
-414. [POST] http://127.0.0.1:18500/api/v1/chat/completions => [200] OK
-
-Note: 198 static requests not shown, run with --static option to see them.

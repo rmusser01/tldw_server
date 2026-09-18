@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18482/chat","text":"You\n• 11:52 PM\n\nPreserve this blue test image through a failed turn. WILLOW IMAGE 0652.\n\n•••\ngemma3:1b\n• 11:52 PM\n\nSomething went wrong while talking to your tldw server.\n\nTry again in a moment, or open Health & diagnostics to inspect server health.\n\nShow technical details\nRecommended next actions: Retry same model, Switch model, Try provider fallback, Continue from partial\nRetry same model\nSwitch model\nTry provider fallback\nContinue from partial\n•••","images":[{"alt":"Uploaded Image","srcPrefix":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAA"}]}
-### Ran Playwright code
-```js
-await (async(page)=>{return {url:page.url(),text:await page.getByRole("log",{name:"Chat messages"}).innerText(),images:await page.getByRole("log",{name:"Chat messages"}).locator("img").evaluateAll(ns=>ns.map(n=>({alt:n.alt,srcPrefix:n.src.slice(0,50)})))};})(page);
-```

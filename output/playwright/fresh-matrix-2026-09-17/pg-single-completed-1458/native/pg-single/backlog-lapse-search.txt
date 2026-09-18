@@ -1,3 +1,0 @@
-Tasks:
-  TASK-12513 - Flashcards UX Phase 3B deck dashboard data proof (Done) [score 0.025]
-  TASK-13260.24 - Preserve authentication across transient refresh failures and recover expired sessions cleanly (Done) [HIGH] [score 0.010]

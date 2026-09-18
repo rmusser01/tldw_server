@@ -1,8 +1,0 @@
-{
-  "file": "apps/packages/ui/src/components/Option/Prompt/PromptFullPageEditor.tsx",
-  "matchingClassCount": 4,
-  "emittedRules": [
-    ".bg-bg {\n    --tw-bg-opacity: 1;\n    background-color: rgb(var(--color-bg) / var(--tw-bg-opacity, 1))\n}"
-  ],
-  "unsupportedBackgroundReferences": 0
-}

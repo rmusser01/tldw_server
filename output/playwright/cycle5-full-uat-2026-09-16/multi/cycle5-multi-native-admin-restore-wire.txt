@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18501/api/v1/media/1/restore","status":200,"body":"{\"media_id\":1,\"source\":{\"url\":\"cycle5-admin-restore.txt\",\"title\":\"Cycle5 Admin only restore fixture\",\"duration\":null,\"type\":\"document\"},\"processing\":{\"prompt\":null,\"analysis\":null,\"safe_metadata\":{\"title\":\"Cycle5 Admin only restore fixture\",\"author\":\"Unknown\"},\"model\":\"Imported\",\"timestamp_option\":null,\"chunking_status\":\"pending\",\"vector_processing_status\":0},\"content\":{\"metadata\":{},\"text\":\"CYCLE5-ADMIN-RESTORE synthetic only source. The coral cabinet stores 9 shells.\",\"word_count\":10},\"keywords\":[],\"timestamps\":[],\"versions\":[{\"uuid\":\"df9e4ca7-2833-496a-94f6-acf0f2fb554b\",\"media_id\":1,\"version_number\":1,\"created_at\":\"2026-09-16T09:12:44.333000Z\",\"prompt\":null,\"analysis_content\":null,\"safe_metadata\":{\"title\":\"Cycle5 Admin only restore fixture\",\"author\":\"Unknown\"},\"content\":null}],\"has_original_file\":false,\"original_file_url\":null}"}
-### Ran Playwright code
-```js
-await (async(page)=>{const p=page.waitForResponse(r=>r.url().includes("/restore")&&r.request().method()==="POST");await page.getByRole("button",{name:"Restore",exact:true}).click();const r=await p;return {url:r.url(),status:r.status(),body:await r.text()};})(page);
-```

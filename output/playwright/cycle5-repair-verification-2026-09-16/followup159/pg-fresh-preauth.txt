@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18582/","title":"Home | tldw","personaCalls":0,"requests":[{"url":"http://127.0.0.1:18582/api/_tldw-webui/runtime-config","method":"GET"},{"url":"http://127.0.0.1:18582/api/v1/setup/first-run/state","method":"GET"},{"url":"http://127.0.0.1:18582/api/v1/setup/first-run/metadata","method":"GET"},{"url":"http://127.0.0.1:18582/api/v1/setup/readiness/status","method":"GET"},{"url":"http://127.0.0.1:18582/api/v1/setup/readiness/profiles","method":"GET"}]}
-### Ran Playwright code
-```js
-await (async page=>({url:page.url(),title:await page.title(),personaCalls:page.__uat159.filter(r=>r.url.includes('/persona/profiles')).length,requests:page.__uat159}))(page);
-```

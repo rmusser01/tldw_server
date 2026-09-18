@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-16T00:16:45.585Z","url":"http://127.0.0.1:18280/media?id=1","toggle":{"x":366,"y":91,"width":24,"height":753},"geometry":{"className":"relative min-h-0 min-w-0 flex-1 flex flex-col bg-bg","width":366,"height":347,"scrollWidth":366,"scrollHeight":931,"scrollTop":207,"documentWidth":390}}
-### Ran Playwright code
-```js
-await (async page => {const c=page.getByTestId("content-scroll-container");const button=page.getByRole("button",{name:"Collapse sidebar",exact:true});await page.screenshot({path:"/private/tmp/uat101-native-library.png"});return {checkedAt:new Date().toISOString(),url:page.url(),toggle:await button.boundingBox(),geometry:await c.evaluate(e=>({className:e.parentElement.className,width:e.clientWidth,height:e.clientHeight,scrollWidth:e.scrollWidth,scrollHeight:e.scrollHeight,scrollTop:e.scrollTop,documentWidth:document.documentElement.scrollWidth}))};})(page);
-```

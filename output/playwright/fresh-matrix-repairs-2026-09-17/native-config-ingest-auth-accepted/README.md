@@ -1,9 +1,0 @@
-# Accepted native configuration, ingest and recovery checks
-
-Bounded acceptance of UAT231,233,237,244,245,247. Independent audits cover corrected generic WebUI setup guidance; one warning per saved source and truthful Results status; literal Open in Media with full content; automatic catalogue refresh; normal PostgreSQL upload admission; distinct two-owner media identities and reciprocal denials; intentional Disconnect/reconnect and real owned API outage/Retry recovery.
-
-Runtime sources span original targeted86458, a7d3155a567afb25982eb360ea24b973cc3249c9 and explicit model232 upgrade6f6983b0620aae1f0892c6b0d3ae3bebfc105e02. Original profiles, initialization, PostgreSQL holders and stored content were preserved. The initial missing-key-only231 capture was insufficient; a separate fresh browser context captures the three corrected generic warnings. Initial partial reviews/helper failures remain. The separate unauthenticated capability401 is open UAT258, not hidden by231 acceptance.
-
-Ingest analysis was truncated and did not succeed; saved source/chunks and exactly one warning did. No native hard-quota/concurrency or all-filter/SQLite permutations are implied. Those regression boundaries are controlled-test coverage. UAT238 source-dependent QA/reanalysis/Trash remains open, including new257 empty PostgreSQL retrieval. This packet neither releases nor accepts the fresh48-row matrix.
-
-Private credentials, raw runtime logs, mutable process/configuration records and repository archives are not copied; changed running tracker/task metadata is likewise represented only by its observed hashes; safe audit projections retain observed hashes and explicit timing limits. Settled UI snapshots do not certify every transient event or zero requests. Credential and JWT scans precede writing. Reviewed nonprivate bytes are unchanged; gzip is lossless for large or whitespace-bearing evidence.

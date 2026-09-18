@@ -1,7 +1,0 @@
-### Result
-{"key":"server:plkwy2:auth:single-user:org:none:user:single-user:key:1ulv0j1","fetchedAt":1789589258355,"capabilities":{"hasChat":true,"hasRag":true,"hasMedia":true,"hasMediaPlaylistPreflight":true,"hasMediaIngestJobs":true,"hasMediaIngestJobEvents":true,"hasMediaIngestWorker":true,"hasDurableMediaCollections":true,"hasKnowledgeQaMediaScope":true,"hasNotes":true,"hasSlides":true,"hasPresentationStudio":true,"hasPresentationRender":true,"hasIngestionSources":true,"canCreateLocalDirectoryIngestionSource":true,"hasPrompts":true,"hasFlashcards":true,"hasQuizzes":true,"hasCharacters":true,"hasWorldBooks":true,"hasChatDictionaries":true,"hasChatKnowledgeSave":true,"hasChatDocuments":true,"hasChatbooks":true,"hasChatQueue":true,"hasChatSaveToDb":false,"hasWebClipper":false,"hasStt":true,"hasTts":true,"hasVoiceChat":true,"hasVoiceConversationTransport":true,"hasAudio":true,"hasEmbeddings":true,"hasMetrics":true,"hasMcp":true,"hasReading":true,"hasWriting":true,"hasWebSearch":true,"hasSkills":true,"hasPersona":true,"hasPersonaLiveControl":true,"hasPersonalization":false,"hasFeedbackExplicit":true,"hasFeedbackImplicit":true,"hasGuardian":false,"hasSelfMonitoring":false,"ffmpegAvailable":true,"specVersion":"local-fallback","specSource":"fallback"}}
-### Ran Playwright code
-```js
-await (async(page)=>await page.evaluate(()=>{const raw=localStorage.getItem("__tldwServerCapabilitiesCacheV5");if(!raw)return null;const d=JSON.parse(raw);return d;}))(page);
-```
-

@@ -1,6 +1,0 @@
-### Result
-{"status":201,"body":{"title":"Cycle5 Alice Biology five facts","content":"The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.","conversation_id":null,"message_id":null,"id":"4ce0fe3d-f7cb-4acc-bee3-410681ded957","created_at":"2026-09-16T08:15:17.173000Z","last_modified":"2026-09-16T08:15:17.173000Z","version":1,"client_id":"2","deleted":false,"studio":null,"keywords":[],"folders":[],"keyword_sync":null}}
-### Ran Playwright code
-```js
-await (async(page)=>{await page.getByRole("textbox",{name:"Note title",exact:true}).fill("Cycle5 Alice Biology five facts"); await page.getByRole("textbox",{name:"Note content",exact:true}).fill("The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level."); const pending=page.waitForResponse(r=>/\/api\/v1\/notes\/?(?:\?|$)/.test(r.url())&&r.request().method()==="POST",{timeout:15000});await page.getByRole("button",{name:"Save note",exact:true}).click();const r=await pending;return {status:r.status(),body:await r.json()};})(page);
-```

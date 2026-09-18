@@ -1,7 +1,0 @@
-# UAT261 diagnostic harness review
-
-Root independently replayed the exact retained fixture shim through existing Character_Chat fixtures:1 passed,4 warnings,exit0. The two safe projection records were byte-identical to the author result (SHA ef52297002958a34e1e4b770b4f8c0073b479091a524aef290372f217512f66b). The temporary copied test module was removed after verifying its bytes were unchanged. The private pytest log stays local; the retained receipt contains its hash and bounded summary only.
-
-Source review confirms the actual complete-v2 assembled messages reach the patched provider-call seam. The projection hashes the existing message envelope and allowlisted dispatch settings, omits raw content and credentials, preserves absent usage as null, and treats the synthetic reasoning-only stream as having no final answer. The fake never delegates to a provider adapter. Static Bandit covers the Python harness with0 findings/errors; this is test instrumentation.
-
-This demonstrates a working isolated diagnostic capture. It is not a real-provider result, recovery of historical request fingerprints, a fix for model-output quality, or acceptance of261. The earlier three standalone startup failures and the original absent raw command output are explicitly disclosed. No production/runtime/provider setting changed; no live inference was sent. The original model-output criterion question remains pending.

@@ -1,8 +1,0 @@
-[
-  "node",
-  "apps/tldw-frontend/node_modules/vitest/vitest.mjs",
-  "run",
-  "--config",
-  ".tmp/uat-repairs-231-246/chat231-232-236-243/vitest.baseline.config.ts",
-  "../packages/ui/src/services/tldw/__tests__/TldwApiClient.sanitizer.test.ts"
-]

@@ -1,6 +1,0 @@
-### Result
-{"requests":[{"status":502,"model":"gemma3:1b","provider":"ollama","messages":[{"role":"user","content":"Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED."}],"conversationId":"0dff2eee-7bf3-4e92-9d1c-688318065fc1","acks":[],"done":true},{"status":200,"model":"llama:../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","metadata":{"tldw_retry_failed_turn":true},"messages":[{"role":"user","content":"Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED."},{"role":"user","content":"Cycle4 fixed Retry108 control 20260916_0449: reply exactly AMBER RESTORED."}],"conversationId":"0dff2eee-7bf3-4e92-9d1c-688318065fc1","acks":[],"done":false}],"url":"http://127.0.0.1:18381/chat"}
-### Ran Playwright code
-```js
-await (async page=>({requests:page.__uat108final,url:page.url()}))(page);
-```

@@ -1,7 +1,0 @@
-[
-  "apps/packages/ui/src/store/playground-session.tsx",
-  "apps/packages/ui/src/hooks/usePlaygroundSessionPersistence.tsx",
-  "apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx",
-  "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.openui-mode.test.tsx",
-  "apps/packages/ui/src/hooks/__tests__/usePlaygroundSessionPersistence.test.tsx"
-]

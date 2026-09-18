@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18281/notes","title":"Cycle3 Bob private note","content":"Bob owns this fictional notebook entry. The Copper Finch observatory opens at 09:40 on Tuesdays. Bob-only sentinel: BOB-COPPER-FINCH-20260915."}
-### Ran Playwright code
-```js
-await (async (page) => { await page.waitForFunction(() => document.querySelector("textarea[aria-label=\"Note content\"]")?.value?.includes("BOB-COPPER-FINCH-20260915"), {timeout:30000}); return {url:page.url(),title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(),content:await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue()}; })(page);
-```

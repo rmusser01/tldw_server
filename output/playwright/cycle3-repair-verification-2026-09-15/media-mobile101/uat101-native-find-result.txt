@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-16T00:18:32.516Z","findText":"Find in content\n1/1\nClose","fields":[{"label":"","value":"Aster","x":62,"y":738.5625,"width":140.921875,"height":28},{"label":"Previous match","value":"","x":232.125,"y":738.5625,"width":28,"height":28},{"label":"Next match","value":"","x":268.125,"y":738.5625,"width":28,"height":28},{"label":"Close","value":"","x":304.125,"y":738.5625,"width":47.875,"height":28}]}
-### Ran Playwright code
-```js
-await (async page => {const bar=page.getByTestId("content-find-bar");await page.getByRole("button",{name:"Next match",exact:true}).waitFor();const fields=await bar.locator("input,button").evaluateAll(es=>es.map(e=>{const r=e.getBoundingClientRect();return {label:e.getAttribute("aria-label")||e.textContent,value:e.value,x:r.x,y:r.y,width:r.width,height:r.height};}));await page.screenshot({path:"/private/tmp/uat101-native-find.png"});return {checkedAt:new Date().toISOString(),findText:await bar.innerText(),fields};})(page);
-```

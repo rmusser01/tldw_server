@@ -1,9 +1,0 @@
-{
-  "checkedAt": "2026-09-16T00:18:15.735Z",
-  "baseline": "/private/tmp/uat032-merged-typecheck.log",
-  "current": "/private/tmp/uat101-combined-typecheck.log",
-  "baselineCount": 90,
-  "currentCount": 90,
-  "added": [],
-  "removed": []
-}

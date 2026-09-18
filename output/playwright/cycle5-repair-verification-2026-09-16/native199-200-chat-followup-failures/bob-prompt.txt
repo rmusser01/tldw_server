@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByTestId('chat-input').fill('For this fictional UAT fixture, reply with exactly: BOB CHARACTER VERIFIED.');
-```

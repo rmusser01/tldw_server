@@ -1,7 +1,0 @@
-/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/lib/python3.11/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "ResponseFormatJsonSchemaSpec" shadows an attribute in parent "BaseModel"
-  warnings.warn(
-{"history_order": "desc", "client_sends_history": true, "pass": false, "payload_roles": ["user", "assistant", "user", "assistant", "user", "system"], "final_non_system_message": "Who coordinates Cedar?", "canonical_user_identity": "failed", "new_message_writes": 0}
-{"history_order": "asc", "client_sends_history": true, "pass": true, "payload_roles": ["system", "user", "assistant", "user", "assistant", "user"], "final_non_system_message": "Reply exactly: CEDAR RETRY READY.", "canonical_user_identity": "failed", "new_message_writes": 0}
-{"history_order": "desc", "client_sends_history": false, "pass": false, "payload_roles": ["user", "assistant", "user", "assistant", "user", "system"], "final_non_system_message": "Who coordinates Cedar?", "canonical_user_identity": "failed", "new_message_writes": 0}
-{"history_order": "asc", "client_sends_history": false, "pass": true, "payload_roles": ["system", "user", "assistant", "user", "assistant", "user"], "final_non_system_message": "Reply exactly: CEDAR RETRY READY.", "canonical_user_identity": "failed", "new_message_writes": 0}
-{"passed": 2, "failed": 2}

@@ -1,4 +1,0 @@
-[
-  "apps/packages/ui/src/hooks/chat/useChatActions.ts",
-  "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx"
-]

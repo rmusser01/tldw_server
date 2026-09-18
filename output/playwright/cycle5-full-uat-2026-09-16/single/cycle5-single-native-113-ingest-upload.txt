@@ -1,9 +1,0 @@
-### Ran Playwright code
-```js
-await fileChooser.setFiles(["/private/tmp/cycle5-single-native-public-source.txt"])
-```
-### Page
-- Page URL: http://127.0.0.1:18580/notes?source_ref_id=5923db59-da1d-4977-a2db-876884cd91f5
-- Page Title: Notes | tldw
-### Snapshot
-- [Snapshot](.playwright-cli/page-2026-09-16T08-31-11-979Z.yml)

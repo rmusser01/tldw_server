@@ -1,1 +1,0 @@
-async page=>{return {at:new Date().toISOString(),startedAt:page.__biologyGenerateAt,snapshot:await page.locator('body').ariaSnapshot(),events:(page.__matrixEvents||[]).filter(e=>e.at>=page.__biologyGenerateAt&&/\/flashcards/.test(e.url||''))};}

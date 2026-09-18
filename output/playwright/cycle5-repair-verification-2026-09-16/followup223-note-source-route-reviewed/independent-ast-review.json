@@ -1,7 +1,0 @@
-{
-  "other_production_AST_identical": true,
-  "changed_function": "_build_note_route",
-  "old_asserts": 45,
-  "new_asserts": 49,
-  "manually_reviewed_existing_assertion_changes": "exact three expected note URLs; no other assertion removed"
-}

@@ -1,9 +1,0 @@
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("button",{name:"New saved chat",exact:true}).click(); const chooser=page.waitForEvent("filechooser"); await page.getByRole("button",{name:"Attach image",exact:true}).click(); await (await chooser).setFiles("/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/sources/pg-single/apps/tldw-frontend/public/icon/128.png"); const before=page.__matrixEvents.filter(e=>e.event==="request"&&e.url?.endsWith("/chat/completions")).length; await page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}).fill("Describe this attached public test icon in one sentence."); await page.getByRole("button",{name:"Send message",exact:true}).click(); await page.getByRole("button",{name:"Retry same model",exact:true}).waitFor({timeout:15000}); const first=await page.locator("body").innerText(); await page.getByRole("button",{name:"Retry same model",exact:true}).click(); return {at:new Date().toISOString(),beforeCompletionRequests:before,first,body:await page.locator("body").innerText(),events:page.__matrixEvents}; })(page);
-```
-### Page
-- Page URL: http://127.0.0.1:18682/chat
-### Modal state
-- [File chooser]: can be handled by upload
-

@@ -1,5 +1,0 @@
-# Targeted native single119/120 and newly found122
-
-Source e7bf2184d3; preserved profile API18402/UI18482.119 full editor opaque dark rgb(15,17,19), light rgb(244,242,238),390x844 preview; screenshots inspected. Restored original1200x953 and dark.120 offline PUTupdate/2 ERR_CONNECTION_REFUSED; Pending#2 exact edited WILLOW text persisted. Offline reload showed intentional readiness gate (row observer timed out, no page loss inference); same API/data restarted, visible Retry revealed retained Pending#2 before saving. Explicit PUT200 acknowledged id3/version3,parent2 then Synced#3. API oldPID76497 replaced81392. Unrelated servers untouched.
-
-118 actual upload reached composer/local transcript but was omitted from POST due false model capability. New122 tracks this confirmed pre-recovery defect; canonical read has system and user only, noimages. No native image-recovery or successful vision pass. Initial file chooser run-code suspended into modal; supported upload completed it. Initial Retry button selector did not match Retry same model/Retry chat. These harness observations are retained separately from the product defect.

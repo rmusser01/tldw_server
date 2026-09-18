@@ -1,8 +1,0 @@
-### Result
-{"at":"2026-09-17T22:56:39.731Z","body":"- dialog \"Quick Ingest (1)\":\n  - button \"Close\":\n    - img \"close\"\n  - text: Quick Ingest (1)\n  - navigation \"Ingest wizard progress\":\n    - list:\n      - listitem:\n        - 'button \"Step 1: Add (completed)\"': Add 1 items\n      - listitem:\n        - 'button \"Step 2: Configure (completed)\"': Configure Custom\n      - listitem:\n        - 'button \"Step 3: Review (current)\" [disabled]': Review\n      - listitem:\n        - 'button \"Step 4: Processing\" [disabled]': Processing\n      - listitem:\n        - 'button \"Step 5: Results\" [disabled]': Results\n  - heading \"Ready to Process\" [level=2]\n  - paragraph: 1 items | Custom preset\n  - paragraph: Processing time depends on the content, selected options, and server.\n  - list \"Items to process\":\n    - listitem: linden-results-public-20260917.txt Custom · OCR + Extract + Analyze + Chunk\n  - paragraph: \"Storage: Server\"\n  - button \"Back to Settings\"\n  - button \"Start processing\": Start Processing"}
-### Ran Playwright code
-```js
-await (async page=>{await page.getByTitle('llama.cpp',{exact:true}).click();await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByRole('button',{name:'Start processing',exact:true}).waitFor({timeout:15000});return {at:new Date().toISOString(),body:await page.getByRole('dialog').ariaSnapshot()};}
-)(page);
-```
-

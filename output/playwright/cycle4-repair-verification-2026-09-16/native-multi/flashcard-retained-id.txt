@@ -1,6 +1,0 @@
-### Result
-{"status":200,"matches":[{"keys":["uuid","deck_id","deck_name","front","back","notes","extra","is_cloze","tags_json","tags","source_ref_type","source_ref_id","conversation_id","message_id","ef","interval_days","repetitions","lapses","due_at","last_reviewed_at","queue_state","step_index","suspended_reason","created_at","last_modified","deleted","client_id","version","model_type","reverse","scheduler_type","next_intervals"],"uuid":"6209bde3-d6c8-4eec-b6a4-ca02804b14bf","front":"Cycle4 repair verification: what color is the synthetic card?"}]}
-### Ran Playwright code
-```js
-await (async page => { const pending=page.waitForResponse(r=>r.request().method()==="GET" && r.url().split("?")[0]==="http://127.0.0.1:18301/api/v1/flashcards"); await page.getByRole("tab",{name:"Manage",exact:true}).click(); const r=await pending; const data=await r.json(); return {status:r.status(),matches:data.items.filter(x=>JSON.stringify(x).includes("Cycle4 repair verification")).map(x=>({keys:Object.keys(x),id:x.id,card_id:x.card_id,uuid:x.uuid,front:x.front}))}; })(page);
-```

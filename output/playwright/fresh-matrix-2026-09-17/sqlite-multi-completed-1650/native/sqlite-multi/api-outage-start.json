@@ -1,8 +1,0 @@
-{
-  "at": "2026-09-17T16:47:08.245Z",
-  "cell": "sqlite-multi",
-  "action": "Controlled graceful API stop for native recovery test",
-  "pid": 45087,
-  "startedAt": "2026-09-17T15:10:23.101Z",
-  "sourceUnchanged": true
-}

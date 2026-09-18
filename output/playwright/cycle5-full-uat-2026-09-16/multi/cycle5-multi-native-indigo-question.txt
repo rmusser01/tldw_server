@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('textbox', { name: 'Search your knowledge base' }).fill('How many violet keys does Indigo Station store?');
-```

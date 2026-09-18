@@ -1,2 +1,0 @@
-{"type": "contexts", "contexts": [], "why": {"topicality": 0.0, "diversity": null, "freshness": null}, "security_filter": {"excluded_count": 1, "retained_count": 0}}
-{"schema_version": 1, "type": "complete", "code": "complete", "upstream_dispatched": true, "output_emitted": false, "allow_non_stream_fallback": false, "message": "Search completed."}

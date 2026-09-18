@@ -1,6 +1,0 @@
-### Result
-{"at":"2026-09-17T01:14:54.335Z","badgeCount":0,"create":{"x":1107.96875,"y":913,"width":76.03125,"height":32,"centerOwned":true}}
-### Ran Playwright code
-```js
-await (async page => ({at:new Date().toISOString(),badgeCount:await page.getByRole("button",{name:"Open Next.js Dev Tools",exact:true}).count(),create:await page.getByRole("button",{name:"Create",exact:true}).evaluate(el=>{const r=el.getBoundingClientRect();const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {x:r.x,y:r.y,width:r.width,height:r.height,centerOwned:el===hit||el.contains(hit)}})}))(page);
-```

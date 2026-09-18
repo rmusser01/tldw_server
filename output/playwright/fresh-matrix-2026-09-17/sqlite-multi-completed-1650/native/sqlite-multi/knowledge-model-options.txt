@@ -1,7 +1,0 @@
-### Result
-"- dialog \"Answer model controls\":\n  - paragraph: Answer model\n  - paragraph: Applies to final answer generation for this search session.\n  - text: Provider\n  - combobox \"Answer provider\":\n    - option \"Server default\"\n    - option \"OpenAI\"\n    - option \"AWS Bedrock\"\n    - option \"Anthropic\"\n    - option \"Cohere\"\n    - option \"DeepSeek\"\n    - option \"Qwen\"\n    - option \"Google\"\n    - option \"Groq\"\n    - option \"Mistral\"\n    - option \"HuggingFace\"\n    - option \"OpenRouter\"\n    - option \"Novita\"\n    - option \"Poe\"\n    - option \"Together\"\n    - option \"Moonshot\"\n    - option \"Z.AI\"\n    - option \"MiniMax\"\n    - option \"Llama.cpp\" [selected]\n    - option \"Kobold.cpp\"\n    - option \"Oobabooga\"\n    - option \"TabbyAPI\"\n    - option \"vLLM\"\n    - option \"Ollama\"\n    - option \"Aphrodite\"\n    - option \"MLX\"\n    - option \"Custom OpenAI API\"\n    - option \"Custom OpenAI API 2\"\n  - text: Model\n  - combobox \"Answer model\": ../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
-### Ran Playwright code
-```js
-await (async page=>{await page.getByRole("combobox",{name:"Answer provider",exact:true}).selectOption({label:"Llama.cpp"});return await page.getByRole("dialog",{name:"Answer model controls",exact:true}).ariaSnapshot();})(page);
-```
-

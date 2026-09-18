@@ -1,6 +1,0 @@
-### Result
-[{"text":"Retry saving remaining drafts","disabled":false,"busy":"false","class":"tldw-btn inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg disabled:opacity-50 disabled:cursor-not-allowed bg-surface2 text-text hover:bg-surface active:bg-surface px-2.5 py-1 text-xs min-h-[28px]"},{"text":"Save generated cards","disabled":false,"busy":null,"class":"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"}]
-### Ran Playwright code
-```js
-await (async page => { return await page.locator("button").filter({hasText:/Save generated cards|Retry saving remaining drafts/}).evaluateAll(nodes=>nodes.map(n=>({text:n.innerText,disabled:n.disabled,busy:n.getAttribute("aria-busy"),class:n.className}))); })(page);
-```

@@ -1,9 +1,0 @@
-- generic [active]:
-  - dialog [ref=f7e1]:
-    - generic [ref=f7e2]:
-      - progressbar [ref=f7e3]
-      - status [ref=f7e7]: Loading...
-      - paragraph [ref=f7e8]: Please wait while we get things ready.
-      - generic [ref=f7e9]: Loading...
-  - button "Open Next.js Dev Tools" [ref=f7e15] [cursor=pointer]
-  - alert [ref=f7e19]

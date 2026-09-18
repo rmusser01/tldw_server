@@ -1,7 +1,0 @@
-{
-  "compiled": [
-    "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
-    "tldw_Server_API/tests/DB_Management/test_transaction_error_logging_backends.py"
-  ],
-  "count": 2
-}

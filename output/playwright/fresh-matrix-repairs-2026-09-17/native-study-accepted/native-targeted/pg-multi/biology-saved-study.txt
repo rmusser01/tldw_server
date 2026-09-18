@@ -1,9 +1,0 @@
-### Error
-Error: locator.waitFor: Error: strict mode violation: getByText('Saved 5 generated cards.', { exact: true }) resolved to 2 elements:
-    1) <p class="text-sm font-medium text-success">Saved 5 generated cards.</p> aka getByTestId('flashcards-generate-save-status').getByText('Saved 5 generated cards.')
-    2) <span>Saved 5 generated cards.</span> aka locator('#tldw-portal-root').getByText('Saved 5 generated cards.')
-
-Call log:
-  - waiting for getByText('Saved 5 generated cards.', { exact: true }) to be visible
-
-

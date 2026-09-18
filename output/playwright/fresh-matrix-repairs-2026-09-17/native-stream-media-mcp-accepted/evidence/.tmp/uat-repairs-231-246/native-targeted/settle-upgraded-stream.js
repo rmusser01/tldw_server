@@ -1,1 +1,0 @@
-async page=>{let settled=true;try{await page.getByRole('button',{name:'Stop Streaming',exact:true}).waitFor({state:'hidden',timeout:20000});}catch{settled=false;}return {at:new Date().toISOString(),settled,url:page.url(),ui:await page.locator('body').ariaSnapshot(),timing:page.__repairCharacterTiming,headers:page.__repairStreamHeaders,events:page.__matrixEvents};}

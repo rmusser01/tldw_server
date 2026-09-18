@@ -1,9 +1,0 @@
-### Error
-Error: locator.ariaSnapshot: Error: strict mode violation: locator('main') resolved to 2 elements:
-    1) <main tabindex="-1" id="main-content" data-demo-mode="off" class="relative flex-1 min-w-0 flex flex-col outline-none">…</main> aka locator('#main-content')
-    2) <main data-testid="playground-cockpit-main" class="min-h-0 min-w-0 overflow-hidden bg-bg w-full">…</main> aka getByTestId('playground-cockpit-main')
-
-Call log:
-  - waiting for locator('main')
-
-

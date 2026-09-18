@@ -1,9 +1,0 @@
-{
-  "checkedAt": "2026-09-16T18:10:07.847Z",
-  "head": "12b683dc49e853ee1731134c11ba36c0ecbe87c3",
-  "dev": "59049e094e0845a4611ea725ae19b7c1754ea709",
-  "devIsAncestor": true,
-  "devOnlyCommits": 0,
-  "branch": "codex/fresh-install-uat-fixes",
-  "note": "Freshly fetched origin/dev; does not change the documented original latest-dev-at-start mistake."
-}

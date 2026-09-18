@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18501/api/v1/chat/knowledge/save","status":201,"request":{"conversation_id":"849ac2ca-e2ff-4c27-8c88-212839e8310b","message_id":"64550040-d4de-4911-8f90-f7039de6da60","snippet":"A fictional cobalt compass points east.","make_flashcard":true,"flashcard_front":"Which direction does the fictional cobalt compass point?","flashcard_back":"A fictional cobalt compass points east.","scope_type":"global"},"response":{"note_id":"60410834-f2dc-4292-be85-ca2a618e0773","flashcard_id":"074806c4-29ec-4dc3-950f-40ad28e1c24f","conversation_id":"849ac2ca-e2ff-4c27-8c88-212839e8310b","message_id":"64550040-d4de-4911-8f90-f7039de6da60","export_status":"not_requested","export_job_id":null}}
-### Ran Playwright code
-```js
-await (async (page) => { const pending = page.waitForResponse(r => r.url().includes("/api/v1/chat/knowledge/save") && r.request().method()==="POST"); await page.getByRole("button", {name:"Save flashcard", exact:true}).click(); const r=await pending; return {url:r.url(),status:r.status(),request:r.request().postDataJSON(),response:await r.json()}; })(page);
-```

@@ -1,5 +1,0 @@
-{
-  "apps/packages/ui/src/components/Flashcards/tabs/ManageTab.tsx": "81153fb0d6fecf2771316a6915408d43b37cbfbbab51288e431954a1c0cb0816",
-  "apps/packages/ui/src/assets/locale/en/option.json": "6b39025c6a5bd79c4ea20d8ec5f3f31048782373d8a81ee28a52e2435a4df131",
-  "apps/packages/ui/src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx": "44d7034125b795713898f44fd1f04e48c487c00f4a66ee0981b344b406a311fd"
-}

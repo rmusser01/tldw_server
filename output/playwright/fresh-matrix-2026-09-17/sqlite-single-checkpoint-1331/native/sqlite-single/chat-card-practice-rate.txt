@@ -1,7 +1,0 @@
-### Result
-{"at":"2026-09-17T13:16:28.572Z","body":"Skip to main content\ntldw Assistant\nSearch\n⌘K\nNotifications are active\n?\nStudy workspace\nFlashcards\nStudy\nManage\nImport / Export\nTemplates\nScheduler\nStudy\nManage\nImport / Export\nTemplates\nScheduler\nTest with Quiz\nSelect deck\nDue only\nCram\nFront first\nBack first\nUpdate schedule\nCreate a new card\nSource reviews\nNo source reviews due\nSchedule\nReviewed today\n1\nRetention rate\n100.0%\nLapse rate\n0.0%\nAvg answer time\n14.2s\nStudy streak\n1 day\nCram session complete!\n🎉\n1 card practiced in this cram session\nYou reached the end of your cram queue.\nPractice again\nCreate more cards\nRecent study sessions\nAll decks\nView completed session\nCompleted\nDue review\n1 card reviewed\nCompleted 2026-09-17 06:15\nPractice saved. Scheduling unchanged.\n\nFlashcards | tldw"}
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("button",{name:"Show answer (Space)",exact:true}).click(); await page.getByRole("button",{name:"Good: I remembered with a bit of effort. Press 3",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; })(page);
-```
-

@@ -1,7 +1,0 @@
-# UAT114 visibility-aware notification transport
-
-TASK13260.54 plan4Task7. Hidden tabs cannot start notification bootstrap/stream/polls; hiding invalidates pending continuations and aborts reads/unsubscribes/clears timer. Becoming visible uses existing fresh unread/cursor bootstrap only unless terminal401/403 requires explicit recovery. Account scope projection/reset stays intact while hidden, and delayed old callbacks fail their generation checks. No new public state or global connection sharing.
-
-Permanent6visibility controls: initialhidden/explicitrefresh,activehide+120secondpollpause+freshcursorcatchup+staleevent, pendingbootstrapabort/late result, terminal401+403 noimplicitretry, hiddenaccountreplacement. Original4RED/2terminalcontrols pass; newprovider42tests plus rotation/page suites106pass before stale toast mock failure. Toast mock lacked2 already-used authStorage exports; added null equivalents matching its existing single-user fake. Corrected6toasttests pass,111unique cases overall. No tests disabled. Logs /private/tmp/uat114-permanent-red.txt, -permanent-green.txt (includes original mock failures), -toast-final.txt. Scoped root ESLint all3files0errors/0warnings baseline/current; comparison /private/tmp/uat114-lint-comparison.json. TS-only Bandit N/A. Native six-tab verification pending.
-
-Potential review focus: terminal-state preservation, account transition while hidden, scope/generation cursor restart, no overlapping transport on resume.

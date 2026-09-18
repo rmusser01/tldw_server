@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await (async (page) => { const reviewed=[]; for(let i=0;i<5;i++){ await page.getByTestId("flashcards-review-show-answer").click(); const front=await page.getByRole("heading",{name:"Front",exact:true}).locator("..").innerText(); const back=await page.getByRole("heading",{name:"Back",exact:true}).locator("..").innerText(); reviewed.push({front,back}); await page.getByTestId("flashcards-review-rate-3").click(); } console.log(JSON.stringify(reviewed)); })(page);
-```

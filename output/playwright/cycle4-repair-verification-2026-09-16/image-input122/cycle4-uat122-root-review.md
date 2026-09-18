@@ -1,7 +1,0 @@
-# Root UAT122 source review
-
-Reviewed frozen three production files, three test files and the shared-UI test-only OCR alias. No remaining actionable finding. ChatTldw rejects user image parts before stream/invoke conversion when capability is not confirmed. Supported payloads and explicit current OCR remain intact. The fixed local Error class is the only friendly-error mapper path that grants a no-dispatch exemption. Pipeline retains local failed-user identity and ACK behavior while using the persisted boolean only for the server retry flag; missing/malformed/server failures remain conservative. No backend exact-match safeguard changes.
-
-Actual formatter/factory tests cover false, omitted and true capability, missing catalog model/failure, image-only, PNG/JPEG/WebP payloads, text-only, current OCR and historical image refusal. Mounted actions cover persistent local refusal, repeated Retry, supported recovery/canonical remount, identical earlier answered image, ambiguous dispatch transitions and owner A/B/A cancellation. These controlled transport tests do not certify a native vision provider. Independent reviewer recorded the accepted historical OCR before/after limitation separately.
-
-Full TypeScript diagnostics remain exactly the 90-error baseline, including complete indented messages and multiplicity; none added or removed. Broader affected frontend run is pending at this checkpoint. The prior e7bf2184d3 backend/Bandit scope is unchanged by this frontend-only repair.

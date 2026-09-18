@@ -1,5 +1,0 @@
-### Result
-- 0: (current) [Knowledge | tldw](http://127.0.0.1:18580/knowledge)
-- 1: [Server Settings | tldw](http://127.0.0.1:18580/settings/tldw)
-### Events
-- New console entries: .playwright-cli/console-2026-09-16T07-59-45-562Z.log#L113-L138

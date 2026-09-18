@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T23:49:14.438Z","scene":"UAT ownership check: keep this Cedar scene on the same saved conversation.","title":"Cycle3 Cedar Guide Chat (20260915_103705) | tldw"}
-### Ran Playwright code
-```js
-await (async page => {await page.getByRole("button",{name:"Role-play setup",exact:true}).click();const dialog=page.getByRole("dialog",{name:"Role-play setup",exact:true});await dialog.getByRole("textbox",{name:"Scene notes",exact:true}).waitFor();return {checkedAt:new Date().toISOString(),scene:await dialog.getByRole("textbox",{name:"Scene notes",exact:true}).inputValue(),title:await page.title()};})(page);
-```

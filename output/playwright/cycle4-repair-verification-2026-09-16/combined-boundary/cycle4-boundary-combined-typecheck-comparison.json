@@ -1,9 +1,0 @@
-{
-  "baseline": "/private/tmp/uat032-merged-typecheck.log",
-  "current": "/private/tmp/cycle4-boundary-combined-typecheck.log",
-  "normalization": "Diagnostic path, TS code, complete indented message and multiplicity; location shifts and wrapper lines excluded",
-  "baselineCount": 90,
-  "currentCount": 90,
-  "added": [],
-  "removed": []
-}

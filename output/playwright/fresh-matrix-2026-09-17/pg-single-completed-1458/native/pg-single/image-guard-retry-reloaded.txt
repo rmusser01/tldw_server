@@ -1,9 +1,0 @@
-### Error
-Error: locator.waitFor: Error: strict mode violation: getByRole('button', { name: 'Retry same model', exact: true }) resolved to 2 elements:
-    1) <button type="button" class="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10">Retry same model</button> aka getByRole('article', { name: 'Assistant message 2 of' }).getByRole('button', { name: 'Retry same model' })
-    2) <button type="button" class="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10">Retry same model</button> aka getByRole('article', { name: 'Assistant message 4 of' }).getByRole('button', { name: 'Retry same model' })
-
-Call log:
-  - waiting for getByRole('button', { name: 'Retry same model', exact: true }) to be visible
-
-

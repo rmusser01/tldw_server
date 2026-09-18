@@ -1,8 +1,0 @@
-[
-  "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
-  "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
-  "apps/packages/ui/src/hooks/chat/useServerChatLoader.ts",
-  "apps/packages/ui/src/hooks/useSelectedAssistant.ts",
-  "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.scope.test.tsx",
-  "apps/packages/ui/src/hooks/__tests__/useServerChatLoader.mirror.integration.test.tsx"
-]

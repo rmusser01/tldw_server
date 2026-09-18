@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('textbox', { name: 'System prompt' }).fill('Summarize the source as exactly three short factual bullet points: keeper, lantern count, and supply boat schedule. Use only source facts. Return the final answer without a preamble.');
-```

@@ -1,9 +1,0 @@
-{
-  "checkedAt": "2026-09-16T00:01:29.673Z",
-  "knownRuntimeValuesChecked": 14,
-  "credentialMatches": 0,
-  "jwtPatternMatches": 0,
-  "privateKeyPatternMatches": 0,
-  "scope": "Every retained payload and final SHA256SUMS; the10 original capture texts also scanned before retaining.",
-  "scanBasis": "Recursive password/secret/token/API-key fields from isolated cycle3 single/multi manifests, values in memory only."
-}

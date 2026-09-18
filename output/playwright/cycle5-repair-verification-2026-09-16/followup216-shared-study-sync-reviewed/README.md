@@ -1,4 +1,0 @@
-# UAT216 shared PostgreSQL Study Pack sync triggers
-
-Commit6edc445d1b. Independentroot55actualPG/SQLitePASS0skip63.95s onfinaltestbytes, completeattributedmethod/testreview andfreshBandit0. Three existingtriggerfunctions selectactualclosed-setidentifiercolumn, preservingpayload/owner/version/rollback. Normalreopenrepairsoldinstalledbodies. EntireChaCha snapshotsinclude209separatework; only216method/testcommitted.218reverseMedia initialization remainsseparatefailingtest andno nativeStudyPackcompletionclaimed. Originaljob2 preserved.
-Known runtime credentials and JWT/PEM patterns scanned, zero matches. Original evidence remains unchanged.

@@ -1,1 +1,0 @@
-{"success":true,"message":"Setup marked as complete. Restart the server to load new configuration.","requires_restart":true,"install_plan_submitted":false}

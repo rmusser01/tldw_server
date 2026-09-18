@@ -1,7 +1,0 @@
-{
-  "at": "2026-09-15T15:34:38.827Z",
-  "action": "revoke only the current isolated browser session",
-  "rotatedCredential": true,
-  "status": 200,
-  "ok": true
-}

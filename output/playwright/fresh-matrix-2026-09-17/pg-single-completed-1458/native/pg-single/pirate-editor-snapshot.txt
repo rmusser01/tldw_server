@@ -1,5 +1,0 @@
-### Error
-Error: Tool "browser_snapshot" does not handle the modal state.
-### Modal state
-- ["confirm" dialog with message "You have unsaved changes. Discard them?"]: can be handled by dialog-accept or dialog-dismiss
-

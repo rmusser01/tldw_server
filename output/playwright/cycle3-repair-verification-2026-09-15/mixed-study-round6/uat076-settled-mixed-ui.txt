@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T19:44:57.117Z","mitochondria":"What is the mitochondria?\n\nNote #9ae43c6a-2458-4910-97fd-013d888914f7\nMemory 2.50\nNext gap 0d\nRecall runs 0\nRelearns 0","photosynthesis":"What does photosynthesis convert light energy into?\n\nNote #9ae43c6a-2458-4910-97fd-013d888914f7\nMemory 2.50\nNext gap 0d\nRecall runs 0\nRelearns 0"}
-### Ran Playwright code
-```js
-await (async(page)=>{const a=page.getByRole("listitem").filter({has:page.getByText("What is the mitochondria?",{exact:true})});const b=page.getByRole("listitem").filter({has:page.getByText("What does photosynthesis convert light energy into?",{exact:true})}).filter({hasText:"Recall runs 0"});const result={checkedAt:new Date().toISOString(),mitochondria:await a.innerText(),photosynthesis:await b.innerText()};await page.getByRole("tab",{name:"Study",exact:true}).click();return result;})(page);
-```

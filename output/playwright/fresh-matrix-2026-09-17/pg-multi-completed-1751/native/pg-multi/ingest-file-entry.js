@@ -1,1 +1,0 @@
-async page=>{page.__sourceIngestAt=new Date().toISOString();await page.getByRole('button',{name:'Quick Ingest',exact:true}).first().click();return {at:page.__sourceIngestAt,body:await page.getByRole('dialog').ariaSnapshot()};}

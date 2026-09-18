@@ -1,4 +1,0 @@
-{
-  "status": 429,
-  "body": "{\"error\":\"rate_limited\",\"policy_id\":\"character_chat.default\",\"retry_after\":1}"
-}

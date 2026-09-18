@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18280/media?id=1","content":{"top":0,"client":2361,"height":2361},"document":{"top":560,"client":720,"height":2541},"ancestors":[{"tag":"HTML","id":"","role":null,"class":"dark","top":560,"client":720,"height":2541}]}
-### Ran Playwright code
-```js
-await (async (page) => { const box = await page.getByTestId("content-scroll-container").boundingBox(); await page.mouse.move(box.x + box.width / 2, Math.min(box.y + 180, 600)); await page.mouse.wheel(0, 560); await page.waitForTimeout(1400); return await page.getByTestId("content-scroll-container").evaluate(el=>({url:location.href,content:{top:el.scrollTop,client:el.clientHeight,height:el.scrollHeight},document:{top:document.scrollingElement.scrollTop,client:document.scrollingElement.clientHeight,height:document.scrollingElement.scrollHeight},ancestors:[...function*(x){for(let p=x.parentElement;p;p=p.parentElement)yield p}(el)].map(p=>({tag:p.tagName,id:p.id,role:p.getAttribute("role"),class:p.className,top:p.scrollTop,client:p.clientHeight,height:p.scrollHeight})).filter(x=>x.top>0||x.height>x.client)})); })(page);
-```

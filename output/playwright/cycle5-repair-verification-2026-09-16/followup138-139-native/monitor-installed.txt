@@ -1,7 +1,0 @@
-### Result
-{"installed":true,"url":"http://127.0.0.1:18580/media"}
-### Ran Playwright code
-```js
-await (async page => {page.__outageEvents=[];page.on('pageerror',e=>page.__outageEvents.push({event:'pageerror',message:String(e),at:Date.now()}));page.on('console',m=>{if(['error','warning'].includes(m.type()))page.__outageEvents.push({event:'console',type:m.type(),text:m.text(),at:Date.now()})});page.on('response',async r=>{if(!/\/api\/v1\/media/.test(r.url()))return;let body;try{body=await r.text()}catch{}page.__outageEvents.push({event:'response',url:r.url(),status:r.status(),body,at:Date.now()})});return {installed:true,url:page.url()};}
-)(page);
-```

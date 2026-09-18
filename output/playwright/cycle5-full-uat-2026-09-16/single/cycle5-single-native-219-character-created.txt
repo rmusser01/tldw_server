@@ -1,6 +1,0 @@
-### Result
-{"status":201,"request":{"name":"E2E-TestBot","system_prompt":"You are E2E-TestBot. Always respond with exactly: BEEP BOOP."},"body":{"name":"E2E-TestBot","description":null,"personality":null,"scenario":null,"system_prompt":"You are E2E-TestBot. Always respond with exactly: BEEP BOOP.","post_history_instructions":null,"first_message":null,"message_example":null,"creator_notes":null,"alternate_greetings":[],"tags":[],"creator":null,"character_version":null,"extensions":{},"image_base64":null,"id":4,"version":1,"created_at":"2026-09-16T09:02:48.392000Z","updated_at":"2026-09-16T09:02:48.392000Z","last_modified":"2026-09-16T09:02:48.392000Z","image_present":false},"time":"2026-09-16T09:02:48.417Z"}
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("textbox",{name:"* Name* Generate with AI",exact:true}).fill("E2E-TestBot"); await page.getByRole("textbox",{name:"* Behavior / instructions (required) Generate with AI",exact:true}).fill("You are E2E-TestBot. Always respond with exactly: BEEP BOOP."); const wait=page.waitForResponse(r=>r.request().method()==="POST"&&r.url().includes("/characters")); await page.getByRole("button",{name:"Create character",exact:true}).click(); const r=await wait; return {status:r.status(),request:r.request().postDataJSON(),body:await r.json(),time:new Date().toISOString()}; })(page);
-```

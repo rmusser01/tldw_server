@@ -1,5 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('checkbox', { name: 'Select llama.cpp' }).check();
-```
-

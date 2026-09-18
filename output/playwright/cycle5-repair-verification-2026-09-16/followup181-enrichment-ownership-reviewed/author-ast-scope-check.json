@@ -1,6 +1,0 @@
-{
-  "native_baseline_hash_matches": true,
-  "only_changes": "one import plus two independent context managers",
-  "callback_scopes": 2,
-  "remaining_ast_identical": true
-}

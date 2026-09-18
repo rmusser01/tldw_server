@@ -1,6 +1,0 @@
-### Result
-{"maxTokens":""}
-### Ran Playwright code
-```js
-await (async page => ({maxTokens:await page.getByRole("spinbutton",{name:"Max Tokens (num_predict)",exact:true}).inputValue()}))(page);
-```

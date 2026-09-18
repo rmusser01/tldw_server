@@ -1,9 +1,0 @@
-296cea69d72030b5215d939664621e9b0ce6cbedfc296375bd91bddcd15e95f2  README.md
-a13c0d0b0f8203ae636cb43c88b6bd1cc1164b36820fc952fca3d17503ba097b  evidence/.tmp/uat-repairs-231-246/model261-disposition-review/REVIEW.md
-2f01600cb7e0d43b9dabd80fd38a1148911b6977314a23ee0c5827fbc1050003  evidence/.tmp/uat-repairs-231-246/model261-disposition-review/audit.json
-5b0344ef53a70ff60fbe8e6fb588f315a9bfd5cf7914f494c8779884004f9dfc  evidence/.tmp/uat-repairs-231-246/model261-disposition-review/audit.mjs
-cfada94c50dc476d74a2d56cea117d91a8d1b27b892976eb5c04b1d82b4008a7  evidence/.tmp/uat-repairs-231-246/model261-evidence-plan/PLAN.md
-f3392890a6d9c05e619efb475e4a8a44c28dc97f01f346e45eb1464ec9a06de8  evidence/.tmp/uat-repairs-231-246/model261-runtime-log-projection.json
-7bbcfcdc203f48e80be1c337a1ba3036d90b1af2c9c8bcff546500eeb8357556  evidence/.tmp/uat-repairs-231-246/model261-terminal-projection-qualified.json
-42acdcb3d14b7bddadf6284b68a6e6150b118b530881ce0d60eb60717f2cf88e  evidence/backlog/tasks/task-13260.203 - Diagnose-TestBot-exact-response-deviation-after-valid-model-selection-UAT-261.md
-b205ce0fa87e13e89dab30f1def9fc0ba7ba65beb140fab6241750ba9f49c511  manifest.json

@@ -1,6 +1,0 @@
-### Result
-{"path":"http://127.0.0.1:18301/api/v1/chats/bd564030-70fe-41bc-9c91-4b661408f8e3/messages","status":200,"rows":[{"id":"96b53a84-fa33-4a21-af3f-549ba7c13729","length":44,"reasoningOnly":false},{"id":"35f1f9e5-6e4a-4a88-9647-beb06abed0b5","length":74,"reasoningOnly":false},{"id":"pa_6438-7568-2bc-da24","length":4551,"reasoningOnly":false},{"id":"d4715838-ef30-435e-b534-e574031595a0","length":457,"reasoningOnly":false},{"id":"pa_e1d1-0ac7-dcb-ae58","length":14297,"reasoningOnly":true}]}
-### Ran Playwright code
-```js
-await (async page => { const chat=page.context().pages().find(p=>p.url().includes("chatId=bd564030")); const pending=chat.waitForResponse(r=>r.url().includes("/api/v1/chats/bd564030-70fe-41bc-9c91-4b661408f8e3/messages")&&r.status()===200); await chat.reload();const r=await pending;const x=await r.json();const rows=Array.isArray(x)?x:x.messages||x.items||[];return {path:r.url().split("?")[0],status:r.status(),rows:rows.map(m=>({id:m.id,role:m.role,length:String(m.content||"").length,reasoningOnly:String(m.content||"").trim().startsWith("<think>")&&String(m.content||"").trim().endsWith("</think>")}))}; })(page);
-```

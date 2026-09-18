@@ -1,6 +1,0 @@
-### Result
-{"fullContentSearch":true}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("checkbox",{name:"Search full content (slower)",exact:true}).check(); await page.getByRole("button",{name:"Search",exact:true}).click(); return {fullContentSearch:true}; })(page);
-```

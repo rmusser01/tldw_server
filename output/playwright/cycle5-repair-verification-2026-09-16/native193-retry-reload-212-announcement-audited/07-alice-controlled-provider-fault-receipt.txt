@@ -1,6 +1,0 @@
-### Result
-{"at":"2026-09-17T06:48:00.780Z","faults":[{"at":"2026-09-17T06:47:02.733Z","url":"http://127.0.0.1:18583/api/v1/chats/471f52fa-22c5-4eba-a3d6-ee5e6982884f/complete-v2?scope_type=global","originalProvider":"llama","originalModel":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","faultProvider":"ollama","faultModel":"uat031-unavailable"}]}
-### Ran Playwright code
-```js
-await (async page => ({at:new Date().toISOString(), faults:page.__uat031Faults??[]}))(page);
-```

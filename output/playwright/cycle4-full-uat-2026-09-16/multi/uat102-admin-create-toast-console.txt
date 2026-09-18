@@ -1,2 +1,0 @@
-/private/tmp/.playwright-cli/console-2026-09-16T00-29-11-463Z.log:10
-[   65089ms] [ERROR] Warning: [antd: message] Static function can not consume context like dynamic theme. Please use 'App' component instead. @ http://127.0.0.1:18381/_next/static/chunks/b5795_next_dist_6bb985b8._.js:1920

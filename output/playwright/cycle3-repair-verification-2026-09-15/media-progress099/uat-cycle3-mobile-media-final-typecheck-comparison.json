@@ -1,9 +1,0 @@
-{
-  "checkedAt": "2026-09-16T00:00:15.339Z",
-  "baseline": "/private/tmp/uat032-merged-typecheck.log",
-  "current": "/private/tmp/uat-cycle3-mobile-media-final-typecheck.log",
-  "baselineCount": 90,
-  "currentCount": 90,
-  "added": [],
-  "removed": []
-}

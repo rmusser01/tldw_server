@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18181/notes","signedOut":true,"reconnectText":true,"privateDraftVisible":false,"runtimeOverlay":false}
-### Ran Playwright code
-```js
-await (async (page) => { await page.screenshot({path:"/private/tmp/uat048-boundary-notes-signed-out.png"}); const body = await page.locator("body").innerText(); return {url:page.url(),signedOut:body.includes("Signed out"),reconnectText:body.includes("Reconnect to sign in."),privateDraftVisible:body.includes("Alice UAT048 signed-out boundary") || body.includes("Alice private offline boundary draft"),runtimeOverlay:body.includes("Runtime Error")}; })(page);
-```

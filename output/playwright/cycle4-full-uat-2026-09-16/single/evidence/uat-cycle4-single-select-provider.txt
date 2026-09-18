@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('checkbox', { name: 'Select Custom OpenAI-' }).check();
-```

@@ -1,9 +1,0 @@
-0373edec234c4a758ff87e0efa515f915ed4c72ea1f53c080f7335a5d838470c  apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx
-7299c9a070126e392d7c4eb3d4cf5ea3c325008ed3434e3be7713e90bc5e1fc9  apps/packages/ui/src/components/Option/Characters/Manager.tsx
-51dd43d68f386b21a19c88eb50bbc4d78b2b11bbb4685f9b8a2ce4d3721a3b5c  apps/packages/ui/src/components/Option/Characters/__tests__/Manager.first-use.test.tsx
-31eacb13865faf0fd6496bdbb954aa30a923ccb0df09aa666f95db4290fa9030  apps/packages/ui/src/services/__tests__/tldw-api-client.characters-delete.test.ts
-b38f1efac1491ac3cf3fd780ea12b59f7c59fb8ad482b97918782b44ff5e8659  .superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-brief.md
-67bab1ad591baacf41d915494c3448739b199fa5801b48c935500e567b2b57c3  .superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-271-report.md
-f8d7600c0cc17b8097ff517b14635c7d6c688818da46674ece2e0521fb889c9b  .tmp/uat-repairs-231-246/character271/bandit.json
-50bafdb6b7367c019c10d377144925b1eaa4820ca61e546c0366643f7e0bab08  .tmp/uat-repairs-231-246/character271/manager-focused-final.log
-695a400f63944e4db86489c999c70524307ead8aa5aca42eb0bf672bb7706666  .tmp/uat-repairs-231-246/character271/client-focused-final.log

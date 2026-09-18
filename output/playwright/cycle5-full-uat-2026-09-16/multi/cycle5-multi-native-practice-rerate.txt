@@ -1,6 +1,0 @@
-### Result
-{"at":"2026-09-16T09:00:48.844Z","text":"Select deck\nDue only\nCram\nFront first\nBack first\nUpdate schedule\nSource reviews\nNo source reviews due\nSchedule\nReviewed today\n6\nRetention rate\n100.0%\nLapse rate\n0.0%\nAvg answer time\n7.4s\nStudy streak\n1 days\nDeck progress\nCycle5 Alice Biology\nTotal: 5\nNew: 0\nLearning: 0\nDue: 0\nMature: 0\n4 cards remaining, 2 reviewed, Available now: 6\nStudy queue\n4\ncards remaining\n2 reviewed\nAvailable now: 6\n~1 min left\nStandard\nReview\nbiology\nNote #4ce0fe3d-f7cb-4acc-bee3-410681ded957\nEdit\nFront\n\nWhat does photosynthesis convert light energy into?\n\nNeed help?\nShow Answer\nSpace Flip\nE Edit\nCompact hints\nRecent study sessions\nAll decks\nView completed session\nCompleted\nDue review\n1 card reviewed\nCompleted 2026-09-16 01:59\nCycle5 Alice Biology\nView completed session\nCompleted\nDue review\n5 cards reviewed\nCompleted 2026-09-16 01:19"}
-### Ran Playwright code
-```js
-await (async(page)=>{await page.getByRole("button",{name:"Show answer (Space)",exact:true}).click();await page.getByRole("button",{name:"Easy: I recalled it quickly and confidently. Press 4",exact:true}).click();await page.keyboard.press("Control+z");return {at:new Date().toISOString(),text:await page.getByRole("tabpanel",{name:"Study",exact:true}).innerText()};})(page);
-```

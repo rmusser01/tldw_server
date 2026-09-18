@@ -1,7 +1,0 @@
-### Result
-{"at":"2026-09-17T01:44:45.064Z","installed":true,"card":"37b10bd7-edf4-4f35-83c1-1490115d8c55","expected":"real provider failure; no message pair"}
-### Ran Playwright code
-```js
-await (async page => {const card='37b10bd7-edf4-4f35-83c1-1490115d8c55';const pattern='**/api/v1/flashcards/'+card+'/assistant/respond';if(page.__uat186AssistantFault)throw Error('already installed');const handler=async route=>{const req=route.request();if(req.method()!=='POST')return route.continue();const before=req.postDataJSON();page.__uat186AssistantFault.applied++;if(page.__uat186AssistantFault.applied!==1)throw Error('fault is one request only');const after={...before,provider:'ollama',model:'uat186-unavailable-provider-control'};(page.__uatStudyEvents??=[]).push({event:'controlled-request-override',at:new Date().toISOString(),url:req.url(),before,after,note:'Real backend dispatch to already verified unavailable local Ollama; no fake response.'});await route.continue({postData:JSON.stringify(after)});};page.__uat186AssistantFault={pattern,handler,applied:0};await page.route(pattern,handler);return {at:new Date().toISOString(),installed:true,card,expected:'real provider failure; no message pair'};}
-)(page);
-```

@@ -1,6 +1,0 @@
-### Error
-TimeoutError: locator.waitFor: Timeout 20000ms exceeded.
-Call log:
-  - waiting for getByRole('button', { name: 'Logout', exact: true }) to be visible
-
-

@@ -1,7 +1,0 @@
-{
-  "tldw_Server_API/app/core/Flashcards/study_assistant.py": "c837ee8ce29d9415b0259157e2b2f67623ec999da18f13454f8e697f2bc78660",
-  "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "c55f83cf82209c3194d4dc6bda255495a279659a11fe78ebf58bc97015b80fbc",
-  "tldw_Server_API/app/api/v1/endpoints/quizzes.py": "41647a2d4566ebaf221d3be0193b80eac6ad0a934648a3a0abc74408822df3ef",
-  "tldw_Server_API/tests/Flashcards/test_study_assistant_adapter_contract.py": "e8ee9e8b559f05fbeef12282ade5951e2fb7e4f8775ca110cefbd180cf2475cb",
-  "tldw_Server_API/tests/Flashcards/test_study_assistant_service_prompts.py": "ed9c42d1d088afd2c7c78c176d5bfaa7b52700ae539307142dd6a30b4fc5f770"
-}

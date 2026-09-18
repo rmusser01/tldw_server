@@ -1,6 +1,8 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 277 findings: 276 verified; 1 unresolved model-output failure (261). Catalogue containment276 and deletion wording277 passed original PostgreSQL multi-user native acceptance and their tasks are Done. The two-call TestBot diagnostic produced one nonexact and one exact answer with matching captured inputs; no actionable application defect is established. That failure remains open and the owner is being asked whether it should hold the next full run. The next full fresh-install matrix has not started.
+- **Evidence storage:** At the user's request, generated `output/playwright/` captures are retained locally and excluded from the PR. Historical evidence links below refer to that local archive; they are not repository-hosted attachments. The tracker and matrix retain the outcomes, defects, and verification summaries.
+
+- **Current repair gate:** 277 findings: 276 verified; 1 unresolved model-output failure (261). The user requested handling and merging PR2967, then resuming UAT starting with261. That finding remains open; its criterion is unchanged. Current work is PR/CI verification under TASK13260.219 and the [integration plan](../../IMPLEMENTATION_PLAN_pr2967_merge_and_uat_resume.md). The next full fresh-install matrix has not started.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 

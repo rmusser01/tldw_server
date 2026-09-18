@@ -1,6 +1,0 @@
-### Result
-{"requests":[{"url":"http://127.0.0.1:18580/api/_tldw-webui/runtime-config","method":"GET","at":1789591046263},{"url":"http://127.0.0.1:18580/api/v1/setup/first-run/state","method":"GET","at":1789591046490},{"url":"http://127.0.0.1:18580/api/v1/setup/first-run/metadata","method":"GET","at":1789591046502}],"personaCalls":0}
-### Ran Playwright code
-```js
-await (async page => ({requests:page.__uatPreauthRequests,personaCalls:page.__uatPreauthRequests.filter(r=>r.url.includes('/persona/profiles')).length}))(page);
-```

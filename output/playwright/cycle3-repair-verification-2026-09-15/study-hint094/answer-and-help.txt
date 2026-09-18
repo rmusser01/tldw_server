@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T21:23:07.347Z","cramChecked":true,"updateSchedule":"false","helpOpensAndCloses":true,"automaticHintCount":0,"answer":"Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15."}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("button",{name:"Show answer (Space)",exact:true}).click(); await page.getByText("Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.",{exact:true}).waitFor(); await page.getByRole("button",{name:"Need help?",exact:true}).click(); await page.getByRole("button",{name:"Hide help",exact:true}).waitFor(); await page.getByRole("button",{name:"Hide help",exact:true}).click(); await page.getByRole("button",{name:"Need help?",exact:true}).waitFor(); await page.screenshot({path:"/private/tmp/uat094-native-cedar-answer-clear.png"}); return {checkedAt:new Date().toISOString(),cramChecked:await page.getByRole("radio",{name:"Cram",exact:true}).isChecked(),updateSchedule:await page.getByRole("switch").getAttribute("aria-checked"),helpOpensAndCloses:true,automaticHintCount:await page.getByText("Need help understanding a card? Ask the study assistant.",{exact:true}).count(),answer:await page.getByText("Jonah Patel coordinates Project Cedar, and volunteers meet every Tuesday at 18:15.",{exact:true}).innerText()}; })(page);
-```

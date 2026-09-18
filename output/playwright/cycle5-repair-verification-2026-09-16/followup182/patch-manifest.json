@@ -1,5 +1,0 @@
-{
-  "beforeSha256": "0e71405bd53b8ea9b7fed933fa9647315721f41bc352614b89eb26e6899526dd",
-  "afterSha256": "17f1a2db3214b6488fd9cb1e6c137dcdfb08594faca869b71115b9afa799a84d",
-  "change": "Only populated getter row[0] -> row[\"image_data\"]; parent applies after181 freeze"
-}

@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18580/chat","articles":[],"draft":"\n\nAccording only to this source, who coordinates Project Cedar and where is its book return?"}
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("button",{name:"Media",exact:true}).click(); await page.getByRole("button",{name:"Select media: cycle5-single-native-public-source",exact:true}).click(); await page.getByRole("button",{name:"Chat with this media",exact:true}).click(); const input=page.getByRole("textbox",{name:"Type a message... (/ commands, @ mentions)",exact:true}); await input.fill((await input.inputValue())+"\n\nAccording only to this source, who coordinates Project Cedar and where is its book return?"); return {url:page.url(),articles:await page.getByRole("article").allTextContents(),draft:await input.inputValue()}; })(page);
-```

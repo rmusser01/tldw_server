@@ -1,6 +1,0 @@
-### Result
-- 0: (current) [](http://127.0.0.1:18281/settings/tldw)
-- 1: [TLDW Server - First-Time Setup](http://127.0.0.1:18201/setup)
-- 2: [](http://127.0.0.1:18281/flashcards?tab=importExport&generate=1&generate_text=Alice-only+fictional+draft.+The+Juniper+Lantern+reading+circle+meets+at+07%3A25+on+Fridays.+Private+boundary+sentinel%3A+ALICE-JUNIPER-LANTERN-20260915.&generate_source_type=note&generate_source_id=01241eac-571d-4631-9802-9cbc7fdfe769&generate_source_title=Cycle3+Alice+offline+private+draft)
-### Events
-- New console entries: .playwright-cli/console-2026-09-15T10-59-00-099Z.log#L46-L47

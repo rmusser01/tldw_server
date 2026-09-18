@@ -1,1 +1,0 @@
-{"query":"cycle5-multi-native-aurora-public","fields":["title","content"],"sort_by":"relevance"}

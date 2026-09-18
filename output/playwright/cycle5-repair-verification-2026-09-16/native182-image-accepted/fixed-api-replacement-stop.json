@@ -1,9 +1,0 @@
-{
-  "at": "2026-09-17T01:04:57.775Z",
-  "pid": 14540,
-  "signal": "SIGTERM",
-  "head": "a647f5cd890e980dd79027ead3452486ad2b2a47",
-  "productionDiffEmpty": true,
-  "concurrentChanges": "New test-only RED controls excluded from source freeze",
-  "reason": "Native fixed-to-fixed replacement after actual Notes/Flashcards/asset reads"
-}

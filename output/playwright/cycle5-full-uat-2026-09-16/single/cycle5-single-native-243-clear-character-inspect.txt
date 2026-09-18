@@ -1,6 +1,0 @@
-### Result
-{"title":"Character: E2E-TestBot","label":null,"text":"Character\nE2E-TestBot","tooltips":["Restore context sidechannel","Restore runtime sidechannel"]}
-### Ran Playwright code
-```js
-await (async page => { await page.getByRole("button",{name:"Cancel",exact:true}).click(); const b=page.getByRole("button",{name:"Character E2E-TestBot",exact:true}); await b.hover(); return {title:await b.getAttribute("title"),label:await b.getAttribute("aria-label"),text:await b.innerText(),tooltips:await page.getByRole("tooltip").allTextContents()}; })(page);
-```

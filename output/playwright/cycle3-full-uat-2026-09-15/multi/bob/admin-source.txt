@@ -1,5 +1,0 @@
-Cycle3 Admin recovery source
-
-The fictional Silver Wren reading room contains four green lamps. It opens at 08:15 on Wednesdays. This synthetic item belongs only to the admin UAT library and tests soft deletion and restoration.
-
-Admin recovery sentinel: ADMIN-SILVER-WREN-20260915.

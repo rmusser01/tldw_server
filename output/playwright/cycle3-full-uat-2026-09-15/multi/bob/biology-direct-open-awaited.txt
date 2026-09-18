@@ -1,9 +1,0 @@
-### Result
-{"title":"Cycle3 Bob Biology study note","content":"The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n"}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("button", {name:"Open note Cycle3 Bob Biology study note",exact:true}).click(); await page.waitForFunction(() => document.querySelector("input[placeholder=Title]")?.value === "Cycle3 Bob Biology study note", null, {timeout:30000}); return {title:await page.getByRole("textbox",{name:"Note title",exact:true}).inputValue(),content:await page.getByRole("textbox",{name:"Note content",exact:true}).inputValue()}; })(page);
-```
-### Page
-- Page URL: http://127.0.0.1:18281/notes
-- Page Title: Notes | tldw

@@ -1,8 +1,0 @@
-979. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-996. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1012. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1029. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1045. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1061. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1076. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK
-1093. [GET] http://127.0.0.1:18501/api/v1/auth/sessions => [200] OK

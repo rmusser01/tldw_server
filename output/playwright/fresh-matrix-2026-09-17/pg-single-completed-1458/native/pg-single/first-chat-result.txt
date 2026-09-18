@@ -1,8 +1,0 @@
-### Result
-{"at":"2026-09-17T14:11:19.799Z","url":"http://127.0.0.1:18682/","firstChat":[{"at":"2026-09-17T14:10:55.018Z","kind":"request","url":"http://127.0.0.1:18682/api/v1/setup/first-run/first-chat","method":"POST","body":{"prompt":"Say exactly: fresh PostgreSQL single-user ready."}},{"at":"2026-09-17T14:10:56.461Z","readAt":"2026-09-17T14:10:56.462Z","kind":"response","status":200,"url":"http://127.0.0.1:18682/api/v1/setup/first-run/first-chat","body":{"status":"ready","provider":"llamacpp","model":"../../../Working/Language_Models/gemma-4-26B-A4B/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf","response_text":"fresh PostgreSQL single-user ready.","message":null}}],"body":"Skip to main content\nRestore media access\n\nFirst chat is complete, but the WebUI needs a working server key before it can add sources.\n\nIf automatic WebUI access is disabled or unavailable, enter the SINGLE_USER_API_KEY configured for this server. Find it in the server's environment configuration or ask its operator.\n\nSingle-user API key\nSave API key\nRetry"}
-### Ran Playwright code
-```js
-await (async page => ({at:new Date().toISOString(),url:page.url(),firstChat:page.__firstSetupChat || [],body:await page.locator('body').innerText()})
-)(page);
-```
-

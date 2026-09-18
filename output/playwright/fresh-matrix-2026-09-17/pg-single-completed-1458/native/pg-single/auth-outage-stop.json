@@ -1,8 +1,0 @@
-{
-  "at": "2026-09-17T14:55:14.046Z",
-  "action": "SIGTERM owned pg-single API only",
-  "pid": 30006,
-  "command": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 18602",
-  "cwdVerified": true,
-  "port": 18602
-}

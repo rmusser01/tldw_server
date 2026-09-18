@@ -1,8 +1,0 @@
-### Result
-{"at":"2026-09-17T22:10:02.295Z","ui":"- link \"Skip to main content\":\n  - /url: \"#main-content\"\n- main:\n  - paragraph: Solo onboarding\n  - heading \"First-time setup\" [level=1]\n  - paragraph: Configure the minimum needed to reach a successful first chat.\n  - button \"Skip for now\"\n  - region \"Setup readiness\":\n    - heading \"Setup readiness\" [level=2]\n    - paragraph: Chat must be ready. RAG and speech can be configured later.\n    - button \"Retry\"\n    - paragraph: Chat\n    - paragraph: First-chat lane\n    - text: ready with warnings\n    - group: Chat details\n    - paragraph: Embeddings/RAG\n    - paragraph: Optional lane\n    - text: ready with warnings\n    - group: Embeddings/RAG details\n    - paragraph: Speech\n    - paragraph: Optional lane\n    - text: ready with warnings\n    - group: Speech details\n  - region \"Audio, STT, and TTS\":\n    - heading \"Audio, STT, and TTS\" [level=2]\n    - paragraph: Choose whether to configure audio now or defer it.\n    - text: \"Suggested: Apple Silicon Local\"\n    - group \"Audio setup mode\":\n      - text: Audio setup mode\n      - radio \"Use defaults\"\n      - text: Use defaults\n      - radio \"Configure now\"\n      - text: Configure now\n      - radio \"Skip for now\" [checked]\n      - text: Skip for now\n    - button \"Back\" [disabled]\n    - button \"Saving...\" [disabled]\n- alert"}
-### Ran Playwright code
-```js
-await (async page=>{await page.getByRole('button',{name:'Continue',exact:true}).click();return {at:new Date().toISOString(),ui:await page.locator('body').ariaSnapshot()};}
-)(page);
-```
-

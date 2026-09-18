@@ -1,6 +1,0 @@
-### Result
-{"at":1789593272375,"url":"http://127.0.0.1:18580/settings/tldw","fields":[{"value":"10","id":"","labels":[],"ariaLabel":null},{"value":"15","id":"","labels":[],"ariaLabel":null},{"value":"120","id":"","labels":[],"ariaLabel":null},{"value":"120","id":"","labels":[],"ariaLabel":null},{"value":"15","id":"","labels":[],"ariaLabel":null},{"value":"120","id":"","labels":[],"ariaLabel":null},{"value":"60","id":"","labels":[],"ariaLabel":null},{"value":"60","id":"","labels":[],"ariaLabel":null}],"balanced":true,"extended":false}
-### Ran Playwright code
-```js
-await (async page => ({at:Date.now(),url:page.url(),fields:await page.locator("#tldw-settings-timeouts input[type=number]").evaluateAll(es=>es.map(e=>({value:e.value,id:e.id,labels:Array.from(e.labels||[]).map(l=>l.textContent),ariaLabel:e.getAttribute("aria-label")}))),balanced:await page.getByRole("radio",{name:"Balanced",exact:true}).isChecked(),extended:await page.getByRole("radio",{name:"Extended",exact:true}).isChecked()}))(page);
-```

@@ -1,5 +1,0 @@
-[main]	INFO	profile include tests: None
-[main]	INFO	profile exclude tests: None
-[main]	INFO	cli include tests: None
-[main]	INFO	cli exclude tests: None
-[json]	INFO	JSON output written to file: .tmp/uat230-settings-20260917/bandit.json

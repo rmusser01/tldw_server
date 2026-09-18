@@ -1,3 +1,0 @@
-# UAT227 endpoint test factory isolation
-
-TASK13260.167. The existing helper scopes its fake factory to the TestClient lifespan and restores the previous factory on normal, exceptional and nested exit. Independent58transport tests pass0skip; author full actual PostgreSQL/SQLite forward and reverse156-case orders both pass0skip. Four causal isolation failures and original38failure mixed run are retained. No product or native behavior change. Ruff clear; Bandit retains one unchanged token_type enum false positive and introduces no finding. Original snapshots remain unchanged; retained text normalizes trailing whitespace and final newline with both hashes recorded.

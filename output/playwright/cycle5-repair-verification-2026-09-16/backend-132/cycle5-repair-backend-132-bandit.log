@@ -1,7 +1,0 @@
-[main]	INFO	profile include tests: None
-[main]	INFO	profile exclude tests: None
-[main]	INFO	cli include tests: None
-[main]	INFO	cli exclude tests: None
-[tester]	WARNING	nosec encountered (B608), but no failed test on line 294
-[tester]	WARNING	nosec encountered (B608), but no failed test on line 312
-[json]	INFO	JSON output written to file: /private/tmp/cycle5-repair-backend-132-bandit.json

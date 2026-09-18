@@ -1,1 +1,0 @@
-async page=>{await page.goto('http://127.0.0.1:18683/chat');await page.getByRole('button',{name:'New saved chat',exact:true}).click();await page.getByRole('button',{name:'Prompts',exact:true}).click();await page.getByRole('button',{name:'New prompt',exact:true}).click();return {at:new Date().toISOString(),snapshot:await page.locator('body').ariaSnapshot()};}

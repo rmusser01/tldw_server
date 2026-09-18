@@ -1,6 +1,0 @@
-### Result
-{"at":"2026-09-17T01:00:22.317Z","action":"Keyboard Enter on native Create button; pointer obstruction161 retained separately"}
-### Ran Playwright code
-```js
-await (async page => {const button=page.getByRole("dialog",{name:"Create Flashcard",exact:true}).getByRole("button",{name:"Create",exact:true});await button.focus();await page.keyboard.press("Enter");return {at:new Date().toISOString(),action:"Keyboard Enter on native Create button; pointer obstruction161 retained separately"};})(page);
-```

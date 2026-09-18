@@ -1,6 +1,0 @@
-{
-  "exact_two_conditional_reads": true,
-  "current_full_sha256": "40869b8d462980a7cee43ea30db6e13af64cd82da59fdd1b308dafa7c274736c",
-  "test_sha256": "d18f3e5e983f303c615313022a08d6276e0ae786d6269e7f318fa89564236ab2",
-  "unrelated_shared_changes_not_attributed": true
-}

@@ -1,7 +1,0 @@
-### Result
-{"fields":[{"placeholder":"Describe your character idea... (e.g., 'a wise old wizard who runs a magical library')","ariaLabel":"Character concept"},{"placeholder":"e.g. Writing coach","ariaLabel":null},{"placeholder":"E.g., You are a patient math teacher who explains concepts step by step and checks understanding with short examples.","ariaLabel":null},{"placeholder":"Hi there! I’m your writing coach. Paste your draft and I’ll help you tighten it up.","ariaLabel":null},{"placeholder":"Short description","ariaLabel":null},{"placeholder":"https://example.com/avatar.png","ariaLabel":null}]}
-### Ran Playwright code
-```js
-await (async page => { const d=page.getByRole("dialog"); await d.getByRole("textbox").all().then(async a=>{ for(const x of a){} }); return {fields:await d.getByRole("textbox").evaluateAll(nodes=>nodes.map(n=>({placeholder:n.getAttribute("placeholder"),ariaLabel:n.getAttribute("aria-label")})))}; })(page);
-```
-

@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T20:03:49.430Z","reopened":"Quick Ingest\nAdd\n1 items\nConfigure\nQuick\nReview\nReviewed\nProcessing\nResults\nSUCCEEDED (1)\nonboarding-uat-note.md\nOpen in Media\n\nWhat's next?\n\nSearch in Knowledge\nOpen in Workspace\n\nTotal: 1 succeeded, 0 failed · 1s elapsed\n\nIngest More\nDone"}
-### Ran Playwright code
-```js
-await (async(page)=>{const d=page.getByRole("dialog",{name:"Quick Ingest",exact:true});await d.getByRole("button",{name:"Close the ingest wizard",exact:true}).click();await d.waitFor({state:"hidden",timeout:10000});await page.getByRole("button",{name:/^Quick Ingest/}).click();const reopened=page.getByRole("dialog",{name:"Quick Ingest",exact:true});await reopened.getByRole("heading",{name:"Succeeded (1)",exact:true}).waitFor({state:"visible",timeout:10000});const text=await reopened.innerText();await reopened.getByRole("button",{name:"Close the ingest wizard",exact:true}).click();return{checkedAt:new Date().toISOString(),reopened:text};})(page);
-```

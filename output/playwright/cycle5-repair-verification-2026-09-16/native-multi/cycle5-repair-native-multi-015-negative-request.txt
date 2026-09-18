@@ -1,1 +1,0 @@
-{"query":"cycle5-repair-unmatched-copper-foreign","fields":["title","content"],"sort_by":"relevance"}

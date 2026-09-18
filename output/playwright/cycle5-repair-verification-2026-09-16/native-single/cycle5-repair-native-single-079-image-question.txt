@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByTestId('chat-input').fill('Describe the attached image. State the color of the speech bubble and how many dots are inside it.');
-```

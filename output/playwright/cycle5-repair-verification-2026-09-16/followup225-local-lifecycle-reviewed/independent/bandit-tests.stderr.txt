@@ -1,1 +1,0 @@
-[tester]	WARNING	nosec encountered (B608), but no failed test on line 24

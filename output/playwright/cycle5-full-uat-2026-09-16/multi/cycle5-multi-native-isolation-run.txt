@@ -1,1 +1,0 @@
-{"completed":true,"checks":32,"notes":{"alice":"3bfcf451-7806-4717-8763-a7e1770bee10","bob":"7c5d0380-7371-426c-972d-95bf760a6ce3"},"bobChat":"d2eba7d9-5793-45fb-adba-73578bd515ba","output":"/private/tmp/cycle5-multi-native-isolation-api.json"}

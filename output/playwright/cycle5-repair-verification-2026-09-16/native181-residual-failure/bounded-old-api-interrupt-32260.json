@@ -1,6 +1,0 @@
-{
-  "at": "2026-09-17T01:20:45.186Z",
-  "pid": 32260,
-  "signal": "SIGINT",
-  "reason": "Native blocked replacement retained; release owned prior API after graceful drain retained locks."
-}

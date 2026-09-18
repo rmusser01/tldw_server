@@ -1,5 +1,0 @@
-### Ran Playwright code
-```js
-await page.getByRole('textbox', { name: 'llama.cpp base URL' }).fill('http://127.0.0.1:9099');
-```
-

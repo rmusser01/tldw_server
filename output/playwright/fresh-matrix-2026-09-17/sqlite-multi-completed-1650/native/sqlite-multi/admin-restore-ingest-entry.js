@@ -1,1 +1,0 @@
-async page=>{await page.goto('http://127.0.0.1:18681/media');await page.getByRole('heading',{name:'Media Inspector',exact:true}).waitFor({timeout:15000});page.__adminRestoreAt=new Date().toISOString();await page.getByRole('button',{name:'Quick Ingest',exact:true}).first().click();return {at:page.__adminRestoreAt,body:await page.getByRole('dialog').ariaSnapshot()};}

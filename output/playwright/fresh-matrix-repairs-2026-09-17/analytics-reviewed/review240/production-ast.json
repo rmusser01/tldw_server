@@ -1,8 +1,0 @@
-{
-  "changed_methods": [
-    "_get_flashcard_review_session_reconstructed_aggregates",
-    "review_flashcard",
-    "get_flashcard_analytics_summary"
-  ],
-  "all_other_ast_identical": true
-}

@@ -1,4 +1,0 @@
-The browser 'fresh-final-20260917-pg-single' is not open, please run open first
-
-  playwright-cli -s=fresh-final-20260917-pg-single open [params]
-

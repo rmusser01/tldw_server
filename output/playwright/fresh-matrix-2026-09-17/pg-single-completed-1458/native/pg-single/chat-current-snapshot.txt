@@ -1,7 +1,0 @@
-### Error
-Error: Tool "browser_snapshot" does not handle the modal state.
-### Page
-- Page URL: http://127.0.0.1:18682/chat
-### Modal state
-- [File chooser]: can be handled by upload
-

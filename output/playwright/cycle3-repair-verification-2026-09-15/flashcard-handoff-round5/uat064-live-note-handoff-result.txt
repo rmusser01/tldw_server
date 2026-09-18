@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T19:07:32.989Z","path":"/flashcards?tab=importExport","content":"The mitochondria is the powerhouse of the cell.\n\nDNA stands for deoxyribonucleic acid.\n\nPhotosynthesis converts light energy into chemical energy.\n\nThe human body has 206 bones.\n\nWater boils at 100 degrees Celsius at sea level.\n","provenance":"Cards saved from this draft will be linked to note Cycle3 Bob Biology study note.","urlHasSourceText":false}
-### Ran Playwright code
-```js
-await (async (page) => { const content = await page.getByRole("textbox", {name:"Paste transcript, notes, or study material..."}).inputValue(); return {checkedAt:new Date().toISOString(), path:page.url().split(":18281")[1], content, provenance:await page.getByText("Cards saved from this draft will be linked to note Cycle3 Bob Biology study note.",{exact:true}).innerText(), urlHasSourceText:page.url().includes("mitochondria")||page.url().includes("Biology")||page.url().includes("generate_text")}; })(page);
-```

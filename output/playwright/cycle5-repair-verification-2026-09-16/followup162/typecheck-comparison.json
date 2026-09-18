@@ -1,8 +1,0 @@
-{
-  "baselinePath": ".tmp/uat159-first-run-auth-20260916/typecheck.log",
-  "baselineCount": 90,
-  "currentCount": 90,
-  "added": [],
-  "removed": [],
-  "comparison": "Prior retained baseline; filename/code/message compared with line and column positions normalized. Not a fresh HEAD replay."
-}

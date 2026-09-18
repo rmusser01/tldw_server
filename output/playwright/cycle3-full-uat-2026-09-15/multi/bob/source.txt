@@ -1,5 +1,0 @@
-Cycle3 Bob public source
-
-The fictional Copper Finch observatory opens at 09:40 on Tuesdays. Its public reading room contains eleven blue telescopes. The welcome desk offers apricot tea. This synthetic public brief belongs to Bob's UAT workspace.
-
-Public source sentinel: BOB-PUBLIC-COPPER-FINCH-20260915.

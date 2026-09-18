@@ -1,6 +1,0 @@
-### Result
-{"url":"http://127.0.0.1:18482/prompts?edit=pa_596f-703e-7e4-e97a","value":"Reply with one concise sentence. Retain WILLOW. Verified offline recovery revision 0647."}
-### Ran Playwright code
-```js
-await (async(page)=>{await page.getByRole("button",{name:"Editor",exact:true}).click();await page.setViewportSize({width:1200,height:953});await page.getByRole("button",{name:"Back to Prompts",exact:true}).click();await page.getByRole("button",{name:"Switch to dark theme",exact:true}).click();await page.getByRole("button",{name:"Edit Prompt",exact:true}).click();await page.getByRole("textbox",{name:"AI Instructions (System Prompt)",exact:true}).fill("Reply with one concise sentence. Retain WILLOW. Verified offline recovery revision 0647.");return {url:page.url(),value:await page.getByRole("textbox",{name:"AI Instructions (System Prompt)",exact:true}).inputValue()};})(page);
-```

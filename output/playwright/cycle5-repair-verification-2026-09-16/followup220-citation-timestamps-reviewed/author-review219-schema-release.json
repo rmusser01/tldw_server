@@ -1,8 +1,0 @@
-{
-  "reviewer": "source013_diagnosis",
-  "combined_tests": 80,
-  "failures": 0,
-  "skips": 0,
-  "schema_sha256": "26b5919233ef56eb2f84211fbff8b911b751039f2ad91876b1e51b40f7866be8",
-  "release": "explicit before 220 production edit"
-}

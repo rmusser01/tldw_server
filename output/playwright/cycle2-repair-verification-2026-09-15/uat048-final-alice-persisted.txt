@@ -1,8 +1,0 @@
-### Result
-{"status":200,"found":true,"id":"2e78af30-3594-455d-a472-dbd3f25b4305","title":"Alice UAT048 offline retest 20260915-0725","version":1}
-### Ran Playwright code
-```js
-await (async (page) => { const read = page.waitForResponse(r => r.request().method() === "GET" && /\/api\/v1\/notes\/?(\?|$)/.test(r.url()), {timeout:25000}); await page.reload(); const response = await read; const data = await response.json(); const rows = Array.isArray(data) ? data : data.notes || data.items || []; const note = rows.find(n => n.title === "Alice UAT048 offline retest 20260915-0725"); return {status:response.status(),found:Boolean(note),id:note?.id,title:note?.title,version:note?.version}; })(page);
-```
-### Events
-- New console entries: .playwright-cli/console-2026-09-15T07-25-25-356Z.log#L95-L96

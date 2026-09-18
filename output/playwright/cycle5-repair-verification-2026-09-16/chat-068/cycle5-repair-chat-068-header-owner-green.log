@@ -1,5 +1,0 @@
-$ vitest run src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx -t "UAT068 clear"
-
- RUN  v4.0.18 /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui
-
-error: script "test" exited with code 130

@@ -1,7 +1,0 @@
-# Native Character retry route acceptance (UAT263)
-
-Independent26checks33hashedinputs accept the specific ownedchildroute/persistence/feedback/reload boundary. OriginalparentRetry createschild0742e5b4, URLchanges tochild, exactfinalBEEPBOOP saves andsurvivesnormalreload. Sixreviewedsourcehashes and2ff90runtime/profile/init/holderbindings verified.
-
-The acceptedbranch copies originaluser andfailedassistant, thenappendsnewassistant. The prior5:42localvariant appearsinRetry-startedUI afteranearlier two-rowcanonicalparentloadwhilepreparing. Capturesdo notestablishwhythevariantreappeared, so nofreshsettledtwo-row claim or inventedcausaldefect. Oldfailedassistant and261providerfailures remainretained; this isnot261/fullmatrixacceptance.
-
-Safeaudit/report/script exactbytesretained; rawprovider-bearingcaptures/privatebindings/sourceinputs remainlocalhash-only. Notstandalonereplay ofomittedinputs.

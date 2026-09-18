@@ -1,9 +1,0 @@
-{
-  "at": "2026-09-17T19:46:03.600Z",
-  "file": "apps/packages/ui/src/services/__tests__/background-proxy.test.ts",
-  "sha256": "145d883a9a2a8b6d61aa7f57e391f6190d2757a90127f2d8b18086e88d51d9b6",
-  "minimalCleanupOnly": true,
-  "assertionsPreserved": 289,
-  "authorAnd248ReviewHashesVerified": true,
-  "initialVerifierError": "Initial manifest reader assumed packet-relative paths for250; corrected to its repository-relative paths before successful verification."
-}

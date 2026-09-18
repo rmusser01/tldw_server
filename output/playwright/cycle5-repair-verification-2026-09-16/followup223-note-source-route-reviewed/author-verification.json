@@ -1,9 +1,0 @@
-{
-  "compile_files": 2,
-  "other_production_AST_unchanged": true,
-  "ruff_findings": 0,
-  "bandit_production_findings": 0,
-  "bandit_production_errors": 0,
-  "bandit_test_findings": 0,
-  "bandit_test_errors": 0
-}

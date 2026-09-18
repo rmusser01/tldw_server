@@ -1,1 +1,0 @@
-async page => { const article=page.getByRole("article",{name:"Assistant message 3 of 3",exact:true}); await article.hover(); await article.getByRole("button",{name:"More actions",exact:true}).click(); await page.getByRole("button",{name:"Save to Flashcards",exact:true}).click(); return {at:new Date().toISOString(),body:await page.locator("body").innerText()}; }

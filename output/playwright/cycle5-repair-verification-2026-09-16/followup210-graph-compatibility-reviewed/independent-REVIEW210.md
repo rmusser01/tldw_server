@@ -1,5 +1,0 @@
-# UAT210 independent root review — clear
-
-TASK13260.148. Reviewed exact five-method NoteStore diff and actual-backend regression controls. No unresolved finding in the row/table compatibility repair. Named id/cnt/keyword_id access works for PostgreSQL mappings and SQLite.Row; explicit count alias and existing keyword table mapper remove the two dialect assumptions. Values, ordering, deletion flags, limits and connection/transaction calls are otherwise unchanged. Owner predicates remain a separate209 repair, still open.
-
-Fresh official requiredPG/SQLite regression plus existing graph suite:46passed,0skips,33.45s. Causal author8fail/12controls and mapped-table-only qualification distinguish the prerequisite SQL table name error from populated mapping-row access. Fresh Bandit production/newtest0findings/0errors (B101 excluded only for assertions); whitespace clean; frozen source/test hashes match. Author scoped Ruff0 inspected. Native graph acceptance pending after reviewed restart and owner repair; no private tenant isolation or full graph acceptance claimed.

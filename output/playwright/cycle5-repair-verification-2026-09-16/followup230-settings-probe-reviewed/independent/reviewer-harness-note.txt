@@ -1,1 +1,0 @@
-Initial hash preflight was invoked from frontend cwd while treating cwd as repo root; ENOENT before source hashing/test execution. Log redirection failed because the intended reviewer directory did not yet exist. Corrected cwd before running the suite; no product/source change.

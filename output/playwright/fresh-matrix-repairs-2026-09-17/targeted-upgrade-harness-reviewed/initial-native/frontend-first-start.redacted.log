@@ -1,4 +1,0 @@
-⨯ Failed to load next.config.mjs, see more info here https://nextjs.org/docs/messages/next-config-error
-Error: TLDW_NEXT_DIST_DIR must be a direct .next-live-tier-* child directory
-    at <unknown> (next.config.mjs:28:9)
-[?25h

@@ -1,4 +1,0 @@
-### Ran Playwright code
-```js
-await (async (page) => { const s=await page.context().newCDPSession(page); console.log({before:await page.evaluate(()=>({visibility:document.visibilityState,focus:document.hasFocus()})),window:await s.send("Browser.getWindowForTarget")}); await s.send("Emulation.setFocusEmulationEnabled",{enabled:false}); const w=await s.send("Browser.getWindowForTarget"); await s.send("Browser.setWindowBounds",{windowId:w.windowId,bounds:{windowState:"minimized"}}); console.log({after:await page.evaluate(()=>({visibility:document.visibilityState,focus:document.hasFocus()})),window:await s.send("Browser.getWindowBounds",{windowId:w.windowId})}); })(page);
-```

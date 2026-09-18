@@ -1,6 +1,0 @@
-### Result
-{"created":true}
-### Ran Playwright code
-```js
-await (async (page) => { await page.getByRole("textbox",{name:"* Name* Generate with AI",exact:true}).fill("Cycle3 BEEP Robot"); await page.getByRole("textbox",{name:"* Behavior / instructions (required) Generate with AI",exact:true}).fill("You are Cycle3 BEEP Robot. Always respond with exactly: BEEP BOOP."); await page.getByRole("textbox",{name:"Description Generate with AI",exact:true}).fill("A synthetic robot for character replacement acceptance testing."); await page.getByRole("button",{name:"Create character",exact:true}).click(); return {created:true}; })(page);
-```

@@ -1,4 +1,0 @@
-# UAT225 local suggestion repair design
-
-TASK13260.163 covers fresh suggestion reads and truthful readiness. TASK13260.164 covers the documented missing inactive-Sync lifecycle. The approved transition retires local provisional review authority using the existing actual canonical binding; accepted product state and immutable Jobs/receipts remain. No stable review namespace or new authority table is planned. These are design/source observations, not implementation freeze, executed race proofs, native acceptance or a full-UAT result. The local merged-tag survivor contract remains an explicit causal/design obligation. The initial plan is retained as written before its later execution updates.
-Known runtime credentials and JWT/PEM patterns scanned, zero matches. Original evidence remains unchanged.

@@ -1,6 +1,0 @@
-### Result
-{"original":{"width":1200,"height":953},"panel":{"button":"<button type=\"button\" class=\"fixed bottom-4 right-4 z-50 rounded-full bg-primary px-4 py-2 text-sm font-medium text-white shadow-lg\">Editor</button>","panels":[{"classes":"fixed inset-0 z-50 flex flex-col bg-bg","background":"rgb(244, 242, 238)","rect":{"x":0,"y":0,"width":390,"height":844,"top":0,"right":390,"bottom":844,"left":0}},{"classes":"fixed inset-0 z-40 bg-bg pt-12","background":"rgb(244, 242, 238)","rect":{"x":0,"y":0,"width":390,"height":844,"top":0,"right":390,"bottom":844,"left":0}}]}}
-### Ran Playwright code
-```js
-await (async(page)=>{const original=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));await page.setViewportSize({width:390,height:844});await page.getByRole("button",{name:"Preview",exact:true}).click();const panel=await page.getByRole("button",{name:"Editor",exact:true}).evaluate(el=>({button:el.outerHTML,panels:[...document.querySelectorAll(".fixed.inset-0.bg-bg")].map(n=>({classes:n.className,background:getComputedStyle(n).backgroundColor,rect:n.getBoundingClientRect().toJSON()}))}));await page.screenshot({path:"/private/tmp/cycle4-pending-native-single119-mobile.png"});return {original,panel};})(page);
-```

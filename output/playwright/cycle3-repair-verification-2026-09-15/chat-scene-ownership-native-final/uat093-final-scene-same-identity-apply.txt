@@ -1,6 +1,0 @@
-### Result
-{"checkedAt":"2026-09-15T23:48:38.010Z","before":{"id":"812385d9-f19b-4bdf-82a0-1d850884a4b3","historyId":"pa_576f-cb09-174-81bf","characterId":4,"messages":2},"responses":[],"after":{"id":"812385d9-f19b-4bdf-82a0-1d850884a4b3","historyId":"pa_576f-cb09-174-81bf","characterId":4,"messages":2}}
-### Ran Playwright code
-```js
-await (async page => {const before=await page.evaluate(()=>{const s=window.__tldw_useStoreMessageOption.getState();return {id:s.serverChatId,historyId:s.historyId,characterId:s.serverChatCharacterId,messages:s.messages.length};});const responses=[];const observe=r=>{if(r.url().includes("/chats/")&&["PUT","PATCH","POST"].includes(r.request().method()))responses.push({path:r.url().split("?")[0],method:r.request().method(),status:r.status()});};page.on("response",observe);try{await page.getByRole("dialog",{name:"Role-play setup",exact:true}).getByRole("button",{name:"Apply",exact:true}).click();await page.getByRole("dialog",{name:"Role-play setup",exact:true}).waitFor({state:"hidden",timeout:20000});return {checkedAt:new Date().toISOString(),before,responses,after:await page.evaluate(()=>{const s=window.__tldw_useStoreMessageOption.getState();return {id:s.serverChatId,historyId:s.historyId,characterId:s.serverChatCharacterId,messages:s.messages.length};})};}finally{page.off("response",observe);}})(page);
-```

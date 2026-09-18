@@ -1,6 +1,0 @@
-import base from '/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/vitest.config'
-import {execFileSync} from 'node:child_process'
-const root='/Users/macbook-dev/Documents/GitHub/tldw_server2'
-const paths=['apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx','apps/packages/ui/src/db/dexie/server-chat-mirror.ts','apps/packages/ui/src/hooks/chat/useServerChatLoader.ts','apps/packages/ui/src/services/pending-chat-promotion.ts']
-const originals=new Map(paths.map(p=>[root+'/'+p,execFileSync('git',['show','ba5233a5a9:'+p],{cwd:root,encoding:'utf8'})]))
-export default {...base,plugins:[{name:'frozen-cycle5-promotion-source-replay',enforce:'pre' as const,transform(code:string,id:string){const old=originals.get(id);return old===undefined?null:{code:old,map:null}}}],test:{...base.test,setupFiles:[root+'/apps/packages/ui/vitest.setup.ts'],include:[root+'/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.saved-normal.integration.test.tsx'],testNamePattern:'UAT131 promotes',maxWorkers:1,fileParallelism:false}}

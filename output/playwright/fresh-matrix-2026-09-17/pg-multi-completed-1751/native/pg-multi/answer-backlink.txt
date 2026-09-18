@@ -1,3 +1,0 @@
-### Error
-TimeoutError: page.waitForFunction: Timeout 15000ms exceeded.
-
