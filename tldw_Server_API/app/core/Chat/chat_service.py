@@ -796,9 +796,7 @@ async def _resolve_default_character_id(
         return None
 
     try:
-        default_character = await loop.run_in_executor(
-            None,
-            get_character_card_by_name,
+        default_character = await asyncio.to_thread(get_character_card_by_name,
             DEFAULT_CHARACTER_NAME,
         )
     except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -858,7 +856,7 @@ async def resolve_input_moderation_chat_type(
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
-        existing_conversation = await loop.run_in_executor(None, get_conversation_by_id, conversation_id)
+        existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
 
     assistant_context = _normalize_conversation_assistant_context(
         existing_conversation,
@@ -899,7 +897,7 @@ async def _resolve_assistant_context_for_chat(
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
-        existing_conversation = await loop.run_in_executor(None, get_conversation_by_id, conversation_id)
+        existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
 
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     assistant_context = _normalize_conversation_assistant_context(
@@ -917,9 +915,7 @@ async def _resolve_assistant_context_for_chat(
             )
 
         persona_owner = str(getattr(chat_db, "client_id", "") or "").strip()
-        persona_profile = await loop.run_in_executor(
-            None,
-            partial(
+        persona_profile = await asyncio.to_thread(partial(
                 chat_db.get_persona_profile,
                 assistant_id,
                 user_id=persona_owner,
@@ -3867,7 +3863,7 @@ async def _resolve_tldw_continuation_history(
     history_order: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Resolve continuation anchor/chain and return history records + metadata."""
-    anchor_record = await loop.run_in_executor(None, chat_db.get_message_by_id, from_message_id)
+    anchor_record = await asyncio.to_thread(chat_db.get_message_by_id, from_message_id)
     if not anchor_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3880,9 +3876,7 @@ async def _resolve_tldw_continuation_history(
         )
 
     if mode == "append":
-        latest_message = await loop.run_in_executor(
-            None,
-            chat_db.get_latest_message_for_conversation,
+        latest_message = await asyncio.to_thread(chat_db.get_latest_message_for_conversation,
             conversation_id,
         )
         latest_id = str((latest_message or {}).get("id") or "")
@@ -3914,7 +3908,7 @@ async def _resolve_tldw_continuation_history(
         parent_id = parent_id_raw.strip() if isinstance(parent_id_raw, str) else ""
         if not parent_id:
             break
-        parent_record = await loop.run_in_executor(None, chat_db.get_message_by_id, parent_id)
+        parent_record = await asyncio.to_thread(chat_db.get_message_by_id, parent_id)
         if not parent_record:
             break
         if str(parent_record.get("conversation_id") or "") != str(conversation_id):
@@ -4183,9 +4177,7 @@ async def build_context_and_messages(
                 raw_hist = resolved_hist
             continuation_metadata["anchor_message_id"] = from_message_id
         elif history_limit > 0:
-            raw_hist = await loop.run_in_executor(
-                None,
-                partial(chat_db.get_messages_for_conversation,
+            raw_hist = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation,
                     conv_id, history_limit, 0, db_order,
                     **({"strict_images": True} if explicit_failed_retry else {})),
             )
@@ -4193,7 +4185,7 @@ async def build_context_and_messages(
             sender_val = str(db_msg.get("sender", "") or "")
             metadata = None
             try:
-                metadata = await loop.run_in_executor(None, chat_db.get_message_metadata, db_msg.get("id"))
+                metadata = await asyncio.to_thread(chat_db.get_message_metadata, db_msg.get("id"))
             except _CHAT_NONCRITICAL_EXCEPTIONS as meta_err:
                 logger.debug("Metadata lookup failed for message {}: {}", db_msg.get("id"), meta_err)
 
@@ -4330,8 +4322,8 @@ async def build_context_and_messages(
     if explicit_failed_retry and should_persist and not conversation_created and request_messages:
         # Read the actual tail independently of the requested context window.
         # Retry is an explicit operation; equal text on an ordinary send is new.
-        tail_rows = await loop.run_in_executor(None, partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
-        tail_metadata = {row["id"]: await loop.run_in_executor(None, chat_db.get_message_metadata, row["id"]) for row in tail_rows}
+        tail_rows = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+        tail_metadata = {row["id"]: await asyncio.to_thread(chat_db.get_message_metadata, row["id"]) for row in tail_rows}
         requested_user = request_messages[-1]
         if requested_user.get("role") != "user":
             raise HTTPException(status_code=409, detail="The failed turn changed. Reload the conversation before retrying.")
@@ -4459,7 +4451,7 @@ async def build_context_and_messages(
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
     if retry_user_message_id and client_message_id:
-        saved_metadata = await loop.run_in_executor(None, chat_db.get_message_metadata, retry_user_message_id)
+        saved_metadata = await asyncio.to_thread(chat_db.get_message_metadata, retry_user_message_id)
         saved_extra = (saved_metadata or {}).get("extra")
         saved_client_id = saved_extra.get("client_message_id") if isinstance(saved_extra, dict) else None
         if saved_client_id and saved_client_id != client_message_id:
