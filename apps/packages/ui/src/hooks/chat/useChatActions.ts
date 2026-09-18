@@ -1,3 +1,11 @@
+import {
+  captureLocalMutationOwner,
+  createSelectedForkAction,
+  getCompareBranchBoundaryId
+} from "@/hooks/chat/chat-action-utils"
+import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
+import { sendNativeHistoryCharacter } from "./native-history-character-send"
+import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { TFunction } from "i18next"
@@ -8,7 +16,8 @@ import {
   updateHistory,
   updateMessage,
   updateMessageMedia,
-  removeMessageByIndex,
+  removeMessageById,
+  updateMessageById,
   formatToChatHistory,
   formatToMessage,
   getSessionFiles,
@@ -40,7 +49,6 @@ import {
   createEditMessage,
   createBranchMessage
 } from "@/hooks/handlers/messageHandlers"
-import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
@@ -577,6 +585,7 @@ export const useChatActions = ({
   visualIdentityManualExpressionOverride,
   setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
+  const historySelection = useHistorySelectionContext()
   const [appendFormattingGuidePrompt] = useStorage(
     PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
     false
@@ -973,6 +982,7 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
+    if (payload?.historyTurn) return baseSaveMessageOnSuccess(payload)
     const scopeSignal = payload?.scopeSignal
     const scopeInvalidatedSignal = payload?.scopeInvalidatedSignal
     const throwIfScopeChanged = () => {
@@ -3119,6 +3129,7 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    const historyOriginIsCurrent = historySelection?.fence()
     const hasVisualIdentityTarget = Boolean(
       selectedCharacter?.id != null ||
         selectedAssistant?.kind === "character" ||
@@ -3279,6 +3290,27 @@ export const useChatActions = ({
     )
 
     try {
+      if (
+        historySelection &&
+        !compareModeActive &&
+        turnResolvedSendMode === "tracked_persona"
+      ) {
+        throw new Error(
+          "native_history_persona_unsupported"
+        )
+      }
+      if (
+        historySelection &&
+        (isRegenerate ||
+          isContinue ||
+          turnUsesImageMode ||
+          turnContextFiles.length ||
+          docs?.length ||
+          documentContext?.length ||
+          turnShouldUseRag)
+      ) {
+        throw new Error("unsupported_history_action_context")
+      }
       // Pre-stream awaits run inside the try so a failure resets streaming state
       // (and lets the caller drain its queue) instead of stranding the UI.
       if (turnPromptIds.length > 0) {
@@ -3647,6 +3679,52 @@ export const useChatActions = ({
               setAbortController(null)
               return chatSubmitSkipped("No model selected for character chat")
             }
+            if (historySelection) {
+              await sendNativeHistoryCharacter({
+                controller: historySelection,
+                originIsCurrent: historyOriginIsCurrent!,
+                signal,
+                temporary: temporaryChat,
+                historyId,
+                serverChatId: serverChatIdOverride || serverChatId,
+                scope,
+                characterId: resolvedSelectedCharacter.id,
+                model: resolvedModel,
+                currentModel: getEffectiveSelectedModel(),
+                toolChoice: servicePromptChatModeParams.toolChoice,
+                settings: servicePromptChatModeParams.currentChatModelSettings,
+                message,
+                image,
+                setServerChatId,
+                setMessages,
+                unsupportedContext: Boolean(
+                  servicePromptChatModeParams.webSearch ||
+                  servicePromptChatModeParams.selectedSystemPrompt ||
+                  uploadedFiles?.length ||
+                  servicePromptChatModeParams.actorSettings?.isEnabled ||
+                  servicePromptChatModeParams.systemPromptAppendix ||
+                  shouldConsumeSteering || replyActive ||
+                  servicePromptChatModeParams.researchContext ||
+                  servicePromptChatModeParams.dynamicUIRequest ||
+                  requestOverrides?.historyForModel || requestOverrides?.messageForModel
+                ),
+                onCreated: (characterId) => {
+                  setServerChatCharacterId(characterId)
+                  setServerChatAssistantKind("character")
+                  setServerChatAssistantId(null)
+                  setServerChatPersonaMemoryMode(null)
+                  setServerChatMetaLoaded(true)
+                },
+                releaseActivity: () => {
+                  if (releaseAbortControllerIfOwned(signal)) {
+                    setAbortController(null)
+                    setIsProcessing(false)
+                    setStreaming(false)
+                  }
+                }
+              })
+              return { status: "submitted" }
+            }
             markSteeringApplied()
             const characterResult = await characterChatMode({
               message,
@@ -3708,7 +3786,18 @@ export const useChatActions = ({
             baseMessages,
             baseHistory,
             signal,
-            scopedNormalModeParams
+            {
+              ...scopedNormalModeParams,
+              ownsAbortController: (turnSignal: AbortSignal) =>
+                activeAbortControllerRef.current?.signal === turnSignal,
+              historySelection: historySelection
+                ? {
+                    controller: historySelection,
+                    originIsCurrent: historyOriginIsCurrent!,
+                    temporary: temporaryChat
+                  }
+                : undefined
+            }
           )
           return toChatSubmitResult(normalResult)
         } else {
@@ -4292,7 +4381,10 @@ export const useChatActions = ({
     }
   }
 
-  const createChatBranch = createBranchMessage({
+  const branchOptions = {
+    scope,
+    historySelection,
+    captureViewFence: historySelection?.fence,
     notification,
     historyId,
     setHistory,
@@ -4322,66 +4414,28 @@ export const useChatActions = ({
     chatTitle: serverChatTitle ?? null,
     messages,
     history
-  })
+  }
+  const branchHandler = createBranchMessage(branchOptions)
 
-  const createServerOnlyChatBranch = createBranchMessage({
-    notification,
+  const createChatBranch = (
+    messageId: string,
+    comparison?: { model_id: string; cluster_id: string | null },
+    onOpened?: (childId: string) => void
+  ) => createSelectedForkAction(
+    historySelection,
+    onOpened ? createBranchMessage({ ...branchOptions, onOpened }) : branchHandler,
     historyId,
-    setHistory,
-    setHistoryId: setHistoryId as (id: string | null) => void,
-    setMessages,
-    setContext: setContextFiles,
-    setSelectedSystemPrompt,
-    setSystemPrompt: currentChatModelSettings.setSystemPrompt,
-    serverChatId,
-    setServerChatId,
-    setServerChatTitle,
-    setServerChatCharacterId,
-    setServerChatMetaLoaded,
-    serverChatState,
-    setServerChatState,
-    setServerChatVersion,
-    serverChatTopic,
-    setServerChatTopic,
-    serverChatClusterId,
-    setServerChatClusterId,
-    serverChatSource,
-    setServerChatSource,
-    serverChatExternalRef,
-    setServerChatExternalRef,
-    onServerChatMutated: invalidateServerChatHistory,
-    characterId: serverChatCharacterId ?? null,
-    chatTitle: serverChatTitle ?? null,
-    messages,
-    history,
-    serverOnly: true
-  })
+    notification
+  )(messageId, comparison)
 
   const regenerateLastMessage = createRegenerateLastMessage({
+    notification,
     validateBeforeSubmitFn,
     history,
     messages,
     setHistory,
     setMessages,
-    onSubmit,
-    beforeSubmit: async ({ nextMessages }) => {
-      if (!serverChatId) return
-      if (selectedCharacter?.id == null && serverChatCharacterId == null) return
-
-      const branchIndex = nextMessages.length - 1
-      if (branchIndex < 0) return
-
-      const branchedChatId = await createServerOnlyChatBranch(branchIndex)
-      if (!branchedChatId) {
-        throw new Error("Failed to create branch for regeneration")
-      }
-
-      return {
-        submitExtras: {
-          serverChatIdOverride: branchedChatId
-        }
-      }
-    }
+    onSubmit
   })
 
   const stopStreamingRequest = React.useCallback(
@@ -4407,6 +4461,16 @@ export const useChatActions = ({
   )
 
   const editMessage = createEditMessage({
+    notification,
+    captureViewFence: historySelection?.fence,
+    mutate: async (target, content) => {
+      const owner = captureLocalMutationOwner(
+        historySelection,
+        historyId,
+        serverChatId
+      )
+      await updateMessageById(owner.conversation_id, target.id, content, owner)
+    },
     messages,
     history,
     setMessages,
@@ -4419,67 +4483,57 @@ export const useChatActions = ({
   const deleteMessage = React.useCallback(
     async (index: number) => {
       const target = messages[index]
-      if (!target) return
-
-      // Capture values synchronously before any awaits
-      const targetId = target.serverMessageId ?? target.id
-      const serverMessageId = target.serverMessageId
-      const serverMessageVersion = target.serverMessageVersion
-      const historyRole = target.role ?? (target.isBot ? "assistant" : "user")
-      const historyContent = target.message ?? ""
-
-      if (replyTarget?.id && targetId && replyTarget.id === targetId) {
-        clearReplyTarget()
-      }
-
+      if (!target?.id) throw new Error("missing_message")
+      const origin = historySelection?.getCurrent()
+      const current = historySelection?.fence() ?? (() => true)
       try {
-        if (serverMessageId) {
-          await tldwClient.initialize().catch(() => null)
-          let expectedVersion = serverMessageVersion
-          if (expectedVersion == null) {
-            const serverMessage = await tldwClient.getMessage(serverMessageId)
-            expectedVersion = serverMessage?.version
-          }
-          if (expectedVersion == null) {
-            throw new Error("Missing server message version")
-          }
-          await tldwClient.deleteMessage(
-            serverMessageId,
-            Number(expectedVersion),
-            serverChatId ?? undefined
+        const owner = captureLocalMutationOwner(
+          historySelection,
+          historyId,
+          serverChatId
+        )
+        const removed = await removeMessageById(
+          owner.conversation_id,
+          target.id,
+          owner
+        )
+        if (!current()) return
+        if (replyTarget?.id === target.id) clearReplyTarget()
+        const remaining = messages.filter((row) => row.id !== target.id)
+        setMessages(remaining)
+        setHistory(historyFromVisibleMessages(remaining))
+        const view = origin?.view
+        if (
+          removed &&
+          view?.interpretation.kind === "parent_graph_v1" &&
+          view.cursor.kind !== "empty" &&
+          view.cursor.message_id === target.id
+        ) {
+          await historySelection?.choose(
+            removed.parent_message_id
+              ? { kind: "after_message", message_id: removed.parent_message_id }
+              : { kind: "empty" }
           )
-          invalidateServerChatHistory()
         }
-
-        if (historyId) {
-          await removeMessageByIndex(historyId, index)
-        }
-      } catch (err) {
-        console.error("[deleteMessage] Failed to delete message", err)
-        return
-      }
-
-      setMessages((prev) => prev.filter((m) => m.id !== targetId))
-      setHistory((prev) => {
-        let removed = false
-        return prev.filter((h) => {
-          if (!removed && h.role === historyRole && h.content === historyContent) {
-            removed = true
-            return false
-          }
-          return true
+      } catch (error) {
+        notification.error({
+          message: "Message deletion failed",
+          description:
+            error instanceof Error ? error.message : "message_delete_failed"
         })
-      })
+        throw error
+      }
     },
     [
-      clearReplyTarget,
       historyId,
-      invalidateServerChatHistory,
-      messages,
-      replyTarget?.id,
       serverChatId,
+      messages,
+      historySelection,
+      replyTarget?.id,
+      clearReplyTarget,
+      setMessages,
       setHistory,
-      setMessages
+      notification
     ]
   )
 
@@ -4521,9 +4575,7 @@ export const useChatActions = ({
       }
 
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === targetId ? { ...m, pinned: nextPinned } : m
-        )
+        prev.map((m) => (m.id === targetId ? { ...m, pinned: nextPinned } : m))
       )
     },
     [invalidateServerChatHistory, messages, serverChatId, setMessages]
@@ -4532,63 +4584,31 @@ export const useChatActions = ({
   const createCompareBranch = async ({
     clusterId,
     modelId,
-    open = true
+    open = true,
+    onOpened
   }: {
     clusterId: string
     modelId: string
     open?: boolean
-  }): Promise<string | null> => {
-    if (!historyId || historyId === "temp") {
-      return null
-    }
-
-    const messageIds = getCompareBranchMessageIds(messages, clusterId, modelId)
-    if (messageIds.length === 0) {
-      return null
-    }
-
-    try {
-      const newBranch = await generateBranchFromMessageIds(
-        historyId,
-        messageIds
-      )
-      if (!newBranch) {
-        return null
-      }
-
-      const splitTitle = buildCompareSplitTitle(newBranch.history.title || "")
-      await updateHistory(newBranch.history.id, splitTitle)
-
-      void trackCompareMetric({ type: "split_single" })
-
-      if (open) {
-        setHistory(formatToChatHistory(newBranch.messages))
-        setMessages(formatToMessage(newBranch.messages))
-        setHistoryId(newBranch.history.id)
-        const systemFiles = await getSessionFiles(newBranch.history.id)
-        setContextFiles(systemFiles)
-
-        const lastUsedPrompt = newBranch?.history?.last_used_prompt
-        if (lastUsedPrompt) {
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
-            if (prompt) {
-              setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
-            }
-          }
-          if (currentChatModelSettings?.setSystemPrompt) {
-            currentChatModelSettings.setSystemPrompt(
-              lastUsedPrompt.prompt_content
-            )
-          }
-        }
-      }
-
-      return newBranch.history.id
-    } catch (e) {
-      console.log("[compare-branch] failed", e)
-      return null
-    }
+    onOpened?: (childId: string) => void
+  }) => {
+    const boundaryId = getCompareBranchBoundaryId(messages, clusterId, modelId)
+    const handler = open
+      ? createBranchMessage({ ...branchOptions, onOpened })
+      : createBranchMessage({
+          notification,
+          historyId,
+          captureViewFence: historySelection?.fence,
+          setHistory: () => {},
+          setMessages: () => {},
+          setHistoryId: () => {}
+        })
+    return createSelectedForkAction(
+      historySelection,
+      handler,
+      historyId,
+      notification
+    )(boundaryId, { model_id: modelId, cluster_id: clusterId })
   }
 
   return {

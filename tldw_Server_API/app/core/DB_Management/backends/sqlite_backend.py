@@ -6,6 +6,7 @@ interface for SQLite databases, maintaining compatibility with the
 existing codebase while enabling multi-backend support.
 """
 
+import hashlib
 import re
 import sqlite3
 import threading
@@ -163,6 +164,13 @@ class SQLiteConnectionPool(ConnectionPool):
             cache_size=-2000,
         )
 
+        def history_sha256(value: Any) -> str | None:
+            if value is None:
+                return None
+            return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
+
+        # Register once on the real handle before any statement can use it.
+        conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
         return conn
 
     def return_connection(self, connection: sqlite3.Connection) -> None:

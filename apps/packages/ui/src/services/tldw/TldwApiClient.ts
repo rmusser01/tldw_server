@@ -1,3 +1,4 @@
+import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
 import type {
@@ -1018,6 +1019,7 @@ export interface ResearchRunResponse {
 }
 
 export interface ChatCompletionRequest {
+  tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
   messages: ChatMessage[]
   model: string
   routing?: {
@@ -1056,6 +1058,7 @@ export interface ChatCompletionRequest {
 }
 
 export type ChatCompletionRequestOptions = {
+  scope?: ChatScope
   signal?: AbortSignal
   timeoutMs?: number
   debugMetadata?: ChatRequestDebugMetadata
@@ -1215,6 +1218,8 @@ export type ConversationState =
   | "non-viable"
 
 export interface ServerChatMessage {
+  tldw_history_admission_v1?: HistoryAdmissionV1
+  parent_message_id?: string | null
   id: string
   role: "system" | "user" | "assistant"
   sender?: string
@@ -3283,7 +3288,7 @@ export class TldwApiClientBase {
   }
 
   async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
-    request.stream = true
+    request = { ...request, stream: true }
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
@@ -5563,13 +5568,17 @@ export class TldwApiClientBase {
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
-      method: "GET"
+      method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
     return this.normalizeChatSummary(res)
   }
@@ -5622,13 +5631,17 @@ export class TldwApiClientBase {
 
   async getChatSettings(
     chat_id: string | number,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "GET",
+      headers: scopeFields.headers,
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       expectedStatuses: [404]
     })
   }
@@ -5636,14 +5649,17 @@ export class TldwApiClientBase {
   async updateChatSettings(
     chat_id: string | number,
     settings: Record<string, unknown>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<ChatSettingsResponse> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
+      abortSignal: options?.signal,
+      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {}),
       body: { settings }
     })
   }
@@ -6003,25 +6019,9 @@ export class TldwApiClientBase {
   async persistCharacterCompletion(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { scope?: ChatScope }
+    options?: { scope?: ChatScope; signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
-    const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    try {
-      const res = await bgRequest<any>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      })
-      this.invalidateChatMessagesCache(cid)
-      return res
-    } catch (error) {
-      if (isSavedDegradedCharacterPersistError(error)) {
-        this.invalidateChatMessagesCache(cid)
-      }
-      throw error
-    }
+    return chatRagMethods.persistCharacterCompletion.call(this as any, chat_id, payload, options)
   }
 
   async *streamCharacterChatCompletion(

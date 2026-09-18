@@ -37,6 +37,25 @@ from fastapi import (
     status,
 )
 
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    TokenScopeGuard,
+    User,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+    require_expected_user,
+    resolve_user_id_for_request,
+)
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HistoryCaptureRequestV1,
+    HistoryCaptureResultV1,
+    LegacyHistoryProjectionV1,
+    LegacyProjectionConfirmEnvelopeV1,
+)
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
@@ -46,20 +65,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_model_priority,
     validate_provider_override,
 )
-
-# ---------------------------------------------------------------------------
-# Imports
-# ---------------------------------------------------------------------------
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    get_request_user,
-    rbac_rate_limit,
-    require_expected_user,
-    RequirePermission,
-    resolve_user_id_for_request,
-    TokenScopeGuard,
-    User,
-)
+from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -109,10 +115,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     API_KEYS as SCHEMAS_API_KEYS,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
-    DEFAULT_LLM_PROVIDER,
     RagContext,
     get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
@@ -129,12 +135,12 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
-    map_sender_to_role,
-)
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     ChatSettingsSizeError,
     validate_chat_settings_storage,
+)
+from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
+    map_sender_to_role,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
     score_exemplars_with_embeddings,
@@ -146,7 +152,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector i
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
     compute_persona_exemplar_telemetry,
 )
-from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -155,17 +161,11 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ProviderCredentialTerminalError,
     SanitizedProviderStreamError,
 )
-from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.chat_exceptions import (
     ChatDatabaseError,
     ChatErrorCode,
     ChatModuleException,
     set_request_id,
-)
-from tldw_Server_API.app.core.Chat.chat_target_resolution import (
-    config_default_llm_provider,
-    get_default_model_for_provider,
-    get_default_provider,
 )
 
 # Note: streaming utilities are handled inside chat_service. No direct import needed here.
@@ -173,19 +173,6 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     validate_request_payload,
 )
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    PROVIDER_STREAM_ERROR_MESSAGES,
-    StreamTaskCapacityError,
-    create_bounded_stream_task,
-    is_trusted_local_stream_frame,
-    invoke_stream_close_bounded,
-    normalize_provider_stream_error,
-    provider_payload_structural_error_code,
-    provider_result_contains_error,
-    provider_stream_error_payload,
-    sanitized_provider_stream_exception,
-)
-from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Chat.chat_service import (
     _nonstream_provider_result_is_usable,
     apply_prompt_templating,
@@ -195,6 +182,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     execute_non_stream_call,
     execute_streaming_call,
     inject_research_context_into_prompt,
+    is_model_known_for_provider,
     moderate_input_messages,
     perform_chat_api_call,
     perform_chat_api_call_async,
@@ -203,20 +191,47 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     resolve_moderation_chat_type,
     resolve_provider_and_model,
     resolve_provider_api_key,
-    is_model_known_for_provider,
     trusted_local_chat_signal_kind,
     write_mandatory_moderation_audit,
 )
-from tldw_Server_API.app.core.Moderation.review_service import (
-    capture_moderation_review_item,
-    is_moderation_review_capture_enabled,
+from tldw_Server_API.app.core.Chat.chat_target_resolution import (
+    config_default_llm_provider,
+    get_default_model_for_provider,
+    get_default_provider,
 )
+from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
 
 # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F401
     apply_template_to_string,
     load_template,
 )
+from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
+from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
+    StreamTaskCapacityError,
+    create_bounded_stream_task,
+    invoke_stream_close_bounded,
+    is_trusted_local_stream_frame,
+    normalize_provider_stream_error,
+    provider_payload_structural_error_code,
+    provider_result_contains_error,
+    provider_stream_error_payload,
+    sanitized_provider_stream_exception,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
+)
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.transaction_utils import (
+    db_transaction,
+)
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -233,18 +248,9 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
-from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDB,
-    CharactersRAGDBError,
-    ConflictError,
-    InputError,
-)
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.transaction_utils import (
-    db_transaction,
+from tldw_Server_API.app.core.Moderation.review_service import (
+    capture_moderation_review_item,
+    is_moderation_review_capture_enabled,
 )
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     bootstrap_guardian_moderation_runtime,
@@ -265,6 +271,11 @@ _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
+    LimitEnforcer,
+    get_billing_org_id,
+    require_within_limit,
+)
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
@@ -279,13 +290,16 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidationIssue,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
+)
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
+from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
@@ -293,29 +307,21 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
     mark_provider_credential_used,
 )
-from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
-    LimitEnforcer,
-    get_billing_org_id,
-    require_within_limit,
-)
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
-from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
-from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.Chat.command_authorization import (
     authorize_command,
     build_command_authorization_context,
 )
+from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
+from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
 from tldw_Server_API.app.core.Chat_Macros.exceptions import MacroStorageError, MacroValidationError
 from tldw_Server_API.app.core.Chat_Macros.jobs import enqueue_chat_macro_run_job
-from tldw_Server_API.app.core.Chat_Macros.context_snapshot import build_macro_context_snapshot
 from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execution, parse_macro_args
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
-from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
@@ -3347,6 +3353,8 @@ async def _persist_system_message_if_needed(
 async def create_chat_completion(
     request: Request,  # Request object for audit logging, rate limiting, and provider state access
     request_data: ChatCompletionRequest = Body(...),
+    scope_type: Literal["global", "workspace"] | None = Query(None),
+    workspace_id: str | None = Query(None),
     chat_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     routing_decision_store: InMemoryRoutingDecisionStore = Depends(get_request_routing_decision_store),
     current_user: User = Depends(get_request_user),
@@ -3443,7 +3451,12 @@ async def create_chat_completion(
             ]
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
-        if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+        if (
+            request_data.tldw_history_selection_v1 is None
+            and user_base_dir is not None
+            and current_user
+            and getattr(current_user, "id", None) is not None
+        ):
             request_data.tools = await add_skill_tool_to_tools_list_async(
                 request_data.tools,
                 user_id=current_user.id,
@@ -4479,20 +4492,46 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                await asyncio.to_thread(
-                    save_workspace_chat_model_selection,
-                    chat_db=chat_db,
-                    conversation_id=final_conversation_id,
-                    owner_client_id=user_id,
-                    provider=target_api_provider,
-                    model=model,
-                    save_to_db=request_data.save_to_db,
-                    explicit_provider_requested=explicit_provider_requested,
-                    explicit_model_requested=explicit_model_requested,
-                )
+                if request_data.tldw_history_selection_v1 is None:
+                    await asyncio.to_thread(
+                        save_workspace_chat_model_selection,
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        owner_client_id=user_id,
+                        provider=target_api_provider,
+                        model=model,
+                        save_to_db=request_data.save_to_db,
+                        explicit_provider_requested=explicit_provider_requested,
+                        explicit_model_requested=explicit_model_requested,
+                    )
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
+                if request_data.tldw_history_selection_v1 is not None:
+                    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+                    from tldw_Server_API.app.core.Chat.persistence_service import (
+                        native_history_owner_key,
+                        prepare_native_history_message,
+                    )
+                    history_scope = _resolve_conversation_scope(scope_type, workspace_id)
+                    _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
+                    if _active_message_sync_service(current_user, history_scope) is not None:
+                        raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
+                    history_owner = native_history_owner_key(request, current_user.id)
+                    if request_data.tldw_history_selection_v1.owner_key != history_owner:
+                        raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
+                    from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
+                    if user_base_dir is not None:
+                        try:
+                            registry_may_be_visible = await asyncio.to_thread(chat_db.history_skills_may_be_visible)
+                            await asyncio.to_thread(require_history_skill_absence, user_base_dir,
+                                registry_may_be_visible=registry_may_be_visible)
+                        except HistorySelectionError as exc:
+                            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": exc.code}) from exc
+                    continuation_runtime.update(history_owner_key=history_owner, history_owner_client_id=str(current_user.id),
+                        history_inputs=[await prepare_native_history_message(message.model_dump(exclude_none=True), final_conversation_id,
+                            _process_content_for_db_sync) for message in request_data.messages if message.role != "system"])
+
                 (
                     character_card_for_context,
                     character_db_id_for_context,
@@ -4510,6 +4549,27 @@ async def create_chat_completion(
                     save_message_fn=_save_message_turn_to_db,
                     runtime_state=continuation_runtime,
                 )
+                completion_save_message = _save_message_turn_to_db
+                history_admission = continuation_runtime.get("tldw_history_admission_v1")
+                if history_admission is not None:
+                    from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_history_message
+                    reference = {key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
+                        "input_message_id", "input_message_revision", "selection_digest")}
+                    async def completion_save_message(db, cid, payload, use_transaction=False):
+                        if payload.get("role") == "system":
+                            return None
+                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        prepared["id"] = str(uuid.uuid4())
+                        prepared["parent_message_id"] = reference["input_message_id"]
+                        try:
+                            return await asyncio.to_thread(db.settle_history_admission, cid, reference, prepared,
+                                owner_client_id=str(current_user.id), owner_key=history_owner)
+                        except HistorySelectionError as exc:
+                            raise HTTPException(409, detail={"code": exc.code}) from exc
+                    await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
+                        conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
+                        model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
+                        explicit_model_requested=explicit_model_requested)
                 continuation_meta = (
                     continuation_runtime.get("tldw_continuation")
                     if isinstance(continuation_runtime.get("tldw_continuation"), dict)
@@ -4655,7 +4715,7 @@ async def create_chat_completion(
                             }
                             for item in runtime_guidance["rejected_exemplars"]
                         ]
-                elif persona_strategy != "off" and character_db_id_for_context is not None:
+                elif persona_strategy != "off" and character_db_id_for_context is not None and history_admission is None:
                     user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
                     if user_turn_text:
                         budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
@@ -4738,7 +4798,7 @@ async def create_chat_completion(
                     if persona_budget_adjustment_reason:
                         persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
 
-                if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+                if history_admission is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
                     final_system_message = await build_system_message_with_skills_async(
                         final_system_message,
                         current_user.id,
@@ -4752,7 +4812,7 @@ async def create_chat_completion(
                         db=chat_db,
                         conversation_id=final_conversation_id,
                         system_message=final_system_message,
-                        save_message_fn=_save_message_turn_to_db,
+                        save_message_fn=completion_save_message,
                         loop=current_loop,
                     )
 
@@ -5312,7 +5372,8 @@ async def create_chat_completion(
                             final_conversation_id=final_conversation_id,
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
-                            save_message_fn=_save_message_turn_to_db,
+                            save_message_fn=completion_save_message,
+                            history_persistence_ack=history_admission is not None,
                             system_message_id=system_message_id,
                             audit_service=audit_service,
                             audit_context=context,
@@ -5580,6 +5641,18 @@ async def create_chat_completion(
                         ),
                     )
                     credential_runtime_owned_by_stream = True
+                    if history_admission is not None:
+                        accepted_stream = stream_response.body_iterator
+                        async def with_history_admission():
+                            try:
+                                yield "data: " + json.dumps({"tldw_history_admission_v1": history_admission}) + "\n\n"
+                                async for chunk in accepted_stream:
+                                    yield chunk
+                            finally:
+                                close = getattr(accepted_stream, "aclose", None)
+                                if close is not None:
+                                    await close()
+                        stream_response.body_iterator = with_history_admission()
                     return stream_response
 
                 else:  # Non-streaming
@@ -5600,7 +5673,7 @@ async def create_chat_completion(
                             final_conversation_id=final_conversation_id,
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
-                            save_message_fn=_save_message_turn_to_db,
+                            save_message_fn=completion_save_message,
                             system_message_id=system_message_id,
                             audit_service=audit_service,
                             audit_context=context,
@@ -5750,6 +5823,8 @@ async def create_chat_completion(
                         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                             logger.debug(f"Billing token recording failed: {_billing_err}")
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
+                    if history_admission is not None:
+                        encoded_payload["tldw_history_admission_v1"] = history_admission
                     return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 
             # --- Exception Handling --- Improved with structured error handling
@@ -8036,3 +8111,73 @@ async def get_conversation_citations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve citations"
         ) from exc
+
+
+@router.post("/conversations/{conversation_id}/history/selection", response_model=HistoryCaptureResultV1, dependencies=[Depends(require_expected_user)])
+async def capture_conversation_history(
+    request: Request,
+    body: HistoryCaptureRequestV1,
+    conversation_id: str,
+    scope_type: Literal["global", "workspace"] | None = None,
+    workspace_id: str | None = None,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Capture a complete owner-bound history manifest and selected content."""
+    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+    from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
+    from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+    scope = _resolve_conversation_scope(scope_type, workspace_id)
+    _verify_conversation_ownership(db, conversation_id, current_user, scope)
+    if _active_message_sync_service(current_user, scope) is not None:
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    owner = native_history_owner_key(request, current_user.id)
+    view = body.view.model_dump(mode="json")
+    if view["conversation_id"] != conversation_id or view["owner_key"] not in {None, owner}:
+        raise HTTPException(409, detail={"status": "invalid_history", "code": "owner_conversation_mismatch"})
+    view["owner_key"] = owner
+    try:
+        with db.transaction() as conn:
+            snap = db.get_conversation_history_snapshot(conversation_id, owner_client_id=str(current_user.id),
+                owner_key=owner, projection_id=view["interpretation"].get("projection_id"), conn=conn)
+            wire = snapshot_to_wire(snap)
+            result = resolve_history_selection(wire, view, body.purpose, "")
+            if result["status"] != "ready":
+                return {**result, "snapshot": wire, "view": view}
+            content = db.get_conversation_history_selected_content(conversation_id,
+                [row["id"] for row in result["rows"]], snapshot=snap, owner_client_id=str(current_user.id),
+                owner_key=owner, conn=conn)
+            return {"status": "captured", "snapshot": wire, "view": view, "purpose": body.purpose,
+                    "rows": result["rows"], "selected_content": content,
+                    "storage_context_digest": snap.storage_context_digest}
+    except HistorySelectionError as exc:
+        raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+
+
+@router.post("/conversations/{conversation_id}/history/legacy-projection", dependencies=[Depends(require_expected_user)])
+async def confirm_conversation_history_projection(
+    request: Request,
+    body: LegacyProjectionConfirmEnvelopeV1,
+    conversation_id: str,
+    scope_type: Literal["global", "workspace"] | None = None,
+    workspace_id: str | None = None,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Retain one immutable reviewed interpretation after an authorized source CAS."""
+    from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
+    from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+    scope = _resolve_conversation_scope(scope_type, workspace_id)
+    _verify_conversation_ownership(db, conversation_id, current_user, scope)
+    if _active_message_sync_service(current_user, scope) is not None:
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+    if body.confirmation.conversation_id != conversation_id:
+        raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
+    try:
+        return LegacyHistoryProjectionV1.model_validate(db.confirm_legacy_history_projection(
+            body.confirmation.model_dump(mode="json"), owner_client_id=str(current_user.id),
+            owner_key=native_history_owner_key(request, current_user.id)))
+    except HistorySelectionError as exc:
+        raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc

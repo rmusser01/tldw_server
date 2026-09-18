@@ -350,16 +350,7 @@ export const useMessageOperations = (opts: UseMessageOperationsOptions) => {
         const branchIndex = nextMessages.length - 1;
         if (branchIndex < 0) return;
 
-        const branchedChatId = await createServerOnlyChatBranch(branchIndex);
-        if (!branchedChatId) {
-          throw new Error("Failed to create branch for regeneration");
-        }
-
-        return {
-          submitExtras: {
-            serverChatIdOverride: branchedChatId,
-          },
-        };
+        throw new Error("unsupported_history_regeneration");
       },
     });
 

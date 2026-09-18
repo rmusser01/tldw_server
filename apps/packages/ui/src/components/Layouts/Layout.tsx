@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
 import { Drawer, Tooltip } from "antd"
@@ -790,7 +792,7 @@ function RootLayoutShell({
     }
   }, [location.pathname, overrides?.sourcePath])
 
-  return (
+  const content = (
     <DemoModeProvider>
       <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
         <OptionLayoutInner
@@ -801,6 +803,18 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture)
+        useStoreMessageOption.getState().setHistory(display.history)
+        useStoreMessageOption.getState().setMessages(display.messages)
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content
 }
 
 export default function OptionLayout(props: OptionLayoutProps) {

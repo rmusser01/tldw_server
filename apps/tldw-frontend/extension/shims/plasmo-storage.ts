@@ -47,27 +47,33 @@ const createMemoryStorage = (): StorageBackend => {
 
 const sessionFallbackMemoryStorage = createMemoryStorage()
 
-const getBackend = (area: StorageOptions["area"]): StorageBackend => {
+const getBackend = (
+  area: StorageOptions["area"]
+): { backend: StorageBackend; persistent: boolean } => {
   if (typeof window !== "undefined") {
     if (area === "session") {
       try {
         if (window.sessionStorage) {
-          return window.sessionStorage
+          return { backend: window.sessionStorage, persistent: false }
         }
       } catch {
         // Fall back to shared in-memory session storage below.
       }
-      return sessionFallbackMemoryStorage
+      return { backend: sessionFallbackMemoryStorage, persistent: false }
     }
     try {
       if (window.localStorage) {
-        return window.localStorage
+        return { backend: window.localStorage, persistent: true }
       }
     } catch {
       // Fall through to isolated memory storage.
     }
   }
-  return area === "session" ? sessionFallbackMemoryStorage : createMemoryStorage()
+  return {
+    backend:
+      area === "session" ? sessionFallbackMemoryStorage : createMemoryStorage(),
+    persistent: false
+  }
 }
 
 const defaultSerde: Required<SerdeOptions> = {
@@ -89,7 +95,10 @@ const defaultSerde: Required<SerdeOptions> = {
 // changes only applied after a full page reload (H10).
 const globalWatchers = new Map<string, Set<WatchCallback>>()
 
-const subscribeGlobal = (storageKey: string, cb: WatchCallback): (() => void) => {
+const subscribeGlobal = (
+  storageKey: string,
+  cb: WatchCallback
+): (() => void) => {
   let set = globalWatchers.get(storageKey)
   if (!set) {
     set = new Set()
@@ -149,6 +158,13 @@ if (typeof window !== "undefined") {
 }
 
 export class Storage {
+  private readonly persistentBackend: boolean
+
+  /** Whether this instance selected durable storage; fallback instances stay volatile. */
+  get hasPersistentBackend(): boolean {
+    return this.persistentBackend
+  }
+
   private backend: StorageBackend
   private serde: Required<SerdeOptions>
   private area: StorageOptions["area"]
@@ -156,7 +172,9 @@ export class Storage {
 
   constructor(options: StorageOptions = {}) {
     this.area = options.area || "local"
-    this.backend = getBackend(this.area)
+    const selected = getBackend(this.area)
+    this.backend = selected.backend
+    this.persistentBackend = selected.persistent
     this.serde = {
       ...defaultSerde,
       ...(options.serde || {})

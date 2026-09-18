@@ -1,4 +1,5 @@
 import React from "react";
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { useQueryClient } from "@tanstack/react-query";
 import { useStoreMessageOption } from "~/store/option";
 import { useTranslation } from "react-i18next";
@@ -39,6 +40,8 @@ import type { ChatScope } from "@/types/chat-scope";
 type PersonaMemoryMode = "read_only" | "read_write";
 
 type UseMessageOptionOptions = {
+  /** Only the chat surface owns hydration; toolbars and settings are passive. */
+  hydrateServerChat?: boolean;
   forceCompareEnabled?: boolean;
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
@@ -74,6 +77,7 @@ const assistantSelectionsMatch = (
 export const useMessageOption = (
   opts: UseMessageOptionOptions = {},
 ) => {
+  const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
     usePageAssist();
@@ -189,6 +193,7 @@ export const useMessageOption = (
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,
@@ -263,6 +268,7 @@ export const useMessageOption = (
   });
 
   useServerChatLoader({
+    enabled: opts.hydrateServerChat === true,
     ensureServerChatHistoryId,
     notification,
     t,
@@ -379,8 +385,14 @@ export const useMessageOption = (
 
   React.useEffect(() => {
     if (!serverChatId || temporaryChat) return;
-    void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined);
-  }, [ensureServerChatHistoryId, serverChatId, serverChatTitle, temporaryChat]);
+    const current = historySelection?.getCurrent();
+    if (current && (!current.settingsQualified || current.owner?.kind !== "native" || current.owner.conversation_id !== serverChatId || !current.owner.validate_lease())) return;
+    const controller = new AbortController();
+    void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined, controller.signal).catch(error => {
+      if (!controller.signal.aborted) console.error("Failed to bind selected server chat mirror", error);
+    });
+    return () => controller.abort();
+  }, [ensureServerChatHistoryId, historySelection, serverChatId, serverChatTitle, temporaryChat]);
 
   usePromptPersistence({
     selectedSystemPrompt,
@@ -645,6 +657,7 @@ export const useMessageOption = (
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,

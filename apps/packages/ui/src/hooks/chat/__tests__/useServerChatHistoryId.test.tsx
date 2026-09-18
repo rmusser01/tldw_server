@@ -147,3 +147,19 @@ describe("useServerChatHistoryId", () => {
     expect(setHistoryServerChatIdMock).toHaveBeenCalledTimes(2)
   })
 })
+
+const scopedMirrors = vi.hoisted(() => ({ link: vi.fn() }))
+vi.mock("@/db/dexie/server-chat-mirror", () => ({ linkServerChatMirror: (...args: any[]) => scopedMirrors.link(...args), serverChatMirrorOwnerKey: ({ requestScope }: any) => requestScope.scopeKey }))
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => null }))
+it("scopes identical server IDs by verified owner and never adopts the current local chat", async () => {
+  scopedMirrors.link.mockImplementation(async ({ ownerKey }) => `mirror-${ownerKey}`)
+  const setHistoryId = vi.fn()
+  const { result } = renderHook(() => useServerChatHistoryId({ serverChatId: "same", historyId: "local-owned", setHistoryId, temporaryChat: false, t: ((key: string) => key) as any }))
+  let first: unknown, second: unknown
+  await act(async () => {
+    first = await result.current.ensureServerChatHistoryId("same", "Title", undefined, { ownerKey: "account-a", validateLease: () => true })
+    second = await result.current.ensureServerChatHistoryId("same", "Title", undefined, { ownerKey: "account-b", validateLease: () => true })
+  })
+  expect([first, second]).toEqual(["mirror-account-a", "mirror-account-b"])
+  expect(scopedMirrors.link.mock.calls.every(([input]) => !input.legacyHistoryId)).toBe(true)
+})

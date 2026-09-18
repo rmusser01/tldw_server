@@ -7,6 +7,12 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HistoryAdmissionReferenceV1,
+    HistoryAdmissionV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
@@ -399,6 +405,19 @@ class ChatSettingsResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     """Schema for creating a new message."""
+    id: str | None = Field(None, min_length=1, max_length=255)
+    tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _validate_history_fields(self) -> "MessageCreate":
+        if self.tldw_history_selection_v1 is not None and self.role != "user":
+            raise ValueError("Selection requires user role")
+        if self.tldw_history_admission_v1 is not None and self.role != "assistant":
+            raise ValueError("Admission requires assistant role")
+        if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None) and not self.id:
+            raise ValueError("Versioned messages require a stable id")
+        return self
     role: Literal["user", "assistant", "system"] = Field(..., description="Message sender role")
     content: Optional[str] = Field(
         None,
@@ -457,6 +476,7 @@ class MessageUpdate(BaseModel):
 
 class MessageResponse(BaseModel):
     """Schema for message responses."""
+    tldw_history_admission_v1: HistoryAdmissionV1 | None = None
     id: str = Field(..., description="UUID of the message")
     conversation_id: str = Field(..., description="ID of the parent conversation")
     parent_message_id: Optional[str] = Field(None, description="ID of parent message")
@@ -816,6 +836,14 @@ class CharacterChatStreamPersistRequest(BaseModel):
 
     Use after a streamed completion where the assistant content was not persisted.
     """
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _require_history_assistant_id(self) -> "CharacterChatStreamPersistRequest":
+        if self.tldw_history_admission_v1 is not None and not self.assistant_message_id:
+            raise ValueError("Versioned persistence requires assistant_message_id")
+        return self
+
     assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
     assistant_message_id: Optional[str] = Field(
         None,

@@ -1,3 +1,19 @@
+import type {
+  HistoryLoadReceipt,
+  HistorySelectionController
+} from "@/hooks/chat/useHistorySelection"
+import type { HistorySendTurn } from "@/types/chat-modes"
+import {
+  captureHistorySnapshot,
+  historyAdmissionReference
+} from "@/services/chat-history-selection"
+import {
+  saveHistoryTurnRecovery,
+  dismissHistoryTurnRecovery
+} from "@/db/dexie/history-selection"
+import type { HistoryTurnRecovery } from "@/db/dexie/types"
+import { useStoreChatModelSettings } from "@/store/model"
+import { useMcpToolsStore } from "@/store/mcp-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
 import {
   type ChatHistory,
@@ -5,7 +21,11 @@ import {
   type MessageMetadataExtra,
   type ToolChoice
 } from "~/store/option"
-import { getPromptById } from "@/db/dexie/helpers"
+import {
+  getPromptById,
+  saveHistory,
+  formatSelectedHistory
+} from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
@@ -60,8 +80,7 @@ const truncateText = (value: string, max = MAX_WEBSEARCH_SNIPPET_LENGTH) => {
 }
 
 const normalizeWebSearchResult = (result: any) => {
-  const title =
-    result?.title || result?.name || result?.metadata?.title || ""
+  const title = result?.title || result?.name || result?.metadata?.title || ""
   const url = result?.url || result?.link || ""
   const snippet =
     result?.content ||
@@ -130,6 +149,13 @@ const buildWebSearchSources = (results: any[]) => {
 }
 
 type NormalChatModeParams = {
+  historySelection?: {
+    controller: HistorySelectionController
+    originIsCurrent: () => boolean
+    temporary?: boolean
+  }
+  historyTurn?: HistorySendTurn
+
   selectedModel: string
   useOCR: boolean
   selectedSystemPrompt: string
@@ -153,6 +179,7 @@ type NormalChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  ownsAbortController?: (signal: AbortSignal) => boolean
   releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
@@ -226,8 +253,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     sources: [],
     createdAt: ctx.createdAt,
     id: ctx.resolvedAssistantMessageId,
-    modelImage:
-      ctx.assistantIdentity?.avatarUrl || ctx.modelInfo?.model_avatar,
+    modelImage: ctx.assistantIdentity?.avatarUrl || ctx.modelInfo?.model_avatar,
     modelName:
       ctx.assistantIdentity?.name ||
       ctx.modelInfo?.model_name ||
@@ -239,7 +265,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
   }),
   preflight: async (ctx) => {
     const requestOverride = ctx.imageGenerationRequest || {}
-    const requestBackend = normalizeImageBackendOverride(requestOverride.backend)
+    const requestBackend = normalizeImageBackendOverride(
+      requestOverride.backend
+    )
     const overrideBackend =
       normalizeImageBackendOverride(ctx.imageBackendOverride) || requestBackend
     const overrideCandidates = overrideBackend
@@ -357,7 +385,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
                 promptMode: ctx.imageGenerationPromptMode,
                 source:
                   ctx.imageGenerationSource ||
-                  (ctx.imageGenerationRequest ? "generate-modal" : "slash-command"),
+                  (ctx.imageGenerationRequest
+                    ? "generate-modal"
+                    : "slash-command"),
                 createdAt: Date.now(),
                 refine: ctx.imageGenerationRefine,
                 refine_model: ctx.imageGenerationRefine?.model,
@@ -376,11 +406,11 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         }
       }
 
-    if (lastError) {
-      throw lastError
+      if (lastError) {
+        throw lastError
+      }
+      return null
     }
-    return null
-  }
     return null
   },
   preparePrompt: async (ctx) => {
@@ -496,10 +526,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         webSearchResults = res?.web_search_results_dict?.results || []
         webSearchSources = buildWebSearchSources(webSearchResults)
       } catch (error) {
-        if (
-          ctx.signal.aborted ||
-          isRequestConfigScopeChangedError(error)
-        ) {
+        if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
           throw error
         }
         console.error("Web search failed, continuing without context", error)
@@ -524,7 +551,8 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
-      ctx.selectedModel
+      ctx.selectedModel,
+      ctx.historyTurn ? { versioned: true } : undefined
     )
     const baseSystemPrompts: string[] = []
     const overlayPrompt = ctx.overlaySystemPrompt?.trim() || ""
@@ -545,8 +573,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     if (!isTempSystemprompt && selectedPrompt) {
       const selectedPromptContent =
         selectedPrompt.system_prompt ?? selectedPrompt.content
-      const resolvedSelectedPrompt =
-        resolvePromptWithAppendix(selectedPromptContent)
+      const resolvedSelectedPrompt = resolvePromptWithAppendix(
+        selectedPromptContent
+      )
       if (resolvedSelectedPrompt) {
         baseSystemPrompts.push(resolvedSelectedPrompt)
       }
@@ -599,6 +628,177 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
   }
 }
 
+/** Establish one operation-lived adapter; display leases never authorize its later writes. */
+const captureNormalHistoryTurn = async (
+  params: NormalChatModeParams,
+  message: string,
+  snapshot: ServicePromptSnapshot,
+  signal: AbortSignal
+): Promise<HistorySendTurn> => {
+  const { controller, originIsCurrent, temporary } = params.historySelection!
+  if (temporary || params.historyId === "temp")
+    throw new Error("temporary_history_unavailable")
+  if (!originIsCurrent()) throw new Error("stale_selection")
+  let current = controller.getCurrent()
+  if (!current.owner && current.status === "idle") {
+    let localId = params.historyId
+    if (!localId && !params.serverChatId) {
+      const created = await saveHistory(
+        message.trim().slice(0, 80) || "Untitled Chat",
+        false,
+        "web-ui"
+      )
+      // Creation may have succeeded after navigation. It remains its own local history.
+      if (!originIsCurrent()) throw new Error("stale_selection")
+      localId = created.id
+      params.setHistoryId(localId)
+    }
+    if (!originIsCurrent()) throw new Error("stale_selection")
+    const target = { historyId: localId, serverChatId: params.serverChatId }
+    let receipt: HistoryLoadReceipt | undefined
+    const loaded = await controller.loadConversation(target, null, (value) => {
+      receipt = value
+    })
+    current = controller.getCurrent()
+    if (
+      !loaded ||
+      !receipt ||
+      current.owner !== receipt.owner ||
+      current.view !== receipt.view
+    ) {
+      throw new Error("stale_selection")
+    }
+    // A historyId-only bound mirror is resolved by the loader; no metadata reread.
+    // Explicit native targets and newly created local targets must still match.
+    const expectedId =
+      target.serverChatId || (!params.historyId ? localId : null)
+    const expectedKind = target.serverChatId ? "native" : "local"
+    if (
+      expectedId &&
+      (receipt.owner.kind !== expectedKind ||
+        receipt.owner.conversation_id !== expectedId)
+    ) {
+      throw new Error("owner_conversation_mismatch")
+    }
+  }
+  if (
+    current.status !== "ready" ||
+    !current.owner ||
+    current.owner.kind === "unavailable" ||
+    !current.view ||
+    !current.bookmarkScope ||
+    current.capture?.status !== "captured"
+  ) {
+    throw new Error(current.error || "history_selection_not_ready")
+  }
+  const view = structuredClone(current.view)
+  const bookmarkScope = { ...current.bookmarkScope }
+  const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
+  const owner =
+    current.owner.kind === "native"
+      ? {
+          ...current.owner,
+          owner_key: view.owner_key,
+          request_scope: snapshot.requestScope,
+          validate_lease: authValid
+        }
+      : current.owner
+  const settings = useStoreChatModelSettings.getState()
+  const tools = useMcpToolsStore.getState()
+  const validateLease = () =>
+    authValid() &&
+    useStoreChatModelSettings.getState() === settings &&
+    useMcpToolsStore.getState() === tools
+  const canUpdateView = () => {
+    const now = controller.getCurrent().view
+    return (
+      !!now &&
+      now.owner_key === view.owner_key &&
+      now.conversation_id === view.conversation_id &&
+      now.view_session_id === view.view_session_id &&
+      now.selection_revision === view.selection_revision
+    )
+  }
+  const capture = await captureHistorySnapshot(owner, view, "send", signal)
+  if (capture.status !== "captured") throw new Error(capture.code)
+  if (!canUpdateView()) throw new Error("stale_selection")
+  const operationId = crypto.randomUUID()
+  const record = (
+    turn: HistorySendTurn,
+    content: string,
+    state: HistoryTurnRecovery["state"]
+  ): HistoryTurnRecovery => ({
+    operation_id: operationId,
+    origin_view: view,
+    selection_digest: turn.selection!.selection_digest,
+    request_context_digest: turn.selection!.request_context_digest,
+    owner_key: view.owner_key,
+    conversation_id: view.conversation_id,
+    input_id: turn.input!.id,
+    assistant_id: turn.assistantId!,
+    created_at: turn.createdAt!,
+    input_text: turn.input!.content,
+    input_images: turn.input!.images ?? [],
+    result_text: content,
+    state,
+    ...(turn.admission
+      ? { admission: historyAdmissionReference(turn.admission) }
+      : {})
+  })
+  const turn: HistorySendTurn = {
+    owner,
+    capture,
+    currentView: () => controller.getCurrent().view,
+    validateLease,
+    canUpdateView,
+    beforeDispatch: async () => {
+      await saveHistoryTurnRecovery(
+        bookmarkScope,
+        view,
+        record(turn, "", "dispatching")
+      )
+    },
+    afterAdmission: async () => {
+      await saveHistoryTurnRecovery(
+        bookmarkScope,
+        view,
+        record(turn, "", "accepted_unsent")
+      )
+    },
+    recover: async (data) => {
+      await saveHistoryTurnRecovery(
+        bookmarkScope,
+        view,
+        record(
+          turn,
+          data.content,
+          data.content
+            ? "generated_unsaved"
+            : turn.admission
+              ? "accepted_unsent"
+              : "unknown"
+        )
+      )
+      await controller.refreshRecovery?.()
+    },
+    cancelPreparation: async () => {
+      await dismissHistoryTurnRecovery(bookmarkScope, view, operationId)
+    },
+    complete: async () => {
+      await dismissHistoryTurnRecovery(
+        bookmarkScope,
+        view,
+        operationId,
+        "completed"
+      )
+    },
+    followResult: async (id) => {
+      await controller.followResult(view, id)
+    }
+  }
+  return turn
+}
+
 export const normalChatMode = async (
   message: string,
   image: string,
@@ -609,11 +809,26 @@ export const normalChatMode = async (
   params: NormalChatModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
-  const ownsServicePromptSnapshot = !params.servicePromptSnapshot && params.webSearch
+  const ownsServicePromptSnapshot =
+    !params.servicePromptSnapshot &&
+    (params.webSearch || !!params.historySelection)
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
-    (params.webSearch
-      ? await loadServicePromptSnapshot(["chat.web_search.answer"], { signal })
+    (params.webSearch || params.historySelection
+      ? await loadServicePromptSnapshot(
+          params.webSearch ? ["chat.web_search.answer"] : [],
+          {
+            signal,
+            requestScope:
+              params.historySelection?.controller.getCurrent().owner?.kind ===
+              "native"
+                ? (
+                    params.historySelection.controller.getCurrent()
+                      .owner as import("@/services/chat-history-selection").NativeHistoryOwnerV1
+                  ).request_scope
+                : undefined
+          }
+        )
       : undefined)
   const executionSignal = servicePromptSnapshot
     ? servicePromptSnapshot.scopeSignal
@@ -622,10 +837,68 @@ export const normalChatMode = async (
     if (params.webSearch) {
       getRequiredServicePrompt(servicePromptSnapshot, "chat.web_search.answer")
     }
-    const resolvedImage =
-      image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
+    if (params.historySelection) {
+      if (isRegenerate) throw new Error("unsupported_history_action")
+      if (params.uploadedFiles?.length)
+        throw new Error("unsupported_history_message_assets")
+      const historyTurn = await captureNormalHistoryTurn(
+        params,
+        message,
+        servicePromptSnapshot!,
+        executionSignal
+      )
+      // Canonical roles/content come from the captured owner, not display normalization.
+      const selected = historyTurn.capture.rows.map((node, index) => {
+        const content = historyTurn.capture.selected_content[index]
+        const metadata = content.extra_metadata ?? {}
+        const local = metadata.local_history as
+          | Record<string, unknown>
+          | undefined
+        return {
+          id: node.id,
+          role: node.role,
+          content: content.message,
+          images: [...content.images],
+          tool_calls: content.tool_calls ? [...content.tool_calls] : undefined,
+          tool_call_id: metadata.tool_call_id as string | undefined,
+          function_call: metadata.function_call as
+            | Record<string, unknown>
+            | undefined,
+          messageType: local?.messageType as string | undefined
+        }
+      })
+      generateHistory(selected, params.selectedModel, { versioned: true })
+      if (
+        historyTurn.owner.kind === "native" &&
+        (params.webSearch || params.dynamicUIRequest)
+      )
+        throw new Error("unsupported_history_native_result_metadata")
+      const selectedParent = historyTurn.capture.rows.at(-1)?.id ?? null
+      if (
+        params.userParentMessageId &&
+        params.userParentMessageId !== selectedParent
+      )
+        throw new Error("unsupported_history_reply_target")
+      messages = formatSelectedHistory(historyTurn.capture).messages
+      params = {
+        ...params,
+        historyTurn,
+        userParentMessageId: selectedParent,
+        historyForModel: selected as ChatHistory,
+        historyId:
+          historyTurn.owner.kind === "local"
+            ? historyTurn.owner.conversation_id
+            : params.historyId
+      }
+      history = selected as ChatHistory
+    }
+    const resolvedImage = params.historyTurn
+      ? image
+      : image.length > 0
+        ? `data:image/jpeg;base64,${image.split(",")[1]}`
+        : ""
 
-    return await runChatPipeline(
+    const result = await runChatPipeline(
       normalChatModeDefinition,
       message,
       resolvedImage,
@@ -639,11 +912,18 @@ export const normalChatMode = async (
         discardCurrentTurnOnAbort: servicePromptSnapshot
           ? () => servicePromptSnapshot.scopeInvalidatedSignal.aborted
           : undefined,
+        ownsAbortController: params.ownsAbortController
+          ? () => params.ownsAbortController!(signal)
+          : undefined,
         releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
           ? () => params.releaseAbortControllerIfOwned!(signal)
           : undefined
       }
     )
+    if (result.status === "submitted" && params.historyTurn?.resultId) {
+      await params.historyTurn.followResult(params.historyTurn.resultId)
+    }
+    return result
   } finally {
     if (ownsServicePromptSnapshot && servicePromptSnapshot) {
       servicePromptSnapshot.release()

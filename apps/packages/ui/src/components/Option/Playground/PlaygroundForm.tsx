@@ -547,6 +547,7 @@ export const PlaygroundForm = ({
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,
@@ -1556,6 +1557,7 @@ export const PlaygroundForm = ({
     selectedModel,
     setSelectedModel,
     compareFeatureEnabled,
+    compareFeatureReady,
     compareMode,
     setCompareMode,
     compareSelectedModels,
@@ -3560,6 +3562,7 @@ export const PlaygroundForm = ({
     };
   }, [
     compareFeatureEnabled,
+    compareFeatureReady,
     compareSelectedModels.length,
     form,
     notificationApi,

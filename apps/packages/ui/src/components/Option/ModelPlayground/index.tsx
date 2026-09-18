@@ -32,6 +32,7 @@ export const ModelPlayground: React.FC = () => {
   const [debugOpen, setDebugOpen] = useStorage(MODEL_PLAYGROUND_DEBUG_KEY, false)
 
   const { messages, streaming } = useMessageOption({
+    hydrateServerChat: true,
     forceCompareEnabled: true
   })
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =

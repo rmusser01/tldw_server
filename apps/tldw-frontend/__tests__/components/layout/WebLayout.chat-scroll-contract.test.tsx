@@ -1,3 +1,4 @@
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 // @vitest-environment jsdom
 import React from 'react';
 import { readFileSync } from 'node:fs';
@@ -234,6 +235,7 @@ vi.mock('@/components/Layouts/Header', () => ({
     sidebarCollapsed?: boolean;
   }) => (
     <button
+      data-history-controller={useHistorySelectionContext() ? "present" : "absent"}
       type="button"
       data-testid="header"
       aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -293,7 +295,7 @@ vi.mock('@/hooks/useServerOnline', () => ({
 vi.mock('@/components/Common/ChatSidebar', () => ({
   ChatSidebar: (props: Record<string, unknown>) => {
     chatSidebarMockState.props.push(props);
-    return <aside data-testid="chat-sidebar" />;
+    return <aside data-testid="chat-sidebar" data-history-controller={useHistorySelectionContext() ? "present" : "absent"} />;
   },
 }));
 
@@ -984,3 +986,42 @@ describe('WebLayout bypass block (#2889)', () => {
     expect(main).toHaveAttribute('tabindex', '-1');
   });
 });
+
+it('shares one H1 controller across the WebUI shell and page only for the chat lifetime', () => {
+  delete (globalThis as any).__tldwOptionShell;
+  routerState.location.pathname = '/chat';
+  featureFlagState.showChatSidebar = true;
+  mediaQueryState.isMobile = false;
+  const seen: any[] = [];
+  let outer: any;
+  function Probe() {
+    const current = useHistorySelectionContext();
+    seen.push(current?.getReference ?? null);
+    return <output data-testid="web-controller">{current ? 'present' : 'absent'}</output>;
+  }
+  function Page() {
+    outer = useHistorySelectionContext()?.getReference ?? null;
+    return outer ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />;
+  }
+  const view = render(<OptionLayout><Page /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');
+  expect(view.getByTestId('chat-sidebar')).toHaveAttribute('data-history-controller', 'present');
+  expect(seen.at(-1)).toBe(outer);
+  const first = outer;
+  routerState.location.pathname = '/workspace';
+  view.rerender(<OptionLayout><Page /></OptionLayout>);
+  expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'absent');
+  expect(seen.at(-1)).toBeNull();
+  routerState.location.pathname = '/chat';
+  view.rerender(<OptionLayout><Page /></OptionLayout>);
+  expect(seen.at(-1)).toBe(outer);
+  expect(outer).not.toBe(first);
+  cleanup();
+  delete (globalThis as any).__tldwOptionShell;
+});
+
+vi.mock('@/services/chat-history-selection', () => ({
+  captureHistorySnapshot: vi.fn(),
+  confirmLegacyHistoryProjection: vi.fn(),
+}));
+vi.mock('@/db/dexie/helpers', () => ({ formatSelectedHistory: vi.fn() }));

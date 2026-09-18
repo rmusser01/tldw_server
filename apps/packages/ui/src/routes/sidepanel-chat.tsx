@@ -1,3 +1,8 @@
+import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
+import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import {
   formatToChatHistory,
   formatToMessage,
@@ -438,6 +443,16 @@ const buildHistorySnapshot = ({
 }
 
 const SidepanelChat = () => {
+  const selection = useHistorySelection({ onCapture: capture => {
+    const display = formatSelectedHistory(capture)
+    useStoreMessageOption.getState().setHistory(display.history)
+    useStoreMessageOption.getState().setMessages(display.messages)
+  } })
+  return <HistorySelectionContext.Provider value={selection}><SidepanelChatContent /></HistorySelectionContext.Provider>
+}
+
+const SidepanelChatContent = () => {
+  const historySelection = useHistorySelectionContext()!
   useServerOnline()
   const drop = React.useRef<HTMLDivElement>(null)
   const [dropedFile, setDropedFile] = React.useState<File | undefined>()
@@ -655,6 +670,8 @@ const SidepanelChat = () => {
     window.open(normalizedRoute, "_blank")
   }, [])
 
+  const expandSelectedHistory = async () => { const route = await historySelection.prepareExpansionPath(); if (route) openOptionsHashRoute(route) }
+
   const handleGenerateFlashcardsFromSelection = React.useCallback(() => {
     const content = noteDraftContent.trim()
     if (!content) {
@@ -769,6 +786,7 @@ const SidepanelChat = () => {
 
   const buildSnapshot = React.useCallback((): SidepanelChatSnapshot => {
     return {
+      historySelectionReference: historySelection.getReference(),
       history,
       messages,
       chatMode,
@@ -813,6 +831,8 @@ const SidepanelChat = () => {
 
   const applySnapshot = React.useCallback(
     (snapshot: SidepanelChatSnapshot) => {
+      historySelection.activate(useSidepanelChatTabsStore.getState().activeTabId || "initial")
+      void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference).then(loaded => { if (loaded) return restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages) }) }).catch(error => console.warn("Failed to restore readable comparison", error))
       setHistory(snapshot.history || [])
       setMessages(snapshot.messages || [])
       setHistoryId(snapshot.historyId ?? null)
@@ -943,6 +963,8 @@ const SidepanelChat = () => {
       return
     }
 
+    historySelection.beginLoad()
+    const isCurrentRestore = historySelection.fence()
     const storage = storageRef.current
     setIsRestoringChat(true)
     try {
@@ -957,6 +979,7 @@ const SidepanelChat = () => {
       for (const key of keysToTry) {
         // eslint-disable-next-line no-await-in-loop
         const candidate = (await storage.get(key)) as SidepanelTabsState | null
+        if (!isCurrentRestore()) return
         if (candidate && Array.isArray(candidate.tabs)) {
           tabsState = candidate
           break
@@ -998,6 +1021,7 @@ const SidepanelChat = () => {
         const candidate = (await storage.get(key)) as
           | LegacySidepanelChatSnapshot
           | null
+        if (!isCurrentRestore()) return
         if (candidate && Array.isArray(candidate.messages)) {
           legacySnapshot = candidate
           break
@@ -1049,12 +1073,14 @@ const SidepanelChat = () => {
 
     try {
       const isEnabled = await copilotResumeLastChat()
+      if (!isCurrentRestore()) return
       if (!isEnabled) {
         setIsRestoringChat(false)
         return
       }
       if (messages.length === 0) {
         const recentChat = await getRecentChatFromCopilot()
+        if (!isCurrentRestore()) return
         if (recentChat) {
           const restoredHistory = formatToChatHistory(recentChat.messages)
           const restoredMessages = formatToMessage(recentChat.messages)
@@ -1270,6 +1296,8 @@ const SidepanelChat = () => {
     })
     isSwitchingTabRef.current = true
     useSidepanelChatTabsStore.getState().setActiveTabId(newTabId)
+    historySelection.activate(newTabId)
+    historySelection.reset()
     clearChat()
     setTimeout(() => {
       isSwitchingTabRef.current = false
@@ -1294,6 +1322,7 @@ const SidepanelChat = () => {
       const snapshot = useSidepanelChatTabsStore.getState().getSnapshot(tabId)
       isSwitchingTabRef.current = true
       useSidepanelChatTabsStore.getState().setActiveTabId(tabId)
+      historySelection.activate(tabId)
       if (snapshot) {
         applySnapshot(snapshot)
       } else {
@@ -1363,8 +1392,11 @@ const SidepanelChat = () => {
       }
       setDropedFile(undefined)
       setIsLoading(true)
+      historySelection.beginLoad()
+      const isCurrentLoad = historySelection.fence()
       try {
         const chatData = await getFullChatData(targetHistoryId)
+        if (!isCurrentLoad()) return
         if (!chatData) {
           notification.error({
             message: t("common:error", "Error"),
@@ -1454,113 +1486,18 @@ const SidepanelChat = () => {
       chat: ServerChatHistoryItem,
       list: ServerChatMessageInput[]
     ) => {
-      let localHistoryId: string | null = null
-      try {
-        const existingHistory = await getHistoryByServerChatId(chatId)
-        if (existingHistory) {
-          localHistoryId = existingHistory.id
-        } else {
-          const newHistory = await saveHistory(
-            chat.title || newChatLabel,
-            false,
-            "server",
-            undefined,
-            chatId
-          )
-          localHistoryId = newHistory.id
-        }
-
-        if (localHistoryId) {
-          const metadataMap = await getHistoriesWithMetadata([localHistoryId])
-          const existingMeta = metadataMap.get(localHistoryId)
-          if (!existingMeta || existingMeta.messageCount === 0) {
-            const now = Date.now()
-            const results = await Promise.allSettled(
-              list.map((m, index) => {
-                const meta = m as Record<string, unknown>
-                const parsedCreatedAt = Date.parse(m.created_at)
-                const resolvedCreatedAt = Number.isNaN(parsedCreatedAt)
-                  ? now + index
-                  : parsedCreatedAt
-                const normalizedId = normalizeServerChatMessageId(m.id)
-                const role =
-                  m.role === "assistant" ||
-                  m.role === "system" ||
-                  m.role === "user"
-                    ? m.role
-                    : "user"
-                const name =
-                  role === "assistant"
-                    ? "Assistant"
-                    : role === "system"
-                      ? "System"
-                      : "You"
-                return saveMessage({
-                  id: normalizedId,
-                  history_id: localHistoryId,
-                  name,
-                  role,
-                  content: m.content,
-                  images: [],
-                  source: [],
-                  time: index,
-                  message_type:
-                    (meta?.message_type as string | undefined) ??
-                    (meta?.messageType as string | undefined),
-                  clusterId:
-                    (meta?.cluster_id as string | undefined) ??
-                    (meta?.clusterId as string | undefined),
-                  modelId:
-                    (meta?.model_id as string | undefined) ??
-                    (meta?.modelId as string | undefined),
-                  modelName:
-                    (meta?.model_name as string | undefined) ??
-                    (meta?.modelName as string | undefined) ??
-                    "Assistant",
-                  modelImage:
-                    (meta?.model_image as string | undefined) ??
-                    (meta?.modelImage as string | undefined),
-                  parent_message_id:
-                    (meta?.parent_message_id as
-                      | string
-                      | null
-                      | undefined) ??
-                    (meta?.parentMessageId as
-                      | string
-                      | null
-                      | undefined) ??
-                    null,
-                  createdAt: resolvedCreatedAt
-                })
-              })
-            )
-            const failed = results
-              .map((result, index) => ({
-                result,
-                messageId:
-                  list[index]?.id === undefined
-                    ? String(index)
-                    : normalizeServerChatMessageId(list[index].id)
-              }))
-              .filter((entry) => entry.result.status === "rejected")
-            if (failed.length > 0) {
-              console.warn(
-                `[ensureLocalHistoryMirror] ${failed.length} messages failed to save`,
-                failed.map(({ messageId, result }) => ({
-                  messageId,
-                  reason:
-                    result.status === "rejected" ? result.reason : undefined
-                }))
-              )
-            }
-          }
-        }
-      } catch (err) {
-        console.error("[ensureLocalHistoryMirror] Failed:", err)
-      }
-      return localHistoryId
+      const current = historySelection.getCurrent()
+      if (current.owner?.kind !== "native" || current.owner.conversation_id !== chatId || current.capture?.status !== "captured") return null
+      const ownerKey = serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope })
+      const signal = historySelection.getSignal()
+      const isCurrent = historySelection.fence()
+      const localHistoryId = await linkServerChatMirror({ chatId, title: chat.title || newChatLabel, ownerKey, signal })
+      if (!isCurrent()) return null
+      const incoming = mapServerChatMessages(list, userDisplayName).mappedMessages.map(message => ({ ...message, serverMessageId: message.serverMessageId || message.id }))
+      await reconcileServerChatMirror({ historyId: localHistoryId, chatId, ownerKey, messages: incoming, signal })
+      return isCurrent() ? localHistoryId : null
     },
-    [newChatLabel]
+    [historySelection, newChatLabel, userDisplayName]
   )
 
   const openServerChat = React.useCallback(
@@ -1578,11 +1515,14 @@ const SidepanelChat = () => {
       setDropedFile(undefined)
       setIsLoading(true)
       try {
-        await tldwClient.initialize().catch(() => null)
+        const loaded = await historySelection.loadConversation({ serverChatId: chatId })
+        if (!loaded) return
+        const isCurrent = historySelection.fence()
+        const owner = historySelection.getCurrent().owner
         const list = await tldwClient.listChatMessages(chatId, {
-          include_deleted: "false",
-          include_metadata: "true"
-        })
+          include_deleted: "false", include_metadata: "true"
+        }, { signal: historySelection.getSignal() })
+        if (!isCurrent() || (owner?.kind === "native" && !owner.validate_lease())) return
         const messageList: ServerChatMessageInput[] = list
         const { history, mappedMessages } = mapServerChatMessages(
           messageList,
@@ -1594,9 +1534,10 @@ const SidepanelChat = () => {
           messageList
         )
 
+        if (!isCurrent()) return
         const snapshot: SidepanelChatSnapshot = {
-          history,
-          messages: mappedMessages,
+          historySelectionReference: historySelection.getReference(),
+          ...(historySelection.getCurrent().capture?.status === "captured" ? formatSelectedHistory(historySelection.getCurrent().capture as import("@/types/history-selection").HistorySelectionCaptureV1) : { history, messages: mappedMessages }),
           chatMode,
           historyId: localHistoryId,
           webSearch,
@@ -2551,6 +2492,10 @@ const SidepanelChat = () => {
                 </div>
               </div>
             ) : (
+              <>
+              <div className={historySelection.status === "idle" ? undefined : "pt-12"}>
+                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+              </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
                 searchQuery={sidebarSearchQuery}
@@ -2558,6 +2503,7 @@ const SidepanelChat = () => {
                 timelineAction={timelineAction}
                 onTimelineActionHandled={() => setTimelineAction(null)}
               />
+              </>
             )}
             {!isRestoringChat && !stickyChatInput && (
               <div className="w-full min-w-0 pt-4 pb-6">

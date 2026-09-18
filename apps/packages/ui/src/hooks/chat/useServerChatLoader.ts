@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import { shallow } from "zustand/shallow"
 import type { TFunction } from "i18next"
@@ -44,6 +45,7 @@ type UseServerChatLoaderOptions = {
   notification: NotificationApi
   t: TFunction
   scope?: ChatScope
+  enabled?: boolean
 }
 
 type PreserveLocalMessagesArgs = {
@@ -599,8 +601,12 @@ export const useServerChatLoader = ({
   ensureServerChatHistoryId,
   notification,
   t,
-  scope
+  scope,
+  enabled = true
 }: UseServerChatLoaderOptions) => {
+  const selection = useHistorySelectionContext()
+  const selectionRef = React.useRef(selection)
+  selectionRef.current = selection
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const {
     messages,
@@ -695,6 +701,11 @@ export const useServerChatLoader = ({
   }, [])
 
   React.useEffect(() => {
+    if (!enabled) {
+      serverChatLoadRef.current.controller?.abort()
+      serverChatLoadRef.current.inFlight = false
+      return
+    }
     if (!serverChatId) return
     if (
       shouldSkipLoadedServerChatReload({
@@ -723,8 +734,9 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      let selectionCurrent = selectionRef.current?.fence() || (() => true)
       const canCommitCurrentLoad = () =>
-        shouldCommitServerChatLoadResult({
+        selectionCurrent() && shouldCommitServerChatLoadResult({
           requestedChatId: serverChatId,
           activeServerChatId: serverChatLoadRef.current.chatId,
           requestController: controller,
@@ -737,13 +749,42 @@ export const useServerChatLoader = ({
         loaded: false
       }
 
+      const rejectCurrentOwner = async (code: string) => {
+        if (!canCommitCurrentLoad()) return
+        const control = selectionRef.current
+        if (!control) {
+          setServerChatId(null)
+          return
+        }
+        const owner = control.getCurrent().owner
+        if (owner?.kind !== "native" || owner.conversation_id !== serverChatId) return
+        setServerChatLoadState("failed")
+        setServerChatLoadError(code)
+        await control.open({ kind: "unavailable", code })
+      }
+
       const loadServerChat = async () => {
         let didLoadSuccessfully = false
         try {
           setIsLoading(true)
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
-          await tldwClient.initialize().catch(() => null)
+          const selectionState = selectionRef.current?.getCurrent()
+          if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
+            setServerChatLoadState("failed")
+            setServerChatLoadError(selectionState.error || "history_owner_unavailable")
+            return
+          }
+          const control = selectionRef.current
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") {
+            if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+            selectionCurrent = control.fence()
+          }
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") return
+          const forkChild = control?.settingsMode?.(serverChatId, scope) === "fork"
+          const forkOwner = forkChild ? control?.getCurrent().owner : null
+          if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
+          if (!forkChild) await tldwClient.initialize().catch(() => null)
 
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
@@ -756,7 +797,7 @@ export const useServerChatLoader = ({
             try {
               const chat = await tldwClient.getChat(
                 serverChatId,
-                scope ? { scope } : undefined
+                forkOwner?.kind === "native" ? {scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: controller.signal} : scope ? { scope } : undefined
               )
               if (!canCommitCurrentLoad()) {
                 return
@@ -773,7 +814,7 @@ export const useServerChatLoader = ({
                 expectedScope: scope || { type: "global" }
               })
               if (!validatedServerChatId) {
-                setServerChatId(null)
+                await rejectCurrentOwner("server_chat_scope_mismatch")
                 return
               }
               const meta = chat as unknown as Record<string, unknown>
@@ -817,7 +858,7 @@ export const useServerChatLoader = ({
               setServerChatMetaLoaded(true)
             } catch (error) {
               if (isMissingServerChatReferenceError(error) && canCommitCurrentLoad()) {
-                setServerChatId(null)
+                await rejectCurrentOwner("server_chat_not_found")
                 return
               }
               // ignore metadata failures; still try to load messages
@@ -828,9 +869,10 @@ export const useServerChatLoader = ({
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
-                syncedSettings = await syncChatSettingsForServerChat({
+                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : await syncChatSettingsForServerChat({
                   historyId: null,
                   serverChatId,
+                  scope,
                   allowScratchFallback: false
                 })
               } catch {
@@ -956,7 +998,7 @@ export const useServerChatLoader = ({
             return null
           })()
 
-          const list = await fetchAllServerChatMessages(
+          const list = forkChild ? [] : await fetchAllServerChatMessages(
             ({ limit, offset, signal }) =>
               tldwClient.listChatMessages(
                 serverChatId,
@@ -973,6 +1015,14 @@ export const useServerChatLoader = ({
             }
           )
 
+          if (!canCommitCurrentLoad()) return
+          const currentSelection = selectionRef.current?.getCurrent()
+          if (selectionRef.current && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
+            if (!await selectionRef.current.loadConversation({ serverChatId, scope, temporary: temporaryChat })) return
+            selectionCurrent = selectionRef.current.fence()
+            if (!canCommitCurrentLoad()) return
+          }
+          const hasSelectedHistory = selectionRef.current?.getCurrent().capture?.status === "captured"
           const mappedMessages = mapServerChatMessagesToPlaygroundMessages({
             serverMessages: list,
             assistantName,
@@ -1002,12 +1052,12 @@ export const useServerChatLoader = ({
             isProcessing: processingRef.current
           })
 
-          if (!shouldPreserveLocal && !shouldPreserveAtCommit) {
+          if (!hasSelectedHistory && !shouldPreserveLocal && !shouldPreserveAtCommit) {
             setHistory(history)
             setMessages(mappedMessages)
           }
           const shouldApplyDeferredAssistantPresentation =
-            !shouldPreserveLocal && !shouldPreserveAtCommit
+            !hasSelectedHistory && !shouldPreserveLocal && !shouldPreserveAtCommit
           if (shouldApplyDeferredAssistantPresentation) {
             void deferredAssistantPresentationPromise
               .then((presentation) => {
@@ -1032,7 +1082,7 @@ export const useServerChatLoader = ({
                 })
               })
           }
-          if (!temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
+          if (!selectionRef.current && !temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
             if (!canCommitCurrentLoad()) {
               return
             }
@@ -1123,7 +1173,7 @@ export const useServerChatLoader = ({
               ? true
               : message.toLowerCase().includes("abort")
           if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
-            setServerChatId(null)
+            await rejectCurrentOwner("server_chat_not_found")
             return
           }
           if (!isAbort && canCommitCurrentLoad()) {
@@ -1163,6 +1213,7 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    enabled,
     ensureServerChatHistoryId,
     notification,
     serverChatAssistantId,

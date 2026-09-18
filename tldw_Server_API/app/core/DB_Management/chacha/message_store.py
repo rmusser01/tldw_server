@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import sqlite3
 import threading
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.Chat.history_selection import (
+    HistoryFencesV1,
+    HistorySelectionError,
+    HistorySelectionSnapshotV1,
+    resolve_legacy_projection,
+    resolve_parent_path,
+    snapshot_to_wire,
+)
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -19,6 +30,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -31,6 +43,861 @@ class MessageStore:
         self._db = db
         self._last_message_order_timestamp: str | None = None
         self._message_order_lock = threading.Lock()
+
+    @staticmethod
+    def _history_digest(value: Any) -> str:
+        """Hash finite canonical JSON for native storage provenance."""
+        encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _history_owner_key(owner_client_id: str, owner_key: str | None) -> str:
+        """Use an adapter namespace externally; the fallback is internal to this DB."""
+        if not isinstance(owner_client_id, str) or not owner_client_id.strip():
+            raise NotFoundError("Conversation not found.")
+        if owner_key is not None and (not isinstance(owner_key, str) or not owner_key.strip()):
+            raise HistorySelectionError("invalid_owner_key")
+        return owner_key if owner_key is not None else f"native-client:{owner_client_id}"
+
+    def _lock_history_owner(self, conn: Any, conversation_id: str, owner_client_id: str) -> None:
+        """Lock only the conversation fence, never existing messages or metadata."""
+        query = (
+            "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE FOR UPDATE"
+            if self._db.backend_type == BackendType.POSTGRESQL
+            else "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE"
+        )
+        row = conn.execute(
+            query,
+            (conversation_id, owner_client_id),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError("Conversation not found.")
+
+    def _read_history_snapshot(
+        self,
+        conversation_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        projection_id: str | None,
+        conn: Any,
+        selected_ids: tuple[str, ...] = (),
+    ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
+        """One statement captures all fences, rows, metadata, assets and an optional base.
+
+        Hash binary values in the engine, returning bytes only for requested content.
+        Window gating enforces a 32 MiB selected image budget before bytes cross the
+        database boundary. No display loader, per-message query or row cap is used.
+        """
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if postgres:
+            requested_sql = "SELECT jsonb_array_elements_text(CAST(? AS JSONB)) AS id"
+
+            def text_hash(field: str) -> str:
+                return f"encode(sha256(convert_to(COALESCE({field}, ''), 'UTF8')), 'hex')"
+
+            binary_hash = "encode(sha256(COALESCE(mi.image_data, m.image_data)), 'hex')"
+            byte_length = "octet_length"
+        else:
+
+            requested_sql = "SELECT value AS id FROM json_each(?)"
+
+            def text_hash(field: str) -> str:
+                return f"h1_sha256(COALESCE({field}, ''))"
+
+            binary_hash = "h1_sha256(COALESCE(mi.image_data, m.image_data))"
+            byte_length = "length"
+        # Keep per-conversation payloads out of the per-message window sort. Even
+        # CASE around a joined payload can materialize it once per message first.
+        # Scalar reads in the first-row CASE preserve one-statement coherence.
+        # All interpolated expressions are fixed backend SQL, never caller identifiers.
+        query = f"""
+            WITH requested AS ({requested_sql})
+            SELECT c.version AS conversation_version, c.history_version,
+                   cs.settings_version, cs.conversation_id AS settings_row_id,
+                   bs.conversation_id AS behavior_row_id,
+                   bs.status AS behavior_status, bs.schema_version AS behavior_schema_version,
+                   bs.digest AS behavior_digest, bs.size_bytes AS behavior_size_bytes,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN {text_hash('(SELECT behavior.canonical_json FROM conversation_behavior_snapshots behavior WHERE behavior.conversation_id = c.id)')}
+                        END AS behavior_content_hash,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT settings.settings_json FROM conversation_settings settings
+                              WHERE settings.conversation_id = c.id) END AS settings_json,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT projection.confirmation_json FROM conversation_history_projections projection
+                              WHERE projection.conversation_id = c.id AND projection.client_id = c.client_id
+                                AND projection.owner_key = ? AND projection.projection_id = ?) END AS projection_json,
+                   c.character_id, c.assistant_kind, c.assistant_id, c.persona_memory_mode,
+                   c.scope_type, c.workspace_id,
+                   m.id, m.parent_message_id, m.sender, m.version AS message_version,
+                   m.history_admission_json, SUBSTR(COALESCE(m.content, ''), 1, 200) AS preview,
+                   {text_hash('m.content')} AS content_hash,
+                   mm.message_id AS metadata_id,
+                   {text_hash('mm.tool_calls_json')} AS tool_calls_hash,
+                   {text_hash('mm.extra_json')} AS extra_hash,
+                   CAST(mm.last_modified AS TEXT) AS metadata_modified,
+                   mi.position, COALESCE(mi.image_mime_type, m.image_mime_type) AS image_mime,
+                   {binary_hash} AS image_hash,
+                   CASE WHEN requested.id IS NOT NULL THEN m.content END AS selected_text,
+                   CASE WHEN requested.id IS NOT NULL THEN mm.tool_calls_json END AS selected_tools,
+                   CASE WHEN requested.id IS NOT NULL THEN mm.extra_json END AS selected_extra,
+                   SUM(CASE WHEN requested.id IS NOT NULL
+                       THEN COALESCE({byte_length}(COALESCE(mi.image_data, m.image_data)), 0) ELSE 0 END)
+                       OVER () AS selected_image_bytes,
+                   CASE WHEN requested.id IS NOT NULL AND
+                       SUM(CASE WHEN requested.id IS NOT NULL
+                           THEN COALESCE({byte_length}(COALESCE(mi.image_data, m.image_data)), 0) ELSE 0 END)
+                           OVER () <= 33554432
+                       THEN COALESCE(mi.image_data, m.image_data) END AS selected_image
+            FROM conversations c
+            LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
+            LEFT JOIN conversation_behavior_snapshots bs ON bs.conversation_id = c.id
+            LEFT JOIN messages m ON m.conversation_id = c.id AND m.deleted = FALSE
+            LEFT JOIN message_metadata mm ON mm.message_id = m.id
+            LEFT JOIN message_images mi ON mi.message_id = m.id
+            LEFT JOIN requested ON requested.id = m.id
+            WHERE c.id = ? AND c.client_id = ? AND c.deleted = FALSE
+            ORDER BY m.timestamp, m.last_modified, m.id, mi.position
+        """  # nosec B608 - fixed SQL fragments; all input values are bound
+        result = conn.execute(
+            query, (json.dumps(selected_ids), owner_key, projection_id, conversation_id, owner_client_id)
+        )
+        records = result.fetchall()
+        if not records:
+            raise NotFoundError("Conversation not found.")
+        header = dict(records[0])
+        if int(header["selected_image_bytes"] or 0) > 33554432:
+            raise HistorySelectionError("selected_content_too_large")
+        nodes: dict[str, dict[str, Any]] = {}
+        contents: dict[str, dict[str, Any]] = {}
+        provenance: dict[str, Any] = {}
+        selected_set = set(selected_ids)
+        for raw in records:
+            record = dict(raw)
+            mid = record["id"]
+            if mid is None:
+                continue
+            if mid not in nodes:
+                try:
+                    authority = json.loads(record["history_admission_json"] or "null")
+                except (TypeError, ValueError):
+                    authority = None
+                provenance[mid] = authority
+                node = {
+                    "id": mid,
+                    "conversation_id": conversation_id,
+                    "parent_id": record["parent_message_id"],
+                    "role": record["sender"],
+                    "preview": record["preview"],
+                    "settled": not isinstance(authority, dict) or authority.get("settled", True) is True,
+                    "metadata": [],
+                    "assets": [],
+                    "revision": str(record["message_version"]),
+                }
+                if isinstance(authority, dict) and authority.get("version") == 1:
+                    interpretation = authority.get("interpretation", {})
+                    if interpretation.get("kind") == "legacy_linear_v1":
+                        node["legacy_projection_id"] = interpretation.get("projection_id")
+                if record["metadata_id"] is not None:
+                    node["metadata"].append(
+                        {
+                            "id": mid,
+                            "kind": "message_metadata",
+                            "revision": self._history_digest(
+                                [record["tool_calls_hash"], record["extra_hash"], record["metadata_modified"]]
+                            ),
+                        }
+                    )
+                nodes[mid] = node
+                if mid in selected_set:
+                    contents[mid] = {
+                        "id": mid,
+                        "message": record["selected_text"] or "",
+                        "images": [],
+                        "tool_calls": json.loads(record["selected_tools"] or "null"),
+                        "extra_metadata": json.loads(record["selected_extra"] or "null"),
+                    }
+                node["_source"] = [record["message_version"], record["content_hash"], record["history_admission_json"]]
+            if record["image_hash"] is not None:
+                position = record["position"] if record["position"] is not None else "primary"
+                nodes[mid]["assets"].append(
+                    {
+                        "id": f"{mid}:{position}",
+                        "kind": "image",
+                        "revision": self._history_digest([record["image_hash"], record["image_mime"]]),
+                    }
+                )
+                if mid in selected_set:
+                    image_bytes = record["selected_image"]
+                    if image_bytes is None or not record["image_mime"]:
+                        raise HistorySelectionError("selected_attachment_unavailable")
+                    contents[mid]["images"].append(
+                        "data:"
+                        + record["image_mime"]
+                        + ";base64,"
+                        + base64.b64encode(bytes(image_bytes)).decode("ascii")
+                    )
+        for node in nodes.values():
+            source = node.pop("_source")
+            node["revision"] = self._history_digest([source, node])
+            if node["id"] in contents:
+                contents[node["id"]]["revision"] = node["revision"]
+                contents[node["id"]]["images"] = tuple(contents[node["id"]]["images"])
+        manifest = tuple(nodes.values())
+        status: dict[str, Any] = {"kind": "legacy_review_required"}
+        if projection_id is not None:
+            if header["projection_json"] is None:
+                raise HistorySelectionError("missing_projection")
+            accepted = json.loads(header["projection_json"])
+            reviewed = {row["id"]: row["revision"] for row in accepted["source_members"]}
+            path = accepted["ordered_path_ids"]
+            if any(mid not in nodes or nodes[mid]["revision"] != reviewed[mid] for mid in path):
+                raise HistorySelectionError("stale_projection")
+            status = {"kind": "legacy_linear_v1", "projection_id": projection_id, "ordered_path_ids": path}
+        else:
+            try:
+                resolve_parent_path(manifest, {"kind": "empty"})
+                unversioned = [
+                    node
+                    for node in manifest
+                    if not (
+                        isinstance(provenance[node["id"]], dict)
+                        and provenance[node["id"]].get("version") == 1
+                        and provenance[node["id"]].get("interpretation", {}).get("kind") == "parent_graph_v1"
+                    )
+                ]
+                unversioned_ids = {node["id"] for node in unversioned}
+                roots = [node for node in unversioned if node["parent_id"] is None]
+                parents = [node["parent_id"] for node in unversioned if node["parent_id"] is not None]
+                # Unprotected legacy data must itself be a unique complete chain.
+                legacy_chain = not unversioned or (
+                    len(roots) == 1
+                    and len(parents) == len(set(parents))
+                    and all(parent in unversioned_ids for parent in parents)
+                )
+                if legacy_chain and not any(node.get("legacy_projection_id") for node in manifest):
+                    status = {"kind": "parent_graph_v1"}
+            except HistorySelectionError:
+                status = {"kind": "legacy_review_required"}
+        fences = HistoryFencesV1(
+            str(header["conversation_version"]), str(header["history_version"]), str(header["settings_version"] or 0)
+        )
+        context = {
+            key: header[key]
+            for key in (
+                "settings_json",
+                "settings_row_id",
+                "behavior_row_id",
+                "behavior_status",
+                "behavior_schema_version",
+                "behavior_digest",
+                "behavior_size_bytes",
+                "behavior_content_hash",
+                "character_id",
+                "assistant_kind",
+                "assistant_id",
+                "persona_memory_mode",
+                "scope_type",
+                "workspace_id",
+            )
+        }
+        # Only the explicitly empty plain policy is representable by H1's legacy copier.
+        # Row presence is digest-bound: unreadable required state is never a default.
+        plain_settings = header["settings_row_id"] is None
+        if not plain_settings:
+            try:
+                plain_settings = json.loads(header["settings_json"]) == {}
+            except (TypeError, ValueError):
+                plain_settings = False
+        context_digest = self._history_digest(context)
+        native_fork_context = {
+            "policy": "plain_v1",
+            "storage_context_digest": context_digest,
+            "supported": plain_settings
+            and header["behavior_row_id"] is None
+            and all(header[key] is None for key in (
+                "character_id", "assistant_kind", "assistant_id", "persona_memory_mode"
+            )),
+        }
+        snapshot = HistorySelectionSnapshotV1(
+            version=1,
+            owner_key=owner_key,
+            conversation_id=conversation_id,
+            fences=fences,
+            nodes=manifest,
+            source_digest=self._history_digest(manifest),
+            interpretation_status=status,
+            storage_context_digest=context_digest,
+            native_fork_context=native_fork_context,
+        )
+        if any(mid not in contents for mid in selected_ids):
+            raise HistorySelectionError("selected_content_mismatch")
+        return snapshot, tuple(contents[mid] for mid in selected_ids)
+
+    def get_conversation_history_snapshot(
+        self,
+        conversation_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        projection_id: str | None = None,
+        conn: Any | None = None,
+        lock_for_update: bool = False,
+    ) -> HistorySelectionSnapshotV1:
+        """Capture a complete owned manifest, optionally using a caller's admission fence.
+
+        `owner_client_id` is authenticated identity, independently checked against the
+        conversation. Browser adapters must supply their verified server/account
+        `owner_key`; the default key is only suitable inside this database.
+        An explicit projection ID selects the view's immutable accepted legacy base.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            if lock_for_update:
+                self._lock_history_owner(active, conversation_id, owner_client_id)
+            snapshot, _ = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+            )
+            return snapshot
+
+    def get_conversation_history_selected_content(
+        self,
+        conversation_id: str,
+        message_ids: Sequence[str],
+        *,
+        snapshot: HistorySelectionSnapshotV1,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        conn: Any | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read all selected text/images/tools/extra metadata bound to a captured source.
+
+        Raises on any source or fence drift; callers must retry capture, never compose
+        mixed revisions. Returned dictionaries are detached from database state.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        ids = tuple(message_ids)
+        if (
+            snapshot.owner_key != namespace
+            or snapshot.conversation_id != conversation_id
+            or len(set(ids)) != len(ids)
+            or any(not isinstance(mid, str) for mid in ids)
+        ):
+            raise HistorySelectionError("selected_content_mismatch")
+        projection_id = snapshot.interpretation_status.get("projection_id")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            fresh, content = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+                selected_ids=ids,
+            )
+            if (
+                snapshot.source_digest != fresh.source_digest
+                or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            return content
+
+    def confirm_legacy_history_projection(
+        self,
+        confirmation: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Authorize, replay or CAS-insert an immutable LegacyHistoryProjectionV1 wire value.
+
+        A matching authorized replay precedes fresh source validation, including after
+        appends or source edits. Reusing its ID for different confirmation bytes fails.
+        Caller-owned transactions are never committed here.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        body = dict(confirmation)
+        required = {
+            "version",
+            "projection_id",
+            "owner_key",
+            "conversation_id",
+            "source_digest",
+            "fences",
+            "source_members",
+            "ordered_path_ids",
+            "cursor",
+            "selection_revision",
+        }
+        if (
+            set(body) != required
+            or type(body["version"]) is not int
+            or body["version"] != 1
+            or body["owner_key"] != namespace
+            or not isinstance(body["projection_id"], str)
+            or not body["projection_id"]
+            or type(body["selection_revision"]) is not int
+            or body["selection_revision"] < 0
+        ):
+            raise HistorySelectionError("invalid_projection")
+        try:
+            canonical = json.dumps(body, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise HistorySelectionError("invalid_projection") from exc
+        body = json.loads(canonical)
+        cursor = body["cursor"]
+        path = body["ordered_path_ids"]
+        if (
+            not isinstance(body["conversation_id"], str)
+            or not body["conversation_id"]
+            or not isinstance(path, list)
+            or any(not isinstance(mid, str) or not mid for mid in path)
+            or not isinstance(cursor, dict)
+            or cursor.get("kind") not in {"empty", "before_message", "after_message"}
+            or set(cursor) != ({"kind"} if cursor.get("kind") == "empty" else {"kind", "message_id"})
+            or (cursor.get("kind") != "empty" and not isinstance(cursor.get("message_id"), str))
+        ):
+            raise HistorySelectionError("invalid_projection")
+        cid = body["conversation_id"]
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, cid, owner_client_id)
+            existing = active.execute(
+                "SELECT confirmation_json, projection_digest, created_at FROM conversation_history_projections "
+                "WHERE client_id = ? AND owner_key = ? AND conversation_id = ? AND projection_id = ?",
+                (owner_client_id, namespace, cid, body["projection_id"]),
+            ).fetchone()
+            if existing is not None:
+                record = dict(existing)
+                if record["confirmation_json"] != canonical:
+                    raise HistorySelectionError("projection_id_conflict")
+                return {
+                    **json.loads(canonical),
+                    "projection_digest": record["projection_digest"],
+                    "created_at": record["created_at"],
+                }
+            fresh, _ = self._read_history_snapshot(
+                cid, owner_client_id=owner_client_id, owner_key=namespace, projection_id=None, conn=active
+            )
+            wire = snapshot_to_wire(fresh)
+            members = [{"id": row["id"], "revision": row["revision"]} for row in wire["nodes"]]
+            if (
+                body["source_digest"] != fresh.source_digest
+                or body["fences"] != wire["fences"]
+                or body["source_members"] != members
+            ):
+                raise HistorySelectionError("stale_source")
+            try:
+                resolve_legacy_projection(wire["nodes"], body["ordered_path_ids"], body["cursor"])
+            except (HistorySelectionError, KeyError, TypeError) as exc:
+                raise HistorySelectionError("invalid_projection") from exc
+            digest = self._history_digest(body)
+            created_at = self._db._get_current_utc_timestamp_iso()
+            active.execute(
+                "INSERT INTO conversation_history_projections (projection_id, conversation_id, client_id, owner_key, "
+                "interpretation_version, source_digest, history_fence, source_members_json, ordered_path_ids_json, "
+                "confirmation_json, projection_digest, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    body["projection_id"],
+                    cid,
+                    owner_client_id,
+                    namespace,
+                    body["source_digest"],
+                    fresh.fences.history,
+                    json.dumps(members),
+                    json.dumps(body["ordered_path_ids"]),
+                    canonical,
+                    digest,
+                    created_at,
+                ),
+            )
+            return {**json.loads(canonical), "projection_digest": digest, "created_at": created_at}
+
+    def validate_history_selection(
+        self, conversation_id: str, selection: Mapping[str, Any], *,
+        owner_client_id: str, owner_key: str, conn: Any,
+    ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
+        """Re-resolve retained membership and context under the caller's owner fence."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+        from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+
+        body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
+        if body["owner_key"] != owner_key or body["conversation_id"] != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        fresh, content = self._read_history_snapshot(
+            conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
+            projection_id=body["interpretation"].get("projection_id"), conn=conn,
+            selected_ids=tuple(row["id"] for row in body["messages"]),
+        )
+        result = resolve_history_selection(snapshot_to_wire(fresh), body, body["purpose"], body["request_context_digest"])
+        if result["status"] != "ready":
+            raise HistorySelectionError(result["code"])
+        # Fence changes alone are not evidence of a changed retained path or context.
+        if result["selection"]["selection_digest"] != body["selection_digest"] or result["selection"]["messages"] != body["messages"]:
+            raise HistorySelectionError("stale_selection")
+        return fresh, content
+
+    def _write_history_authority(self, conn: Any, message_id: str, authority: Mapping[str, Any]) -> None:
+        """Write owner-only provenance; public CRUD and sync never call this seam."""
+        conn.execute(
+            "UPDATE messages SET history_admission_json = ? WHERE id = ?",
+            (json.dumps(authority, sort_keys=True, ensure_ascii=False, separators=(",", ":")), message_id),
+        )
+
+    def _history_message_state(
+        self,
+        conversation_id: str,
+        message_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+    ) -> str:
+        """Hash the accepted row's state without revalidating its old source projection.
+
+        The immutable interpretation tag is part of row state, but resolving its
+        historical base is admission-only. Later source edits are unrelated to
+        the accepted input's content, parent, role, metadata and assets.
+        """
+        fresh, content = self._read_history_snapshot(
+            conversation_id,
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            projection_id=None,
+            conn=conn,
+            selected_ids=(message_id,),
+        )
+        node = next((row for row in snapshot_to_wire(fresh)["nodes"] if row["id"] == message_id), None)
+        if node is None or not content:
+            raise HistorySelectionError("stale_parent")
+        node.pop("revision")
+        item = {key: value for key, value in content[0].items() if key != "revision"}
+        return self._history_digest([node, item])
+
+    @staticmethod
+    def _history_intent_digest(message: Mapping[str, Any]) -> str:
+        """Stable retry identity includes ordered image bytes and explicit parent presence."""
+
+        def encode(value: Any) -> Any:
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                return {"bytes": base64.b64encode(bytes(value)).decode("ascii")}
+            if isinstance(value, Mapping):
+                return {key: encode(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [encode(item) for item in value]
+            return value
+
+        return MessageStore._history_digest(encode(message))
+
+    def append_selected_history_input(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Atomically validate selected history and append one accepted current input."""
+        body, data = dict(selection), dict(message)
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if not data.get("id") or data.get("sender") not in {"user", "tool", "system"}:
+            raise HistorySelectionError("invalid_input")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
+            if existing is not None:
+                authority = json.loads(existing["history_admission_json"] or "null")
+                if (
+                    not isinstance(authority, dict)
+                    or authority.get("intent_digest") != intent
+                    or authority.get("selection") != body
+                ):
+                    raise HistorySelectionError("message_id_conflict")
+                self._validate_history_parent(
+                    conversation_id,
+                    authority["admission"],
+                    owner_client_id=owner_client_id,
+                    owner_key=owner_key,
+                    conn=active,
+                )
+                return authority["admission"]
+            fresh, _ = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            parent = body["messages"][-1]["id"] if body["messages"] else None
+            if "parent_message_id" in data and data["parent_message_id"] != parent:
+                raise HistorySelectionError("parent_mismatch")
+            data.update(conversation_id=conversation_id, parent_message_id=parent, client_id=owner_client_id)
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            scope = dict(
+                active.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+                ).fetchone()
+            )
+            admission = {
+                "version": 1,
+                "owner_key": owner_key,
+                "conversation_id": conversation_id,
+                "input_message_id": mid,
+                "input_message_revision": "1",
+                "selection_digest": body["selection_digest"],
+                "messages": body["messages"],
+                "originating_selection_revision": body["selection_revision"],
+            }
+            authority = {
+                "version": 1,
+                "interpretation": body["interpretation"],
+                "settled": True,
+                "admission": admission,
+                "selection": body,
+                "intent_digest": intent,
+                "storage_context_digest": fresh.storage_context_digest,
+                "scope": scope,
+            }
+            self._write_history_authority(active, mid, authority)
+            authority["input_state_digest"] = self._history_message_state(
+                conversation_id, mid, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            self._write_history_authority(active, mid, authority)
+            return admission
+
+    def append_selected_history_inputs(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Accept a server-owned current-input chain once, under one owner transaction."""
+        body = dict(selection)
+        if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
+            raise HistorySelectionError("invalid_input")
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            consumed = active.execute(
+                "SELECT history_admission_json FROM messages "
+                "WHERE conversation_id = ? AND history_admission_json IS NOT NULL",
+                (conversation_id,),
+            ).fetchall()
+            for row in consumed:
+                authority = json.loads(row["history_admission_json"])
+                if (
+                    authority.get("server_completion") is True
+                    and authority.get("admission", {}).get("owner_key") == owner_key
+                    and authority.get("admission", {}).get("selection_digest") == body.get("selection_digest")
+                ):
+                    raise HistorySelectionError("selection_already_consumed")
+            self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            scope = dict(
+                active.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+                ).fetchone()
+            )
+            parent = body["messages"][-1]["id"] if body["messages"] else None
+            chain = []
+            for message in messages:
+                data = dict(message)
+                if "parent_message_id" in data and data["parent_message_id"] != parent:
+                    raise HistorySelectionError("parent_mismatch")
+                data.update(
+                    id=self._db._generate_uuid(),
+                    conversation_id=conversation_id,
+                    parent_message_id=parent,
+                    client_id=owner_client_id,
+                )
+                mid = self.add_message(data, conn=active)
+                if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                    self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+                self._write_history_authority(
+                    active, mid, {"version": 1, "interpretation": body["interpretation"], "settled": True}
+                )
+                chain.append(
+                    {
+                        "id": mid,
+                        "version": "1",
+                        "state": self._history_message_state(
+                            conversation_id, mid, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                        ),
+                    }
+                )
+                parent = mid
+            admission = {
+                "version": 1,
+                "owner_key": owner_key,
+                "conversation_id": conversation_id,
+                "input_message_id": parent,
+                "input_message_revision": "1",
+                "selection_digest": body["selection_digest"],
+                "messages": body["messages"],
+                "originating_selection_revision": body["selection_revision"],
+            }
+            authority = {
+                "version": 1,
+                "interpretation": body["interpretation"],
+                "settled": True,
+                "server_completion": True,
+                "admission": admission,
+                "selection": body,
+                "scope": scope,
+                "input_state_digest": chain[-1]["state"],
+                "input_chain": chain,
+            }
+            for item in chain:
+                self._write_history_authority(active, item["id"], authority)
+            return admission
+
+    def _validate_history_parent(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+    ) -> dict[str, Any]:
+        """Check owner-issued acceptance and live input state without checking current branch."""
+        if reference.get("owner_key") != owner_key or reference.get("conversation_id") != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        row = conn.execute(
+            "SELECT version, history_admission_json FROM messages "
+            "WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+            (reference["input_message_id"], conversation_id),
+        ).fetchone()
+        if row is None or str(row["version"]) != reference["input_message_revision"]:
+            raise HistorySelectionError("stale_parent")
+        authority = json.loads(row["history_admission_json"] or "null")
+        if not isinstance(authority, dict) or any(
+            authority.get("admission", {}).get(key) != value for key, value in reference.items()
+        ):
+            raise HistorySelectionError("invalid_admission")
+        state = self._history_message_state(
+            conversation_id, reference["input_message_id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+        )
+        if state != authority["input_state_digest"]:
+            raise HistorySelectionError("stale_parent")
+        for item in authority.get("input_chain", []):
+            version = conn.execute(
+                "SELECT version FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (item["id"], conversation_id),
+            ).fetchone()
+            if version is None or str(version["version"]) != item["version"]:
+                raise HistorySelectionError("stale_parent")
+            state = self._history_message_state(
+                conversation_id, item["id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+            )
+            if state != item["state"]:
+                raise HistorySelectionError("stale_parent")
+        scope = dict(
+            conn.execute("SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        )
+        if scope != authority["scope"]:
+            raise HistorySelectionError("stale_scope")
+        return authority
+
+    def settle_history_admission(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> str:
+        """Settle an assistant/tool result against its immutable accepted input."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+
+        binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
+        data = dict(message)
+        if not data.get("id") or data.get("sender") not in {"assistant", "tool"}:
+            raise HistorySelectionError("invalid_settlement")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if "parent_message_id" in data and data["parent_message_id"] != binding["input_message_id"]:
+            raise HistorySelectionError("parent_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            authority = self._validate_history_parent(
+                conversation_id, binding, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            existing = active.execute(
+                "SELECT history_admission_json, deleted, version FROM messages WHERE id = ?", (data["id"],)
+            ).fetchone()
+            if existing is not None:
+                saved = json.loads(existing["history_admission_json"] or "null")
+                if (
+                    existing["deleted"]
+                    or existing["version"] != 1
+                    or not isinstance(saved, dict)
+                    or saved.get("settlement") != binding
+                    or saved.get("intent_digest") != intent
+                ):
+                    raise HistorySelectionError("message_id_conflict")
+                state = self._history_message_state(
+                    conversation_id, data["id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                )
+                if state != saved.get("result_state_digest"):
+                    raise HistorySelectionError("message_id_conflict")
+                return data["id"]
+            data.update(
+                conversation_id=conversation_id, parent_message_id=binding["input_message_id"], client_id=owner_client_id
+            )
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            result_authority = {
+                "version": 1,
+                "interpretation": authority["interpretation"],
+                "settled": True,
+                "settlement": binding,
+                "intent_digest": intent,
+            }
+            # Install the stable interpretation before hashing the row. Legacy
+            # nodes derive their projection tag from this protected provenance.
+            self._write_history_authority(active, mid, result_authority)
+            result_authority["result_state_digest"] = self._history_message_state(
+                conversation_id,
+                mid,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+            )
+            self._write_history_authority(active, mid, result_authority)
+            return mid
 
     def _next_message_order_timestamp(self) -> str:
         """Return a millisecond ISO timestamp that is monotonic for message inserts."""

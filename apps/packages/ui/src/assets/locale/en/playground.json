@@ -1238,5 +1238,86 @@
     "mobilePanelTabs": "Mobile cockpit panels",
     "messageCount_one": "{{count}} message",
     "messageCount": "{{count}} messages"
+  },
+  "historySelection": {
+    "region": "Conversation history selection",
+    "loading": "Loading selected history",
+    "pending": "History confirmation pending",
+    "pendingMessage": "The original choices are retained. Check the same confirmation before creating another interpretation.",
+    "checkConfirmation": "Check original confirmation",
+    "changed": "Conversation history changed",
+    "changedMessage": "Your choices are retained. Refresh the source, then review missing messages or choose a new boundary.",
+    "reason": "Reason",
+    "refresh": "Refresh history",
+    "unavailable": "Selected history unavailable",
+    "unavailableMessage": "You can still read this conversation. A supported, verified history owner is required to continue from a selection.",
+    "bind": "Connect this conversation",
+    "review": "Review conversation history",
+    "empty": "Use no prior messages",
+    "expand": "Expand in full page",
+    "counts": "Complete source / included path",
+    "instructions": "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages.",
+    "source": "Complete source messages",
+    "imageOnly": "Image or attachment only",
+    "emptyMessage": "Empty message",
+    "include": "Include",
+    "omitted": "Omitted alternative",
+    "position": "Path position",
+    "up": "Move earlier",
+    "down": "Move later",
+    "chooseBoundary": "Continue after this message",
+    "beforeFirst": "Before first included message",
+    "throughLast": "Through last included message",
+    "confirmEffect": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives.",
+    "confirm": "Confirm selected history",
+    "cancel": "Cancel review",
+    "expandDescription": "Opens this selected history in the extension full page. Active streaming stays in this panel.",
+    "recoveryTitle": "Turn needs review",
+    "recoveryMessage": "The original send outcome is retained separately from history. It will not be sent again automatically.",
+    "inspectRecovery": "Inspect original input and result",
+    "copyRecovery": "Copy recovered text",
+    "dismissRecovery": "Dismiss recovery",
+    "recoveryLoadError": "Could not load retained send outcomes. Refresh history to try again.",
+    "recoveryState": {
+      "dispatching": "Send outcome pending or unknown",
+      "unknown": "User admission outcome unknown",
+      "accepted_unsent": "User input accepted; response not saved",
+      "accepted_response_unknown": "User input accepted; response outcome unknown",
+      "generated_unsaved": "Generated response needs review"
+    },
+    "copyOpenFailed": "Copy saved; opening failed",
+    "copyRecordFailed": "Copy saved; recovery record update failed",
+    "copyRecordFailedDetail": "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}",
+    "forkLoadError": "Could not load retained fork outcomes.",
+    "forkInspect": "Inspect copy",
+    "forkAllowNew": "Allow a new fork action",
+    "forkNewExplanation": "Allowing a new action permits a separate copy and keeps this result. It does not retry this operation.",
+    "forkStates": {
+      "prepared": {
+        "title": "Fork prepared",
+        "message": "This fork has not been sent. The app will not start another attempt automatically."
+      },
+      "dispatching": {
+        "title": "Fork in progress",
+        "message": "The copy outcome is not confirmed yet. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+      },
+      "unknown": {
+        "title": "Fork status unknown",
+        "message": "A copy may have been created, but its outcome could not be confirmed. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+      },
+      "partial": {
+        "title": "Fork incomplete",
+        "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+      },
+      "completed": {
+        "title": "Fork saved",
+        "message": "The selected supported content was copied. You can inspect the saved copy."
+      },
+      "rejected": {
+        "title": "Fork not started",
+        "message": "No copy was created by this operation. Review the details before starting a new fork."
+      }
+    },
+    "forkDetails": "Operation details"
   }
 }

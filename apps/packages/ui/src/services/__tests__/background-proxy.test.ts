@@ -79,6 +79,46 @@ describe("background proxy fallback safety", () => {
     mocks.storageRemove.mockResolvedValue(undefined)
   })
 
+  it("preserves native projection non-commit details through the real domain and proxy", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 409,
+      error: "stale source",
+      data: { detail: { status: "stale_selection", code: "stale_source" } }
+    })
+    const { chatRagMethods } = await import("@/services/tldw/domains/chat-rag")
+    const confirmation = {
+      version: 1 as const,
+      owner_key: "native-key",
+      conversation_id: "chat",
+      projection_id: "p",
+      source_digest: "source",
+      fences: { conversation: "1", history: "1", settings: "1" },
+      source_members: [],
+      ordered_path_ids: [],
+      cursor: { kind: "empty" as const },
+      selection_revision: 1
+    }
+    await expect(
+      chatRagMethods.confirmHistoryProjection.call(
+        {} as any,
+        "chat",
+        confirmation,
+        {
+          requestScope: {
+            config: { serverUrl: "https://server.test", authMode: "multi-user" },
+            userId: "alice"
+          }
+        }
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      details: { detail: { status: "stale_selection", code: "stale_source" } }
+    })
+    expect(mocks.sendMessage).toHaveBeenCalledOnce()
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
   it("does not fall back to direct request when background returns non-2xx", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: false, status: 500, error: "boom" })
     mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { fallback: true } })
@@ -4318,4 +4358,20 @@ describe("background proxy GET coalescing", () => {
 
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(2)
   })
+})
+
+it.each([
+  ["/api/v1/chats/child", "GET"],
+  ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "GET"],
+  ["/api/v1/chats/child/settings?scope_type=workspace&workspace_id=original", "PUT"]
+])("forwards scoped fork inspection/settings through actual proxy: %s %s", async (path, method) => {
+  mocks.runtimeId = "test-extension"
+  mocks.sendMessage.mockReset()
+  mocks.storageGet.mockResolvedValue(null)
+  mocks.sessionStorageGet.mockResolvedValue(null)
+  mocks.sendMessage.mockResolvedValue({ok: true, status: 200, data: {conversation_id: "child", settings: {}}})
+  const {bgRequest} = await importProxy()
+  const servicePromptConfig = {serverUrl: "https://api.example.com", authMode: "multi-user" as const, expectedUserId: 7}
+  await bgRequest({path: path as `/api/v1/${string}`, method: method as "GET" | "PUT", servicePromptConfig, headers: {"X-TLDW-Expected-User-ID": "7"}, ...(method === "PUT" ? {body: {settings: {authorNote: "explicit"}}} : {})})
+  expect(mocks.sendMessage).toHaveBeenCalledWith(expect.objectContaining({payload: expect.objectContaining({path, method, servicePromptConfig})}))
 })

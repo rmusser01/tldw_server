@@ -1,3 +1,5 @@
+import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useStoreMessageOption } from "@/store/option"
@@ -7,6 +9,7 @@ import {
   formatToChatHistory,
   formatToMessage,
   getFullChatData,
+  getSessionFiles,
   getPromptById
 } from "@/db/dexie/helpers"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -49,6 +52,9 @@ export type PlaygroundSessionRestoreOutcome =
  * - Clears session when user starts a new chat
  */
 export function usePlaygroundSessionPersistence() {
+  const historySelection = useHistorySelectionContext()
+  const selectionRef = useRef(historySelection)
+  selectionRef.current = historySelection
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRestoringRef = useRef(false)
   const initialRestoreSettledRef = useRef(false)
@@ -239,6 +245,7 @@ export function usePlaygroundSessionPersistence() {
       null
 
     return {
+      historySelectionReference: selectionRef.current?.getReference() ?? null,
       historyId,
       serverChatId,
       trackedAssistantSelection,
@@ -531,16 +538,74 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    selectionRef.current?.beginLoad()
+    let selectionCurrent = selectionRef.current?.fence() || (() => true)
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
     const isCurrentRestore = () =>
-      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision && selectionCurrent()
     const scopeKey = await resolveCurrentScopeKey()
     if (!isCurrentRestore()) {
       initialRestoreSettledRef.current = true
       return "cancelled"
     }
-    if (!isSessionValid(scopeKey)) {
+    const tabReference = selectionRef.current?.getStoredReference()
+    const sharedReference = sessionStore.historySelectionReference
+    const matchesShared = tabReference && sharedReference &&
+      tabReference.profile_id === sharedReference.profile_id &&
+      tabReference.owner_key === sharedReference.owner_key &&
+      tabReference.conversation_id === sharedReference.conversation_id
+    const canReuseSharedSession = matchesShared && isSessionValid(scopeKey) &&
+      (tabReference.owner_kind === "local"
+        ? sessionStore.historyId === tabReference.conversation_id && !sessionStore.serverChatId
+        : sessionStore.serverChatId === tabReference.conversation_id)
+    if (tabReference) {
+      const selected = selectionRef.current!
+      const loaded = await selected.loadConversation(tabReference.owner_kind === "local"
+        ? { historyId: tabReference.conversation_id } : { serverChatId: tabReference.conversation_id }, tabReference)
+      if (!loaded || usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+      selectionCurrent = selected.fence()
+      // A failed owner validation stays visible; never substitute the other tab's session.
+      if (!selected.getCurrent().capture) return "restored"
+      setHistoryId(tabReference.owner_kind === "local" ? tabReference.conversation_id : null)
+      setServerChatId(tabReference.owner_kind === "native" ? tabReference.conversation_id : null)
+      if (!canReuseSharedSession) {
+        setQueuedMessages([])
+        setServerChatAssistantKind(null)
+        setServerChatAssistantId(null)
+        setServerChatCharacterId(null)
+        setServerChatPersonaMemoryMode(null)
+        setServerChatMetaLoaded(false)
+        await setSelectedAssistant(null)
+        if (!isCurrentRestore()) return "cancelled"
+        setSystemPrompt("")
+        useStoreMessageOption.getState().setContextFiles([])
+        if (tabReference.owner_kind === "local") {
+          const chatData = await getFullChatData(tabReference.conversation_id)
+          if (!isCurrentRestore()) return "cancelled"
+          if (chatData) {
+            const prompt = chatData.historyInfo.last_used_prompt
+            setSystemPrompt(prompt?.prompt_content || "")
+            const files = await getSessionFiles(tabReference.conversation_id)
+            if (!isCurrentRestore()) return "cancelled"
+            useStoreMessageOption.getState().setContextFiles(files)
+            if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
+            if (selected.getCurrent().capture?.status !== "captured") {
+              if (selected.getCurrent().error === "unsupported_comparison_history") {
+                await restoreReadableLocalComparison(selected, display => { setHistory(display.history); setMessages(display.messages) }, chatData)
+                if (!isCurrentRestore()) return "cancelled"
+              } else {
+                setHistory(formatToChatHistory(chatData.messages))
+                setMessages(formatToMessage(chatData.messages))
+              }
+            }
+          }
+        }
+        initialRestoreSettledRef.current = true
+        return "restored"
+      }
+    }
+    if (!tabReference && !isSessionValid(scopeKey)) {
       clearSession()
       initialRestoreSettledRef.current = true
       return "not-restored"
@@ -571,15 +636,34 @@ export function usePlaygroundSessionPersistence() {
         const chatData = await getFullChatData(savedHistoryId)
         if (!isCurrentRestore()) return "cancelled"
         if (!chatData) {
+          if (tabReference) return "restored"
           // History was deleted, clear session
           clearSession()
           return "not-restored"
         }
 
+        if (selectionRef.current && !tabReference) {
+          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+          selectionCurrent = selectionRef.current.fence()
+          const current = selectionRef.current.getCurrent()
+          if (!current.capture && current.error) {
+            if (current.error === "unbound_server_mirror") {
+              // Preserve the local read-only locator; binding is a separate explicit action.
+              setHistoryId(savedHistoryId)
+              setServerChatId(null)
+              setHistory(formatToChatHistory(chatData.messages))
+              setMessages(formatToMessage(chatData.messages))
+            }
+            return "restored"
+          }
+        }
         // Restore messages and history
         setHistoryId(savedHistoryId)
-        setHistory(formatToChatHistory(chatData.messages))
-        setMessages(formatToMessage(chatData.messages))
+        if (selectionRef.current?.getCurrent().capture?.status !== "captured") {
+          setHistory(formatToChatHistory(chatData.messages))
+          setMessages(formatToMessage(chatData.messages))
+        }
 
         // Restore system prompt if present
         const lastUsedPrompt = (chatData.historyInfo as any)?.last_used_prompt
@@ -596,11 +680,19 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore settings from session store
-      if (savedServerChatId) {
+      if (savedServerChatId && selectionRef.current?.getCurrent().error !== "unbound_server_mirror") {
+        if (!savedHistoryId && selectionRef.current && !tabReference) {
+          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+          selectionCurrent = selectionRef.current.fence()
+          if (!selectionRef.current.getCurrent().capture && selectionRef.current.getCurrent().error) return "restored"
+        }
         if (!savedHistoryId) {
           setHistoryId(null)
-          setHistory([])
-          setMessages([])
+          if (selectionRef.current?.getCurrent().capture?.status !== "captured") {
+            setHistory([])
+            setMessages([])
+          }
         }
         setServerChatId(savedServerChatId)
         if (
@@ -649,9 +741,14 @@ export function usePlaygroundSessionPersistence() {
       }
       setChatMode(sessionStore.chatMode)
       setWebSearch(sessionStore.webSearch)
-      setCompareMode(sessionStore.compareMode)
-      if (sessionStore.compareSelectedModels.length > 0) {
-        setCompareSelectedModels(sessionStore.compareSelectedModels)
+      const restoredOwner = selectionRef.current?.getCurrent().owner
+      // Local H1 comparison is restored from its per-conversation compareStates.
+      // A shared session snapshot can predate that asynchronous owner hydration.
+      if (restoredOwner?.kind !== "local" || restoredOwner.conversation_id !== savedHistoryId) {
+        setCompareMode(sessionStore.compareMode)
+        if (sessionStore.compareSelectedModels.length > 0) {
+          setCompareSelectedModels(sessionStore.compareSelectedModels)
+        }
       }
 
       // Restore RAG settings
@@ -711,6 +808,7 @@ export function usePlaygroundSessionPersistence() {
       saveTimerRef.current = null
     }
     initialRestoreSettledRef.current = true
+    selectionRef.current?.reset()
     clearSession()
   }, [clearSession])
 

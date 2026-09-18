@@ -18,6 +18,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import {
   TldwChatService,
+  prepareChatCompletionRequest,
   getLastChatCompletionDebugSnapshot
 } from "@/services/tldw/TldwChat"
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
@@ -661,4 +662,63 @@ describe("TldwChatService message sanitization", () => {
 
     await expect(streamRun).resolves.toEqual(["hello", " world"])
   })
+})
+
+
+it("dispatches the exact finalized stateless wire body without rereading messages or settings", async () => {
+  mocks.streamChatCompletion.mockImplementation(async function* () {
+    yield { choices: [{ delta: { content: "ok" } }] }
+  })
+  const request = prepareChatCompletionRequest(
+    [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "c1",
+            type: "function",
+            function: { name: "lookup", arguments: "{}" }
+          }
+        ]
+      },
+      { role: "tool", tool_call_id: "c1", content: " result " },
+      { role: "user", content: " next " }
+    ],
+    {
+      model: "chosen",
+      temperature: 0.23,
+      slashCommandInjectionMode: "replace",
+      saveToDb: false
+    },
+    true
+  )
+  Object.freeze(request)
+  const service = new TldwChatService()
+  for await (const _ of service.streamMessage(
+    [{ role: "user", content: "wrong" }],
+    {
+      model: "changed",
+      slashCommandInjectionMode: "preface",
+      temperature: 1.8,
+      conversationId: "ambient",
+      saveToDb: true,
+      preparedRequest: request
+    }
+  )) {
+  }
+  const actual = mocks.streamChatCompletion.mock.lastCall?.[0]
+  expect(actual).toBe(request)
+  expect(actual).toMatchObject({
+    model: "chosen",
+    slash_command_injection_mode: "replace",
+    temperature: 0.23,
+    save_to_db: false,
+    messages: [
+      { role: "assistant", content: null },
+      { role: "tool", tool_call_id: "c1", content: "result" },
+      { role: "user", content: "next" }
+    ]
+  })
+  expect(actual.conversation_id).toBeUndefined()
 })
