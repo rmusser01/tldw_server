@@ -2,7 +2,7 @@
 
 Tracking: TASK-13261.1. This is a source delta review during H1 implementation, supplementing the [parity inventory](2026-09-16-chatbook-console-parity-matrix.md) and [review closure](2026-09-16-chatbook-chat-parity-review-closure.md). It does not award an implemented or Equivalent status.
 
-Latest verified pins: server `59049e094e0845a4611ea725ae19b7c1754ea709`, Chatbook `e89f28d751bc8a5b4f4545b8894b87437252c657`, rechecked unchanged at 2026-09-18 04:50:48 UTC (September 17 local time). The four refreshes below preserve their own evidence and scope.
+Latest verified pins: server `59049e094e0845a4611ea725ae19b7c1754ea709`, Chatbook `e89f28d751bc8a5b4f4545b8894b87437252c657`, rechecked unchanged at 2026-09-18 06:15:59 UTC (September 17 local time). The four refreshes below preserve their own evidence and scope.
 
 Rechecked during browser qualification at 2026-09-18 02:16 UTC (September 17 local time): `git ls-remote https://github.com/rmusser01/tldw_server.git refs/heads/dev` and the corresponding `tldw_chatbook.git` query returned server `59049e094e0845a4611ea725ae19b7c1754ea709` and the then-current Chatbook `d8fb4053f9a27a799d5cdb8ee58f7fd1de91efce`. Initial sandbox queries could not resolve GitHub; authorized network reads succeeded. No fetch or checkout mutation was needed, and no new source delta was present.
 
@@ -89,3 +89,7 @@ H1 continues to bind the exact composer inputs it consumes; staged excerpts cann
 Read-only remote recheck at 2026-09-18 04:10:21 UTC (September 17 local time) confirmed both dev heads unchanged: Chatbook `e89f28d751bc8a5b4f4545b8894b87437252c657` and server `59049e094e0845a4611ea725ae19b7c1754ea709`. No additional source delta or audit was introduced; all earlier code/test provenance remains at its recorded pin.
 
 A further authorized read-only remote recheck at 2026-09-18 04:50:48 UTC confirmed the same two dev heads. No new source delta or audit was required.
+
+The authorized read-only recheck at 2026-09-18 05:36:50 UTC, during the whole-branch fix wave, again returned those same Chatbook and server dev heads. No fetch or checkout mutation was performed, and no new source delta or repeated audit was needed.
+
+The final authorized read-only recheck at 2026-09-18 06:15:59 UTC again returned unchanged Chatbook `e89f28d751bc8a5b4f4545b8894b87437252c657` and server `59049e094e0845a4611ea725ae19b7c1754ea709` dev heads. No fetch, checkout mutation or additional source audit was needed before bounded H1 acceptance.

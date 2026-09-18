@@ -4,7 +4,9 @@ Date: 2026-09-16
 
 Tracking: TASK-13261
 
-Status: reviewed design with H1 implementation in progress under TASK-13261.1; no complete parity row is awarded. The [closure addendum][closure] records current binding decisions and review-loop status; [first][review] and [second][review2] reviews retain historical findings. The [2026-09-17 source refresh](2026-09-17-chatbook-chat-parity-source-refresh.md) records the latest model/settings/readiness, Library excerpts and warm handoffs, capture lifecycle, batch-ingestion/setup and local STT diagnostic changes.
+Status: reviewed design with bounded H1 implementation accepted under TASK-13261.1 at `9a9a012c42`; no complete parity row is awarded. The [closure addendum][closure] records current binding decisions and review-loop status; [first][review] and [second][review2] reviews retain historical findings. The [2026-09-17 source refresh](2026-09-17-chatbook-chat-parity-source-refresh.md) records the latest model/settings/readiness, Library excerpts and warm handoffs, capture lifecycle, batch-ingestion/setup and local STT diagnostic changes.
+
+H1 completion: the [accepted verification record](../Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md) supersedes the historical destination findings below only for its qualified selected-history, scoped mutation and bounded-copy behavior. The remaining full-row acceptance scenarios, including rich/temporary copying and synchronized continuations, remain open. The final whole-branch and fix reviews have no unresolved H1 P1/P2 findings; this does not award Equivalent to B01–B05 or any other row.
 
 Read the [call-path audit and port design][audit] for mounted flows, retained-field contracts and earlier test results, and the [closure addendum][closure] for selection, publication, local availability, sync authority and runtime decisions. E1–E12 identify the audited areas. This inventory does not claim all rows are live-qualified.
 

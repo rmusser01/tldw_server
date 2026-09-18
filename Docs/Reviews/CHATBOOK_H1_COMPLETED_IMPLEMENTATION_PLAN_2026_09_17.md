@@ -1,6 +1,6 @@
 # Chatbook H1 History Selection and Fork Ownership Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Use only delegation authorized by the current session or applicable instructions.
+> **Completed execution record:** All five stages are accepted for TASK-13261.1 at application commit `9a9a012c42`. This archived plan preserves the implementation sequence and historical checkpoints; it does not authorize unrelated follow-on work. See the [final verification record](CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md).
 
 **Goal:** Make normal send and Fork use the user's selected history, isolate current local copies from their source, and preserve the owner of uncertain fork operations.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Existing TypeScript/React shared UI, Dexie 4, Vitest 4, Playwright, FastAPI/Pydantic, Python `hashlib`, SQLite/PostgreSQL chat backends and `@noble/hashes` 2.0.1. Follow the checked-out lockfiles and project virtual environment; no added runtime dependency.
 
-**Spec:** [H1 selected history and fork ownership](Docs/Design/2026-09-16-chatbook-h1-history-selection-design.md). Read it and the linked [D1–D6 closure](Docs/Design/2026-09-16-chatbook-chat-parity-review-closure.md) before implementation. Tracking: TASK-13261.1; design: TASK-13261.
+**Spec:** [H1 selected history and fork ownership](../Design/2026-09-16-chatbook-h1-history-selection-design.md). Read it and the linked [D1–D6 closure](../Design/2026-09-16-chatbook-chat-parity-review-closure.md) before implementation. Tracking: TASK-13261.1; design: TASK-13261.
 
 ## Global Constraints
 
@@ -27,7 +27,7 @@
 
 Execution started from the reviewed design commit on `codex/chatbook-h1-history-selection`; per-stage status and the execution ledger record progress. This plan is not a passing test report. The reviewed server pin is `59049e094e0845a4611ea725ae19b7c1754ea709`; Chatbook is `24094f23d59c7a9d3cfac964c19fd263bc0393b2`. Source paths below were checked against that server object. New paths are explicitly labeled Create.
 
-Fresh remote verification on 2026-09-17 found server dev unchanged and Chatbook advanced first to `1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6`, then to `c97a64eba54d18f88cecc77bf6233e208df8bf24`. The [source delta review](Docs/Design/2026-09-17-chatbook-chat-parity-source-refresh.md) records the C07/C08 settings/provider/context refinements and the later batch-ingestion/setup/clipboard changes. A third read-only refresh during Task5 preparation found Chatbook `d8fb4053f9a27a799d5cdb8ee58f7fd1de91efce`, adding local Library STT failure diagnostics. A fourth read-only refresh found `e89f28d751bc8a5b4f4545b8894b87437252c657` (PR 2704): real Library excerpts and warm handoffs, workspace link Undo, settings/capture lifecycle and local RAG identity refinements. The preserved source audit maps these to broader parity acceptance; no identified H1 ancestry/admission/fork contract changes follow. Historical evidence retains its original pin; broader parity remains open.
+Fresh remote verification on 2026-09-17 found server dev unchanged and Chatbook advanced first to `1c0327b3bb3d95b61e3e1b9a83b30e7030453ad6`, then to `c97a64eba54d18f88cecc77bf6233e208df8bf24`. The [source delta review](../Design/2026-09-17-chatbook-chat-parity-source-refresh.md) records the C07/C08 settings/provider/context refinements and the later batch-ingestion/setup/clipboard changes. A third read-only refresh during Task5 preparation found Chatbook `d8fb4053f9a27a799d5cdb8ee58f7fd1de91efce`, adding local Library STT failure diagnostics. A fourth read-only refresh found `e89f28d751bc8a5b4f4545b8894b87437252c657` (PR 2704): real Library excerpts and warm handoffs, workspace link Undo, settings/capture lifecycle and local RAG identity refinements. The preserved source audit maps these to broader parity acceptance; no identified H1 ancestry/admission/fork contract changes follow. Historical evidence retains its original pin; broader parity remains open.
 
 Execution uses the root checkout's existing virtual environment with this isolated worktree as cwd/PYTHONPATH. After a frozen Bun install, `pnpm exec` attempted dependency reconciliation; use the installed `apps/packages/ui/node_modules/.bin/vitest` from the UI package cwd for equivalent focused test commands. The shared JSON fixture is explicitly tracked despite the repository's JSON ignore rule.
 
@@ -512,9 +512,9 @@ Execution evidence: Task 4.2 implementation `ec5f19816c`, locale completion `ac6
 
 **Tests:** H1-A through H1-H, relevant baseline regressions, live IndexedDB rollback/reopen and real SQLite/PostgreSQL admission.
 
-**Status:** In Progress (Task5.1 implementation and fix1 passed scoped review through `d6129ace01`; whole-branch review of `f00e12a5aa..34f737d3c8` returned F1/P2 recovery-owner invalidation, F2/P2 retained-editor identity and M1/P3 saved-copy feedback. A combined fix and independent re-review are required).
+**Status:** Complete. The whole-branch review and fresh scoped fix re-review resolve F1/P2 recovery-owner invalidation, F2/P2 retained-editor identity and M1/P3 saved-copy feedback at `9a9a012c42`; no required H1 P1/P2 remains.
 
-Qualification checkpoint: Task5 fix1 passed independent scoped review for all four original findings and three confirmed evidence gaps. Final affected verification is174unit tests/11files and4/4 repeated full-tip cases in each shell, with no skips/retries/unexpected/flaky outcomes. The29named-case/31actual-result union per shell explicitly reuses earlier unchanged passing cases. Both builds complete; the full frontend typecheck retains90byte-identical initial-base diagnostics, and final lint reports0errors/148warnings versus0/147base. The finalized WebUI artifact still has two traced-copy ENOENT warnings from old test profiles; standalone deployment completeness is unverified despite passing static-token and bundle checks. Whole-branch triage must assess the inner positional message key, saved-copy notification issue and all prior observations. See the [verification record](Docs/Reviews/CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md) and [scoped review](Docs/Reviews/CHATBOOK_H1_TASK5_FIX1_REVIEW_2026_09_17.md).
+Final qualification: the final affected fix passed 136 tests/9 files and independent scoped review. Prior Task5 evidence retains 174 tests/11 files and the 29-case/31-result reuse mapping per shell, including final 4/4 navigation repetitions; these counts overlap and are not a new combined final browser run. Both final builds completed, but frontend types retain 90 byte-identical initial-base diagnostics and the WebUI artifact retains two traced-copy ENOENT warnings; standalone deployment completeness is unverified. Final fix lint is 0 errors/77 warnings with zero added/removed diagnostics against its immutable base. The [verification record](CHATBOOK_H1_HISTORY_SELECTION_VERIFICATION_2026_09_17.md), [whole-branch review](CHATBOOK_H1_WHOLE_BRANCH_REVIEW_2026_09_17.md) and [final scoped review](CHATBOOK_H1_WHOLE_BRANCH_FIX_REVIEW_2026_09_17.md) preserve full findings, commands and boundaries.
 
 ### Task 5.1: browser flows, regression and release record
 
@@ -556,9 +556,9 @@ source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && py
 
 If additional Python is touched, add it to the scope. Compare existing findings with the baseline; fix all new findings introduced by the change. Record code compile/lint checks and `git diff --check`.
 
-- [ ] Perform independent review of the actual diff, especially admission dispatch races, multi-view legacy interpretations, copy allowlist/parent remapping, source isolation and unknown outcomes. Fix each P1/P2 and rereview affected behavior; do not close on a list of proposed fixes.
-- [ ] Fill the verification record with commit/base, commands, pass/fail/skip counts, artifacts, supported modes and remaining H2/H3/H4/F02 work. All required H1 modes must pass before TASK-13261.1 is Done. Keep the overall parity inventory honest.
-- [ ] Commit only this work and its tracking. A draft PR may summarize the concrete problem and validation when requested/authorized; merging still follows the repository's human-authored Change summary rule. Remove only this implementation plan after all stages are complete if following the repository cleanup convention, retaining its committed history and durable verification links.
+- [x] Perform independent review of the actual diff, especially admission dispatch races, multi-view legacy interpretations, copy allowlist/parent remapping, source isolation and unknown outcomes. Fix each P1/P2 and rereview affected behavior; do not close on a list of proposed fixes.
+- [x] Fill the verification record with commit/base, commands, pass/fail/skip counts, artifacts, supported modes and remaining H2/H3/H4/F02 work. All required H1 modes must pass before TASK-13261.1 is Done. Keep the overall parity inventory honest.
+- [x] Commit only this work and its tracking. A draft PR may summarize the concrete problem and validation when requested/authorized; merging still follows the repository's human-authored Change summary rule. Archive only this completed implementation plan under Docs/Reviews after all stages are complete, retaining its committed history and repairing current documentation links. Preserve the local branch/worktree and build/profile evidence.
 
 ## Acceptance-to-task map
 
