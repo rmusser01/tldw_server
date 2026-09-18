@@ -1,0 +1,109 @@
+{
+  "task": "TASK13260.178 UAT236 fresh-profile retention audit",
+  "verdict": "CLEAR bounded fresh-profile AC3 packet retained exactly",
+  "manifestSha256": "25dbb7aa812039b8f695a948837e10d75b208b6710d9e77a808f6fccf78e781f",
+  "retainerSha256": "75a345db1393a9e02b1328eaa4b875dae0a5adcc279538c26454ac45df24bb57",
+  "checks": [
+    {
+      "name": "Declared manifest checksum matches",
+      "pass": true
+    },
+    {
+      "name": "Packet is bounded to UAT236 acceptance",
+      "pass": true
+    },
+    {
+      "name": "Manifest secret counters are zero",
+      "pass": true
+    },
+    {
+      "name": "Every packaged payload matches its source bytes and manifest",
+      "pass": true
+    },
+    {
+      "name": "Every packet checkpoint matches",
+      "pass": true
+    },
+    {
+      "name": "Source reviewer recorded a complete passing 21-check audit",
+      "pass": true
+    },
+    {
+      "name": "All 43 source inputs still match their recorded hashes and sizes",
+      "pass": true
+    },
+    {
+      "name": "Packet omission records are the complete 43-input hash projection",
+      "pass": true
+    },
+    {
+      "name": "AC3 evidence is actual library Chat, exact persisted canonical completion, and no reselection",
+      "pass": true
+    },
+    {
+      "name": "Fresh-profile scope and UAT261 limitation remain explicit",
+      "pass": true
+    },
+    {
+      "name": "Safe packet does not contain known private credential values or generic token forms",
+      "pass": true
+    }
+  ],
+  "counts": {
+    "payloads": 3,
+    "checkpoints": 5,
+    "provenanceInputs": 43,
+    "privateHashOnlyInputs": 7,
+    "privateFillCandidatesScanned": 1
+  },
+  "payloadHashes": [
+    "f00924a19617b429b0a8881ecfb96fe4cc7da4528af4efc680b96226c02c2cf2",
+    "06b39bb7412ecf1c097d554e8cb61c0cb9170434ddf0eefedbafbb2c306f676a",
+    "49659a2ba28fc91d82a4356caf51f1245ecc73e9b4999fdc4275b99373d30929"
+  ],
+  "inputHashes": [
+    "06b39bb7412ecf1c097d554e8cb61c0cb9170434ddf0eefedbafbb2c306f676a",
+    "099bd3d1706b9a24de1f8bf6fc690da801f0c9604ffbfdb30384e72aa8c61b05",
+    "099bd3d1706b9a24de1f8bf6fc690da801f0c9604ffbfdb30384e72aa8c61b05",
+    "0a093490c3bf61e12192c90f3ca2c2ca84c49515376b43071692bec7afcb5cf0",
+    "0d4c3386aacb4271793404aab15f0a7e225c635755756c17cbde1971aa04094b",
+    "1126c3f50de45218fcf9bc6b0b2f4cb713579ec05d84110f8e7a3aa2621badb2",
+    "1583ff5447d57c64b17df4f9aa090ed43f77ff92ba153336cd2b2f325ca00385",
+    "276ddb4da9004157570fcb4b6238a192a58ec1c68cebfb5eda4d4c6f04303e7d",
+    "3525d20d7b6146059564000b92a372412ba09ec0805ced6bb3de8e004d83f2a7",
+    "3f8809c573ec5ca63aaa4f6263c054679b831743989ad144f2d41a3b1a608abd",
+    "413a107406f017bc8337f26ac186d9adc1606614032ad7c8e537dea925fa47a0",
+    "4228aa4ce1fa50192a783ff61152d709d5827fe7367964c17f0f7127d3630db1",
+    "4228aa4ce1fa50192a783ff61152d709d5827fe7367964c17f0f7127d3630db1",
+    "4726de65f9c49626678527f0b85822934252e2714582ccf40b66fc4ef1666ed2",
+    "49ed955ea85f10253a6f0640ac50e3fa9462ccc44610bac4e2038b64ca03050f",
+    "4cb87c91018c4bf16ca5eda29163b999b8b734f95ae79708922b79de807371d4",
+    "54482c418ab37454c538a0aa3093012d0d21e167177e49618437fa2d4612aa00",
+    "54482c418ab37454c538a0aa3093012d0d21e167177e49618437fa2d4612aa00",
+    "551f96429ff99f5b4de49a98dd11ab286c9e8f63a5acbba2d8b670d539db8e51",
+    "56ffbbe0cce3c2179dbe23500db5f7e114e2f06fb127ff3a0e24772be1354cb8",
+    "5a146c5373e7972f346e82fbd043715511886bf9ac0d3f8a1abacf5b60d2195d",
+    "5ddf05c07bb21d5dacfdbdcace08d42a8fc2f2596e97f97f3a4f74edf561dd3e",
+    "62c9997aee408b86400ceedf12ac844a8186ea6bb2a6374264ac6e4bacff0c44",
+    "71579787f7179754c83c6de7b8e8592d079f607c3469034a12efe504e3e42662",
+    "827409c71366a412c4715f7afe34bd261bc5705657f85d14ead18c1a18495711",
+    "8d83c50f1ecbef6bf96dcf0d9d1318525fce6735e8797bd5e404d5cc739190fa",
+    "915abdfc76c58aae60e74b367e48692a21e2e2c8971e0837ccd15118ab20868c",
+    "93006bda43b25d8b5f696aaf91f3d5ed516e7f37e649aaff840a4c6a6e00c534",
+    "9f8ece970905dc534e9374d9b9afab4a0107e9bd624c2a30ef872be04ab4a813",
+    "a0c13f1769aa5f45b047e68b64b6317760b83da4e42bcd52200577413ce29606",
+    "a66106a23fffd51c275bfb04eeee56ff58976e7eed67880ba4451deb334f3a0a",
+    "a663d7ef9d186e0894b10827cd56547698f6c64aa24ff15de16cf3650e8b47f9",
+    "a8a641a9b3b972323ffb26f9c9d38def3948e9394bdaa440329dadb3d4ecec23",
+    "a90634fff4b8c6f37af467db9ab0976f1f702f26f935b510e8079634dfd5f508",
+    "ad0c7e93890c4008c70a2283373ad14f06a82802df4835fc4b4e19b400e2862b",
+    "b4adbf7926b22995c46d6aef5c10c97d46ad27bcc6588b48a4091407bd518ab3",
+    "b77d4ea8db1288301416fb4e54480f93fa0c8631a7b4dfdbfc80abc9a8ad2eb6",
+    "c0b728567b4544a5ab838fb08d26a07ee98dfc9908794378aafb78ff0385dbea",
+    "da822136685593f40c884af0eb6d7d1b663ab434b0bce8f83131fc2788099745",
+    "f604be887bd2111f3b57a6ec3efc2dabe5293ff91de6efa5819815279c1f7659",
+    "f73cc25815fffafbb7ef99e7a9b256ed0492c1431b3b290eeaaff3cd8eb8b951",
+    "f7890b7d82e8beb7c2ee40181972f0fa23690b2ceec77b0fa24a6f4601fc7460",
+    "fe5b0a7aa47894c25fcba740b861ca52f0230dbffedb758601fbd7de94dbdbb8"
+  ]
+}

@@ -263,3 +263,9 @@ TASK13260.209. Corrected264canonicalauthroute reaches actual500 on frozen2ff90d1
 ## Task210: full World Book lifecycle compatibility
 
 **Status:** In Progress. User-approved concurrent ownership is disjoint from Sources267. Official fixture RED identifies268 PostgreSQL entry connection misuse and269 SQLite entry writes escaping caller rollback. Add independent seeded operation cases for remaining supported mutations; preserve all causal failures and narrow fixes to proven boundaries. Independent review/native acceptance required. Existing260/265/266 fixes committed0d7f2a23c9 and remain the frozen native candidate.
+
+## Task211: legacy World Book regression harness
+
+**Status:** In Progress. TASK13260.211/UAT270 records ten failures reproduced on both0d7 and210. An implementer owns only the legacy test file, with production210 and its new lifecycle test frozen. Require faithful database doubles, unchanged behavior assertions, independent review and adjacent real-backend controls.
+
+- UAT236 fresh-profile AC3 and independent retention are verified; TASK13260.178 Done. Current270 findings:261verified,4reviewed/native-pending,5active. Root independent210 checks pass21 actual SQLite/PG lifecycle and timestamp cases plus10permissions/negative cases. Native260265266 runs on immutable0d7 source with unchanged original profile/init/holder; no inference.

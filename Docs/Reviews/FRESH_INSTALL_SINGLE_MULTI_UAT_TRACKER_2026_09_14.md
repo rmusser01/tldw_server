@@ -1,6 +1,6 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current repair gate:** 269 findings: 260 verified; 5 reviewed fixes awaiting native acceptance (236, 260, 264, 265, 266); 4 under investigation or repair (261, 267, 268, 269). Fresh-setup TestBot now completes and reloads without model reselection; independent review is underway. World Book timestamp/edit/attachment fixes are committed and awaiting native checks. Separate implementers own Sources portability and the remaining World Book lifecycle. Shared-model calls remain serialized. The next full fresh-install matrix has not started.
+- **Current repair gate:** 270 findings: 261 verified; 4 reviewed fixes awaiting native acceptance (260, 264, 265, 266); 5 under investigation or repair (261, 267, 268, 269, 270). Fresh-setup TestBot completes and reloads without model reselection, with independent native and retention reviews passed. World Book timestamp/edit/attachment UI checks are underway on committed source. Sources portability and World Book lifecycle/test repairs remain separate work units. Shared-model calls remain serialized. The next full fresh-install matrix has not started.
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -2931,3 +2931,15 @@ A separate test assertion used `entry_id` where the public result has `id`; that
 ### Parallel execution update
 
 The user approved two implementers in disjoint areas, with a coordinator and independent reviewer/native-UAT worker. Sources267 and World Book lifecycle210 now proceed concurrently. Git, shared infrastructure and fixture ownership remain coordinated. Native workers have exclusive browser/profile/port ownership, and the shared local model is used serially.
+
+## UAT236 — fresh setup acceptance verified
+
+The preserved fresh MCP251 PostgreSQL single-user profile resumes its setup wizard on source a7d3155a567afb25982eb360ea24b973cc3249c9. First chat returns ready200, normal credential entry succeeds, and normal Characters creation uses the exact workflow name E2E-TestBot and exact saved instruction. Library Chat uses the original configured model without reselection. Initial completion and persistence succeed; normal reload returns the same conversation a1979872-5e20-4288-8d06-062545bfeca2 with two canonical rows and exact final BEEP BOOP.
+
+Independent native review passes21 checks over43 hashed inputs; a separate retention review verifies all43 inputs and exact safe payloads. [Accepted packet](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-model236-fresh-accepted/README.md), manifest25dbb7aa812039b8f695a948837e10d75b208b6710d9e77a808f6fccf78e781f. [Retention review](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-model236-fresh-retention-review/REVIEW.md). Earlier picker-only evidence and its correction remain unchanged. This resumed fresh application profile reuses dependencies; no clean-OS or full-matrix claim. The different tagged Character failures in261 remain unresolved. TASK13260.178 is Done.
+
+## UAT270 — P2: legacy World Book tests use stale database doubles
+
+TASK13260.211 tracks ten failures encountered during lifecycle qualification. The candidate and independently selected committed0d7 production module both produce29passed/10failed with the same failure names. This proves they predate the210 lifecycle patch, not that they can be ignored. Read/query mocks, attachment reference checks and dependent clone/export/context behavior need comparison with the maintained service contracts. Retain behavior assertions; repair only proven stale mocks and record any actual product defect separately. Baseline log remains local at .tmp/uat-repairs-231-246/worldbook-lifecycle210/root-legacy-baseline.log.
+
+UAT236 post-closure recheck: all42 immutable provenance inputs still match. The only changed input is the Backlog task intentionally moved to Done; its pre-closure bytes match git592521e9fa. Original11-check retention audit remains unchanged in its packet. [Additive metadata supplement](../../output/playwright/fresh-matrix-repairs-2026-09-17/native-model236-closure-metadata/CLOSURE-METADATA-SUPPLEMENT.md) records the strict rerun mismatch and closure-only diff without revising the acceptance evidence.
