@@ -1,0 +1,7 @@
+# Native ordinary Chat guidance and retry acceptance (UAT232/256)
+
+Independent reviews pass 14 initial and 14 supplemental checks. The original new repeated question received a real unavailable-model 400 with correct visible guidance, then failed Retry with 409 before the identity repair. On reviewed revision2787043410, Retry preserves the failed client identity and conversation, returns200 with one successful terminal marker, and saves ORBIT-742. Normal reload shows Saved and seven canonical rows; all five original records remain byte-identical. The two new canonical rows are ordered user then assistant.
+
+Both PostgreSQL upgrade copies have actual source/binding/profile/initialization/holder hash parity. The native recovery is single-user; this does not claim native multi-user retry, all providers, cancellation, or full48-row matrix acceptance. Initial UI-review limitations are resolved by the supplemental review, and both reports remain unchanged.
+
+This packet retains safe audit facts, checks, source references and hashes. Raw original local captures can contain provider reasoning; private profiles/process receipts and large immutable source records are represented by hashes only and remain at their original local paths. The omitted-input ledger explicitly describes each boundary. No claim that the public packet alone replays those omitted inputs. Audit scripts expect the original repository-root scratch layout.

@@ -1,0 +1,234 @@
+{
+  "issue": "UAT232/256 supplemental independent native retry review",
+  "status": "pass",
+  "checks": [
+    {
+      "name": "Model232 capture displays selected-model unavailable guidance",
+      "pass": true
+    },
+    {
+      "name": "Model232 error capture retains the retry-same-model action before the later retry",
+      "pass": true
+    },
+    {
+      "name": "Retry256 canonical reload shows the expected success markers",
+      "pass": true
+    },
+    {
+      "name": "Retry256 canonical reload has no active selected-model-unavailable or retry control",
+      "pass": true
+    },
+    {
+      "name": "Model232 settled reload has no active unavailable guidance",
+      "pass": true
+    },
+    {
+      "name": "Canonical recovery grows exactly from five rows to seven rows",
+      "pass": true
+    },
+    {
+      "name": "All five original canonical rows remain byte-identical after recovery",
+      "pass": true
+    },
+    {
+      "name": "pg-single startup receipts bind the actual immutable binding",
+      "pass": true
+    },
+    {
+      "name": "pg-single binding preserves profile initialization and holder identities",
+      "pass": true
+    },
+    {
+      "name": "pg-single immutable chat service matches the revision-bound manifest",
+      "pass": true
+    },
+    {
+      "name": "pg-multi startup receipts bind the actual immutable binding",
+      "pass": true
+    },
+    {
+      "name": "pg-multi binding preserves profile initialization and holder identities",
+      "pass": true
+    },
+    {
+      "name": "pg-multi immutable chat service matches the revision-bound manifest",
+      "pass": true
+    },
+    {
+      "name": "Both immutable copies have identical chat-service bytes",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "oldCanonicalRows": 5,
+    "recoveredCanonicalRows": 7,
+    "oldCanonicalProof": [
+      {
+        "idSha256": "b06452af3a0101630d5dddf91a5bab21c571661a18c1a88ff5579bcbc0cd7b2e",
+        "contentSha256": "c8472cd9daed5e7c20aa53689e441e10620a002aacd58686aeac2cb188addb5c",
+        "recordSha256": "fb02275f47dab31318e925a17261f24f2bf14f9f9f87d84f532c63d9c06641da",
+        "exactRecordMatch": true
+      },
+      {
+        "idSha256": "85d86db8e34a0b0866225990c7ff2d53a123673eaaf4a3467263b96f83e669b4",
+        "contentSha256": "e95ac433c8898bfeab1e53703c81c1c0b80f6ebd7fbe3933b6356270cb814ad0",
+        "recordSha256": "e5f5482153653bfb21d905a3b6eae97597e46c0ee276794ede65ab93270e4a99",
+        "exactRecordMatch": true
+      },
+      {
+        "idSha256": "55a4f698e41f071716c0a0e4be1494c826033f7ab49e67b3e50e1c8f2dbc9451",
+        "contentSha256": "a48978c288dbb54319d0952ea1b296f739917dd562ff65f3709fcba154b86461",
+        "recordSha256": "be6892a987bead85322a6983450f37ff20e939dff7a6ffac3e28d6c1eb2d8ff2",
+        "exactRecordMatch": true
+      },
+      {
+        "idSha256": "02ff945cb22c93b16cf8d7aa64454858b173fd754afae4cf4bdea77bb9f21b20",
+        "contentSha256": "cce5128ebc998a5e38dad6c6a00d048a6ae1f065734adfd7855315059103417e",
+        "recordSha256": "02957e54a46b6bedb97bc3942876f12dcfb7c81ca2bda31c8cd09fbf313b3290",
+        "exactRecordMatch": true
+      },
+      {
+        "idSha256": "233b953be5ad0040d364d774b0441acea4eac49a51976e5e212d82882d91d3f1",
+        "contentSha256": "4dd06459d1be9ab89e9d69e4e7132c8cbec0e7bc0a631be16b0e05e890df3e28",
+        "recordSha256": "4557362a035a9c5d32e763f7e8589eb31938ab126b768615cc1f747759c8b20b",
+        "exactRecordMatch": true
+      }
+    ],
+    "matrix": [
+      {
+        "cell": "pg-single",
+        "bindingSha256": "b4012e7af0fab8a83f59f5cb1f2baf147475510ee74913346dbe5a4b38b11172",
+        "sourceSha256": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721",
+        "sourceManifestSha256": "d78922fc0a37aa7b20ce3f4cc0ca75e2085849a162b892781a849a1e9339ab3c",
+        "sourceManifestMatches": true,
+        "originalProfileMatches": true,
+        "originalInitializationMatches": true,
+        "originalHolderMatches": true,
+        "receiptBindingsMatch": true
+      },
+      {
+        "cell": "pg-multi",
+        "bindingSha256": "8b4304d2a2b3acc0c081e58c427b7fa0ef3473b7030117d418c93fa9195439ed",
+        "sourceSha256": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721",
+        "sourceManifestSha256": "08e05fe6f7925de594603821d1c2cffd602fac87f9153ee647a973c6d0596523",
+        "sourceManifestMatches": true,
+        "originalProfileMatches": true,
+        "originalInitializationMatches": true,
+        "originalHolderMatches": true,
+        "receiptBindingsMatch": true
+      }
+    ]
+  },
+  "limits": [
+    "This audit reads synthetic UI text and private receipts only in memory; its output contains labels as check names, hashes, counts, and booleans only.",
+    "No raw UI capture, provider reasoning, credentials, database data, runtime output, or private receipt fields are emitted.",
+    "The immutable source conclusion is manifest- and binding-based. This review does not invoke Git or modify a native profile, process, database, or source file."
+  ],
+  "inputs": [
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-error-captured.txt",
+      "bytes": 166361,
+      "sha256": "022b3ad5cacfe212d5e0254281603ac8fa51b4832bc7bf576a5c8c1c91d5bea7"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-reload.txt",
+      "bytes": 42890,
+      "sha256": "399cb28842ec1e686336f0e3669804c5935a5d2b260d52522543f831c33d8f8b"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-retry-reloaded.txt",
+      "bytes": 44580,
+      "sha256": "8da336cf1cdd0007a455b4160b88cdb6e852bc538b40ae6a03c93d58bb852a0e"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-targeted/pg-single/retry256-canonical-reload.txt",
+      "bytes": 57104,
+      "sha256": "2c41bfdb6a120f71bc705412d10ef6bd2d77ad9ad8e8647f4e69c12d0ebf2b45"
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/native-upgrade-preparation/retry256-startup-safe.json",
+      "bytes": 3109,
+      "sha256": "b267bcd53f5e1d4874024eb50414d500e818d161677a223d4d74d8a83512748c"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/binding.private.json",
+      "bytes": 1670,
+      "sha256": "b4012e7af0fab8a83f59f5cb1f2baf147475510ee74913346dbe5a4b38b11172"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "bytes": 11397,
+      "sha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "bytes": 217,
+      "sha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "bytes": 1594,
+      "sha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/preparation/pg-single-source-manifest.json",
+      "bytes": 8550589,
+      "sha256": "d78922fc0a37aa7b20ce3f4cc0ca75e2085849a162b892781a849a1e9339ab3c"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-single/tldw_Server_API/app/core/Chat/chat_service.py",
+      "bytes": 316001,
+      "sha256": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/backend-1789688805806-06132a52-fb3a-449f-b4b8-cf7f60670181.process.private.json",
+      "bytes": 1257,
+      "sha256": "7713f05d47d7edfa44e6a191c0ab9b2b4d599c33b644a65b0c24bda8fb1e782a"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-single/frontend-1789688709480-0a70b120-4229-4036-bf29-a8e9ee3af0c2.process.private.json",
+      "bytes": 1398,
+      "sha256": "967e017c355b22eaf52ea76991747de2e647a496d3d04169f98d8a79172ce88f"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-multi/binding.private.json",
+      "bytes": 1667,
+      "sha256": "8b4304d2a2b3acc0c081e58c427b7fa0ef3473b7030117d418c93fa9195439ed"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-multi.profile.private.json",
+      "bytes": 11348,
+      "sha256": "103a8e425b548ad91613c54e9f408e857ac64b8abd15ee4217d254cfebd1426f"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-multi/initialized.private.json",
+      "bytes": 217,
+      "sha256": "c89b10ee84ed3f715fa6c04cb09fb7e91729cc3cada7ca977c8835752aafbbf9"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-multi/pg-multi.pg-receipt.private.json",
+      "bytes": 1593,
+      "sha256": "dc7a97e82486636b42c900d3960c7e19d45509922894f9162d72ce9c5d8ff5db"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/preparation/pg-multi-source-manifest.json",
+      "bytes": 8550588,
+      "sha256": "08e05fe6f7925de594603821d1c2cffd602fac87f9153ee647a973c6d0596523"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/retry256-worldbook255-upgrade-20260917/pg-multi/tldw_Server_API/app/core/Chat/chat_service.py",
+      "bytes": 316001,
+      "sha256": "3cec9d7ed4c6cf30701341d7d4a5dfc0ed833c401591f32e78ed859aee835721"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-multi/backend-1789688846328-40dad860-c9b5-436f-aa35-69750545fedc.process.private.json",
+      "bytes": 1253,
+      "sha256": "8883710adb1413b296a6240014ab30e01015516dc15f2bc190bfc7253a5f66ab"
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/retry256-worldbook255-upgrade-20260917/pg-multi/frontend-1789688718574-96c45133-f4e6-452d-8da8-9d568de41de7.process.private.json",
+      "bytes": 1393,
+      "sha256": "4893f09a030c5317f50778dbb1c1a3b3d1ed525dc53c3dbada1b7faeb1d1ad8e"
+    }
+  ]
+}

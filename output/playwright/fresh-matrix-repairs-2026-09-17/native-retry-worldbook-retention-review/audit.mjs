@@ -1,0 +1,63 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
+const root=process.cwd(),packet='output/playwright/fresh-matrix-repairs-2026-09-17/native-retry232-256-accepted',out='.tmp/uat-repairs-231-246/native-retry232-256-retention-review';
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex'),checks=[],inputs=[];
+const check=(name,pass)=>checks.push({name,pass:Boolean(pass)});
+const read=(p,privateHashOnly=false)=>{const b=fs.readFileSync(path.resolve(root,p));inputs.push({path:path.relative(root,path.resolve(root,p)),bytes:b.length,sha256:sha(b),privateHashOnly});return b;};
+const json=(p,priv=false)=>JSON.parse(read(p,priv));
+const manifestBytes=read(packet+'/manifest.json'),manifest=JSON.parse(manifestBytes),readme=read(packet+'/README.md').toString(),checkpoint=read(packet+'/CHECKPOINT_SHA256SUMS').toString();
+const retainer=read('.tmp/uat-repairs-231-246/retain-native-retry232-256.mjs');
+check('Exact requested manifest',sha(manifestBytes)==='60c7dbd31831e4e9e53b12d5245a0e3037dc07cae0081ca81a70ec4fb7d6f0cd');
+function walk(dir){return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e=>{const p=path.join(dir,e.name);if(e.isSymbolicLink())throw Error('Packet symlink');return e.isDirectory()?walk(p):[p];});}
+const stored=walk(path.resolve(root,packet));const relative=stored.map(p=>path.relative(path.resolve(root,packet),p));
+const contained=p=>{const a=path.resolve(root,packet,p);return a.startsWith(path.resolve(root,packet)+path.sep)&&!path.isAbsolute(p)&&!p.split(/[\\/]/).includes('..');};
+check('Nine regular packet files and no symlinks',stored.length===9&&stored.every(p=>fs.lstatSync(p).isFile()));
+check('Exactly six safe review payloads with identity encoding',manifest.files.length===6&&manifest.files.every(f=>f.encoding==='identity'&&f.source.startsWith('.tmp/uat-repairs-231-246/native-retry232-256-review/')&&!/private|native-targeted/.test(f.path)));
+check('Payload paths contained and unique',manifest.files.every(f=>contained(f.path))&&new Set(manifest.files.map(f=>f.path)).size===6);
+const payloadProof=manifest.files.map(f=>{const b=read(path.join(packet,f.path)),s=read(f.source);return {path:f.path,source:f.source,exact:b.equals(s),storedMatches:b.length===f.bytes&&sha(b)===f.sha256,sourceMatches:s.length===f.sourceBytes&&sha(s)===f.sourceSha256};});
+check('All six retained payloads exactly match reviewed source bytes',payloadProof.every(p=>p.exact&&p.storedMatches&&p.sourceMatches));
+const entries=checkpoint.trim().split('\n').map(l=>{const m=l.match(/^([a-f0-9]{64})  (.+)$/);if(!m)throw Error('Invalid checkpoint syntax');return {sha256:m[1],path:m[2]};});
+check('Checksum list exactly covers the other eight packet files',entries.length===8&&new Set(entries.map(e=>e.path)).size===8&&relative.filter(p=>p!=='CHECKPOINT_SHA256SUMS').every(p=>entries.some(e=>e.path===p))&&entries.every(e=>contained(e.path)&&sha(fs.readFileSync(path.join(root,packet,e.path)))===e.sha256));
+const audits=['audit.json','supplemental-audit.json'].map(n=>json('.tmp/uat-repairs-231-246/native-retry232-256-review/'+n));
+check('Both retained independent audits report fourteen passing checks',audits.every(a=>a.status==='pass'&&a.checks.length===14&&a.checks.every(c=>c.pass)));
+const refs=new Map();for(const a of audits)for(const e of a.inputs){if(refs.has(e.path)&&refs.get(e.path).sha256!==e.sha256)throw Error('Conflicting reviewed input hashes');refs.set(e.path,e);}
+const omittedProof=manifest.omitted.map(e=>{const b=read(e.path,/private/.test(e.path));return {path:e.path,reason:e.reason,reviewMatches:refs.get(e.path)?.sha256===e.sha256&&refs.get(e.path)?.bytes===e.bytes,currentMatches:b.length===e.bytes&&sha(b)===e.sha256,sha256:e.sha256};});
+check('All twenty-seven audit inputs are explicitly hash-only omitted',refs.size===27&&manifest.omitted.length===27&&new Set(manifest.omitted.map(e=>e.path)).size===27&&[...refs.keys()].every(p=>manifest.omitted.some(e=>e.path===p)));
+check('Omission ledger matches original audit and current local input hashes',omittedProof.every(e=>e.reviewMatches&&e.currentMatches&&e.reason));
+check('README clearly limits replay and native scope',readme.includes('No claim that the public packet alone replays')&&readme.includes('native recovery is single-user')&&readme.includes('full48-row matrix')&&readme.includes('provider reasoning')&&manifest.fullMatrixAccepted===false);
+const projection=json('.tmp/uat-repairs-231-246/native-targeted/pg-single/retry256-canonical-final-projection.json');
+function capture(p){const s=read(p).toString(),m=s.match(/### Result\n([\s\S]*?)(?:\n### |$)/);if(!m)throw Error('Structured capture missing');return JSON.parse(m[1]);}
+const canonical=capture(projection.source),old=capture('.tmp/uat-repairs-231-246/native-targeted/pg-single/model232-upgraded-retry-reloaded.txt');
+const messages=c=>c.events.filter(e=>e.event==='response'&&e.status===200&&Array.isArray(e.body?.messages)).at(-1)?.body.messages;
+const current=messages(canonical),before=messages(old),assistant=current?.find(m=>m.id===projection.assistantId);
+const raw=assistant?.content||'',final=raw.replace(/<think>[\s\S]*?<\/think>/gi,'').trim();
+const oldIds=new Set(before?.map(m=>m.id));const newRows=current?.filter(m=>!oldIds.has(m.id));
+check('Exact assistant belongs to the newly persisted turn',before?.length===5&&current?.length===7&&newRows?.length===2&&newRows[0].sender==='user'&&newRows[1].sender==='assistant'&&newRows[1].id===projection.assistantId&&assistant?.sender==='assistant');
+check('All five prior canonical records remain byte-identical',before.every(m=>JSON.stringify(m)===JSON.stringify(current.find(n=>n.id===m.id))));
+check('New assistant final answer equals exact requested marker',final==='ORBIT-742'&&sha(raw)===projection.contentSha256&&sha(final)===projection.finalSha256&&sha(fs.readFileSync(path.join(root,projection.source)))===projection.sourceSha256&&projection.exactFinalExpected===true);
+const worldPacket='output/playwright/fresh-matrix-repairs-2026-09-17/native-worldbook239-255-accepted';
+const worldManifestBytes=read(worldPacket+'/manifest.json'),worldManifest=JSON.parse(worldManifestBytes),worldReadme=read(worldPacket+'/README.md').toString(),worldChecksum=read(worldPacket+'/CHECKPOINT_SHA256SUMS').toString();
+read('.tmp/uat-repairs-231-246/retain-native-worldbook239-255.mjs');
+const worldFiles=walk(path.resolve(root,worldPacket));
+const worldAudit=json('.tmp/uat-repairs-231-246/native-worldbook239-255-review/audit.json');
+check('WorldBook exact requested manifest and accepted IDs239/255',sha(worldManifestBytes)==='a02a2d8afe653d0ddb2bdbfc2135372354d8b134ce69b8b60f9d337f8d42ea22'&&JSON.stringify(worldManifest.acceptedFindings)===JSON.stringify([239,255]));
+const worldContained=p=>{const a=path.resolve(root,worldPacket,p);return a.startsWith(path.resolve(root,worldPacket)+path.sep)&&!path.isAbsolute(p)&&!p.split(/[\\/]/).includes('..');};
+const worldPayloadProof=worldManifest.files.map(f=>{const b=read(path.join(worldPacket,f.path)),s=read(f.source);return {path:f.path,source:f.source,exact:b.equals(s),storedMatches:b.length===f.bytes&&sha(b)===f.sha256,sourceMatches:s.length===f.sourceBytes&&sha(s)===f.sourceSha256,contained:worldContained(f.path),safe:f.encoding==='identity'&&f.source.startsWith('.tmp/uat-repairs-231-246/native-worldbook239-255-review/')};});
+check('WorldBook three exact safe payloads in six regular files',worldManifest.files.length===3&&worldFiles.length===6&&worldPayloadProof.every(p=>p.exact&&p.storedMatches&&p.sourceMatches&&p.contained&&p.safe));
+const worldEntries=worldChecksum.trim().split('\n').map(l=>{const m=l.match(/^([a-f0-9]{64})  (.+)$/);if(!m)throw Error('Invalid WorldBook checkpoint syntax');return {sha256:m[1],path:m[2]};});
+check('WorldBook checkpoint covers exactly the five other files',worldEntries.length===5&&new Set(worldEntries.map(e=>e.path)).size===5&&worldFiles.filter(p=>!p.endsWith('/CHECKPOINT_SHA256SUMS')).every(p=>worldEntries.some(e=>e.path===path.relative(path.resolve(root,worldPacket),p)))&&worldEntries.every(e=>worldContained(e.path)&&sha(fs.readFileSync(path.join(root,worldPacket,e.path)))===e.sha256));
+const worldOmittedProof=worldManifest.omitted.map(e=>{const b=read(e.path,/private/.test(e.path));const original=worldAudit.inputs.find(i=>i.path===e.path);return {path:e.path,reason:e.reason,sha256:e.sha256,reviewMatches:original?.sha256===e.sha256&&original?.bytes===e.bytes,currentMatches:b.length===e.bytes&&sha(b)===e.sha256};});
+check('WorldBook omission ledger covers all46 reviewed inputs with exact hashes',worldAudit.inputs.length===46&&worldManifest.omitted.length===46&&new Set(worldManifest.omitted.map(e=>e.path)).size===46&&worldOmittedProof.every(e=>e.reviewMatches&&e.currentMatches&&e.reason));
+check('WorldBook retained original review remains CLEAR21checks',worldAudit.verdict.startsWith('CLEAR')&&worldAudit.checks.length===21&&worldAudit.checks.every(c=>c.pass));
+check('WorldBook README preserves timestamp260 and bounded replay limitations',/260/.test(worldReadme)&&/7\s*hours/.test(worldReadme)&&/hash.only/i.test(worldReadme)&&/replay/i.test(worldReadme)&&worldManifest.fullMatrixAccepted===false);
+const matrix='.tmp/uat-next-matrix-20260916',secrets=[];let profiles=0;
+for(const n of fs.readdirSync(matrix).filter(n=>n.endsWith('.profile.private.json'))){const p=json(path.join(matrix,n),true),c=json(p.credentialsPath,true);profiles++;secrets.push(c.apiKey,c.jwtSecret,c.apiHashSecret,...Object.values(c.accounts||{}).map(a=>a.password),...(c.providerSecrets||[]));if(p.pgConfigPath)secrets.push(json(p.pgConfigPath,true).password);}
+secrets.push(json('.tmp/fresh-uat-recovery-20260916/postgres-private.json',true).password);
+const variants=[...new Set(secrets.filter(v=>typeof v==='string'&&v.length).flatMap(v=>[v,encodeURIComponent(v),JSON.stringify(v).slice(1,-1),Buffer.from(v).toString('base64'),Buffer.from(v).toString('base64url')]))];
+let knownMatches=0,jwtMatches=0;for(const p of [...stored,...worldFiles]){const t=fs.readFileSync(p,'utf8');knownMatches+=variants.filter(v=>t.includes(v)).length;jwtMatches+=(t.match(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g)||[]).length;}
+check('All packet bytes free of known credential variants and JWT candidates',knownMatches===0&&jwtMatches===0);
+const audit={task:'UAT232/256 safe native retention review',at:new Date().toISOString(),verdict:checks.every(c=>c.pass)?'CLEAR':'GAPS',checks,packet:{manifestSha256:sha(manifestBytes),checkpointSha256:sha(Buffer.from(checkpoint)),payloads:manifest.files.length,files:stored.length,omitted:manifest.omitted.length,payloadProof,omittedProof},exactNewAssistant:{assistantId:projection.assistantId,priorRows:before.length,canonicalRows:current.length,newRows:newRows.map(m=>({sender:m.sender,idSha256:sha(m.id)})),contentSha256:sha(raw),finalSha256:sha(final),exactFinalExpected:final==='ORBIT-742'},secretScan:{profiles,variants:variants.length,knownMatches,jwtMatches},limits:['Original public packet remains unchanged. The extra exact-new-assistant proof is retained here, not added retroactively to that packet.','Public payloads are exact safe review/audit bytes; twenty-seven raw/local/private/large inputs are hash-only, not publicly replayable.','Known-secret scan is bounded to existing profile credentials and JWT-like syntax; it is not a universal proof that arbitrary secrets cannot exist.','No native request, process, browser, model, DB, product, Git or Backlog mutation was performed. Raw provider reasoning/UI/private records were not serialized.'],inputs};
+audit.task='UAT232/256 and UAT239/255 separate safe native retention packets';
+audit.worldBookPacket={acceptedFindings:[239,255],manifestSha256:sha(worldManifestBytes),checkpointSha256:sha(Buffer.from(worldChecksum)),files:worldFiles.length,payloads:worldPayloadProof.length,omitted:worldOmittedProof.length,payloadProof:worldPayloadProof,omittedProof:worldOmittedProof};
+audit.packet.acceptedFindings=[232,256];
+read(out+'/audit.mjs');
+fs.mkdirSync(out,{recursive:true});fs.writeFileSync(out+'/audit.json',JSON.stringify(audit,null,2)+'\n');console.log(JSON.stringify({verdict:audit.verdict,checks:checks.length,failed:checks.filter(c=>!c.pass),inputs:inputs.length,secretScan:audit.secretScan,exactNewAssistant:audit.exactNewAssistant,auditSha256:sha(fs.readFileSync(out+'/audit.json'))}));
