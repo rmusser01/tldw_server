@@ -4000,7 +4000,9 @@ class WorldBooksRetriever(BaseRetriever):
 
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         max_results = int(self.config.max_results)
-        sql = """
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND wb.client_id = ?" if is_postgres else ""
+        sql = f"""
             SELECT
                 wb.id AS world_book_id,
                 wb.name AS world_book_name,
@@ -4016,6 +4018,7 @@ class WorldBooksRetriever(BaseRetriever):
             WHERE wb.deleted = 0
               AND wb.enabled = 1
               AND e.enabled = 1
+              {owner_clause}
               AND (
                 wb.name LIKE ?
                 OR wb.description LIKE ?
@@ -4025,8 +4028,9 @@ class WorldBooksRetriever(BaseRetriever):
               )
             ORDER BY e.priority DESC, e.id DESC
             LIMIT ?
-        """
-        rows = await self._execute_query_async(sql, (*([f"%{query}%"] * 5), max_results))
+        """  # nosec B608 - fixed owner predicate; every value remains bound.
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
+        rows = await self._execute_query_async(sql, (*owner_params, *([f"%{query}%"] * 5), max_results))
         documents: list[Document] = []
         query_lower = query.lower()
         for row in rows:
@@ -4061,14 +4065,18 @@ class WorldBooksRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         entry_id = doc_id.replace("world_book_entry_", "")
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND wb.client_id = ?" if is_postgres else ""
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
         rows = self._execute_query(
-            """
+            f"""
             SELECT e.*, wb.name AS world_book_name
             FROM world_book_entries e
             JOIN world_books wb ON e.world_book_id = wb.id
             WHERE e.id = ?
-            """,
-            (entry_id,),
+              {owner_clause}
+            """,  # nosec B608 - fixed owner predicate; every value remains bound.
+            (entry_id, *owner_params),
         )
         return dict(rows[0]) if rows else {}
 

@@ -40,8 +40,14 @@ def _seed(db, character):
             (105, "Disabled attachment", True, False, False, 7),
             (106, "Deleted book", True, True, True, 10),
         ]:
-            conn.execute("INSERT INTO world_books (id, name, enabled, deleted) VALUES (?, ?, ?, ?)",
-                         (book_id, name, enabled, deleted))
+            if db.backend_type == BackendType.POSTGRESQL:
+                conn.execute(
+                    "INSERT INTO world_books (id, name, enabled, deleted, client_id) VALUES (?, ?, ?, ?, ?)",
+                    (book_id, name, enabled, deleted, db.client_id),
+                )
+            else:
+                conn.execute("INSERT INTO world_books (id, name, enabled, deleted) VALUES (?, ?, ?, ?)",
+                             (book_id, name, enabled, deleted))
             conn.execute("INSERT INTO character_world_books (character_id, world_book_id, enabled, priority) "
                          "VALUES (?, ?, ?, ?)", (character, book_id, attached_enabled, priority))
         for enabled in (True, False):

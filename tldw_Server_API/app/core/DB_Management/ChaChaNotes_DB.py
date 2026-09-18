@@ -33210,9 +33210,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return 0
+        params = ()
+        if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT COUNT(*) AS count FROM world_books WHERE deleted = FALSE AND client_id = ?"
+            params = (self.client_id,)
         try:
             # Category selects a fixed allowlisted query; no user input enters SQL.
-            cursor = self.execute_query(query)  # nosec B608
+            cursor = self.execute_query(query, params)  # nosec B608
             row = cursor.fetchone()
             if not row:
                 return 0
@@ -33240,9 +33244,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return []
+        params = ()
+        if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ? ORDER BY id ASC"
+            params = (self.client_id,)
         try:
             # Category selects a fixed allowlisted query; no user input enters SQL.
-            cursor = self.execute_query(query)  # nosec B608
+            cursor = self.execute_query(query, params)  # nosec B608
             ids: list[str] = []
             for row in cursor.fetchall() or []:
                 try:
