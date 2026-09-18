@@ -645,3 +645,10 @@ extension (actual mounted consumer unless the case explicitly names injected pro
 | selected sidepanel expansion opens extension full page with an independent view over the same owner | /tmp/h1_fix1_extension_final.json | 1 |
 | explicit Continue in WebUI composer action preserves its existing full-app draft handoff | /tmp/h1_fix1_extension_final.json | 1 |
 | settings written in options remain shared with the sidepanel through real extension storage | /tmp/h1_fix1_extension_final.json | 1 |
+
+
+## Task5.1 scoped re-review accepted; whole-branch gate open
+
+The [independent fix1 review](CHATBOOK_H1_TASK5_FIX1_REVIEW_2026_09_17.md) passed requirement compliance and technical quality at `d6129ace01cd8b2647e045093477bfbb2c18abd3`, covering the implementation `6066e63a626ad4860979432d69877bb3262a2d79` and explicit documentation-only supplement. F1–F4 and C1–C3 are addressed within scope, with no new Critical/Important breakage. Root read the full report and independently checked final browser JSON, retained-editor images, unit/type/lint/build evidence and each29case/31result mapping against its actual source reports.
+
+This is not whole-branch acceptance. The final review must explicitly triage the pre-existing inner `m-${blockIndex}` message key at `PlaygroundChat.tsx:1398`, which can remount an editor after preceding-row removal/reorder, and the distinct Task4.2 saved-copy/record-write notification issue. The attempted key probe failed setup three times and is not a runtime reproduction. The completed build's two traced-copy warnings remain disclosed; standalone deployment completeness is unverified. All earlier deferred observations and H2/H3/H4/F02/workspace boundaries remain in force. TASK-13261.1 stays In Progress.
