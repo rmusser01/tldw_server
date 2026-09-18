@@ -1,7 +1,8 @@
-import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
 
 
 class KnowledgeSaveRequest(BaseModel):
@@ -18,8 +19,8 @@ class KnowledgeSaveRequest(BaseModel):
     snippet: str = Field(..., min_length=1, description="Snippet content to save")
     tags: Optional[list[str]] = Field(None, description="Optional tags to attach as keywords")
     make_flashcard: bool = Field(False, description="If true, also create a flashcard from the snippet")
-    flashcard_front: Optional[str] = Field(None, description="Reviewed question; required when creating a flashcard")
-    flashcard_back: Optional[str] = Field(None, description="Reviewed answer; required when creating a flashcard")
+    flashcard_front: Optional[str] = Field(None, description="Reviewed question; legacy requests may use the linked parent question")
+    flashcard_back: Optional[str] = Field(None, description="Reviewed answer; legacy requests may use a linked public answer excerpt")
     export_to: Literal["none", "notion", "wiki"] = Field(
         "none", description="Optional export target; disabled unless chat connectors v2 is enabled"
     )
@@ -30,12 +31,7 @@ class KnowledgeSaveRequest(BaseModel):
         """Persist answer text, excluding closed or unfinished model reasoning blocks."""
         if value is None:
             return None
-        return re.sub(
-            r"<(think|reason|reasoning|thought)>.*?(?:</\1>|$)",
-            "",
-            value,
-            flags=re.IGNORECASE | re.DOTALL,
-        ).strip()
+        return visible_knowledge_text(value)
 
     @field_validator("tags")
     @classmethod
@@ -61,7 +57,11 @@ class KnowledgeSaveRequest(BaseModel):
     def _validate_scope(self) -> "KnowledgeSaveRequest":
         if not self.snippet:
             raise ValueError("Snippet must contain visible answer text")
-        if self.make_flashcard and (not self.flashcard_front or not self.flashcard_back):
+        if (
+            self.make_flashcard
+            and {"flashcard_front", "flashcard_back"}.intersection(self.model_fields_set)
+            and (not self.flashcard_front or not self.flashcard_back)
+        ):
             raise ValueError("A flashcard requires both a question and an answer")
         if self.scope_type == "workspace" and not self.workspace_id:
             raise ValueError("workspace_id is required when scope_type='workspace'")

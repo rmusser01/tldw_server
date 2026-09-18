@@ -21,6 +21,85 @@ async def test_ingestion_sources_schema_initializes_twice_in_postgres(test_db_po
 
 
 @pytest.mark.asyncio
+async def test_ingestion_sources_upgrades_legacy_item_presence_in_postgres(test_db_pool) -> None:
+    """An existing catalog gains presence state without losing its item bindings."""
+    from tldw_Server_API.app.core.Ingestion_Sources.service import (
+        create_source,
+        ensure_ingestion_sources_schema,
+        list_source_items,
+        upsert_source_item,
+    )
+
+    async with test_db_pool.transaction() as db:
+        await ensure_ingestion_sources_schema(db)
+        source = await create_source(
+            db,
+            user_id=7,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "policy": "canonical",
+                "config": {"path": "/allowed/legacy"},
+            },
+        )
+        item = await upsert_source_item(
+            db,
+            source_id=int(source["id"]),
+            normalized_relative_path="legacy.md",
+            content_hash="original",
+            sync_status="completed",
+            binding={"media_id": 17},
+            present_in_source=True,
+        )
+        # Model a pre-column catalog in the official fixture's isolated database.
+        await db.execute("ALTER TABLE ingestion_source_items DROP COLUMN present_in_source")
+
+        await ensure_ingestion_sources_schema(db)
+        await ensure_ingestion_sources_schema(db)
+
+        column = await db.fetchrow(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() "
+            "AND table_name = 'ingestion_source_items' AND column_name = 'present_in_source'"
+        )
+        if column is None:
+            pytest.fail("Existing PostgreSQL source catalog was not upgraded with present_in_source")
+
+        rows = await list_source_items(db, source_id=int(source["id"]))
+        assert len(rows) == 1
+        assert rows[0]["id"] == item["id"]
+        assert rows[0]["binding"] == {"media_id": 17}
+        assert rows[0]["present_in_source"] is True
+
+        updated = await upsert_source_item(
+            db,
+            source_id=int(source["id"]),
+            normalized_relative_path="legacy.md",
+            content_hash="changed",
+            sync_status="completed",
+            binding={"media_id": 17},
+            present_in_source=False,
+        )
+        assert updated["id"] == item["id"]
+        assert updated["present_in_source"] is False
+        assert await list_source_items(db, source_id=int(source["id"]), include_absent=False) == []
+
+
+@pytest.mark.asyncio
+async def test_current_source_catalog_initialization_does_not_lock_out_readers(test_db_pool) -> None:
+    """Per-request schema checks must not acquire an exclusive lock after upgrade."""
+    from tldw_Server_API.app.core.Ingestion_Sources.service import ensure_ingestion_sources_schema
+
+    async with test_db_pool.transaction() as db:
+        await ensure_ingestion_sources_schema(db)
+    async with test_db_pool.transaction() as reader:
+        await reader.fetch("SELECT id FROM ingestion_source_items")
+        async with test_db_pool.transaction() as initializer:
+            await initializer.execute("SET LOCAL lock_timeout = '500ms'")
+            await ensure_ingestion_sources_schema(initializer)
+
+
+@pytest.mark.asyncio
 async def test_ingestion_sources_service_round_trip_is_owner_isolated_in_postgres(
     test_db_pool,
 ) -> None:

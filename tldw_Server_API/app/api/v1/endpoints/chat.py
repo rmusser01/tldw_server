@@ -147,6 +147,10 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry 
     compute_persona_exemplar_telemetry,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.knowledge_save import (
+    KnowledgeFlashcardError,
+    resolve_knowledge_flashcard,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -6717,6 +6721,7 @@ async def save_chat_knowledge(
             scope,
         )
 
+        message = None
         if payload.message_id:
             message = _verify_message_ownership(
                 db,
@@ -6726,6 +6731,28 @@ async def save_chat_knowledge(
             )
             if message.get("conversation_id") != payload.conversation_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is not in conversation")
+
+        flashcard_front = payload.flashcard_front
+        flashcard_back = payload.flashcard_back
+        if payload.make_flashcard:
+            parent = None
+            if flashcard_front is None and flashcard_back is None and message and message.get("parent_message_id"):
+                parent = _verify_message_ownership(
+                    db,
+                    str(message["parent_message_id"]),
+                    current_user,
+                    scope,
+                )
+            try:
+                flashcard_front, flashcard_back = resolve_knowledge_flashcard(
+                    snippet=payload.snippet,
+                    front=flashcard_front,
+                    back=flashcard_back,
+                    message=message,
+                    parent=parent,
+                )
+            except KnowledgeFlashcardError as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
         export_status = "not_requested"
         export_job_id: str | None = None
@@ -6766,8 +6793,8 @@ async def save_chat_knowledge(
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
-                        "front": payload.flashcard_front,
-                        "back": payload.flashcard_back,
+                        "front": flashcard_front,
+                        "back": flashcard_back,
                         "notes": f"From {safe_title}",
                         "source_ref_type": "note",
                         "source_ref_id": note_id,
@@ -6801,8 +6828,8 @@ async def save_chat_knowledge(
                 if payload.make_flashcard:
                     flashcard_id = db.add_flashcard(
                         {
-                            "front": payload.flashcard_front,
-                            "back": payload.flashcard_back,
+                            "front": flashcard_front,
+                            "back": flashcard_back,
                             "notes": f"From {safe_title}",
                             "source_ref_type": "note",
                             "source_ref_id": note_id,

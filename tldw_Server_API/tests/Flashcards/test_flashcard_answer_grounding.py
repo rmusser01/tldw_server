@@ -5,11 +5,10 @@ import json
 
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints.flashcards import _build_flashcard_verification_units
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import verify_generated_artifact_against_sources
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import HybridClaimVerifier
+from tldw_Server_API.app.core.Flashcards.verification import build_flashcard_verification_units
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
-
 
 pytestmark = pytest.mark.unit
 
@@ -40,7 +39,7 @@ def test_verifier_receives_question_relationship_and_rejects_wrong_answers(monke
     result = asyncio.run(
         verify_generated_artifact_against_sources(
             artifact_type="flashcards",
-            units=_build_flashcard_verification_units(
+            units=build_flashcard_verification_units(
                 [{"front": "What produces energy in cells?", "back": answer, "model_type": "basic"}]
             ),
             source_documents=[Document(id="flashcards-source", content=SOURCE, metadata={})],
@@ -55,7 +54,7 @@ def test_verifier_receives_question_relationship_and_rejects_wrong_answers(monke
 
 
 def test_question_context_does_not_drop_other_generated_claims():
-    units = _build_flashcard_verification_units(
+    units = build_flashcard_verification_units(
         [
             {
                 "front": "What produces energy in cells?",
@@ -121,7 +120,7 @@ def test_quoted_source_term_does_not_prove_an_incorrect_answer(monkeypatch):
     result = asyncio.run(
         verify_generated_artifact_against_sources(
             artifact_type="flashcards",
-            units=_build_flashcard_verification_units([{"front": 'What do "Mitochondria" produce?', "back": "Light"}]),
+            units=build_flashcard_verification_units([{"front": 'What do "Mitochondria" produce?', "back": "Light"}]),
             source_documents=[Document(id="source", content=SOURCE, metadata={})],
             generation_provider="llamacpp",
             generation_model="test",

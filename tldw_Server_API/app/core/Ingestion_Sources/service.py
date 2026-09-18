@@ -9,6 +9,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.database import _convert_question_mark_to_dollar
 from tldw_Server_API.app.core.DB_Management.Ingestion_Sources_DB import (
+    ensure_postgres_source_item_presence,
     update_ingestion_source_record,
 )
 from tldw_Server_API.app.core.exceptions import (
@@ -386,6 +387,8 @@ async def ensure_ingestion_sources_schema(db) -> None:
             column_name="present_in_source",
             column_sql="INTEGER NOT NULL DEFAULT 1",
         )
+    else:
+        await ensure_postgres_source_item_presence(db)
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
