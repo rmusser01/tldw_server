@@ -164,6 +164,17 @@ const RAG_QUERY_MAX_LENGTH = 20000
 // (e.g. long passages on local Kokoro), so give it a generous default that
 // callers can still override.
 const TTS_REQUEST_TIMEOUT_MS = 120000
+const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
+
+const hasManualSessionCredentialLock = (): boolean =>
+  typeof navigator !== "undefined" && Boolean(navigator.locks?.request)
+
+const withManualSessionCredentialLock = async <T>(
+  operation: () => Promise<T>
+): Promise<T> => {
+  if (!hasManualSessionCredentialLock()) return await operation()
+  return await navigator.locks.request(MANUAL_SESSION_CREDENTIAL_LOCK, operation)
+}
 
 const toRecordOrNull = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -2114,10 +2125,22 @@ export class TldwApiClientBase {
       const manualApiKey = await resolveManualCredential(storedManual, {
         session: this.sessionStorage
       })
-      if (!manualApiKey) {
-        await this.sessionStorage
-          .remove(MANUAL_SESSION_KEY)
-          .catch(() => undefined)
+      if (!manualApiKey && hasManualSessionCredentialLock()) {
+        await withManualSessionCredentialLock(async () => {
+          const currentConfig = await this.storage
+            .get<TldwConfig>("tldwConfig")
+            .catch(() => null)
+          const currentManualApiKey = currentConfig
+            ? await resolveManualCredential(currentConfig, {
+                session: this.sessionStorage
+              })
+            : null
+          if (!currentManualApiKey) {
+            await this.sessionStorage
+              .remove(MANUAL_SESSION_KEY)
+              .catch(() => undefined)
+          }
+        })
       }
     }
     const stored = await resolveEffectiveTldwConfig(
@@ -2171,11 +2194,10 @@ export class TldwApiClientBase {
     this.publishConfigUpdated(config)
   }
 
-  private async writeSessionOrMemory(
+  private async writeSessionOrMemoryUnlocked(
     input: { serverUrl: string; apiKey: string },
-    serverOrigin: string,
-    previousConfig: TldwConfig | null
-  ): Promise<"session" | "memory"> {
+    serverOrigin: string
+  ): Promise<{ persistence: "session" | "memory"; config: TldwConfig }> {
     const persisted: TldwConfig = {
       authMode: "single-user",
       authSource: "manual",
@@ -2195,8 +2217,7 @@ export class TldwApiClientBase {
     try {
       await this.storage.set("tldwConfig", persisted)
       await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
-      await this.activateManualConfig(hydrated, previousConfig)
-      return "session"
+      return { persistence: "session", config: hydrated }
     } catch {
       await clearManualCredentials(this.storage, this.sessionStorage).catch(
         async () => {
@@ -2205,9 +2226,16 @@ export class TldwApiClientBase {
             .catch(() => undefined)
         }
       )
-      await this.activateManualConfig(hydrated, previousConfig)
-      return "memory"
+      return { persistence: "memory", config: hydrated }
     }
+  }
+
+  private async clearManualSingleUserCredentialsUnlocked(): Promise<TldwConfig | null> {
+    await clearManualCredentials(this.storage, this.sessionStorage)
+    return (
+      (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
+      null
+    )
   }
 
   async saveManualSingleUserCredential(input: {
@@ -2222,8 +2250,15 @@ export class TldwApiClientBase {
     if (!apiKey) throw new Error("API key is required")
 
     const previousConfig = await this.getConfig()
-    await this.clearManualSingleUserCredentials()
-    if (input.persistence === "device") {
+    const saved = await withManualSessionCredentialLock(async () => {
+      await this.clearManualSingleUserCredentialsUnlocked()
+      if (input.persistence !== "device") {
+        return await this.writeSessionOrMemoryUnlocked(
+          { serverUrl, apiKey },
+          serverOrigin
+        )
+      }
+
       const deviceConfig: TldwConfig = {
         authMode: "single-user",
         authSource: "manual",
@@ -2238,22 +2273,16 @@ export class TldwApiClientBase {
         await this.sessionStorage
           .remove(MANUAL_SESSION_KEY)
           .catch(() => undefined)
-        await this.activateManualConfig(deviceConfig, previousConfig)
-        return "device"
+        return { persistence: "device" as const, config: deviceConfig }
       } catch {
-        return await this.writeSessionOrMemory(
+        return await this.writeSessionOrMemoryUnlocked(
           { serverUrl, apiKey },
-          serverOrigin,
-          previousConfig
+          serverOrigin
         )
       }
-    }
-
-    return await this.writeSessionOrMemory(
-      { serverUrl, apiKey },
-      serverOrigin,
-      previousConfig
-    )
+    })
+    await this.activateManualConfig(saved.config, previousConfig)
+    return saved.persistence
   }
 
   async hydrateManualSingleUserCredential(): Promise<TldwConfig | null> {
@@ -2262,11 +2291,11 @@ export class TldwApiClientBase {
   }
 
   async clearManualSingleUserCredentials(): Promise<void> {
-    await clearManualCredentials(this.storage, this.sessionStorage)
+    const stored = await withManualSessionCredentialLock(async () =>
+      await this.clearManualSingleUserCredentialsUnlocked()
+    )
     if (this.config?.authSource !== "cookie-session") {
-      this.config =
-        (await this.storage.get<TldwConfig>("tldwConfig").catch(() => null)) ||
-        null
+      this.config = stored
       this.applyConfigState()
     }
   }

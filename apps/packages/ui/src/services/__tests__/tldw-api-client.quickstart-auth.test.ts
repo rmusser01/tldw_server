@@ -72,11 +72,22 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.sessionStorage.clear()
     mocks.storageRemoveError = null
     window.localStorage.clear()
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: async (_name: string, work: () => unknown) => await work()
+          }
+        }
+      })
+    )
     activateCookieSessionConfig()
     clearRuntimeAuthOverride()
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     window.localStorage.clear()
