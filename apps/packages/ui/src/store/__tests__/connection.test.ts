@@ -1,4 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+const browserStorage = vi.hoisted(() => {
+  const listeners = new Set<
+    (changes: Record<string, { newValue?: unknown }>, area: string) => void
+  >()
+  const set = vi.fn(async (values: Record<string, unknown>) => {
+    const changes = Object.fromEntries(
+      Object.entries(values).map(([key, newValue]) => [key, { newValue }])
+    )
+    listeners.forEach((listener) => listener(changes, "local"))
+  })
+  return { listeners, set }
+})
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      local: { set: browserStorage.set },
+      onChanged: {
+        addListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) =>
+          browserStorage.listeners.add(listener),
+        removeListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) =>
+          browserStorage.listeners.delete(listener)
+      }
+    }
+  }
+}))
+
 import { browser } from "wxt/browser"
 import {
   ConnectionPhase,

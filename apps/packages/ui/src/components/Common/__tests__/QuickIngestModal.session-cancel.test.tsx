@@ -6,6 +6,7 @@ import {
   createInitialQuickIngestLastRunSummary,
   useQuickIngestStore
 } from "@/store/quick-ingest"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 
 import { useMilestoneStore } from "@/store/milestones"
 const identity = vi.hoisted(() => ({ scope: "server-a:alice" as string | null }))
@@ -199,6 +200,14 @@ const deferred = <T,>() => {
 
 describe("QuickIngestModal session cancel flow", () => {
   beforeEach(() => {
+    sessionStorage.clear()
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    useQuickIngestSessionStore.setState({
+      session: null,
+      triggerSummary: { count: 0, label: null, hadFailure: false }
+    })
+    useQuickIngestSessionStore.getState().setAuthority("quick-ingest-test-owner")
+    useQuickIngestSessionStore.getState().createDraftSession()
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.cancelQuickIngestSession.mockReset()

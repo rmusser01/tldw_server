@@ -488,8 +488,8 @@ describe("CharactersManager first-use onboarding", () => {
         editorLoad.pending = null
         releaseEditor()
       })
-      const close = await screen.findByRole("button", { name: "Close" })
       await waitFor(() => expect(document.querySelector("form")).not.toBeNull())
+      const close = await screen.findByRole("button", { name: "Close" })
       await user.click(close)
       await waitFor(() => expect(close).not.toBeInTheDocument())
       await user.click(screen.getByRole("button", { name: "New character" }))

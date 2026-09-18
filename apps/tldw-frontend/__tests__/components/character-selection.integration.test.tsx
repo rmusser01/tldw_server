@@ -31,6 +31,11 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
     listChatMessages: mocks.listChatMessages,
     listAllCharacters: mocks.listAllCharacters,
     listPersonaProfiles: async () => [],
+    ensureConfigForRequest: async () => ({
+      serverUrl: 'http://127.0.0.1:8000',
+      authMode: 'single-user',
+      apiKey: 'test-key',
+    }),
   },
 }));
 vi.mock('@/db/dexie/helpers', () => ({
@@ -221,14 +226,16 @@ describe('character picker with greeting and server hydration', () => {
       serverChatId: 'cedar-chat',
       serverChatCharacterId: 4,
       serverChatAssistantKind: 'character',
-      serverChatMetaLoaded: true,
+      // Leave saved metadata unresolved so the canonical loader owns the
+      // pending Character read that the picker must supersede.
+      serverChatMetaLoaded: false,
     });
     mocks.getCharacter.mockImplementation(async (id) =>
       String(id) === '4' ? oldProfile.promise : robot
     );
     const user = userEvent.setup();
     render(<SelectionWorkspace />);
-    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith(4));
+    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
     await user.click(screen.getByTestId('character-select'));
     await user.click(await screen.findByRole('button', { name: 'Cycle3 BEEP Robot', exact: true }));
     await waitFor(() => expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('5'));

@@ -424,12 +424,12 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
     render(<WorldBooksManager />)
     await user.click(screen.getByText("Arcana"))
-    await user.click(screen.getByRole("tab", { name: "Attachments" }))
-    await user.click(screen.getByRole("button", { name: "Try again" }))
+    await user.click(await screen.findByRole("tab", { name: "Attachments" }))
+    await user.click(await screen.findByRole("button", { name: "Try again" }))
 
-    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+    await waitFor(() => expect(invalidateQueriesMock).toHaveBeenCalledWith({
       queryKey: ["tldw:listCharactersForWB"]
-    })
+    }))
     expect(invalidateQueriesMock).toHaveBeenCalledWith({
       queryKey: ["tldw:worldBookAttachments"]
     })

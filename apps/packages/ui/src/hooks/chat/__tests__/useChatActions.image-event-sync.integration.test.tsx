@@ -713,7 +713,16 @@ describe("useChatActions character stream throttling integration", () => {
       expect.objectContaining({
         assistant_message_id: expect.any(String)
       }),
-      undefined
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: expect.objectContaining({
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user"
+          }),
+          userId: null
+        }),
+        signal: expect.any(AbortSignal)
+      })
     )
     expect(
       addChatMessageMock.mock.calls.filter(

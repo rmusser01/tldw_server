@@ -59,7 +59,38 @@ const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() 
 const realErrorPersistence = vi.hoisted(() => ({ enabled: false }))
 const actualAuthority = vi.hoisted(() => ({
   enabled: false,
+  config: null as Record<string, unknown> | null,
   snapshot: null as import("@/services/service-prompts").ServicePromptSnapshot | null
+}))
+const safeStorage = vi.hoisted(() => {
+  const values = new Map<string, unknown>()
+  const watchers = new Set<Record<string, (change: { newValue?: unknown }) => void>>()
+  return {
+    values,
+    watchers,
+    get: async <T,>(key: string) => values.get(key) as T | undefined,
+    set: async <T,>(key: string, value: T) => {
+      values.set(key, value)
+      watchers.forEach((handlers) => handlers[key]?.({ newValue: value }))
+    },
+    remove: async (key: string) => {
+      values.delete(key)
+      watchers.forEach((handlers) => handlers[key]?.({}))
+    }
+  }
+})
+
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: () => ({
+    get: safeStorage.get,
+    set: safeStorage.set,
+    remove: safeStorage.remove,
+    watch: (handlers: Record<string, (change: { newValue?: unknown }) => void>) =>
+      safeStorage.watchers.add(handlers),
+    unwatch: (handlers: Record<string, (change: { newValue?: unknown }) => void>) =>
+      safeStorage.watchers.delete(handlers)
+  }),
+  safeStorageSerde: { serialize: JSON.stringify, deserialize: JSON.parse }
 }))
 
 const messageStoreState = vi.hoisted(() => ({
@@ -215,7 +246,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     addChatMessage: addChatMessageMock,
     getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
-    ensureConfigForRequest: async () => createSafeStorage().get("tldwConfig"),
+    ensureConfigForRequest: async () => actualAuthority.config ?? createSafeStorage().get("tldwConfig"),
     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
   }
 }))
@@ -317,7 +348,10 @@ describe("useChatActions character integration", () => {
     realErrorPersistence.enabled = false
     clearVisualIdentityResolverCaches()
     actualAuthority.enabled = false
+    actualAuthority.config = null
     actualAuthority.snapshot = null
+    safeStorage.values.clear()
+    safeStorage.watchers.clear()
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
     vi.mocked(getModelNicknameByID).mockResolvedValue(null)
     vi.mocked(generateID).mockImplementation(() => "generated-id")
@@ -359,15 +393,30 @@ describe("useChatActions character integration", () => {
 
 
 
-  const enableActualAuthority = async () => {
-    actualAuthority.enabled = true
-    await createSafeStorage().set("tldwConfig", {
+  const configureActualAuthority = async (
+    overrides: Record<string, unknown> = {}
+  ) => {
+    const config = {
       serverUrl: "http://127.0.0.1:8000", authMode: "single-user",
       apiKey: "synthetic-test-key", credentialSource: "manual",
-      apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000"
-    })
-    const { authService } = await vi.importActual<typeof import("@web/lib/auth")>("@web/lib/auth")
-    return () => authService.logout()
+      apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000",
+      ...overrides
+    }
+    actualAuthority.config = config
+    await createSafeStorage().set("tldwConfig", config)
+  }
+
+  const enableActualAuthority = async () => {
+    actualAuthority.enabled = true
+    await configureActualAuthority()
+    // This is the browser-visible credential boundary consumed by the actual
+    // service-prompt lease. The frontend AuthService emits it on logout, but
+    // this UI-package test must not import a frontend-only module.
+    return () => window.dispatchEvent(
+      new CustomEvent("tldw:auth-credentials-changed", {
+        detail: { authenticated: false }
+      })
+    )
   }
 
   it.each(["late-success", "late-failure", "partial-logout", "caller-stop", "partial-error", "same-owner"])(
@@ -534,7 +583,9 @@ describe("useChatActions character integration", () => {
       actualAuthority.enabled = true
       realErrorPersistence.enabled = true
       await i18n.init({ lng: "en", resources: {} })
-      await createSafeStorage().set("tldwConfig", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "synthetic-test-key", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000", ...(mode === "explicit-budget" ? { streamIdleTimeoutMs: 12_000 } : {}) })
+      await configureActualAuthority(
+        mode === "explicit-budget" ? { streamIdleTimeoutMs: 12_000 } : {}
+      )
       const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
       bgStreamMock.mockImplementation(actualProxy.bgStream)
       streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
@@ -608,7 +659,7 @@ describe("useChatActions character integration", () => {
     actualAuthority.enabled = true
     realErrorPersistence.enabled = true
     await i18n.init({ lng: "en", resources: {} })
-    await createSafeStorage().set("tldwConfig", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "synthetic-test-key", credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000" })
+    await configureActualAuthority()
     const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
     bgStreamMock.mockImplementation(actualProxy.bgStream)
     streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)

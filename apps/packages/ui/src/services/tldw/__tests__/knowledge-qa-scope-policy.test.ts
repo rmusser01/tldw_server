@@ -5,6 +5,7 @@ describe("bounded Knowledge QA request scope policy", () => {
   it.each([
     ["GET", "/api/v1/characters"], ["GET", "/api/v1/characters/"],
     ["GET", "/api/v1/characters/search?query=Helpful"], ["GET", "/api/v1/characters/search/"],
+    ["GET", "/api/v1/characters/1"], ["GET", "/api/v1/characters/1/"],
     ["GET", "/api/v1/chats/owned"], ["DELETE", "/api/v1/chats/owned"],
     ["GET", "/api/v1/chat/conversations?keywords=__knowledge_QA__"],
     ["GET", "/api/v1/chat/conversations/owned"], ["PATCH", "/api/v1/chat/conversations/owned"],
@@ -20,7 +21,10 @@ describe("bounded Knowledge QA request scope policy", () => {
   })
   it.each([
     ["POST", "/api/v1/characters"], ["DELETE", "/api/v1/characters/1"],
-    ["GET", "/api/v1/characters/1"], ["GET", "/api/v1/characters/search/other"],
+    ["GET", "/api/v1/characters/search/other"],
+    ["GET", "/api/v1/characters/1/world-books"],
+    ["GET", "/api/v1/characters/1/entries"],
+    ["GET", "/api/v1/characters/a%2fb"], ["GET", "/api/v1/characters/%2e%2e"],
     ["GET", "/api/v1/chat/conversations//messages-with-context"],
     ["GET", "/api/v1/chat/conversations/a%2fb/messages-with-context"],
     ["GET", "/api/v1/chat/conversations/%2e%2e/messages-with-context"],
