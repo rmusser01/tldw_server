@@ -253,7 +253,7 @@ describe("TldwSettings cookie logout", () => {
 
   it("tests an unverified authenticated session without profile permissions and defaults to password login", async () => {
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200, headers: { "Content-Type": "application/json" } })))
     mocks.apiSend.mockImplementation(async ({ path }) => path === "/api/v1/auth/sessions"
       ? { ok: true, status: 200, data: [] }
       : { ok: false, status: 403, error: "Email not verified" })
@@ -268,7 +268,7 @@ describe("TldwSettings cookie logout", () => {
 
   it("does not load or render billing when the server does not advertise it", async () => {
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 }))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200, headers: { "Content-Type": "application/json" } }))
     vi.stubGlobal("fetch", fetchMock)
     render(<TldwSettings />)
     await screen.findByTestId("auth-mode")
@@ -280,7 +280,7 @@ describe("TldwSettings cookie logout", () => {
 
   it("does not send a saved login to an edited foreign server URL", async () => {
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200, headers: { "Content-Type": "application/json" } })))
     render(<TldwSettings />)
     await screen.findByTestId("auth-mode")
     formValues.serverUrl = "https://different.example"
@@ -295,7 +295,7 @@ describe("TldwSettings cookie logout", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000")
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "alice-token" })
     const paths = Object.fromEntries(['plans', 'subscription', 'usage', 'invoices'].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths }), { status: 200 })))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths }), { status: 200, headers: { "Content-Type": "application/json" } })))
     render(<TldwSettings />)
     expect(await screen.findByText("Billing controls")).toBeInTheDocument()
     await waitFor(() => expect(mocks.apiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/billing/invoices?limit=20" })))
@@ -304,7 +304,7 @@ describe("TldwSettings cookie logout", () => {
   describe("billing OpenAPI discovery routing", () => {
     const billingSpec = () => new Response(JSON.stringify({
       paths: Object.fromEntries(["plans", "subscription", "usage", "invoices"].map(route => [`/api/v1/billing/${route}`, { get: {} }]))
-    }), { status: 200 })
+    }), { status: 200, headers: { "Content-Type": "application/json" } })
     const noBilling = () => {
       expect(screen.queryByText("Billing controls")).not.toBeInTheDocument()
       expect(mocks.apiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: expect.stringContaining("/billing/") }))
@@ -428,7 +428,7 @@ describe("TldwSettings cookie logout", () => {
   it("describes rejected multi-user sessions without calling them invalid API keys", async () => {
     configuredClient({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "expired-token" })
     mocks.apiSend.mockResolvedValue({ ok: false, status: 401, error: "Token expired" })
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200, headers: { "Content-Type": "application/json" } })))
     render(<TldwSettings />)
     await screen.findByTestId("auth-mode")
     fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
@@ -445,7 +445,7 @@ describe("TldwSettings cookie logout", () => {
     beforeEach(() => {
       storage = new Storage({ area: "local" })
       configuredClient(target)
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200, headers: { "Content-Type": "application/json" } })))
     })
 
     const status = (expected: string) => waitFor(() =>

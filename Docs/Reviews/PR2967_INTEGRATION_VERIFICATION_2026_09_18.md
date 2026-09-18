@@ -116,3 +116,10 @@ Source repair is complete locally. Publication, individual Qodo replies and fina
 
 
 Publication checkpoint: all reviewed source fixes are pushed at 38b686f0b2. All 14 Qodo threads are resolved, and the updated review reports zero open bugs, rule violations or cross-repo conflicts. Individual replies include fix commits and verification evidence. Final required hosted CI remains pending.
+
+
+### Final CI billing-fixture correction
+
+On 4752bbe5aa, frontend shard 4 reports three failures in the existing cookie/logout Billing discovery tests; 445 other shard cases pass. The same three failures reproduce locally (30 passing controls). The fixtures supply JSON bodies but their synthetic Response objects default to text/plain. The real shared request transport correctly uses Content-Type to choose JSON parsing; the actual retained API returns /openapi.json as application/json.
+
+Seven fixture responses now supply that real Content-Type. No production code, assertion, timeout, cancellation or transport mock changes. All 33 cookie/logout cases and nine form lifecycle cases pass on Node 20.20.2. Independent source review confirms the correction preserves the positive/negative, same-origin, timeout and stale-response controls. Earlier failures remain retained. Final hosted CI must rerun on the updated commit. This is a test-fixture correction, not an additional native UAT product finding.
