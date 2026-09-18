@@ -1,0 +1,75 @@
+{
+  "errors": [
+    {
+      "filename": "./apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "reason": "syntax error while parsing AST from file"
+    },
+    {
+      "filename": "./apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+      "reason": "syntax error while parsing AST from file"
+    }
+  ],
+  "generated_at": "2026-09-18T01:06:20Z",
+  "metrics": {
+    "./apps/packages/ui/src/components/Option/Playground/Playground.tsx": {
+      "loc": 4293,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx": {
+      "loc": 1207,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx": {
+      "loc": 1424,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/hooks/chat/useChatActions.ts": {
+      "loc": 4614,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/hooks/handlers/messageHandlers.ts": {
+      "loc": 539,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./apps/packages/ui/src/utils/character-chat-mode-intent.ts": {
+      "loc": 79,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 12156,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": []
+}

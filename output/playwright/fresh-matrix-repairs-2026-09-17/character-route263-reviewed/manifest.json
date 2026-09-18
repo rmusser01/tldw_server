@@ -1,0 +1,182 @@
+{
+  "at": "2026-09-18T01:33:33.939Z",
+  "reviewedImplementation": [
+    263
+  ],
+  "integrationAccepted": [],
+  "nativeAcceptancePending": [
+    263
+  ],
+  "sourceBaseline": "2787043410fc918b2c280d90f753d8fd02b6b35b",
+  "fullMatrixAccepted": false,
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/bandit.json",
+      "sourceBytes": 2298,
+      "sourceSha256": "310fbd65a908280662386ff5c6a2440d4fcba3e63ba79145f7ab92e19a4bcb33",
+      "bytes": 2298,
+      "sha256": "310fbd65a908280662386ff5c6a2440d4fcba3e63ba79145f7ab92e19a4bcb33",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/eslint-current.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/eslint-current.json.gz",
+      "sourceBytes": 506443,
+      "sourceSha256": "6aa2f016502460e1a4bd9397d87cd9620708c277585e6df1f15ac68a50023e20",
+      "bytes": 83778,
+      "sha256": "46539208db3eb8c016a377f4e042fa37fc63ca3a69b354f1f2b787b984c01f18",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/eslint-summary.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/eslint-summary.json",
+      "sourceBytes": 20506,
+      "sourceSha256": "93d02b243441be78b805a8b59b72da002def4f298ca611a69e1bde9f0f10c889",
+      "bytes": 20506,
+      "sha256": "93d02b243441be78b805a8b59b72da002def4f298ca611a69e1bde9f0f10c889",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/owned.patch",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/owned.patch.gz",
+      "sourceBytes": 12680,
+      "sourceSha256": "f5156dadf9155a7257d449b8eb8daabb36251ad4fcc10ba70899064ae62ab7ac",
+      "bytes": 3312,
+      "sha256": "a0fdcb027b0f7cfebc61cc9e93fb3326d7e42f8772a68353d682939886b7c680",
+      "encoding": "gzip"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/tsc-comparison.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/tsc-comparison.json",
+      "sourceBytes": 70,
+      "sourceSha256": "64ca044225e1b87af199fbd3adf8b4301dcf096cb0a1c262bd0ea4016f5b7e4c",
+      "bytes": 70,
+      "sha256": "64ca044225e1b87af199fbd3adf8b4301dcf096cb0a1c262bd0ea4016f5b7e4c",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/tsc-current-summary.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/tsc-current-summary.json",
+      "sourceBytes": 41,
+      "sourceSha256": "c07051e29ce46f101157fcd5e22e9b5a5f4ca5d90c1840fb4598e00ef5d9d6d5",
+      "bytes": 41,
+      "sha256": "c07051e29ce46f101157fcd5e22e9b5a5f4ca5d90c1840fb4598e00ef5d9d6d5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/tsc-current.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/tsc-current.json",
+      "sourceBytes": 35180,
+      "sourceSha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b",
+      "bytes": 35180,
+      "sha256": "a673ec42b98e80f39f9c410fc7484ad11d474031d9626fa8110296994843249b",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/tsc-current.log",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/tsc-current.log",
+      "sourceBytes": 24428,
+      "sourceSha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "bytes": 24428,
+      "sha256": "fcfd198d305d73ec70d16fb5235891facef416cddbef45c4ef64c59f25f1a33e",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263/verification-summary.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263/verification-summary.json",
+      "sourceBytes": 1548,
+      "sourceSha256": "05c31b4677104519b037170f33e6ce6a2c2550f09d79edbbcf90ba545d99b339",
+      "bytes": 1548,
+      "sha256": "05c31b4677104519b037170f33e6ce6a2c2550f09d79edbbcf90ba545d99b339",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/character-route263-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/character-route263-review/REVIEW.md",
+      "sourceBytes": 4521,
+      "sourceSha256": "a59bb2bd926e2af3be36c2c05714e4d7fe8cfae741847b3ad7f91300de486702",
+      "bytes": 4521,
+      "sha256": "a59bb2bd926e2af3be36c2c05714e4d7fe8cfae741847b3ad7f91300de486702",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-263-brief.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-263-brief.md",
+      "sourceBytes": 2203,
+      "sourceSha256": "74c4bb84dd88fb020a3adb5cce17d2b1547e971d5c08f58023e457dafcad6dcd",
+      "bytes": 2203,
+      "sha256": "74c4bb84dd88fb020a3adb5cce17d2b1547e971d5c08f58023e457dafcad6dcd",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-263-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-263-report.md",
+      "sourceBytes": 3009,
+      "sourceSha256": "0c142d510e21c089945596188e89c39c0e0ee45c7ca40c2794fa9526601c813f",
+      "bytes": 3009,
+      "sha256": "0c142d510e21c089945596188e89c39c0e0ee45c7ca40c2794fa9526601c813f",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "sourceBytes": 160147,
+      "sourceSha256": "ee1349b4059581d49667e725767db308fe40ecac0f87c32002f82fa6cf60c3e9",
+      "bytes": 160147,
+      "sha256": "ee1349b4059581d49667e725767db308fe40ecac0f87c32002f82fa6cf60c3e9",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "path": "evidence/apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "sourceBytes": 77763,
+      "sourceSha256": "6fa7aa29e70104aa241113beb3a01a84f664ee3675e719ae5287e7ec547069db",
+      "bytes": 77763,
+      "sha256": "6fa7aa29e70104aa241113beb3a01a84f664ee3675e719ae5287e7ec547069db",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "path": "evidence/apps/packages/ui/src/hooks/chat/useChatActions.ts",
+      "sourceBytes": 167448,
+      "sourceSha256": "0b0524c04945282aba4f9add789fbba1d5f735a235fb92221a6d9fc0ae85db1b",
+      "bytes": 167448,
+      "sha256": "0b0524c04945282aba4f9add789fbba1d5f735a235fb92221a6d9fc0ae85db1b",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "path": "evidence/apps/packages/ui/src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx",
+      "sourceBytes": 68438,
+      "sourceSha256": "9ab6e6f727f3ce573edf25496a3421db597fe99e9f31089502556d29ecb91a98",
+      "bytes": 68438,
+      "sha256": "9ab6e6f727f3ce573edf25496a3421db597fe99e9f31089502556d29ecb91a98",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "path": "evidence/apps/packages/ui/src/hooks/handlers/messageHandlers.ts",
+      "sourceBytes": 17709,
+      "sourceSha256": "ec6ddb62f75bf7c12eceae7d8db1d2db7c1cb79e3d0941662cb2a2d5d012d3d0",
+      "bytes": 17709,
+      "sha256": "ec6ddb62f75bf7c12eceae7d8db1d2db7c1cb79e3d0941662cb2a2d5d012d3d0",
+      "encoding": "identity"
+    },
+    {
+      "source": "apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+      "path": "evidence/apps/packages/ui/src/utils/character-chat-mode-intent.ts",
+      "sourceBytes": 2565,
+      "sourceSha256": "bc4983feb9e494c000832a2f63bf84930ee5c99718eb70f9dbf2979f17b4dbbe",
+      "bytes": 2565,
+      "sha256": "bc4983feb9e494c000832a2f63bf84930ee5c99718eb70f9dbf2979f17b4dbbe",
+      "encoding": "identity"
+    }
+  ]
+}
