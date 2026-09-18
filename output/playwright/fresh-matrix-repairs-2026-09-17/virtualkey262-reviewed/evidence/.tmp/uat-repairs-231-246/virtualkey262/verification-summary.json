@@ -1,0 +1,32 @@
+{
+  "task": "UAT262",
+  "source": "tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py",
+  "sourceSha256": "302af943a627fc98fd994b3f194cd394c206851375afb68a7b413a9bb3fc8e8f",
+  "change": "Added whitespace separators between adjacent PostgreSQL positional parameters in both virtual-key INSERT variants.",
+  "verification": [
+    {
+      "command": "run-pg-tests-fixture-database.mjs test_authnz_api_keys_repo_postgres.py::test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres",
+      "result": "1 passed, 4 warnings"
+    },
+    {
+      "command": "run-pg-tests-fixture-database.mjs test_auth_principal_api_key_happy_path.py::test_api_key_scopes_org_and_team_membership",
+      "result": "1 passed, 4 warnings"
+    },
+    {
+      "command": "focused managed-SQL guard regression set",
+      "result": "44 passed, 90 warnings"
+    },
+    {
+      "command": "compileall and ruff on changed scope",
+      "result": "passed"
+    },
+    {
+      "command": "bandit on changed scope",
+      "result": "0 high, 0 medium, 38 low pytest-assert findings"
+    }
+  ],
+  "preexistingOrHarnessNotes": [
+    "The original PostgreSQL runner used the bootstrap database as its disposable fixture database; the task owner supplied the corrected fixture-database runner without changing production code.",
+    "Existing SQLite tests that perform raw protected users-table writes fail under the frozen profile-write guard and are unrelated to this repository query-formatting repair."
+  ]
+}

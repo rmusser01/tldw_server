@@ -1,0 +1,833 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-18T01:10:16Z",
+  "metrics": {
+    "./tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1429,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py": {
+      "CONFIDENCE.HIGH": 29,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 30,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 254,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py": {
+      "CONFIDENCE.HIGH": 8,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 8,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 146,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 37,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 1,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 38,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 1829,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "50     )\n51     assert user_id is not None\n52     user_id_int = int(user_id)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 51,
+      "line_range": [
+        51
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "80     )\n81     assert row_first is not None\n82     assert row_second is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 32,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 81,
+      "line_range": [
+        81
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "81     assert row_first is not None\n82     assert row_second is not None\n83     assert row_first[\"status\"] == APIKeyStatus.ROTATED.value\n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 82,
+      "line_range": [
+        82
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "82     assert row_second is not None\n83     assert row_first[\"status\"] == APIKeyStatus.ROTATED.value\n84     assert int(row_first[\"rotated_to\"]) == second_id\n",
+      "col_offset": 4,
+      "end_col_offset": 60,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 83,
+      "line_range": [
+        83
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "83     assert row_first[\"status\"] == APIKeyStatus.ROTATED.value\n84     assert int(row_first[\"rotated_to\"]) == second_id\n85     assert row_first[\"revoke_reason\"] == \"PG rotation\"\n",
+      "col_offset": 4,
+      "end_col_offset": 52,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 84,
+      "line_range": [
+        84
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "84     assert int(row_first[\"rotated_to\"]) == second_id\n85     assert row_first[\"revoke_reason\"] == \"PG rotation\"\n86     assert int(row_second[\"rotated_from\"]) == first_id\n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 85,
+      "line_range": [
+        85
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "85     assert row_first[\"revoke_reason\"] == \"PG rotation\"\n86     assert int(row_second[\"rotated_from\"]) == first_id\n87 \n",
+      "col_offset": 4,
+      "end_col_offset": 54,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 86,
+      "line_range": [
+        86
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "96     )\n97     assert revoked is True\n98 \n",
+      "col_offset": 4,
+      "end_col_offset": 26,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 97,
+      "line_range": [
+        97
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "106     )\n107     assert row_second_after is not None\n108     assert row_second_after[\"status\"] == APIKeyStatus.REVOKED.value\n",
+      "col_offset": 4,
+      "end_col_offset": 39,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 107,
+      "line_range": [
+        107
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "107     assert row_second_after is not None\n108     assert row_second_after[\"status\"] == APIKeyStatus.REVOKED.value\n109     assert int(row_second_after[\"revoked_by\"]) == user_id_int\n",
+      "col_offset": 4,
+      "end_col_offset": 67,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 108,
+      "line_range": [
+        108
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "108     assert row_second_after[\"status\"] == APIKeyStatus.REVOKED.value\n109     assert int(row_second_after[\"revoked_by\"]) == user_id_int\n110     assert row_second_after[\"revoke_reason\"] == \"PG revoke\"\n",
+      "col_offset": 4,
+      "end_col_offset": 61,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 109,
+      "line_range": [
+        109
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "109     assert int(row_second_after[\"revoked_by\"]) == user_id_int\n110     assert row_second_after[\"revoke_reason\"] == \"PG revoke\"\n111 \n",
+      "col_offset": 4,
+      "end_col_offset": 59,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 110,
+      "line_range": [
+        110
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "147     )\n148     assert user_id is not None\n149     user_id_int = int(user_id)\n",
+      "col_offset": 4,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 148,
+      "line_range": [
+        148
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "171     )\n172     assert after is not None\n173     assert int(after[\"usage_count\"] or 0) == before_count + 1\n",
+      "col_offset": 4,
+      "end_col_offset": 28,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 172,
+      "line_range": [
+        172
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "172     assert after is not None\n173     assert int(after[\"usage_count\"] or 0) == before_count + 1\n174     assert after[\"last_used_ip\"] == \"203.0.113.5\"\n",
+      "col_offset": 4,
+      "end_col_offset": 61,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 173,
+      "line_range": [
+        173
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "173     assert int(after[\"usage_count\"] or 0) == before_count + 1\n174     assert after[\"last_used_ip\"] == \"203.0.113.5\"\n175     assert after[\"last_used_at\"] is not None\n",
+      "col_offset": 4,
+      "end_col_offset": 49,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 174,
+      "line_range": [
+        174
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "174     assert after[\"last_used_ip\"] == \"203.0.113.5\"\n175     assert after[\"last_used_at\"] is not None\n176 \n",
+      "col_offset": 4,
+      "end_col_offset": 44,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 175,
+      "line_range": [
+        175
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "185     after_audit = await pool.fetchval(\"SELECT COUNT(*) FROM api_key_audit_log\")\n186     assert int(after_audit or 0) == int(before_audit or 0) + 1\n187 \n",
+      "col_offset": 4,
+      "end_col_offset": 62,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 186,
+      "line_range": [
+        186
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "195     )\n196     assert last_row is not None\n197     assert int(last_row[\"api_key_id\"]) == key_id\n",
+      "col_offset": 4,
+      "end_col_offset": 31,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 196,
+      "line_range": [
+        196
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "196     assert last_row is not None\n197     assert int(last_row[\"api_key_id\"]) == key_id\n198     assert last_row[\"action\"] == \"unit_test_pg\"\n",
+      "col_offset": 4,
+      "end_col_offset": 48,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 197,
+      "line_range": [
+        197
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "197     assert int(last_row[\"api_key_id\"]) == key_id\n198     assert last_row[\"action\"] == \"unit_test_pg\"\n199     assert int(last_row[\"user_id\"]) == user_id_int\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 198,
+      "line_range": [
+        198
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "198     assert last_row[\"action\"] == \"unit_test_pg\"\n199     assert int(last_row[\"user_id\"]) == user_id_int\n200 \n",
+      "col_offset": 4,
+      "end_col_offset": 50,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 199,
+      "line_range": [
+        199
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "208     await users_db.initialize()\n209     user = await users_db.create_user(\n210         username=username,\n211         email=f\"{username}@example.com\",\n212         password_hash=\"x\",\n213         role=\"user\",\n214         is_active=True,\n215         is_superuser=False,\n216         storage_quota_mb=5120,\n217     )\n218     user_id = int(user[\"id\"])\n",
+      "col_offset": 17,
+      "end_col_offset": 5,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "MEDIUM",
+      "issue_cwe": {
+        "id": 259,
+        "link": "https://cwe.mitre.org/data/definitions/259.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Possible hardcoded password: 'x'",
+      "line_number": 209,
+      "line_range": [
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b106_hardcoded_password_funcarg.html",
+      "test_id": "B106",
+      "test_name": "hardcoded_password_funcarg"
+    },
+    {
+      "code": "258         )\n259         assert row is not None\n260         assert row[\"is_virtual\"] is True\n",
+      "col_offset": 8,
+      "end_col_offset": 30,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 259,
+      "line_range": [
+        259
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "259         assert row is not None\n260         assert row[\"is_virtual\"] is True\n261         assert row[\"scope\"] == \"read\"\n",
+      "col_offset": 8,
+      "end_col_offset": 40,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 260,
+      "line_range": [
+        260
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "260         assert row[\"is_virtual\"] is True\n261         assert row[\"scope\"] == \"read\"\n262         assert json.loads(row[\"llm_allowed_endpoints\"]) == [\"chat.completions\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 37,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 261,
+      "line_range": [
+        261
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "261         assert row[\"scope\"] == \"read\"\n262         assert json.loads(row[\"llm_allowed_endpoints\"]) == [\"chat.completions\"]\n263         assert json.loads(row[\"llm_allowed_providers\"]) == [\"openai\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 79,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 262,
+      "line_range": [
+        262
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "262         assert json.loads(row[\"llm_allowed_endpoints\"]) == [\"chat.completions\"]\n263         assert json.loads(row[\"llm_allowed_providers\"]) == [\"openai\"]\n264         assert json.loads(row[\"llm_allowed_models\"]) == [\"gpt-test\"]\n",
+      "col_offset": 8,
+      "end_col_offset": 69,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 263,
+      "line_range": [
+        263
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "263         assert json.loads(row[\"llm_allowed_providers\"]) == [\"openai\"]\n264         assert json.loads(row[\"llm_allowed_models\"]) == [\"gpt-test\"]\n265         assert json.loads(row[\"metadata\"]) == {\n",
+      "col_offset": 8,
+      "end_col_offset": 68,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 264,
+      "line_range": [
+        264
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "264         assert json.loads(row[\"llm_allowed_models\"]) == [\"gpt-test\"]\n265         assert json.loads(row[\"metadata\"]) == {\n266             \"allowed_methods\": [\"POST\"],\n267             \"allowed_paths\": [\"/api/v1/chat/completions\"],\n268             \"max_calls\": 3,\n269             \"max_runs\": 4,\n270         }\n271 \n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "./tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 265,
+      "line_range": [
+        265,
+        266,
+        267,
+        268,
+        269,
+        270
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "63 \n64     assert key_id == 101\n65 \n",
+      "col_offset": 4,
+      "end_col_offset": 24,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 64,
+      "line_range": [
+        64
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "97         await repo.ensure_tables()\n98     assert seen_paths == [\"strict.db\"]\n99 \n",
+      "col_offset": 4,
+      "end_col_offset": 38,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 98,
+      "line_range": [
+        98
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "166 \n167     assert row is not None\n168     assert row[\"id\"] == 1\n",
+      "col_offset": 4,
+      "end_col_offset": 26,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 167,
+      "line_range": [
+        167
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "167     assert row is not None\n168     assert row[\"id\"] == 1\n169     assert row[\"user_id\"] == 42\n",
+      "col_offset": 4,
+      "end_col_offset": 25,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 168,
+      "line_range": [
+        168
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "168     assert row[\"id\"] == 1\n169     assert row[\"user_id\"] == 42\n170     assert row[\"is_virtual\"] == 0\n",
+      "col_offset": 4,
+      "end_col_offset": 31,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 169,
+      "line_range": [
+        169
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "169     assert row[\"user_id\"] == 42\n170     assert row[\"is_virtual\"] == 0\n171     assert row[\"parent_key_id\"] is None\n",
+      "col_offset": 4,
+      "end_col_offset": 33,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 170,
+      "line_range": [
+        170
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "170     assert row[\"is_virtual\"] == 0\n171     assert row[\"parent_key_id\"] is None\n172     assert row[\"llm_allowed_endpoints\"] is None\n",
+      "col_offset": 4,
+      "end_col_offset": 39,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 171,
+      "line_range": [
+        171
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    },
+    {
+      "code": "171     assert row[\"parent_key_id\"] is None\n172     assert row[\"llm_allowed_endpoints\"] is None\n",
+      "col_offset": 4,
+      "end_col_offset": 47,
+      "filename": "./tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 172,
+      "line_range": [
+        172
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.3/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+{
+  "at": "2026-09-18T01:19:42.331Z",
+  "reviewedImplementation": [
+    262
+  ],
+  "integrationAccepted": [
+    262
+  ],
+  "nativeAcceptancePending": [],
+  "sourceBaseline": "2787043410fc918b2c280d90f753d8fd02b6b35b",
+  "fullMatrixAccepted": false,
+  "omittedInputs": [],
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit-security.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit-security.json",
+      "sourceBytes": 795,
+      "sourceSha256": "6d13a5e775567d189efcfd298813f19bc32eeda331f0252a1aa3e452ad0aa9bd",
+      "bytes": 795,
+      "sha256": "6d13a5e775567d189efcfd298813f19bc32eeda331f0252a1aa3e452ad0aa9bd",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit.json",
+      "sourceBytes": 25693,
+      "sourceSha256": "b2ceacc1bbaaf853650d30347a505bd510e395d04b26b9cc45d07c5e8228811f",
+      "bytes": 25693,
+      "sha256": "b2ceacc1bbaaf853650d30347a505bd510e395d04b26b9cc45d07c5e8228811f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/cleanup-ruff.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/cleanup-ruff.json",
+      "sourceBytes": 2,
+      "sourceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/cleanup-verification.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/cleanup-verification.json",
+      "sourceBytes": 1777,
+      "sourceSha256": "73f41d53890a7ef0271d31eb3d593cc007911e473d8ebcfcd75a56746488d2ad",
+      "bytes": 1777,
+      "sha256": "73f41d53890a7ef0271d31eb3d593cc007911e473d8ebcfcd75a56746488d2ad",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/cleanup.patch",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/cleanup.patch",
+      "sourceBytes": 4646,
+      "sourceSha256": "7f594c504a7dcd79475d1bc9585657875a3ccc00be7d0778feb5df3f8d72c4aa",
+      "bytes": 4646,
+      "sha256": "7f594c504a7dcd79475d1bc9585657875a3ccc00be7d0778feb5df3f8d72c4aa",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/root-bandit-status.txt",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/root-bandit-status.txt",
+      "sourceBytes": 249,
+      "sourceSha256": "e31e9deeda2ae8bf97db7662750bd4083526c2f725f2b3d35499ec12aece3aed",
+      "bytes": 249,
+      "sha256": "e31e9deeda2ae8bf97db7662750bd4083526c2f725f2b3d35499ec12aece3aed",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/root-bandit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/root-bandit.json",
+      "sourceBytes": 33941,
+      "sourceSha256": "caa37d0108ade31bf5f3f40b1c868e8962728170e6fafe28bdab27aab6dec368",
+      "bytes": 33941,
+      "sha256": "caa37d0108ade31bf5f3f40b1c868e8962728170e6fafe28bdab27aab6dec368",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/root-ruff.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/root-ruff.json",
+      "sourceBytes": 2,
+      "sourceSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "bytes": 2,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262/verification-summary.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262/verification-summary.json",
+      "sourceBytes": 1485,
+      "sourceSha256": "1504d481b9d196147d2d248a7769b117aaf2aa6a370fa613aed1a24ef60db591",
+      "bytes": 1485,
+      "sha256": "1504d481b9d196147d2d248a7769b117aaf2aa6a370fa613aed1a24ef60db591",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262-review/CLEANUP-SUPPLEMENT.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262-review/CLEANUP-SUPPLEMENT.md",
+      "sourceBytes": 1637,
+      "sourceSha256": "264509111141fa8b7d537a26996edbbe2afcd3e8b610f5941508dd3c16d33b81",
+      "bytes": 1637,
+      "sha256": "264509111141fa8b7d537a26996edbbe2afcd3e8b610f5941508dd3c16d33b81",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/virtualkey262-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/virtualkey262-review/REVIEW.md",
+      "sourceBytes": 5153,
+      "sourceSha256": "2567eee7c1307e4ca5454d4882aa04661e79e71b5f47c4c4486a91d3ac0cbfb9",
+      "bytes": 5153,
+      "sha256": "2567eee7c1307e4ca5454d4882aa04661e79e71b5f47c4c4486a91d3ac0cbfb9",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-262-brief.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-262-brief.md",
+      "sourceBytes": 2906,
+      "sourceSha256": "3e52688d1ff4e47267faaa7a179707c6e71161a1a0523692bc85662c774392d5",
+      "bytes": 2906,
+      "sha256": "3e52688d1ff4e47267faaa7a179707c6e71161a1a0523692bc85662c774392d5",
+      "encoding": "identity"
+    },
+    {
+      "source": ".superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-262-correction-report.md",
+      "path": "evidence/.superpowers/sdd/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs/task-262-correction-report.md",
+      "sourceBytes": 1708,
+      "sourceSha256": "15cd42a83ebb2bd5e3d6ff083c4f356ae6714b97abe8d68fd126c4f9256736e2",
+      "bytes": 1708,
+      "sha256": "15cd42a83ebb2bd5e3d6ff083c4f356ae6714b97abe8d68fd126c4f9256736e2",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py",
+      "path": "evidence/tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py",
+      "sourceBytes": 61602,
+      "sourceSha256": "302af943a627fc98fd994b3f194cd394c206851375afb68a7b413a9bb3fc8e8f",
+      "bytes": 61602,
+      "sha256": "302af943a627fc98fd994b3f194cd394c206851375afb68a7b413a9bb3fc8e8f",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "path": "evidence/tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+      "sourceBytes": 9538,
+      "sourceSha256": "01cf5b01a614e6a68760c955846b792c2bbc195ab5d5d89a9db7d7865a4afe6b",
+      "bytes": 9538,
+      "sha256": "01cf5b01a614e6a68760c955846b792c2bbc195ab5d5d89a9db7d7865a4afe6b",
+      "encoding": "identity"
+    },
+    {
+      "source": "tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "path": "evidence/tldw_Server_API/tests/AuthNZ/unit/test_api_keys_repo_schema_strictness.py",
+      "sourceBytes": 5714,
+      "sourceSha256": "0e1282cbd61788c775f37e0d0a6ed34cbef2b54281409cff7991ba0bd11bcebb",
+      "bytes": 5714,
+      "sha256": "0e1282cbd61788c775f37e0d0a6ed34cbef2b54281409cff7991ba0bd11bcebb",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/run-pg-tests-fixture-database.mjs",
+      "path": "evidence/.tmp/fresh-uat-recovery-20260916/run-pg-tests-fixture-database.mjs",
+      "sourceBytes": 1917,
+      "sourceSha256": "03610a54e611da17183dd9eb1e26ae6494f876a0c3b595bbb6bd733fbde49ee1",
+      "bytes": 1917,
+      "sha256": "03610a54e611da17183dd9eb1e26ae6494f876a0c3b595bbb6bd733fbde49ee1",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/virtualkey262-independent-focused-command.json",
+      "path": "evidence/.tmp/fresh-uat-recovery-20260916/virtualkey262-independent-focused-command.json",
+      "sourceBytes": 643,
+      "sourceSha256": "99ca8e7cd0fdf7873b000dcf60ca7ad2a2e79b89aa9169627edf6a56dfa58de6",
+      "bytes": 643,
+      "sha256": "99ca8e7cd0fdf7873b000dcf60ca7ad2a2e79b89aa9169627edf6a56dfa58de6",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/virtualkey262-independent-adjacent-command.json",
+      "path": "evidence/.tmp/fresh-uat-recovery-20260916/virtualkey262-independent-adjacent-command.json",
+      "sourceBytes": 1008,
+      "sourceSha256": "58329cfc6203eb2372970b681c2f856ae8cf691628119f09c63ccdbf63cabb9f",
+      "bytes": 1008,
+      "sha256": "58329cfc6203eb2372970b681c2f856ae8cf691628119f09c63ccdbf63cabb9f",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/fresh-uat-recovery-20260916/virtualkey262-cleanup-command.json",
+      "path": "evidence/.tmp/fresh-uat-recovery-20260916/virtualkey262-cleanup-command.json",
+      "sourceBytes": 508,
+      "sourceSha256": "08f774367f000c923023a931d9c6e51f6043a6508c4cc1767621d5afb14855ac",
+      "bytes": 508,
+      "sha256": "08f774367f000c923023a931d9c6e51f6043a6508c4cc1767621d5afb14855ac",
+      "encoding": "identity"
+    }
+  ]
+}

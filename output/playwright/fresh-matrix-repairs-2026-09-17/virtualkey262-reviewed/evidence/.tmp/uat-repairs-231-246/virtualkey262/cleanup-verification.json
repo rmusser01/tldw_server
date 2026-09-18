@@ -1,0 +1,30 @@
+{
+  "task": "TASK13260.204 / UAT262 test-fixture cleanup",
+  "source": {
+    "path": "tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py",
+    "sha256": "01cf5b01a614e6a68760c955846b792c2bbc195ab5d5d89a9db7d7865a4afe6b"
+  },
+  "commands": [
+    {
+      "command": "source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py -f json -o .tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit.json",
+      "exitCode": 1,
+      "result": "29 B101 assertions in test code; zero B106 findings."
+    },
+    {
+      "command": "source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py -s B101 -f json -o .tmp/uat-repairs-231-246/virtualkey262/cleanup-bandit-security.json",
+      "exitCode": 0,
+      "result": "Zero non-B101 security findings; supplementary classification only, not a replacement for the full scan."
+    },
+    {
+      "command": "source .venv/bin/activate && python -m ruff check tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py --output-format json > .tmp/uat-repairs-231-246/virtualkey262/cleanup-ruff.json",
+      "exitCode": 0,
+      "result": "No findings."
+    },
+    {
+      "command": "source .venv/bin/activate && TLDW_UAT_EVIDENCE_LABEL=virtualkey262-cleanup node .tmp/fresh-uat-recovery-20260916/run-pg-tests-fixture-database.mjs tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py::test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres -q --tb=short",
+      "exitCode": 0,
+      "result": "1 passed, 4 warnings.",
+      "redactedLog": ".tmp/fresh-uat-recovery-20260916/virtualkey262-cleanup.redacted.log"
+    }
+  ]
+}

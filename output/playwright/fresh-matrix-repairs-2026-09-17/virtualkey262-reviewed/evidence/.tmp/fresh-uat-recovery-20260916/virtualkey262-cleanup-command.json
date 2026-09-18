@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-18T01:12:54.289Z",
+  "command": [
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "tldw_Server_API/tests/AuthNZ/integration/test_authnz_api_keys_repo_postgres.py::test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres",
+    "-q",
+    "--tb=short"
+  ],
+  "postgresRequired": true,
+  "fixtureDatabase": "tldw_uat_51d55c2430ea",
+  "fixtureProvisioning": true,
+  "reusesRunningOwnedContainer": "tldw_uat_cycle5_postgres_20260916",
+  "dockerAutostart": false,
+  "port": 55475
+}
