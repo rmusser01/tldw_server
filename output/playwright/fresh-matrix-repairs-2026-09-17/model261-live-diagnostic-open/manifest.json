@@ -1,0 +1,551 @@
+{
+  "at": "2026-09-18T05:11:59.905Z",
+  "diagnosedFindings": [
+    261
+  ],
+  "acceptedFindings": [],
+  "openFindings": [
+    261
+  ],
+  "instrumented": true,
+  "fullMatrixAccepted": false,
+  "sourceRevision": "2ff90d14ae2d8cc1686cb403b8c3a147cc53427c",
+  "secretScan": {
+    "knownVariants": 122,
+    "matches": 0,
+    "jwtMatches": 0
+  },
+  "files": [
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/REVIEW.md",
+      "bytes": 6949,
+      "sha256": "2e1242513de99e63b48458ab85f57012dfc26fe3afcd865afea07a9e44d8d821",
+      "sourceBytes": 6949,
+      "sourceSha256": "2e1242513de99e63b48458ab85f57012dfc26fe3afcd865afea07a9e44d8d821",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/audit.mjs",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/audit.mjs",
+      "bytes": 16637,
+      "sha256": "6e8b29a4fbe88ecb810c746051224037a0253904eff3bd3445180379c4aff472",
+      "sourceBytes": 16637,
+      "sourceSha256": "6e8b29a4fbe88ecb810c746051224037a0253904eff3bd3445180379c4aff472",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/audit.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/audit.json",
+      "bytes": 35081,
+      "sha256": "77e44fd58a1ac116144dad8c440e422821c44ba930b5ebb48c7c45da9ed838cf",
+      "sourceBytes": 35081,
+      "sourceSha256": "77e44fd58a1ac116144dad8c440e422821c44ba930b5ebb48c7c45da9ed838cf",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/PROTOCOL.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/PROTOCOL.md",
+      "bytes": 2752,
+      "sha256": "cab8b3eafc5378b770f41e1749240f76b4123805df40b8b78db0365d8c2d61f7",
+      "sourceBytes": 2752,
+      "sourceSha256": "cab8b3eafc5378b770f41e1749240f76b4123805df40b8b78db0365d8c2d61f7",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/startup-safe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/startup-safe.json",
+      "bytes": 1176,
+      "sha256": "7d6910067da91ec1dde47da9c686c2f17fae56abeaa7ce373f95c705c0e52420",
+      "sourceBytes": 1176,
+      "sourceSha256": "7d6910067da91ec1dde47da9c686c2f17fae56abeaa7ce373f95c705c0e52420",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/restore-pre-stop-safe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/restore-pre-stop-safe.json",
+      "bytes": 999,
+      "sha256": "ef98e5b21894a78e586fe8b6168eb9ac8b5d0d7b99857fbb61af56df44ea4287",
+      "sourceBytes": 999,
+      "sourceSha256": "ef98e5b21894a78e586fe8b6168eb9ac8b5d0d7b99857fbb61af56df44ea4287",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/restored-ordinary-safe.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/restored-ordinary-safe.json",
+      "bytes": 1774,
+      "sha256": "84c47595ba9495cd15d2194e1c623bbd91c6dc81f8e7f927011c0bad73cea859",
+      "sourceBytes": 1774,
+      "sourceSha256": "84c47595ba9495cd15d2194e1c623bbd91c6dc81f8e7f927011c0bad73cea859",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-native/backend-source-comparison.json",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-native/backend-source-comparison.json",
+      "bytes": 748,
+      "sha256": "9864416834b6f9ca449d18634c33e4548cc5d59590f1c1fd49bd2679dbddcc3a",
+      "sourceBytes": 748,
+      "sourceSha256": "9864416834b6f9ca449d18634c33e4548cc5d59590f1c1fd49bd2679dbddcc3a",
+      "encoding": "identity"
+    },
+    {
+      "source": ".tmp/uat-repairs-231-246/model261-live-disposition-review/REVIEW.md",
+      "path": "evidence/.tmp/uat-repairs-231-246/model261-live-disposition-review/REVIEW.md",
+      "bytes": 4150,
+      "sha256": "574d83e7c09135ce835427ffda32ab189e348a4d8b2a47c5ac47f5d71c77ab25",
+      "sourceBytes": 4150,
+      "sourceSha256": "574d83e7c09135ce835427ffda32ab189e348a4d8b2a47c5ac47f5d71c77ab25",
+      "encoding": "identity"
+    }
+  ],
+  "omitted": [
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/04-first-opened.txt",
+      "sha256": "45dcc09dec105c3598eda1efc721ddc41be3ebeb4922013b94f7bf7d8c100032",
+      "bytes": 18002,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/05-first-sent.txt",
+      "sha256": "e14cff500b552c1335da6c03570792bd47f7b48808f9d868214199716d452f2a",
+      "bytes": 19063,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/07-first-terminal.txt",
+      "sha256": "534c1297ff67d1b72c8178796b0ca0cc500ac126962f474d5940dc22d5059896",
+      "bytes": 37177,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/09-first-reloaded.txt",
+      "sha256": "5de9f70c0b69eff17f6250184c05e7fdda137c063c4f606be59d0693235ca820",
+      "bytes": 59779,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/11-second-opened.txt",
+      "sha256": "444a9635a28897c7419ffca7379f302dc1c98d3f1f81c0904cd7d6e75aeec052",
+      "bytes": 76531,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/12-second-sent.txt",
+      "sha256": "ebd2c9eb3e061201a5b26b390f0a50e88b489c37143836092c109aaf7983ff7a",
+      "bytes": 77042,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/14-second-terminal.txt",
+      "sha256": "481e5ab49d6fdeea236b5de28695af165f12cb11a0a0fbd4c547919ab0fd112a",
+      "bytes": 95669,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/16-second-reloaded.txt",
+      "sha256": "ed6a19cc7190dcd74e5cc5254879d46bea73a3f1ae5a2eafcebab4e369db260e",
+      "bytes": 115255,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/17-final-handback.txt",
+      "sha256": "fbc706a0d6e6f43ae3d803ecdfc4810334b0bc6d59df555091dd9f9ea7a8c59e",
+      "bytes": 119768,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/08-first-wrapper-terminal-v2.json",
+      "sha256": "1b722aa80d4d1d18b6f332558a3cca816305e6a8bbec50cde304a36ea003c4a4",
+      "bytes": 1461,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/15-pair-wrapper-terminal.json",
+      "sha256": "dc94b0ac27e3a4b9c228b372ca3dd65ee2a67571e84477f93aa88cf387062424",
+      "bytes": 2281,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/01-idle-before.json",
+      "sha256": "753b06850010571979ba1ce96afebc91a97c603017b807fcc4a077ceb47bc8a8",
+      "bytes": 149,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/startup-safe.json",
+      "sha256": "7d6910067da91ec1dde47da9c686c2f17fae56abeaa7ce373f95c705c0e52420",
+      "bytes": 1176,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/pre-stop-safe.json",
+      "sha256": "b2572bc9037a65b5ea2e06aa3b451983c2cd83f4c17ca007acac7f305f68c8d7",
+      "bytes": 1617,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/18-process-observed-safe.json",
+      "sha256": "ae3b8c31794cdebda49bf8efa49839f8b1755f2794337fe118e4caeaaaf4b74a",
+      "bytes": 1166,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-diagnostics/model261-capture-20260918/pg-single/binding.private.json",
+      "sha256": "dd3513f7524197a99afb6178a9fecfe3e87954fc087812288463b93f01283bf0",
+      "bytes": 2047,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-capture/release-gate.json",
+      "sha256": "f866d96ed2b6ecc9b13336bea3bfadef5392f360a55d2425c2578f310e1b441f",
+      "bytes": 583,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-repairs-231-246/model261-live-capture/uat261_capture.py",
+      "sha256": "3ff6ea2ae18c572e6cba57626a230a9c156f38a3ac524b320a296b6fb1c3cc4e",
+      "bytes": 17795,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/PROTOCOL.md",
+      "sha256": "cab8b3eafc5378b770f41e1749240f76b4123805df40b8b78db0365d8c2d61f7",
+      "bytes": 2752,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repairs231-250-targeted-20260917-pg-single.profile.private.json",
+      "sha256": "121ba91dd8c382d1b8a5582af08933db846bb148266defaccb82a9ffd2077122",
+      "bytes": 11397,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/holders/repairs231-250-targeted-20260917-pg-single/pg-single.pg-receipt.private.json",
+      "sha256": "220454ba87270bab4961d5e61cbf43b379790324a2617b6ee370a12babfb5b2f",
+      "bytes": 1594,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/initialized.private.json",
+      "sha256": "7620832cebd96f370791336f006e9b2e38caaadb2b4bb9bfcdae6763d1f755f2",
+      "bytes": 217,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/Config_Files/config.txt",
+      "sha256": "83974e4ed8c1c137fef10c8ff8c1110213839eb2cd8c4eb8451da8ea8e8ede0b",
+      "bytes": 61615,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-diagnostics/model261-capture-20260918/pg-single/backend-1789707207888-4d6f5b13-4dc9-4eb1-a80c-a6397d51028e.process.private.json",
+      "sha256": "da0890d4a0dfde093961c11e2068c21425bafe1fcb6bdc962c6961116b9d6200",
+      "bytes": 1249,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/frontend-1789695714835-7d72f11c-5167-46f7-b87f-8e3cf1d24130.process.private.json",
+      "sha256": "3799633fa5dd689faac2b468155c5f3c1204c6c3193c86969c3f4dd7c775374a",
+      "bytes": 1353,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/pg-single-source-manifest.json",
+      "sha256": "a46959a992d3e66757197ec7f463c82f4eec09655e3548c4682aee364e7c0429",
+      "bytes": 8594853,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/complete.json",
+      "sha256": "4b762f05def1d47c22b3051e7259d9e4b8f42b4f5f8aa582b301b095006f4d7f",
+      "bytes": 562,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/gate.json",
+      "sha256": "a04a40c411bd6a197f6999d73a626f22d53b08fbb17bc62fa90b53ada3f9eefd",
+      "bytes": 1293,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/preparation/python-reuse.json",
+      "sha256": "3d924ab1b13e64026d4f026b252f286f59919938297f047aa4b842a317e53544",
+      "bytes": 1417,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py",
+      "sha256": "1e55a255af414653f4df2f7c6a18b220f26353b1fb252d5035d8a4e6aa0bcb1b",
+      "bytes": 359125,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/tldw_Server_API/app/core/Chat/prompt_cost_envelope.py",
+      "sha256": "e8899904e61bd1d8dc403f5a467cb504f4fd525fe86626bf4c4f0bf548ea54ba",
+      "bytes": 10345,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/hooks/useImplicitFeedback.tsx",
+      "sha256": "50c96781eef50e78882be6afd064de8df5eab9aa5713d990e81591ad0c0c0356",
+      "bytes": 4398,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/repair-sources/routes263264-upgrade-20260918/pg-single/apps/packages/ui/src/services/feedback.ts",
+      "sha256": "2c69f64086aea335a8d4aab9acfce9c9cf3a2f23c8f010c1b1e8e16ebb9b2bdb",
+      "bytes": 2882,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-capture/REPORT.md",
+      "sha256": "d530be9264eb00a612a1d65ab37146f501e254be441bf84b2933691a28044a9d",
+      "bytes": 5479,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-capture/RUN.md",
+      "sha256": "091051d4317a8a4f59ae31837014bd757d89262a12fbb82f27830ee8cd4e5819",
+      "bytes": 3512,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-capture-review/REVIEW.md",
+      "sha256": "e2fd2abe981451f518cecf2275fe0c3896d4ed692988c00f70451d18b2a7e6a7",
+      "bytes": 2017,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-capture-review/final-controls.log",
+      "sha256": "8cf35c2aff350371698f2a422e510b42013c30b5ec795f8209f3c7b87e69e522",
+      "bytes": 1206,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-launcher-review/REVIEW.md",
+      "sha256": "b67919c12cfffbed2d156bb17b703b16cf96e18bbc83a4e4d289a4a86b1953ac",
+      "bytes": 2237,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-launcher-review/audit-final.json",
+      "sha256": "6b2a472474b40496c6b8f45e65ee60ab832d1146b2031f835ecaaff84c92ac99",
+      "bytes": 442,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/backend-source-comparison.json",
+      "sha256": "9864416834b6f9ca449d18634c33e4548cc5d59590f1c1fd49bd2679dbddcc3a",
+      "bytes": 748,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/02-library.js",
+      "sha256": "49660eaf1f9ba8fd65d064a7b97c902179559a1bec955b5e6ae738ea819d0393",
+      "bytes": 3215,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/02-library.txt",
+      "sha256": "c91abf3cd794e98238d8f2bc5daa21f3fa49ee42321ba990ac824db9b3bf6b8d",
+      "bytes": 14502,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/03-observer-corrected-library.js",
+      "sha256": "a043a61fa495d7b465f0e69499786e898a9db1773c4de6a4d1e69c0cd53db970",
+      "bytes": 3262,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/03-observer-corrected-library.txt",
+      "sha256": "3c41ec4900a87240846de3c0f75ba43a4e8f5f70526b04b4748d167c9e664183",
+      "bytes": 13787,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/06-first-observed.txt",
+      "sha256": "ca71d790938b7119f37792c6a38b5419e95d0ceebe7405d68af9e0472cfa4152",
+      "bytes": 30777,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/08-first-wrapper-terminal.json",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/10-second-library.txt",
+      "sha256": "f41e8cc40011243be4b0158b62a3ae45cdf7dadbf7d0eb05640950fbc49357d9",
+      "bytes": 68195,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/13-second-observed.txt",
+      "sha256": "97c3006c14fcb52d350311dfd1ed8a1e0dff5848a812194d17a356c219417408",
+      "bytes": 88455,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/observe.js",
+      "sha256": "605363708f9410addda102e76f361b2f5e7a1dca8697ab6b1c655ef2263ad224",
+      "bytes": 752,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/open-fresh.js",
+      "sha256": "563c138176899e386b345d639ff491ba9cee7fd560559200060be05ada15aa21",
+      "bytes": 726,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/reload-canonical.js",
+      "sha256": "1c5dc8a54c39f19cfbd853dfc230f986663c13ad94fbfc1af5e73ffec55eb90f",
+      "bytes": 1401,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/send-fresh.js",
+      "sha256": "f81a2a9ecb7d9d8cbff84fee4b6be68c59400d1c4ab33ab0f69af7e90340ec31",
+      "bytes": 952,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/restored-ordinary-safe.json",
+      "sha256": "84c47595ba9495cd15d2194e1c623bbd91c6dc81f8e7f927011c0bad73cea859",
+      "bytes": 1774,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-next-matrix-20260916/targeted-upgrades/routes263264-upgrade-20260918/pg-single/backend-1789707910370-9aed1c21-7a06-40d6-bf06-4c4a5b924467.process.private.json",
+      "sha256": "89e6bf57599b65fcb9dd08045fe04fc2f37c73f5f535032df2c04f3a701038b6",
+      "bytes": 1230,
+      "privateHashOnly": true,
+      "classification": "mutable-process-receipt",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": ".tmp/uat-repairs-231-246/model261-live-native/audit.mjs",
+      "sha256": "6e8b29a4fbe88ecb810c746051224037a0253904eff3bd3445180379c4aff472",
+      "bytes": 16637,
+      "privateHashOnly": false,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    },
+    {
+      "path": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/profiles/tldw-onboarding-uat-repairs231-250-targeted-20260917-pg-single/credentials.private.json",
+      "sha256": "7c6727188eb9b17bb11161e8643480d9c2f8b9b7ee365356db2eb68d4ee70466",
+      "bytes": 787,
+      "privateHashOnly": true,
+      "classification": "immutable-evidence",
+      "reason": "Local original evidence retained by hash; safe report/audit projections are published. Raw native bodies, private records and source snapshots are not copied."
+    }
+  ]
+}

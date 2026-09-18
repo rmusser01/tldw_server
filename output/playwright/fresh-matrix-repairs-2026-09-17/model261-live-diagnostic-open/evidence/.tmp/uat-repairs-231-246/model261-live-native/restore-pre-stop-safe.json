@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-18T05:04:53.841Z",
+  "receipt": ".tmp/uat-next-matrix-20260916/targeted-diagnostics/model261-capture-20260918/pg-single/backend-1789707207888-4d6f5b13-4dc9-4eb1-a80c-a6397d51028e.process.private.json",
+  "receiptSha256": "da0890d4a0dfde093961c11e2068c21425bafe1fcb6bdc962c6961116b9d6200",
+  "bindingSha256": "dd3513f7524197a99afb6178a9fecfe3e87954fc087812288463b93f01283bf0",
+  "pid": 94249,
+  "identity": "94249 94216 /Users/macbook-dev/Documents/GitHub/tldw_server2/.tmp/uat-next-matrix-20260916/dependencies/python-venv/bin/python -m uvicorn uat261_capture:create_app --factory --host 127.0.0.1 --port 18702",
+  "profileUnchanged": true,
+  "initializationUnchanged": true,
+  "holderUnchanged": true,
+  "twoCapturesComplete": true,
+  "captureStatus": {
+    "binding_restored": true,
+    "capture_limit": 2,
+    "capture_version": "uat261-live-boundary-v1",
+    "captured_calls": 2,
+    "diagnostic_type": "instrumented_request_boundary",
+    "persistence_available": true
+  }
+}
