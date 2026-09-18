@@ -66,6 +66,17 @@ files match the pre-rebase candidate; the recovery ref preserves8eca6.
 Historical plan details and local generated evidence are preserved. No
 output/playwright files are tracked. Qodo review will run on the updated PR.
 
+Qodo subsequently posted14 findings on the production-equivalent source. Their
+individual status and retained verification results are in the
+[review ledger](PR2967_QODO_REVIEW_2026_09_18.md). The alleged Flashcards syntax
+failure is dismissed by Qodo after actual TypeScript parser verification. The
+remaining review repairs are in progress. The session-key failure is reproduced
+with native storage events and a controlled concurrent-client regression:
+an initializer's stale missing read can schedule removal after a successful
+save. Independent review requires serialization of the entire clear/write
+mutation and under-lock cleanup, including the late removal window. The first
+3/3 local browser candidate does not close that review requirement.
+
 ## Remaining merge gates
 
 - The Settings readiness helper is confirmed in8eca6 hosted CI. At fa50b25ca4, shard2
@@ -91,3 +102,14 @@ output/playwright files are tracked. Qodo review will run on the updated PR.
 Existing PostgreSQL World Books without recorded ownership remain intact but
 hidden until trusted maintenance assignment. See the
 [upgrade guide](../Deployment/Database/world-book-owner-upgrade.md).
+
+
+## Final local review acceptance, 2026-09-18
+
+All 14 Qodo findings now have a verified fix or accepted disposition. The reviewed source is committed in b852f644a0 (complete credential mutation serialization), 3420b66228 (PostgreSQL upgrade, legacy Chatbook compatibility and DB/core boundaries), 9344f3ae95 (frontend transport, localization, timers and web route boundaries), and a55e86167f (durable offline Notes saves and owner-safe title recovery).
+
+The final credential repair passes 113 focused and adjacent tests and all three real browser lifecycle cases with zero skips or retries. Backend verification passes 70 combined controls, then 35 focused controls after the final refinements, including four actual PostgreSQL cases with no skips. Frontend review verification passes 46 focused UI, 12 route-title and seven Login/navigation tests. Notes/title verification passes 18 focused UI and 18 existing web title tests; the final test-only lint correction also passes all three provenance cases. Independent reviews accept the resulting changes. Failed intermediate attempts remain retained.
+
+The canonical OpenAPI fingerprint is 6dcb5357a7a6d13b636b6d1cae6a7275a432796b6a2105745fcde7e7dc89bc06. Only the two legacy flashcard field descriptions change; path and schema counts remain 2097 and 3207. Nine touched backend production files have zero Bandit findings.
+
+Source repair is complete locally. Publication, individual Qodo replies and final required hosted CI remain merge gates. These results do not close UAT261 or certify the pending full fresh-install matrix. The requester-provided Change summary is already published, and the latest fetch still identifies dev as 59049e094e0845a4611ea725ae19b7c1754ea709.

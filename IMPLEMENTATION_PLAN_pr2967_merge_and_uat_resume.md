@@ -28,7 +28,7 @@ At fa50b25ca4, final hosted extension acceptance passes36 scenarios with zero sk
 **Goal:** Integrate the verified repair branch into dev.
 **Success Criteria:** PR description represents final scope and261 limitation; human-requester Change summary required by repository policy is present; PR ready and required checks/review clear; normal merge succeeds and remote merge commit verified.
 **Tests:** Fresh PR status/head/base/check review immediately before merge; inspect remote merged state afterward.
-**Status:** Not Started.
+**Status:** In Progress.
 
 Requester checkpoint2026-09-18: the user supplied their own Change summary and explicitly requested latest-dev rebase, remediation of all Qodo findings/comments, then merge. The exact summary is published in PR2967. Fresh origin/dev remains59049e094e0845a4611ea725ae19b7c1754ea709. Rebase replayed327 non-merge commits, preserving the previous8eca6 head in codex/pr2967-before-rebase-20260918. Historical tracker/task conflicts retain their accepted records; the original cycle3 plan detail is restored. Application/test files match the pre-rebase candidate. Generated output/playwright files remain excluded and their local archive is preserved. Before pushing, integrate and verify the final CI fixture correction below; then mark ready for Qodo review and address every finding before normal merge.
 
@@ -41,3 +41,22 @@ At8eca6, all eight frontend unit shards pass; shard2 has31 frontend and563 UI te
 **Status:** Not Started.
 
 The first corrected local browser run passes device and legacy persistence but fails session readiness after the unchanged15-second wait, with retries0. Thus the original weak readiness check does not explain the full failure. Retain that failed attempt and trace actual save/storage behavior before another candidate. Local evidence: .tmp/pr2967-merge-20260918/manual-api-key-e2e/. The rebased branch may be reviewed by Qodo while this known gate is diagnosed; it is not merge-ready.
+
+## Qodo remediation checkpoint, 2026-09-18
+
+Rebase and force-with-lease push are complete at19919ea; the PR is ready for review. The human summary is published verbatim. Qodo posted14 findings; all are tracked in [the review ledger](Docs/Reviews/PR2967_QODO_REVIEW_2026_09_18.md). Qodo accepted the actual TypeScript parser evidence and dismissed its Flashcards syntax finding. TASK13260.219.11 owns Notes durable offline saving and title authority recovery; .12 owns the PostgreSQL upgrade, compatible grounded legacy Chatbook saves, DB probe and core claim construction; .13 owns the remaining frontend transport, translations, timer and page-boundary findings. Existing and new focused regressions remain intact, including failed intermediate runs.
+
+UAT282 is now reproduced as a real stale initializer deleting a concurrently written session credential. TASK13260.219.10 owns the mutation serialization and causal race tests. An initial isolated browser candidate passes3/3, but independent review finds the full clear/write sequence still needs serialization and broader existing cleanup controls. That candidate is not considered final. Final reviewed source must pass the required hosted checks after publication.
+
+Fresh dev rulesets require strict CI and permit merge commits only. Once final review and checks pass, use a normal merge with an exact head guard; do not squash or bypass branch protection. Then resume261 before the full fresh UAT matrix.
+
+
+## Final local review acceptance, 2026-09-18
+
+All 14 Qodo findings now have a verified fix or accepted disposition. The reviewed source is committed in b852f644a0 (complete credential mutation serialization), 3420b66228 (PostgreSQL upgrade, legacy Chatbook compatibility and DB/core boundaries), 9344f3ae95 (frontend transport, localization, timers and web route boundaries), and a55e86167f (durable offline Notes saves and owner-safe title recovery).
+
+The final credential repair passes 113 focused and adjacent tests and all three real browser lifecycle cases with zero skips or retries. Backend verification passes 70 combined controls, then 35 focused controls after the final refinements, including four actual PostgreSQL cases with no skips. Frontend review verification passes 46 focused UI, 12 route-title and seven Login/navigation tests. Notes/title verification passes 18 focused UI and 18 existing web title tests; the final test-only lint correction also passes all three provenance cases. Independent reviews accept the resulting changes. Failed intermediate attempts remain retained.
+
+The canonical OpenAPI fingerprint is 6dcb5357a7a6d13b636b6d1cae6a7275a432796b6a2105745fcde7e7dc89bc06. Only the two legacy flashcard field descriptions change; path and schema counts remain 2097 and 3207. Nine touched backend production files have zero Bandit findings.
+
+Source repair is complete locally. Publication, individual Qodo replies and final required hosted CI remain merge gates. These results do not close UAT261 or certify the pending full fresh-install matrix. The requester-provided Change summary is already published, and the latest fetch still identifies dev as 59049e094e0845a4611ea725ae19b7c1754ea709.
