@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 05:27'
+updated_date: '2026-09-19 05:50'
 labels:
   - uat
   - testing
@@ -251,6 +251,8 @@ Teardown confirmed: API32673/frontend11535/child11536 gone; ports18801/18881 unb
 UAT294 repaired and verified in e840341be1: 124 focused tests, independent review and native reciprocal SQLite plus real PostgreSQL account-switch/legacy-link/Back/reload pass. Current count299 findings:282 verified,17 open (261,283-293,295-299). Frozen four-cell3cff matrix remains failed; no new full run started. PostgreSQL token-blacklist initialization failure recurred and is logged under existing298. Generated evidence remains ignored; UAT293 read-only diagnosis identifies unscoped draft registry and retained live option/session state. Continue fixes before another full matrix.
 
 Targeted UAT293 repair found UAT300: navigation can precede login workspace initialization, leaving an owned draft in org-null while later login selects org2. New child TASK13260.237 records evidence and required causal investigation. Current totals: 300 findings, 282 verified, 18 open (261, 283-293, 295-300). UAT293 unit/regression controls pass and reciprocal SQLite privacy checks pass; steady-workspace recovery control and real PostgreSQL acceptance remain in progress.
+
+UAT293 verified/Done in30d15d951d: reciprocal native SQLite and fresh PostgreSQL account-switch/history/reload privacy, own full conversation/draft recovery, canonical foreign403 controls. Official fixtures released with holder exit0 after app teardown;24,924 source entries match.231 focused tests plus7/7 ownership controls including added org isolation; no new lint/type diagnostics. UAT300 remains separate. Current300 findings,283 verified,17 open (261,283-292,295-300). Stage4 repairs continue before another full matrix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
