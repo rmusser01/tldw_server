@@ -16,6 +16,7 @@ import sqlite3
 import time
 import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -1814,9 +1815,10 @@ class MediaDBRetriever(BaseRetriever):
                 include_trash=False,
                 include_deleted=False,
             )
-        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"MediaDatabase search failed: {exc}")
-            return [], 0
+        except (MediaDatabaseError, AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError):
+            raise RAGDatabaseError(
+                "Media search failed.", database_name="media", operation_type="search",
+            ) from None
 
         return results, len(results)
 
@@ -2533,11 +2535,31 @@ class MediaDBRetriever(BaseRetriever):
         Returns:
             Merged and re-ranked documents
         """
-        # Perform both searches in parallel
+        async def _read_component(
+            search: Awaitable[list[Document]],
+        ) -> list[Document] | RAGDatabaseError:
+            try:
+                return await search
+            except RAGDatabaseError as error:
+                return error
+
+        # Retain usable documents across database failures. Provider/credential
+        # errors and cancellation still propagate immediately through gather.
         fts_task = self._retrieve_fts(query, media_type, **kwargs)
         vector_task = self._retrieve_vector(query, media_type, **kwargs)
 
-        fts_docs, vector_docs = await asyncio.gather(fts_task, vector_task)
+        results = await asyncio.gather(
+            _read_component(fts_task), _read_component(vector_task)
+        )
+        fts_docs, vector_docs = [
+            [] if isinstance(result, RAGDatabaseError) else result for result in results
+        ]
+        if any(isinstance(result, RAGDatabaseError) for result in results) and not (
+            fts_docs or vector_docs
+        ):
+            raise RAGDatabaseError(
+                "Media search failed.", database_name="media", operation_type="search"
+            )
 
         # Merge using reciprocal rank fusion
         return self._reciprocal_rank_fusion(fts_docs, vector_docs, alpha)
@@ -4858,11 +4880,13 @@ class MultiDatabaseRetriever:
                     tasks.append(_run_with_config(retr, retr.retrieve, query))
 
         # Execute all retrievals concurrently
+        had_source_failure = False
         if tasks:
             try:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-            except (RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Multi-database retrieval failed: {e}")
+            except (RuntimeError, TypeError, ValueError):
+                logger.error("Multi-database retrieval failed")
+                had_source_failure = True
                 results = []
         else:
             results = []
@@ -4876,9 +4900,15 @@ class MultiDatabaseRetriever:
                 raise res
             if isinstance(res, Exception):
                 # Skip failed sources (partial success expected)
+                had_source_failure = True
                 continue
             if isinstance(res, list):
                 documents.extend(res)
+
+        if had_source_failure and not documents:
+            raise RAGDatabaseError(
+                "Document retrieval failed.", operation_type="search",
+            ) from None
 
         # Sort globally by score desc and cap by max_results
         documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)

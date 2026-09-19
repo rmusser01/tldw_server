@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from collections.abc import Sequence
 from datetime import datetime
 from math import isfinite
 from typing import Any
@@ -191,7 +190,6 @@ class MediaSearchRepository:
         fts_relevance_added = False
 
         fts_select_params: list[Any] = []
-        fts_condition_params: list[Any] = []
         postgres_tsquery: str | None = None
 
         def _is_sqlite_fts_query_error(err: Exception) -> bool:
@@ -359,7 +357,7 @@ class MediaSearchRepository:
                     )
                     if postgres_tsquery:
                         conditions.append("m.media_fts_tsv @@ to_tsquery('english', ?)")
-                        fts_condition_params.append(postgres_tsquery)
+                        params.append(postgres_tsquery)
                         fts_condition_index = len(conditions) - 1
                     else:
                         logger.debug(
@@ -427,6 +425,9 @@ class MediaSearchRepository:
 
         order_by_clause_str = ""
         default_order_by = "ORDER BY m.last_modified DESC, m.id DESC"
+        if backend_type == BackendType.POSTGRESQL and sort_by in {"title_asc", "title_desc"}:
+            # PostgreSQL DISTINCT requires ORDER BY expressions in the select list.
+            base_select_parts.append("LOWER(m.title) AS _title_sort")
         if fts_search_active and (sort_by == "relevance" or not sort_by):
             if backend_type == BackendType.SQLITE:
                 if not any("AS relevance_score" in part for part in base_select_parts):
@@ -464,14 +465,14 @@ class MediaSearchRepository:
                 order_by_clause_str = "ORDER BY m.ingestion_date ASC, m.last_modified ASC, m.id ASC"
             elif sort_by == "title_asc":
                 if backend_type == BackendType.POSTGRESQL:
-                    order_by_clause_str = "ORDER BY LOWER(m.title) ASC, m.title ASC, m.id ASC"
+                    order_by_clause_str = "ORDER BY _title_sort ASC, m.title ASC, m.id ASC"
                 else:
-                    order_by_clause_str = "ORDER BY m.title ASC COLLATE NOCASE, m.id ASC"
+                    order_by_clause_str = "ORDER BY m.title COLLATE NOCASE ASC, m.id ASC"
             elif sort_by == "title_desc":
                 if backend_type == BackendType.POSTGRESQL:
-                    order_by_clause_str = "ORDER BY LOWER(m.title) DESC, m.title DESC, m.id DESC"
+                    order_by_clause_str = "ORDER BY _title_sort DESC, m.title DESC, m.id DESC"
                 else:
-                    order_by_clause_str = "ORDER BY m.title DESC COLLATE NOCASE, m.id DESC"
+                    order_by_clause_str = "ORDER BY m.title COLLATE NOCASE DESC, m.id DESC"
             elif sort_by == "last_modified_asc":
                 order_by_clause_str = "ORDER BY m.last_modified ASC, m.id ASC"
             else:
@@ -510,11 +511,7 @@ class MediaSearchRepository:
         try:
             count_sql = f"SELECT {count_select} {base_from} {join_clause} {where_clause}"
             logger.debug(f"Search Count SQL ({db.db_path_str}): {count_sql}")
-            count_params_seq: Sequence[Any]
-            if backend_type == BackendType.POSTGRESQL:
-                count_params_seq = list(fts_condition_params) + list(params)
-            else:
-                count_params_seq = list(params)
+            count_params_seq = list(params)
             logger.debug(f"Search Count Params: {count_params_seq}")
 
             try:
@@ -566,7 +563,6 @@ class MediaSearchRepository:
                 if backend_type == BackendType.POSTGRESQL:
                     paginated_params = tuple(
                         list(fts_select_params)
-                        + list(fts_condition_params)
                         + list(params)
                         + [results_per_page, offset]
                     )
@@ -580,6 +576,7 @@ class MediaSearchRepository:
                     results_list = []
                     for row in results_cursor.fetchall():
                         item = dict(row)
+                        item.pop("_title_sort", None)
                         item["safe_metadata"] = _parse_safe_metadata(item.get("safe_metadata"))
                         results_list.append(item)
                 except (sqlite3.OperationalError, DatabaseError) as exc:

@@ -924,6 +924,109 @@ async def test_multi_database_retriever_keeps_ordinary_partial_source_success():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_empty_source", [False, True])
+async def test_multi_database_failure_cannot_masquerade_as_empty_search(with_empty_source):
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
+
+    class FailingRetriever:
+        async def retrieve(self, query):
+            raise dr.MediaDatabaseError("private-database-path query-secret")
+
+    class EmptyRetriever:
+        async def retrieve(self, query):
+            return []
+
+    retriever = dr.MultiDatabaseRetriever({})
+    retriever.retrievers = {DataSource.MEDIA_DB: FailingRetriever()}
+    if with_empty_source:
+        retriever.retrievers[DataSource.NOTES] = EmptyRetriever()
+    with pytest.raises(dr.RAGDatabaseError) as failure:
+        await retriever.retrieve("Rowan")
+    assert "private-database-path" not in str(failure.value)
+    assert "query-secret" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+async def test_media_backend_error_is_not_an_empty_search(monkeypatch):
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.media_db = SimpleNamespace(backend_type=dr.BackendType.POSTGRESQL)
+    retriever.config = dr.RetrievalConfig(use_fts=True, use_vector=False)
+
+    def unavailable(*args, **kwargs):
+        raise ConnectionError("private-database-path query-secret")
+
+    monkeypatch.setattr(dr, "search_media", unavailable)
+    with pytest.raises(dr.RAGDatabaseError) as failure:
+        await retriever.retrieve("Rowan", allowed_media_ids=[3])
+    assert "private-database-path" not in str(failure.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("successful_component", ["fts", "vector", "empty", "neither"])
+async def test_media_hybrid_preserves_documents_when_database_component_fails(
+    monkeypatch, successful_component
+):
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.media_db = SimpleNamespace(backend_type=dr.BackendType.POSTGRESQL)
+    retriever.config = dr.RetrievalConfig(max_results=3)
+
+    def unavailable(*args, **kwargs):
+        raise ConnectionError("private-database-path query-secret")
+
+    async def success(*args, **kwargs):
+        return _docs()
+
+    async def vector(*args, **kwargs):
+        if successful_component == "vector":
+            return _docs()
+        if successful_component == "empty":
+            return []
+        raise dr.RAGDatabaseError("Vector search failed.")
+
+    monkeypatch.setattr(dr, "search_media", unavailable)
+    monkeypatch.setattr(retriever, "_retrieve_vector", vector)
+    if successful_component == "fts":
+        monkeypatch.setattr(retriever, "_retrieve_fts", success)
+
+    if successful_component in {"empty", "neither"}:
+        with pytest.raises(dr.RAGDatabaseError) as failure:
+            await retriever.retrieve_hybrid("Rowan", allowed_media_ids=[3])
+        assert "private-database-path" not in str(failure.value)
+    else:
+        documents = await retriever.retrieve_hybrid("Rowan", allowed_media_ids=[3])
+        assert [document.id for document in documents] == ["doc-1", "doc-2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["credentials", "provider", "cancelled"])
+async def test_media_hybrid_propagates_security_provider_and_cancellation_errors(
+    monkeypatch, failure_kind
+):
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+
+    failures = {
+        "credentials": ByokResolutionError("invalid_provider_credentials", "openai"),
+        "provider": dr.ChatAPIError("Provider unavailable"),
+        "cancelled": asyncio.CancelledError(),
+    }
+    failure = failures[failure_kind]
+    retriever = object.__new__(dr.MediaDBRetriever)
+    retriever.config = dr.RetrievalConfig(max_results=3)
+    retriever.credential_runtime = _CredentialRuntime("openai")
+
+    async def success(*args, **kwargs):
+        return _docs()
+
+    async def fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(retriever, "_retrieve_fts", success)
+    monkeypatch.setattr(retriever, "_retrieve_vector", fail)
+    with pytest.raises(type(failure)):
+        await retriever.retrieve_hybrid("Rowan")
+
+
+@pytest.mark.asyncio
 async def test_media_scoped_model_override_resolves_its_actual_hosted_provider(monkeypatch):
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
 

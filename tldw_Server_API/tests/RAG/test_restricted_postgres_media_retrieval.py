@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -74,6 +75,52 @@ def restricted_media_store(request, tmp_path):
                 conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
         if admin is not None:
             admin.get_pool().close_all()
+
+
+@pytest.mark.parametrize("id_kind", ["integer", "uuid"])
+@pytest.mark.parametrize("sort_by", ["relevance", "title_asc", "title_desc"])
+def test_scoped_media_fts_filters_keep_parameter_order_and_owner(
+    restricted_media_store, id_kind, sort_by,
+):
+    """Both WHERE and rank bindings preserve filters, pagination and RLS."""
+    db = restricted_media_store
+    records = []
+    for label in ["alder", "Birch", "Cedar", "Outside"]:
+        marker = "Unrelated" if label == "Cedar" else "Rowan"
+        with scoped_context(user_id=1, is_admin=False):
+            media_id, media_uuid, _ = db.add_media_with_keywords(
+                title=f"{label} {marker}",
+                media_type="document",
+                content=f"{marker} observatory source {label}.",
+                owner_user_id=1,
+                author="Rowan curator",
+                ingestion_date="2026-09-18T12:00:00",
+                keywords=["orbit"],
+            )
+            records.append((media_id, media_uuid))
+    ids = [row[0 if id_kind == "integer" else 1] for row in records[:3]]
+    with scoped_context(user_id=1, is_admin=False):
+        pages = [search_media(
+            db,
+            search_query="Rowan",
+            search_fields=["title", "content", "author"],
+            media_ids_filter=ids,
+            media_types=["document"],
+            date_range={"start_date": datetime(2026, 9, 1), "end_date": datetime(2026, 10, 1)},
+            must_have_keywords=["orbit"],
+            must_not_have_keywords=["excluded"],
+            sort_by=sort_by,
+            results_per_page=1,
+            page=page,
+        ) for page in (1, 2, 3)]
+    assert [total for _, total in pages] == [2, 2, 2]
+    assert {row["id"] for rows, _ in pages for row in rows} == {records[0][0], records[1][0]}
+    assert [len(rows) for rows, _ in pages] == [1, 1, 0]
+    if sort_by in {"title_asc", "title_desc"}:
+        expected = records[:2] if sort_by == "title_asc" else records[1::-1]
+        assert [row["id"] for rows, _ in pages for row in rows] == [record[0] for record in expected]
+    with scoped_context(user_id=2, is_admin=False):
+        assert search_media(db, search_query="Rowan", media_ids_filter=ids) == ([], 0)
 
 
 @pytest.mark.asyncio
@@ -307,6 +354,43 @@ def test_permission_first_auth_stream_without_preseeded_scope(authenticated_medi
     contexts = [context for event in events if event.get("type") == "contexts"
                 for context in event["contexts"]]
     assert any(context.get("source_id") == str(media_id) for context in contexts) is expected
+
+
+def test_failed_selected_media_read_emits_error_without_answer(
+    authenticated_media_client, monkeypatch,
+):
+    """An authenticated selected-source QA failure must not generate empty-context prose."""
+    from tldw_Server_API.app.api.v1.endpoints import rag_unified
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+
+    client, db, media_id = authenticated_media_client
+    execute = db.execute_query
+    calls = []
+
+    def failed_search(query, *args, **kwargs):
+        if "COUNT(DISTINCT m.id)" in query:
+            raise DatabaseError("private-database-path query-secret")
+        return execute(query, *args, **kwargs)
+
+    async def generate(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("Failed retrieval must not dispatch answer generation")
+
+    monkeypatch.setattr(db, "execute_query", failed_search)
+    monkeypatch.setattr(rag_unified, "generate_streaming_response", generate)
+    with client.stream(
+        "POST", "/api/v1/rag/search/stream",
+        headers={"X-API-KEY": "causal-content-scope-key"},
+        json={"query": "Rowan", "strategy": "standard", "sources": ["media_db"],
+              "search_mode": "fts", "fts_level": "media", "include_media_ids": [media_id],
+              "min_score": 0.0, "enable_generation": True, "enable_cache": False},
+    ) as response:
+        assert response.status_code == 200
+        events = [json.loads(raw) for raw in response.iter_lines() if raw]
+    assert [event["type"] for event in events] == ["error"]
+    assert not calls
+    assert events[0]["allow_non_stream_fallback"] is False
+    assert "private-database-path" not in str(events)
 
 
 @pytest.mark.asyncio

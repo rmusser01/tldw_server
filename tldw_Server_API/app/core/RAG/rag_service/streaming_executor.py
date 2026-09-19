@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -17,6 +16,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
+from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline,
 )
@@ -360,6 +360,17 @@ async def _retrieve_standard_documents(
         kwargs["enable_research_progress"] = True
 
     retrieval_result = await standard_pipeline(**kwargs)
+    documents = _documents_from_result(retrieval_result)
+    errors = (
+        retrieval_result.get("errors", [])
+        if isinstance(retrieval_result, dict)
+        else getattr(retrieval_result, "errors", [])
+    ) or []
+    if not documents and any(
+        error in {"document_retrieval_failed", "media_db_fallback_failed", "pipeline_failed"}
+        for error in errors
+    ):
+        raise RAGDatabaseError("Document retrieval failed.", operation_type="search")
     metadata = (
         retrieval_result.get("metadata", {})
         if isinstance(retrieval_result, dict)
@@ -383,7 +394,7 @@ async def _retrieve_standard_documents(
     ):
         safe_filter_outcome = {key: filter_outcome[key] for key in ("excluded_count", "retained_count")}
     return _PrefetchedEvidence(
-        documents=normalize_documents_for_generation(_documents_from_result(retrieval_result)),
+        documents=normalize_documents_for_generation(documents),
         clarification_answer=answer,
         security_filter=safe_filter_outcome,
     )
@@ -762,14 +773,17 @@ async def stream_rag_events(
                         yield item
             except asyncio.CancelledError:
                 raise
-            except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
+            except Exception as prefetch_error:  # noqa: BLE001 - preserve retrieval failure as a terminal event
                 if classify_rag_provider_error(prefetch_error) is not None:
                     raise
-                logger.debug(
-                    "RAG streaming standard prefetch failed; continuing with empty contexts",
-                    exc_info=prefetch_error,
+                logger.error("RAG streaming standard retrieval failed")
+                # Retrieval may itself dispatch providers for embeddings or
+                # query rewriting; never certify a safe non-stream replay.
+                yield rag_internal_error_event(
+                    upstream_dispatched=True,
+                    output_emitted=output_emitted,
                 )
-                docs = []
+                return
 
         # Numbered citations can reference only the contexts exposed to the client.
         if bool(_value(payload, request_defaults, "enable_citations", False)):
