@@ -2,7 +2,8 @@ import React from "react"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
-import { resolveServicePromptScope } from "@/services/service-prompts"
+import { isServicePromptScopeUnresolvedError, resolveServicePromptScope } from "@/services/service-prompts"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 type DraftOwner = { key: string }
 
@@ -38,8 +39,13 @@ export const useChatDraftOwner = (clearComposer: () => void) => {
         const nextOwner = { key }
         currentOwner.current = nextOwner
         setOwner(nextOwner)
-      } catch {
-        if (mounted && check === generation && currentOwner.current) clear()
+      } catch (error) {
+        // A temporary recheck failure does not revoke the verified draft owner.
+        // Explicit account/credential changes already clear before the request.
+        const authorityLost = isServicePromptScopeUnresolvedError(error) ||
+          isRequestConfigScopeChangedError(error) ||
+          (error && typeof error === "object" && (error as { status?: unknown }).status === 401)
+        if (mounted && check === generation && currentOwner.current && authorityLost) clear()
       }
     }
     const stop = watchChatAccountChanges((invalidated) => { void resolve(invalidated) })

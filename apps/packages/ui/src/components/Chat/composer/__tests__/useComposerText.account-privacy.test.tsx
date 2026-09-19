@@ -3,11 +3,14 @@ import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { COMPOSER_CONSTANTS } from "@/config/ui-constants"
 import { Storage } from "@plasmohq/storage"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
-const authority = vi.hoisted(() => ({ user: "alice" as string | null, org: null as number | null }))
+const authority = vi.hoisted(() => ({ user: "alice" as string | null, org: null as number | null, error: null as unknown }))
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
   resolveServicePromptScope: async () => {
+    if (authority.error) throw authority.error
     if (!authority.user) throw new Error("Signed out")
     return { scopeKey: authority.user, userId: authority.user,
       config: { serverUrl: "http://localhost:8000", authMode: "multi-user", authSource: "manual", orgId: authority.org } }
@@ -36,7 +39,7 @@ const switchTo = async (user: string) => {
 }
 
 describe("composer account ownership using the real draft registry", () => {
-  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice"; authority.org = null })
+  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null })
   afterEach(() => vi.useRealTimers())
 
   it("rejects unowned raw and registry drafts from earlier releases", async () => {
@@ -89,6 +92,69 @@ describe("composer account ownership using the real draft registry", () => {
     act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
     await settle()
     expect(result.current.form.values.message).toBe("CURRENT EDIT")
+  })
+
+  it.each([
+    ["focus", new TypeError("Failed to fetch")],
+    ["pageshow", { status: 500, message: "Temporarily unavailable" }]
+  ])("retains pending same-owner text and image after a transient %s recheck", async (event, error) => {
+    const { result } = mount()
+    await settle()
+    act(() => result.current.setMessageValue("ALICE SAVED"))
+    await settle()
+    const ownerKey = ownerRecordKeys()[0]
+    act(() => {
+      result.current.setMessageValue("ALICE PENDING")
+      result.current.form.setFieldValue("image", "alice-image")
+      authority.error = error
+      window.dispatchEvent(new Event(event))
+    })
+    await act(async () => { await vi.dynamicImportSettled() })
+    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
+    expect(localStorage.getItem(ownerKey)).toContain("ALICE SAVED")
+    await settle()
+    expect(localStorage.getItem(ownerKey)).toContain("ALICE PENDING")
+    expect(ownerRecordKeys()).toEqual([ownerKey])
+    authority.error = null
+    act(() => window.dispatchEvent(new Event(event)))
+    await settle()
+    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
+  })
+
+  it.each([
+    { code: "service_prompt_scope_unresolved" },
+    { status: 401 },
+    createServicePromptScopeChangedError()
+  ])("clears pending private content when revalidation confirms authority loss: %j", async error => {
+    const { result } = mount()
+    await settle()
+    act(() => {
+      result.current.setMessageValue("ALICE PENDING")
+      result.current.form.setFieldValue("image", "alice-image")
+      authority.error = error
+      window.dispatchEvent(new Event("focus"))
+    })
+    await settle()
+    expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(ownerRecordKeys()).toEqual([])
+  })
+
+  it.each([
+    ["tldw:auth-principal-changed", { kind: "logout" }],
+    ["tldw:auth-credentials-changed", {}],
+    ["tldw:config-updated", { authorityChanged: true }]
+  ])("clears pending private content at %s even while offline", async (event, detail) => {
+    const { result } = mount()
+    await settle()
+    act(() => {
+      result.current.setMessageValue("ALICE PENDING")
+      result.current.form.setFieldValue("image", "alice-image")
+      authority.error = new TypeError("Failed to fetch")
+      window.dispatchEvent(new CustomEvent(event, { detail }))
+    })
+    await settle()
+    expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(ownerRecordKeys()).toEqual([])
   })
 
   it("keeps organization changes separate even for the same account", async () => {
@@ -153,7 +219,7 @@ describe("composer account ownership using the real draft registry", () => {
         blocked = true
         await held
       }
-      await original.call(this, key, value)
+      return original.call(this, key, value)
     })
     act(() => view.result.current.setMessageValue("ALICE PENDING WRITE"))
     await settle()
