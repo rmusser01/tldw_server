@@ -159,3 +159,63 @@ def test_sqlite_prose_fallback_preserves_caller_rollback_and_real_errors(tmp_pat
             db.search_character_cards("Rowan")
     finally:
         db.close_all_connections()
+
+
+@pytest.fixture
+def private_chat_evidence(search_db, tmp_path):
+    """Seed matching private evidence in the two users' actual storage layout."""
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+
+    foreign = CharactersRAGDB(
+        tmp_path / "2" / "search.db", client_id="2",
+        backend=search_db.backend if search_db.backend_type == BackendType.POSTGRESQL else None,
+    )
+    records = {}
+    try:
+        for name, db in (("own", search_db), ("foreign", foreign), ("deleted", search_db)):
+            conversation = db.add_conversation({"title": f"{name} tour"})
+            message = db.add_message({
+                "conversation_id": conversation, "sender": "user",
+                "content": "Rowan Observatory opens Fridays.",
+            })
+            records[name] = (conversation, message)
+        # Older/imported data may retain active child rows under a deleted parent.
+        search_db.execute_query(
+            "UPDATE conversations SET deleted = TRUE WHERE id = ?",
+            (records["deleted"][0],), commit=True,
+        )
+        yield search_db, records
+    finally:
+        foreign.close_all_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["Rowan", "Rowan Observatory,"])
+async def test_chat_retrieval_excludes_foreign_and_deleted_conversations(private_chat_evidence, query):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import ChatHistoryRetriever
+
+    db, records = private_chat_evidence
+    retriever = ChatHistoryRetriever(db.db_path_str, chacha_db=db)
+    documents = await retriever.retrieve(query)
+
+    assert {doc.id for doc in documents} == {f"chat_{records['own'][1]}"}
+
+
+def test_message_search_filters_owners_and_deleted_parents_before_pagination(private_chat_evidence):
+    db, records = private_chat_evidence
+    pages = [db.search_messages_by_content("Rowan", limit=1, offset=offset) for offset in range(3)]
+
+    assert [row["id"] for page in pages for row in page] == [records["own"][1]]
+    assert db.search_messages_by_content("Rowan", conversation_id=records["foreign"][0]) == []
+
+
+@pytest.mark.asyncio
+async def test_chat_metadata_excludes_foreign_and_deleted_conversations(private_chat_evidence):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import ChatHistoryRetriever
+
+    db, records = private_chat_evidence
+    retriever = ChatHistoryRetriever(db.db_path_str, chacha_db=db)
+
+    assert (await retriever.get_metadata(f"chat_{records['own'][1]}"))["id"] == records["own"][1]
+    assert await retriever.get_metadata(f"chat_{records['foreign'][1]}") == {}
+    assert await retriever.get_metadata(f"chat_{records['deleted'][1]}") == {}

@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 320 UAT findings: 308 verified; 12 open (261, 283–287, 290, 299–300, 306, 319–320). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT289 and UAT302 now pass targeted fresh SQLite/PostgreSQL acceptance, and UAT309 passes controlled sanitizer regressions. UAT310/311/313–316 now pass targeted fresh SQLite/PostgreSQL Suggestions acceptance. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 323 UAT findings: 309 verified; 14 open (261, 283–287, 290, 299–300, 306, 319, 321–323). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT289 and UAT302 now pass targeted fresh SQLite/PostgreSQL acceptance, and UAT309 passes controlled sanitizer regressions. UAT310/311/313–316 now pass targeted fresh SQLite/PostgreSQL Suggestions acceptance. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3562,7 +3562,7 @@ Fresh immutable63d4581613 SQLite/PostgreSQL multi-user profiles both save a matc
 
 TASK13260.257. Native Fast query Rowan Observatory, returns zero contexts at22:23 and22:26UTC despite owned Character3 and saved Chat c0ed44d0-ea45-46f1-b324-514b860c5bae. Preflight calls Characters/Chats empty: its current non-file backend handling covers only Media, while ChaCha readiness checks local file presence. The retrieval cause remains under investigation; ownership/security filtering must remain intact.
 
-## UAT320 — P2, open: fresh Balanced QA stalls after embedding model loading
+## UAT320 — P2, verified: fresh Balanced QA stalls after embedding model loading
 
 TASK13260.258. SQLite Balanced search begins22:17:00UTC. The default Qwen embedding download completes and model-loaded log appears22:20:27UTC; UI still searches at812seconds with no results or error while unrelated endpoints respond. The neutral progress wording is accurate (UAT288 remains closed). Preserve this first attempt, inspect native cancellation and a lexical control, and establish the cause before repair. An OS sample is retained without a definitive Python-level diagnosis. The full matrix remains completed with failures; no recertification claimed.
 
@@ -3583,3 +3583,33 @@ Authenticated supplemental controls establish that both SQLite and PostgreSQL re
 Causal evidence:9 corrected stream KeyErrors,3unit failures/2controls,2actual SQLite/PostgreSQL pipeline failures. The first stream test setup lacked required metadata in four cases; fixed before reproducing all9 true failures. The first PostgreSQL helper invocation supplied a label as a filename and collected no tests; corrected using the evidence-label environment variable. Final affected203tests pass/0skips, reviewer reports no actionable findings. Production Bandit0; six unchanged baseline test-fixture findings and25 identical baseline Ruff findings. No native closure yet.
 
 SQLite native Stop returns the form and truthful cancellation status. The cold model unloaded normally at22:25:27, so a model-lock deadlock is not established. OS sampling was inconclusive; Python profiler requires macOS root and noninteractive sudo has no cached authorization. No permissions were changed. UAT320 remains under investigation; do not substitute the Fast control for Balanced acceptance. Both screenshots were inspected.
+
+
+### UAT299/319 native retrieval checkpoint — 2026-09-19 23:17 UTC
+
+Immutable f746 SQLite/PostgreSQL native Character saves201 and real local-model Chat completion/persistence200 both survive normal reload. Fast query Rowan Observatory, now returns the exact owned Character plus both Chat messages on each backend with security filtering retained. Stream source_status correctly reports Character1 and Chats2 searched, with Media/Notes empty. Both native cards and screenshots inspected. Narrow retrieval repair acceptance is positive; final isolation/audit/cleanup still pending. This does not certify the full matrix or answer generation. The300-token Fast requests return no generated answer and the UI states that honestly; retain under the existing261 reasoning-only model investigation pending attribution.
+
+The first Chat observer waited for /chat/completions, but Character Chat uses complete-v2; its30-second timeout is a harness error. Actual network receipt, visible completed message and normal reload independently establish success, without resubmission. Recurrent bootstrap-admin profile403 is attributed to Email verification required and remains a tracked observation pending UX/policy assessment.
+
+## UAT321 — P2, open: saved model reasoning contaminates Chat retrieval evidence
+
+TASK13260.259. Both fresh native QA streams include optional model reasoning in the assistant Chat excerpt, while the visible Chat answer is separately collapsed from that reasoning. Preserve raw source messages but project the visible answer into evidence and downstream generation context. Evidence stays local in .tmp/uat319-native; no provider reasoning is copied into this tracker.
+
+## UAT322 — P2, open: Character and Chat evidence loses source identity
+
+TASK13260.260. Both native QA pages label each retrieved Character/Chat as Source N and Document. Stream title is null, source uses character_cards/chat_history, and source identity fields are missing. Native View opens the excerpt with the same generic Document label and no original-record link. Keep provenance truthful and allowlist only public metadata. Screenshots inspected; source type/title and supported owner-page navigation require repair.
+
+
+## UAT323 — P1, open: PostgreSQL Knowledge QA returns another account’s Chat evidence
+
+TASK13260.261. Fresh immutable f746 PostgreSQL multi-user Bob query at23:23UTC returns administrator assistant chat_pa_f840-e8ee-1cc-c25e; the corresponding SQLite Bob query returns zero sources. The shared-backend substring query omits conversation ownership, and the full-text fallback also lacks an explicit owner condition. Repair both paths and metadata lookup with real cross-user/deleted-parent regressions before resuming the matrix. UAT319 stays open because its isolation acceptance failed. Local evidence .tmp/uat323-repair and .tmp/uat319-native remains excluded from the PR.
+
+### UAT320 controlled timing acceptance — 2026-09-19 23:32 UTC
+
+Fresh immutable a944 native Balanced query started23:14:51.199. A labeled diagnostic wrapper delays only the first real HuggingFace load by190seconds; the application source is unchanged. HTTP200 begins after15.371seconds, heartbeats keep the browser alive through the actual fresh1.19GB download, and a correct answer with one citation is visible by23:22:07. Screenshot inspected. Exact response-end timing was not retained; this verifies controlled long-load recovery, not the full matrix. All24,957 tracked source entries match. Browser and owned apps are stopped, ports18821/18901 released, and provider configuration restored byte-for-byte. Shutdown completes; wrapper SIGTERM and one leaked semaphore warning retained.98backend/126frontend regressions and independent review were already green.320 closes.
+
+### UAT323 attribution and repair checkpoint
+
+Bob identity3 returns200 from auth/me and403 for direct access to the administrator Chat. A cache-disabled supplemental QA request nevertheless returns both administrator message IDs, confirming a retrieval ownership bypass independent of cache. Eight real SQLite/PostgreSQL cases fail before repair (foreign PostgreSQL rows and deleted parents on both backends). The bounded patch enforces conversation ownership in both PostgreSQL search paths and Chat metadata, and excludes deleted parents on both backends before pagination. All27 focused tests pass, zero skips. Production/test Bandit has0findings/errors, Ruff is clean, and independent read-only review has no actionable findings. Broader regression and fresh native acceptance remain pending;323 stays open.
+
+UAT323 broader affected regression:259passed/0skips, including actual PostgreSQL. Known pytest deprecation and unrelated old-temporary-directory cleanup warnings retained. Old f746 browsers/apps are stopped and provider configurations restored; official PostgreSQL fixture cleanup requested only after all app ports released. Fresh acceptance remains pending.

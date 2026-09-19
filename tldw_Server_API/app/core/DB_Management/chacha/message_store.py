@@ -1561,10 +1561,12 @@ class MessageStore:
             base_query = [
                 "SELECT m.*, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
                 "FROM messages m",
+                "JOIN conversations c ON c.id = m.conversation_id",
                 "WHERE m.deleted = FALSE",
+                "AND c.deleted = FALSE AND c.client_id = ?",
                 "AND m.messages_fts_tsv @@ to_tsquery('english', ?)",
             ]
-            params_list: list[Any] = [tsquery, tsquery]
+            params_list: list[Any] = [tsquery, self._db.client_id, tsquery]
 
             if conversation_id:
                 base_query.append("AND m.conversation_id = ?")
@@ -1588,9 +1590,11 @@ class MessageStore:
         base_query = """
                      SELECT m.*
                      FROM messages_fts, messages m
+                     JOIN conversations c ON c.id = m.conversation_id
                      WHERE messages_fts.rowid = m.rowid \
                        AND messages_fts MATCH ? \
                        AND m.deleted = FALSE \
+                       AND c.deleted = FALSE \
                      """
         params_list = [safe_search_term]
         if conversation_id:

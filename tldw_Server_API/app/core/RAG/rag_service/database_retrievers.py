@@ -3916,8 +3916,11 @@ class ChatHistoryRetriever(BaseRetriever):
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         documents: list[Document] = []
         max_results = int(self.config.max_results)
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND conv.client_id = ?" if is_postgres else ""
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
 
-        sql = """
+        sql = f"""
             SELECT
                 m.id,
                 m.conversation_id,
@@ -3931,12 +3934,14 @@ class ChatHistoryRetriever(BaseRetriever):
             JOIN conversations conv ON m.conversation_id = conv.id
             LEFT JOIN character_cards cc ON conv.character_id = cc.id
             WHERE m.deleted = 0
+              AND conv.deleted = 0
+              {owner_clause}
               AND m.content LIKE ?
               AND COALESCE(conv.source, '') != ?
             ORDER BY m.timestamp DESC
             LIMIT ?
-        """
-        rows = await self._execute_query_async(sql, (f"%{query}%", "knowledge_qa", max_results))
+        """  # nosec B608 - fixed owner predicate; every value remains bound.
+        rows = await self._execute_query_async(sql, (*owner_params, f"%{query}%", "knowledge_qa", max_results))
         for row in rows:
             documents.append(
                 Document(
@@ -4005,14 +4010,19 @@ class ChatHistoryRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         chat_id = doc_id.replace("chat_", "")
+        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
+        owner_clause = "AND conv.client_id = ?" if is_postgres else ""
+        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
         results = self._execute_query(
-            """
+            f"""
             SELECT m.*, conv.character_id
             FROM messages m
             JOIN conversations conv ON m.conversation_id = conv.id
             WHERE m.id = ?
-            """,
-            (chat_id,),
+              AND m.deleted = 0 AND conv.deleted = 0
+              {owner_clause}
+            """,  # nosec B608 - fixed owner predicate; every value remains bound.
+            (chat_id, *owner_params),
         )
         return dict(results[0]) if results else {}
 
